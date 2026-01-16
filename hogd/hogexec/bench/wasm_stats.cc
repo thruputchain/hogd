@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

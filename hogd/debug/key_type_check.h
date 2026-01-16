@@ -21,7 +21,7 @@ check_item_key_type(StorageKeyType key_type, StorageItemType item_type)
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    case StorageKeyType::kStorageKeyTypeAddressAuthData:
       if (item_type != StorageItemType::kItemTypeAuthData) {
         error("item type is not valid for key type: {} with {}", key_type,
               item_type);
@@ -70,7 +70,7 @@ check_delta_type(StorageKeyType key_type, StorageDeltaType delta_type)
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    case StorageKeyType::kStorageKeyTypeAddressAuthData:
       if (delta_type != StorageDeltaType::kDeltaTypeAuthDataChange) {
         error("delta type is not valid for key type: {} with {}", key_type,
               delta_type);

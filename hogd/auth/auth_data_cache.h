@@ -1,6 +1,6 @@
 #pragma once
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -25,7 +25,7 @@ class AuthDataCacheBucket {
 public:
   void
   put(const ContractAddress &address,
-      std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>
+      std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>
           auth_data)
   {
     CHECK_PTR(auth_data.get());
@@ -71,7 +71,7 @@ public:
     }
   }
 
-  std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>
+  std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>
   get(ContractAddress const &address)
   {
     std::lock_guard lock(lock_);
@@ -96,7 +96,7 @@ private:
   constexpr static size_t kBucketSize = 16;
   struct BucketEntry {
     ContractAddress address = {};
-    std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>
+    std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>
         auth_data = nullptr;
     bool read = false;
   };
@@ -117,14 +117,14 @@ public:
   // Caches both positive and negative lookups.
   void
   put(const ContractAddress &address,
-      std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>
+      std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>
           auth_data)
   {
     size_t bucket_index = get_bucket_index(address);
     buckets_[bucket_index].put(address, std::move(auth_data));
   }
 
-  std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>
+  std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>
   get(const ContractAddress &address)
   {
     return buckets_[get_bucket_index(address)].get(address);

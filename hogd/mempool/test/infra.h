@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "built_contracts/contract_loader.h"
 #include "contract.hh"
 #include "db_sched.hh"
@@ -136,11 +136,11 @@ public:
     CHECK(get_db().write_address_average_hog_age({average}).has_value());
   }
 
-  void set_account_auth_data(const ContractAddress &account,
-                             const AccountAuthData &auth_data)
+  void set_address_auth_data(const ContractAddress &account,
+                             const AddressAuthData &auth_data)
   {
     CHECK(get_db()
-              .write_address_account_auth_data(account, auth_data)
+              .write_address_auth_data(account, auth_data)
               .has_value());
   }
 

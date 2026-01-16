@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -413,12 +413,12 @@ InvokeTX::request_auth_data(Address const &addr,
                             StorageItemRPCFlagSet flags)
 {
   auto base_auth_data =
-      block_.get().get_db().read_address_account_auth_data(addr);
+      block_.get().get_db().read_address_auth_data(addr);
   if (!base_auth_data) {
     if (base_auth_data.error() != HogDBCode::kNotFound) {
       return base_auth_data.error();
     }
-    base_auth_data = AccountAuthData{};
+    base_auth_data = AddressAuthData{};
   }
 
   AuthDataItem auth_data_item(std::move(base_auth_data.value()));
@@ -438,7 +438,7 @@ InvokeTX::request_auth_data(Address const &addr,
   if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
     change.set_permanent_exclusive();
   }
-  return request_change(make_account_auth_data_item_key(addr),
+  return request_change(make_address_auth_data_item_key(addr),
                         std::move(change));
 }
 

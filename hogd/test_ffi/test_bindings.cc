@@ -12,7 +12,7 @@
 #include <string>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"

@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -123,9 +123,9 @@ private:
     constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
   };
 
-  struct AccountAuthDataEntry {
-    AccountAuthData account_auth_data_;
-    constexpr static ItemViewType kItemType = ItemViewType::kAccountAuthData;
+  struct AddressAuthDataEntry {
+    AddressAuthData address_auth_data_;
+    constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
   };
 
   class RetrocausalQueueEntry {
@@ -161,7 +161,7 @@ private:
   using variant_type =
       std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
                    DeletedEntry, NativeTokenBalanceEntry, ReplayCacheEntry,
-                   AccountAuthDataEntry>;
+                   AddressAuthDataEntry>;
   static variant_type make_variant(StorageItem item, StorageKey const &db_key);
   static variant_type make_contract_key_variant(StorageItem item);
 

@@ -30,7 +30,7 @@
 #include <variant>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
@@ -366,7 +366,7 @@ namespace hogd {
 
 class AuthDataItem {
 public:
-  AuthDataItem(AccountAuthData auth_data)
+  AuthDataItem(AddressAuthData auth_data)
     : base_auth_data_(std::move(auth_data))
   {}
 
@@ -383,13 +383,13 @@ public:
 
   bool narrow(const AuthDataItem &auth_data_item) const;
 
-  AccountAuthData const &base_auth_data() const { return base_auth_data_; }
+  AddressAuthData const &base_auth_data() const { return base_auth_data_; }
 
 private:
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
   std::optional<NonceConfig> nonce_change_;
   std::optional<GasConfigChange> gas_config_change_;
-  AccountAuthData base_auth_data_;
+  AddressAuthData base_auth_data_;
 
   friend struct std::formatter<AuthDataItem>;
   friend class AuthLock;

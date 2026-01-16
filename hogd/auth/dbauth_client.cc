@@ -2,7 +2,7 @@
 
 #include <optional>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
@@ -12,16 +12,16 @@
 
 namespace hogd {
 
-x23::Async<AuthStatus<std::optional<AccountAuthData>>>
+x23::Async<AuthStatus<std::optional<AddressAuthData>>>
 DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
   auto res = co_await client_.authdb_get_auth_data(height, address);
 
   switch (res.error()) {
   case DBAuthError::kDBAuthSuccess:
-    co_return AuthStatus<std::optional<AccountAuthData>>{res.auth_data()};
+    co_return AuthStatus<std::optional<AddressAuthData>>{res.auth_data()};
   case DBAuthError::kDBAuthNotFound:
-    co_return AuthStatus<std::optional<AccountAuthData>>{std::nullopt};
+    co_return AuthStatus<std::optional<AddressAuthData>>{std::nullopt};
   case DBAuthError::kDBAuthStaleBlockHeight:
     co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
   case DBAuthError::kDBAuthInternal:

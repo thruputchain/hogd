@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"

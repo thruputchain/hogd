@@ -4,14 +4,14 @@
 #include <mutex>
 #include <optional>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/types.h"
 #include "types.hh"
 
 namespace hogd {
 
-std::optional<AccountAuthData>
+std::optional<AddressAuthData>
 MockDBAuthRpc::find_auth_data_at_height(ContractAddress address,
                                         BlockHeight height) const
 {

@@ -6,7 +6,7 @@ add_custom_command(
       ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/cbindgen.toml
       ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-      ${CMAKE_SOURCE_DIR}/protocol/account.x
+      ${CMAKE_SOURCE_DIR}/protocol/address_auth.x
     COMMAND 
       cbindgen --config cbindgen.toml --crate contract_types --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
     WORKING_DIRECTORY
@@ -17,4 +17,5 @@ add_custom_target(
 	generate_contract_types_ffi_h ALL
 	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
 )
+add_dependencies(generate_contract_types_ffi_h build_protocol)
 

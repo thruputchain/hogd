@@ -1,11 +1,11 @@
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <shared_mutex>
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -13,6 +13,7 @@
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -63,7 +64,7 @@ public:
     co_return;
   }
 
-  x23::Async<void> scheddb_changed_accounts(BlockHeight height,
+  x23::Async<void> scheddb_changed_addresses(BlockHeight height,
                                             ContractAddressBatch addresses)
   {
     scheduler_lock_.lock_shared();

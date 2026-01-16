@@ -18,7 +18,7 @@ enum class ItemViewType {
   kRetrocausalQueue,
   kNativeTokenBalance,
   kReplayCache,
-  kAccountAuthData,
+  kAddressAuthData,
 };
 
 } // namespace hogd

@@ -149,7 +149,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
                                     addrkey.key.contract_data_key().data()),
                                 addrkey.key.contract_data_key().size());
       case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-      case hogd::StorageKeyType::kStorageKeyTypeAccountAuthData:
+      case hogd::StorageKeyType::kStorageKeyTypeAddressAuthData:
       case hogd::StorageKeyType::kStorageKeyTypeAddressMetadata:
       case hogd::StorageKeyType::kStorageKeyTypeReplayCache:
         return std::string_view();

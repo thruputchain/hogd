@@ -4,7 +4,7 @@
 #include <mutex>
 #include <span>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -21,10 +21,10 @@
 
 namespace hogd {
 
-AccountAuthData
+AddressAuthData
 AuthLock::build_result() const
 {
-  AccountAuthData result = base_auth_data_;
+  AddressAuthData result = base_auth_data_;
   for (size_t i = 0; i < kMaxSigners; ++i) {
     if (pk_changes_[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -148,12 +148,12 @@ HogDBStatus<void>
 AuthLock::write_committed_change(LockContext const &ctx,
                                  MerkleTriePrefix &trie) const
 {
-  assert(ctx.key.is_account_auth_data());
+  assert(ctx.key.is_address_auth_data());
 
   auto res = build_result();
   assert(ctx.dao);
   auto ret =
-      ctx.dao->write_address_account_auth_data(ctx.key.get_address(), res);
+      ctx.dao->write_address_auth_data(ctx.key.get_address(), res);
   if (!ret) {
     return ret.error();
   }

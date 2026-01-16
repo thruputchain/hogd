@@ -9,7 +9,7 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"

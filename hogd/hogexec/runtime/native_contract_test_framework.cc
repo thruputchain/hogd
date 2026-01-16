@@ -6,7 +6,7 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"

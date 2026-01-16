@@ -13,9 +13,10 @@ else()
     message(STATUS "sccache not found - Rust builds will not use caching")
 endif()
 
-set_source_files_properties(
-    ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs
-    PROPERTIES GENERATED TRUE)
+# ffi_enums.rs is no longer generated - using hogexec-internal crate instead
+# set_source_files_properties(
+#     ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs
+#     PROPERTIES GENERATED TRUE)
 
 # Import targets defined in the workspace manifest `Cargo.toml` file
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES staticlib LOCKED FROZEN)
@@ -67,14 +68,15 @@ endif()
 
 
 
-add_dependencies(
-  cargo-prebuild_unified_lib
-  ffi_enum_rs)
-
-target_sources(
-  unified_lib
-  PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs)
+# ffi_enums.rs is no longer generated - using hogexec-internal crate instead
+# add_dependencies(
+#   cargo-prebuild_unified_lib
+#   ffi_enum_rs)
+#
+# target_sources(
+#   unified_lib
+#   PRIVATE
+#   ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs)
 
 target_link_libraries(
   unified_lib

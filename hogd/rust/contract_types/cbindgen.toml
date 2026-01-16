@@ -152,7 +152,7 @@ bitflags = false
 parse_deps = true
 # cbindgen fails to parse xdr_common::VecM, because for some reason it can't handle template params explicit values
 # like VecM<MAX_SIZE>.  So we only include groundhog_xdr.
-include = ["groundhog_xdr"]
+include = ["groundhog-xdr"]
 exclude = []
 clean = false
 extra_bindings = []

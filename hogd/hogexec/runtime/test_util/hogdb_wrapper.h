@@ -3,7 +3,7 @@
 #include <map>
 #include <memory>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"

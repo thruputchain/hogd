@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "discovery.hh"
 #include "hogd/base/types.h"
@@ -30,14 +30,14 @@ TEST(Mempool, SubmitUnvetted)
 
   MempoolTestInfra server;
 
-  AccountAuthData auth_data = get_default_account();
+  AddressAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
                  /*required_weight=*/1);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   Transaction tx = txs[0].tx;
   auto make_sign_claim = [&](uint32_t idx) {
@@ -478,7 +478,7 @@ TEST(Mempool, AuthChanged)
                   /*num_hogs=*/5'000'000'000 *
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
-  AccountAuthData auth_data = get_default_account();
+  AddressAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
@@ -487,7 +487,7 @@ TEST(Mempool, AuthChanged)
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/2);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   SignedTransactionBatch signed_txs;
 
@@ -505,9 +505,9 @@ TEST(Mempool, AuthChanged)
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
-  // Now change the [AccountAuthData].
+  // Now change the [AddressAuthData].
   auth_data.nonce_config.required_weight = 2;
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -544,7 +544,7 @@ TEST(Mempool, AuthInvalidated)
                   /*num_hogs=*/5'000'000'000 *
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
-  AccountAuthData auth_data = get_default_account();
+  AddressAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
@@ -553,7 +553,7 @@ TEST(Mempool, AuthInvalidated)
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/2);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
 
   SignedTransactionBatch signed_txs;
@@ -571,9 +571,9 @@ TEST(Mempool, AuthInvalidated)
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
-  // Now change the [AccountAuthData].
+  // Now change the [AddressAuthData].
   auth_data.nonce_config.required_weight = 10;
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};

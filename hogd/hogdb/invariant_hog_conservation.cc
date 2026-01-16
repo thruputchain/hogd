@@ -7,7 +7,9 @@
 #include <span>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
+#include "contract.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -15,7 +17,6 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "storage_item.hh"
-#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -47,8 +48,8 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
   case Prefix::kWasmCodeRefcount:
     // This doesn't pay storage costs;
     return;
-  case Prefix::kAccountAuthData:
-    handle_account_auth_data_item_change(before, after);
+  case Prefix::kAddressAuthData:
+    handle_address_auth_data_item_change(before, after);
     return;
   case Prefix::kAddressMetadata:
     handle_address_metadata_item_change(before, after);
@@ -144,7 +145,7 @@ HogConservationInvariant::handle_contract_data_item_change(
 }
 
 void
-HogConservationInvariant::handle_account_auth_data_item_change(
+HogConservationInvariant::handle_address_auth_data_item_change(
     HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
 {
   auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
@@ -152,11 +153,11 @@ HogConservationInvariant::handle_account_auth_data_item_change(
       return 0;
     }
     assert(item.value().type == 0);
-    AccountAuthData auth_data;
+    AddressAuthData auth_data;
     try {
       x23::deserialize(&auth_data, x23::BufViewEnd(item.value().value));
     } catch (x23::XdrException &e) {
-      warn("failed to deserialize account auth data: {}", e.what());
+      warn("failed to deserialize address auth data: {}", e.what());
       assert(false);
       return 0;
     }

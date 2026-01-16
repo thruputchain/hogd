@@ -10,7 +10,7 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"
@@ -1101,7 +1101,7 @@ AddressAndKey
 auth_data_addrkey(ContractAddress const &address)
 {
   return {.address = address,
-          .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthData)};
+          .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressAuthData)};
 }
 } // namespace
 
@@ -1120,8 +1120,8 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->change_public_key(key_index, std::move(new_key));
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    address_auth_data_item->change_public_key(key_index, std::move(new_key));
     return {};
   }
 
@@ -1131,7 +1131,7 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  AccountAuthDataItem new_item;
+  AddressAuthDataItem new_item;
   new_item.change_public_key(key_index, std::move(new_key));
   return item_view->set(new_item);
 }
@@ -1144,8 +1144,8 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->set_nonce_config(nonce_config);
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    address_auth_data_item->set_nonce_config(nonce_config);
     return {};
   }
 
@@ -1154,7 +1154,7 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
     return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
   assert(item_view->get<UnmodifiedItem>());
-  AccountAuthDataItem new_item;
+  AddressAuthDataItem new_item;
   new_item.set_nonce_config(nonce_config);
   return item_view->set(new_item);
 }
@@ -1168,8 +1168,8 @@ SystemCallHandler::set_address_gas_permission_configs(
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->set_gas_permission_configs(
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    address_auth_data_item->set_gas_permission_configs(
         std::move(gas_permission_configs));
     return {};
   }
@@ -1180,7 +1180,7 @@ SystemCallHandler::set_address_gas_permission_configs(
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  AccountAuthDataItem new_item;
+  AddressAuthDataItem new_item;
   new_item.set_gas_permission_configs(std::move(gas_permission_configs));
   return item_view->set(new_item);
 }

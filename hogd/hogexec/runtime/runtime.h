@@ -12,7 +12,7 @@
 #include <string_view>
 #include <system_error>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"

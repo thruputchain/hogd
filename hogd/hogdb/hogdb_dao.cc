@@ -11,7 +11,7 @@
 #include <utility>
 
 // xdr types
-#include "account.hh"
+#include "address_auth.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -56,7 +56,7 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kHogAge:
     return false;
   case Prefix::kBalance:
-  case Prefix::kAccountAuthData:
+  case Prefix::kAddressAuthData:
   case Prefix::kAddressMetadata:
   case Prefix::kContractDataKey:
   case Prefix::kWasmCodeRefcount:
@@ -244,16 +244,16 @@ HogDBDAO::read_address_replay_cache_data(Address const &addr,
 }
 
 // TODO(jhumphri): Handle [block_id].
-HogDBStatus<AccountAuthData>
-HogDBDAO::read_address_account_auth_data(const Address &addr)
+HogDBStatus<AddressAuthData>
+HogDBDAO::read_address_auth_data(const Address &addr)
 {
-  auto key = make_address_key(addr, Prefix::kAccountAuthData);
+  auto key = make_address_key(addr, Prefix::kAddressAuthData);
   HogDBStatus<OwningSpan<const std::byte>> raw =
       db_.get_if_type(std::as_bytes(std::span(key)), 0);
   if (!raw)
     return raw.error();
 
-  AccountAuthData auth;
+  AddressAuthData auth;
   try {
     x23::deserialize(&auth, x23::BufViewEnd(*raw));
   } catch (x23::XdrException &e) {
@@ -332,10 +332,10 @@ HogDBDAO::write_address_average_hog_age(const HogAge &age)
 
 // TODO(jhumphri): Handle [block_id].
 HogDBStatus<void>
-HogDBDAO::write_address_account_auth_data(const Address &addr,
-                                          const AccountAuthData &auth)
+HogDBDAO::write_address_auth_data(const Address &addr,
+                                          const AddressAuthData &auth)
 {
-  auto key = make_address_key(addr, Prefix::kAccountAuthData);
+  auto key = make_address_key(addr, Prefix::kAddressAuthData);
   auto buf = x23::serialize(auth);
 
   auto before_item = get_before_item(key);
@@ -460,10 +460,10 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       return std::make_pair(0, ItemLockCacheData::from_balance(r.value()));
     }
 
-  case ItemKeyType::kItemKeyTypeAccountAuthData:
-    assert(key.is_account_auth_data());
+  case ItemKeyType::kItemKeyTypeAddressAuthData:
+    assert(key.is_address_auth_data());
     {
-      auto r = read_address_account_auth_data(key.get_address());
+      auto r = read_address_auth_data(key.get_address());
       if (!r && r.error() != HogDBCode::kNotFound) {
         return r.error();
       }
@@ -584,8 +584,8 @@ HogDBDAO::remove_item(const ItemKey &key)
     update_invariants_post(db_key, before_item);
     return ret;
   }
-  if (key.is_account_auth_data()) {
-    auto db_key = make_address_key(key.get_address(), Prefix::kAccountAuthData);
+  if (key.is_address_auth_data()) {
+    auto db_key = make_address_key(key.get_address(), Prefix::kAddressAuthData);
     auto before_item = get_before_item(db_key);
     auto ret = db_.remove(db_key);
     update_invariants_post(db_key, before_item);

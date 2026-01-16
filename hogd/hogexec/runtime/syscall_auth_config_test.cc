@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -94,7 +94,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
 
   // Verify the nonce config was written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.nonce_config.accepted_keys, 0x01);
@@ -165,7 +165,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsSuccess)
 
   // Verify the gas permission configs were written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.gas_permissions.size(), 2);
@@ -231,7 +231,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsEmpty)
 
   // Verify the gas permission configs are empty
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.gas_permissions.size(), 0);
@@ -420,7 +420,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
 
   // Verify all 5 gas permission configs were written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.gas_permissions.size(), 5);
@@ -538,7 +538,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
 
   // Verify all three configs were written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
 

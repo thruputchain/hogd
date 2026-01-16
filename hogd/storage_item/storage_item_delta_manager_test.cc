@@ -7,7 +7,7 @@
 #include <tuple>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/init.h"

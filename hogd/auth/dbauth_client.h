@@ -2,7 +2,7 @@
 
 #include <optional>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
@@ -19,7 +19,7 @@ class DBAuthClient {
 public:
   DBAuthClient(dbauth_client_t &&client) : client_(std::move(client)) {}
 
-  x23::Async<AuthStatus<std::optional<AccountAuthData>>>
+  x23::Async<AuthStatus<std::optional<AddressAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);

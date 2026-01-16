@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"

@@ -27,7 +27,6 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -138,9 +137,9 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   BlockID test_block_id = 100;
 
   // Generate an experiment with ERC20 payments
-  constexpr uint32_t kNumAccounts = 5;
+  constexpr uint32_t kNumAddresses = 5;
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
-  config.erc20_payments().num_accounts = kNumAccounts;
+  config.erc20_payments().num_addresses = kNumAddresses;
 
   LoadgenResult result = loadgen_client_->generate_experiment(config)();
   ASSERT_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
@@ -231,9 +230,9 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   BlockID test_block_id = 200;
 
   // Generate an experiment with ERC20 payments
-  constexpr uint32_t kNumAccounts = 5;
+  constexpr uint32_t kNumAddresses = 5;
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
-  config.erc20_payments().num_accounts = kNumAccounts;
+  config.erc20_payments().num_addresses = kNumAddresses;
 
   LoadgenResult result = loadgen_client_->generate_experiment(config)();
   ASSERT_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);

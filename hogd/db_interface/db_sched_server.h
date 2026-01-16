@@ -44,10 +44,10 @@ public:
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  static x23::Async<DbAccountAuthDataBatchResult>
-  dbsched_get_account_auth_data(BlockID block_id, ContractAddressBatch accounts)
+  static x23::Async<DbAddressAuthDataBatchResult>
+  dbsched_get_address_auth_data(BlockID block_id, ContractAddressBatch accounts)
   {
-    co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+    co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
   }
 
   x23::Async<DbSchedResult> dbsched_create_snapshot(BlockID parent_id,

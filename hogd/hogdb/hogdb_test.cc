@@ -8,7 +8,7 @@
 #include <utility>
 
 // xdr types
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"

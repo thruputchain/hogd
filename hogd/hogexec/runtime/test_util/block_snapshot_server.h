@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"

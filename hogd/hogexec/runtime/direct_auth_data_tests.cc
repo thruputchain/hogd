@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -90,7 +90,7 @@ TEST_P(DirectAuthDataTest, BasicAuthDataCreation)
   auto tx1 = make_new_per_tx_db_proxy();
   // Note: This is a simplified test - actual auth data changes would use
   // the proper AuthDataChangeArgs structure
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -112,7 +112,7 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
   auth_data.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -120,7 +120,7 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
   ASSERT_TRUE(tx1.commit_transaction({}));
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -131,7 +131,7 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
   check_balances(contract_addr, contract_addr,
                  kInitialBalance - (cost_model_->get_auth_data_cost(1)));
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto db_auth_data = item->auth_data();
   ASSERT_TRUE(db_auth_data.public_keys[0]);
@@ -152,7 +152,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   auth_data.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -161,7 +161,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
 
   auth_data.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
 
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_2 = tx1.try_push_current_subtransaction();
@@ -170,7 +170,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   ASSERT_TRUE(tx1.commit_transaction({}));
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr_ref),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr_ref),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -182,7 +182,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   check_balances(contract_addr, contract_addr_ref,
                  kInitialBalance - (cost_model_->get_auth_data_cost(2)));
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto db_auth_data = item->auth_data();
   ASSERT_TRUE(db_auth_data.public_keys[0]);
@@ -205,7 +205,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
   auth_data2.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data1),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -213,7 +213,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
   ASSERT_TRUE(tx1.commit_transaction({}));
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -224,7 +224,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
                 kInitialBalance - (cost_model_->get_auth_data_cost(2)));
 
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto db_auth_data = item->auth_data();
   ASSERT_TRUE(db_auth_data.public_keys[0]);
@@ -252,19 +252,19 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
   auth_data3.auth_data_change_signers.push_back({2, make_pk_config(Weight{3})});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data1),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
 
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
 
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data3),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_3 = tx1.try_push_current_subtransaction();
@@ -274,7 +274,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
   ASSERT_TRUE(tx1.commit_transaction({}));
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr_ref),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr_ref),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -286,7 +286,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
                  kInitialBalance - (cost_model_->get_auth_data_cost(1)));
 
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto db_auth_data = item->auth_data();
   ASSERT_FALSE(db_auth_data.public_keys[0]);
@@ -296,7 +296,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
             auth_data2.auth_data_change_signers[0].public_key->key);
 
   auto item_ref = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr_ref));
+      make_address_auth_data_addrkey(contract_addr_ref));
   ASSERT_TRUE(item_ref.has_value());
   auto db_auth_data_ref = item_ref->auth_data();
 
@@ -326,7 +326,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   auth_data_conflict.auth_data_change_signers.push_back({0, nullptr});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data1),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -334,7 +334,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_TRUE(r1.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data1),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -342,7 +342,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_TRUE(r2.value());
 
   // Can't reserve a lock for a conflicting key; tx2 holds a sharedlock ref
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_2 = tx1.try_push_current_subtransaction();
@@ -352,7 +352,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   // how tx2 releases a shared lock ref
   ASSERT_TRUE(tx2.pop_subtransactions(1).has_value());
 
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_3 = tx1.try_push_current_subtransaction();
@@ -360,7 +360,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_TRUE(r1_3.value());
 
   // tx1 has the lock in exclusive mode
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2_2 = tx2.try_push_current_subtransaction();
@@ -368,7 +368,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_FALSE(r2_2.value());
 
   // tx1 still has the lock in exclusive mode
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data_conflict),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2_3 = tx2.try_push_current_subtransaction();
@@ -378,7 +378,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
 
   // the exclusive lock is now released
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2_4 = tx2.try_push_current_subtransaction();
@@ -412,7 +412,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
         {0, make_pk_config(Weight{1})});
 
     auto tx0 = make_new_per_tx_db_proxy();
-    tx0.add_delta(make_account_auth_data_addrkey(contract_addr),
+    tx0.add_delta(make_address_auth_data_addrkey(contract_addr),
                   make_auth_data_delta(auth_data0),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r0 = tx0.try_push_current_subtransaction();
@@ -429,7 +429,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
   auth_data1.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data1),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -441,7 +441,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
   auth_data2.auth_data_change_signers.push_back({3, make_pk_config(Weight{2})});
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -476,7 +476,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
         {0, make_pk_config(Weight{1})});
 
     auto tx0 = make_new_per_tx_db_proxy();
-    tx0.add_delta(make_account_auth_data_addrkey(contract_addr),
+    tx0.add_delta(make_address_auth_data_addrkey(contract_addr),
                   make_auth_data_delta(auth_data0),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r0 = tx0.try_push_current_subtransaction();
@@ -493,7 +493,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
   auth_data2.auth_data_change_signers.push_back({3, make_pk_config(Weight{2})});
 
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
@@ -506,7 +506,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
   auth_data1.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+  tx1.add_delta(make_address_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data1),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
@@ -540,7 +540,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
 
   auto initialize = [&] {
     auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+    tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                  make_auth_data_delta(auth_data_init),
                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
@@ -569,7 +569,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           co_await set.bg();
 
           auto tx = self->make_new_per_tx_db_proxy();
-          tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+          tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                        make_auth_data_delta(auth_data1),
                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
           auto r1 = tx.try_push_current_subtransaction();
@@ -585,7 +585,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           auth_data2.auth_data_change_signers.push_back(
               {6, make_pk_config(Weight{3})});
 
-          tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+          tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                        make_auth_data_delta(auth_data2),
                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
           auto r2 = tx.try_push_current_subtransaction();
@@ -615,7 +615,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           co_await set.bg();
 
           auto tx = self->make_new_per_tx_db_proxy();
-          tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+          tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                        make_auth_data_delta(auth_data3),
                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
           auto r3 = tx.try_push_current_subtransaction();
@@ -640,7 +640,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
     advance_block();
 
     auto item = lookup_storage_item_from_db(
-        make_account_auth_data_addrkey(contract_addr));
+        make_address_auth_data_addrkey(contract_addr));
     ASSERT_TRUE(item.has_value());
     auto db_auth_data = item->auth_data();
     ASSERT_FALSE(db_auth_data.public_keys[0]);

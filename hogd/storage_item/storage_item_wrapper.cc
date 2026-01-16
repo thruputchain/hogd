@@ -4,7 +4,8 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -34,7 +35,7 @@ StorageItemWrapper::StorageItemWrapper(ReplayCache replay_cache,
   : storage_item_(ReplayCacheWrapper{.cache_ = std::move(replay_cache)}),
     cost_model_(cost_model)
 {}
-StorageItemWrapper::StorageItemWrapper(AccountAuthData auth_data,
+StorageItemWrapper::StorageItemWrapper(AddressAuthData auth_data,
                                        StorageCostModel const *cost_model)
   : storage_item_(AuthDataWrapper{.auth_data_ = std::move(auth_data)}),
     cost_model_(cost_model)
