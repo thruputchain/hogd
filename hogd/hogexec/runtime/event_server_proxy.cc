@@ -7,7 +7,6 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
 
