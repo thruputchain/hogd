@@ -71,7 +71,7 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
 
 // The number of coroutines to use (one coroutine per thread) when converting
 // to/from a parallel batch.
-constexpr size_t kNumThreadsForParallelBatch = 20;
+constexpr size_t kNumThreadsForParallelBatch = 10;
 
 template<typename T>
 inline x23::Async<bool>
@@ -141,7 +141,8 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     // remaining handles in [handles] due to short-circuiting.
     ret = (co_await handle) && ret;
   }
-  info("parallel_batch_to_t took {}", timer.elapsed());
+  info("parallel_batch_to_t took {}, parallel.segment_tokens.size() is {}",
+       timer.elapsed(), parallel.segment_tokens.size());
   co_return ret;
 }
 
