@@ -22,6 +22,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "serialize_calldata.h"
@@ -34,16 +35,21 @@ namespace hogd {
 
 // Common utilities for building preset contracts
 
-// Get the method ID for a given method,
-// at which contracts using the SDK will expect to find it.
-MethodID sdk_method_id(std::string_view identifier_name,
-                       std::string_view identifier_version, uint16_t method_id);
+
 ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
                           uint16_t method_id);
-MethodID sdk_method_id(ContractEntrypointID entry_point_id);
-ContractEntrypointID entrypoint_from_method_id(MethodID method_id);
+Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
+
+// Get the method ID for a given method,
+// at which contracts using the SDK will expect to find it.
+inline Runtime::MethodID 
+sdk_method_id(std::string_view identifier_name,
+  std::string_view identifier_version, uint16_t method_id) {
+  return sdk_method_id(sdk_entrypoint_derivation(identifier_name, identifier_version, method_id));
+}
+ContractEntrypointID entrypoint_from_method_id(Runtime::MethodID method_id);
 
 namespace detail {
 

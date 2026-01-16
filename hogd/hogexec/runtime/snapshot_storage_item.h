@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 

@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {

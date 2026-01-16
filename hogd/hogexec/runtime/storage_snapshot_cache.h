@@ -15,6 +15,7 @@
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {

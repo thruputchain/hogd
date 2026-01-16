@@ -75,7 +75,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
-                     MethodID input_method, GasAmount input_gas_limit,
+                     uint64_t input_entrypoint_id, GasAmount input_gas_limit,
                      std::span<const std::byte> input_calldata,
                      InvokeFlagSet input_flags,
                      RuntimeMemoryLength &output_return_buffer_len)
@@ -89,7 +89,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
 
   auto [invoke_res, gas_amount] =
-      syscall_handler.invoke(input_address, input_method,
+      syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.gas_amount_),
                              calldata, input_flags);

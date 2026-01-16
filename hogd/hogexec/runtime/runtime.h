@@ -16,7 +16,6 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -151,6 +150,8 @@ std::unique_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
 class Runtime {
 public:
   Runtime(std::unique_ptr<HostCallContext> host_call_context);
+
+  using MethodID = uint64_t; // from ContractEntryPointID, interpreted in big-endian
 
   // Disable copy and move
   Runtime(Runtime const &) = delete;

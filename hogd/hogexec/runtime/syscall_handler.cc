@@ -11,6 +11,7 @@
 #include <variant>
 
 #include "account.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -370,7 +371,7 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
+SystemCallHandler::invoke(ContractAddress const &address, Runtime::MethodID method,
                           GasAmount gas_limit, Calldata calldata,
                           InvokeFlagSet flags)
 {
@@ -553,7 +554,7 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
 {
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
-  assert(data.size() <= kMaxLogMessageLen);
+  assert(data.size() <= kMaxEventLength);
 
   x23::Buf buf;
   uint32_t num_topics = 0;
