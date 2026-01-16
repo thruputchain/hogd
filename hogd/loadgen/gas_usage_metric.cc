@@ -30,7 +30,7 @@ run_gas_usage_metric(uint32_t num_accounts)
 
   // Create ERC20 experiment
   auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-      .num_accounts = num_accounts,
+      .num_addresses = num_accounts,
   });
 
   auto context = make_hogexec_context();

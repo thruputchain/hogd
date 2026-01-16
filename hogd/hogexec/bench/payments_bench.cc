@@ -53,7 +53,7 @@ struct BenchmarkState : public CommonBenchState {
     HogexecMetrics::launch_log_worker();
 
     auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-        .num_accounts = num_accounts_,
+        .num_addresses = num_accounts_,
     });
     auto result = exp.generate_experiment();
     if (!result.has_value()) {

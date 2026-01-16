@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "hogd/base/coropoll.h"
@@ -20,9 +19,10 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "loadgen.hh"
+#include "nomination.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
@@ -57,7 +57,7 @@ public:
   {
     // Initialize the experiment.
     ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
-    config.erc20_payments().num_accounts = num_accounts;
+    config.erc20_payments().num_addresses = num_accounts;
 
     LoadgenResult result = client_->generate_experiment(config)();
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);

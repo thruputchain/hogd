@@ -38,8 +38,8 @@ void
 ERC20BasicAuthExperimentState::initialize_wallets(
     SHA256Hash const &wallet_contract_hash)
 {
-  wallets_.reserve(config_.num_accounts + 1);
-  for (size_t i = 0; i < config_.num_accounts + 1; ++i) {
+  wallets_.reserve(config_.num_addresses + 1);
+  for (size_t i = 0; i < config_.num_addresses + 1; ++i) {
     auto keys = ed25519_keygen();
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
@@ -100,7 +100,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                              erc20_meta::make_calldata<"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
-                             int128_t{500'000} * config_.num_accounts);
+                            int128_t{500'000} * config_.num_addresses);
   erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
       sha256(*erc20_contract), make_nonce(0));
 
@@ -123,8 +123,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
-  mint_txs.reserve(config_.num_accounts);
-  for (size_t i = 1; i <= config_.num_accounts; ++i) {
+  mint_txs.reserve(config_.num_addresses);
+  for (size_t i = 1; i <= config_.num_addresses; ++i) {
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata = x23::serialize(
@@ -204,7 +204,7 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
           std::random_device rd;
           std::mt19937 gen(rd());
 
-          std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
+          std::uniform_int_distribution<size_t> dist(1, config_.num_addresses);
 
           uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
               0, std::numeric_limits<uint64_t>::max())(gen);

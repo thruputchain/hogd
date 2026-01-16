@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -373,7 +374,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
              for (int i = 0; i < 5; i++) {
                ffi_configs[i].limit =
                    GasAmount{static_cast<uint64_t>(1000 + (i * 100))};
-               ffi_configs[i].accepted_keys = BitMap{1ULL << i};
+               ffi_configs[i].accepted_keys = BitMap{1U << i};
                ffi_configs[i].required_weight =
                    Weight{static_cast<uint32_t>(i + 1)};
              }
@@ -427,7 +428,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
   for (int i = 0; i < 5; i++) {
     ASSERT_EQ(auth_data.gas_permissions[i].limit,
               GasAmount{static_cast<uint64_t>(1000 + (i * 100))});
-    ASSERT_EQ(auth_data.gas_permissions[i].accepted_keys, BitMap{1ULL << i});
+    ASSERT_EQ(auth_data.gas_permissions[i].accepted_keys, BitMap{1U << i});
     ASSERT_EQ(auth_data.gas_permissions[i].required_weight,
               Weight{static_cast<uint32_t>(i + 1)});
   }
