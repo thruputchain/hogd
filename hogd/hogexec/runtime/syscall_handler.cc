@@ -554,8 +554,7 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
 {
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
-  assert(data.size() <= kMaxEventLength);
-
+  
   x23::Buf buf;
   uint32_t num_topics = 0;
   if (topic0) {
