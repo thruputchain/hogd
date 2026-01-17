@@ -21,7 +21,6 @@
 #include "x23/format.h"
 #include "x23/x23.h"
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "event.hh"
