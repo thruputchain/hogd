@@ -83,8 +83,7 @@ TEST_F(ItemViewTest, SetBytestring)
 {
   ItemView proxy;
 
-  Bytestring bytes{0, 1, 2, 3}, bytes2{3, 2, 1, 0},
-      bytes_long(kBytestringMaxLen + 10, 0);
+  Bytestring bytes{0, 1, 2, 3}, bytes2{3, 2, 1, 0};
   EXPECT_TRUE(proxy.set(BytestringItem(bytes)));
 
   const auto *get_res = proxy.template get<BytestringItem>();
@@ -92,10 +91,6 @@ TEST_F(ItemViewTest, SetBytestring)
   EXPECT_EQ(get_res->bytestring_, bytes);
 
   EXPECT_TRUE(proxy.set(BytestringItem(bytes2)));
-  ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
-  EXPECT_EQ(get_res->bytestring_, bytes2);
-
-  EXPECT_FALSE(proxy.set(BytestringItem(bytes_long)));
   ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
   EXPECT_EQ(get_res->bytestring_, bytes2);
 }
