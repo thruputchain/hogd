@@ -50,11 +50,12 @@ public:
   // want to remove the const reference.
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
-    co_await scheduler_lock_.lock();
+    auto cg = std::make_unique<x23::CoroGuard>();
+    co_await (*cg)(scheduler_lock_);
 
     if (scheduler_) {
       // See the comment above if you change this.
-      handle_transfer(transfers);
+      handle_transfer(transfers, std::move(cg));
     }
     else {
       info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
@@ -64,7 +65,8 @@ public:
     co_return;
   }
 
-  x23::Detached handle_transfer(HogsTransferred transfers)
+  x23::Detached handle_transfer(HogsTransferred transfers,
+                                std::unique_ptr<x23::CoroGuard> cg)
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
@@ -72,7 +74,7 @@ public:
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
-    scheduler_lock_.unlock();
+    cg.reset();
   }
 
   x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
