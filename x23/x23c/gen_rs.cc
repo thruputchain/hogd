@@ -157,7 +157,7 @@ struct GenRs {
   void show_type(const StructBody &s, string const &tname);
   void show_type(const UnionBody &b, string const &tname);
 
-  void show_comment(std::string_view comment, bool chomp, string prefix = {});
+  void show_comment(std::string comment, bool chomp, string prefix = {});
 
   static string map_type(const string &t);
   static string map_proc_return_type(const string &t);
@@ -224,7 +224,7 @@ struct GenRs {
     return ret;
   }
 
-  static optional<string> substring_removed(const string &str,
+  static optional<string> substring_removed(std::string_view str,
                                             const string_view sub)
   {
     string::size_type i = str.find(sub);
@@ -242,6 +242,7 @@ struct GenRs {
       R"(#[serde(with = "serde_arrays")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
+  static constexpr string_view kDocHidden = R"(#[doc(hidden)])";
   static constexpr string_view kDefaultDerives =
       R"(#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)])";
 
@@ -801,6 +802,8 @@ GenRs::show_type(const UnionBody &b, string const &tname)
 
     for (const auto &a : b.arms) {
 
+      show_comment(a.decl.comment, false);
+
       for (const auto &c : a.cases) {
         prtop("// case {}:\n", c);
       }
@@ -809,7 +812,6 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         prtop("// default:\n");
       }
 
-      show_comment(a.decl.comment, false, "//   ");
       if (a.decl.qual == Declaration::kVoid) {
         prtop("//   void;\n");
         for (const auto &c : a.cases) {
@@ -830,7 +832,6 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         }
 
         prtop("//   {} {};\n", type_name(a.decl, false, false), a.decl.id);
-
         for (const auto &c : a.cases) {
           prtop("{} {{ {}: {} }} = {} as {},\n", int_qualified_declname(c),
                 a.decl.id, name_prefix + type_name(a.decl, false, false),
@@ -880,7 +881,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
 }
 
 void
-GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
+GenRs::show_comment(std::string comment, bool chomp, string prefix)
 {
   constexpr auto kSplit = [](std::string_view sv) {
     // NOLINTNEXTLINE(readability-static-accessed-through-instance)
@@ -900,6 +901,9 @@ GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
     }
     return std::pair{col, sv.substr(pos)};
   };
+  if (auto stripped = substring_removed(comment, kDocHidden)) {
+    comment = *stripped + "\n#[doc(hidden)]";
+  }
 
   if (comment.empty())
     return;

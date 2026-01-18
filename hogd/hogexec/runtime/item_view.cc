@@ -80,8 +80,15 @@ NNIntItem::get_delta() const
 SyscallStatus<void>
 BytestringItem::validate() const
 {
-  if (bytestring_.size() > kBytestringMaxLen)
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  // The bytestring is coming from untrusted contract input.
+  // We should not get to this point with a bytestring that is too long.
+  // That might be a security risk in extreme cases --- a contract could ask us
+  // to allocate a Bytestring that is extremely long (as long as its linear
+  // memory).  Given current linear memory limits, it would not be possible to
+  // allocate a bytestring long enough to exhaust memory resources and/or cause
+  // malloc to fail, but a contract could still adversarially waste system
+  // resources.
+  assert(bytestring_.size() <= kBytestringMaxLen);
 
   return {};
 }
