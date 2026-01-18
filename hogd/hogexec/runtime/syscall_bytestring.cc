@@ -9,7 +9,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -63,7 +62,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,
-                            StorageItemRPCFlagSet input_flags)
+                            StorageDeltaFlagSet input_flags)
 {
   if (input_bytestring.size() > kBytestringMaxLen) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};

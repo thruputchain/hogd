@@ -12,7 +12,6 @@
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -228,8 +227,8 @@ public:
 
   template<typename ItemType>
   SyscallStatus<void> set(ItemType const &type,
-                          StorageItemRPCFlagSet flags = std::to_underlying(
-                              StorageItemRPCFlags::kStorageNone))
+                          StorageDeltaFlagSet flags = std::to_underlying(
+                              StorageDeltaFlags::kStorageDeltaFlagNone))
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -256,16 +255,15 @@ public:
     return {};
   }
 
-  std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
-  get_delta() const;
+  std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet> get_delta() const;
 
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
                AddressAuthDataItem>
       delta_args_;
-  StorageItemRPCFlagSet flags_ =
-      std::to_underlying(StorageItemRPCFlags::kStorageNone);
+  StorageDeltaFlagSet flags_ =
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone);
 };
 
 } // namespace hogd

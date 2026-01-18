@@ -15,7 +15,6 @@
 #include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -76,7 +75,7 @@ to_span(const Bytestring &bs)
 RPCError
 HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageItemRPCFlagSet flags)
+                              StorageDeltaFlagSet flags)
 {
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
@@ -224,7 +223,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
         ctx_.get_db().read_address_balance(key.get_address());
     if (!nnint)
       return ExpectedStorageItem(to_rpc_error(nnint.error()));
-    StorageItem out(StorageItemType::kItemTypeNonnegativeInt);
+    WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
     ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
@@ -236,7 +235,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
         ctx_.get_db().read_address_auth_data(key.get_address());
     if (!auth_data)
       return ExpectedStorageItem(to_rpc_error(auth_data.error()));
-    StorageItem out(StorageItemType::kItemTypeAuthData);
+    WireStorageItem out(StorageItemType::kItemTypeAuthData);
     out.auth_data() = *auth_data;
     ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
@@ -248,7 +247,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
   if (!item)
     return ExpectedStorageItem(to_rpc_error(item.error()));
 
-  StorageItem out;
+  WireStorageItem out;
   switch (item->type) {
   case kNNInt128:
   {

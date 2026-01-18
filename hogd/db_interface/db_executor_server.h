@@ -14,7 +14,6 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/block_state.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -71,7 +70,7 @@ private:
   static bool try_reserve_delta(BlockState *block_state, TransactionID tx,
                                 AddressAndKey const &addrkey,
                                 StorageDelta const &delta,
-                                StorageItemRPCFlagSet flags);
+                                StorageDeltaFlagSet flags);
   BlockManager *block_manager_;
 };
 

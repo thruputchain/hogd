@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -51,7 +50,7 @@ make_nnint128_add(int128_t add)
 
 } // namespace
 
-std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
+std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
 ItemView::get_delta() const
 {
   return {std::visit(

@@ -36,7 +36,6 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -84,11 +83,11 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
 }
 
 namespace {
-template<StorageItemRPCFlags... Flags>
+template<StorageDeltaFlags... Flags>
 constexpr bool
-validate_flags(StorageItemRPCFlagSet flags)
+validate_flags(StorageDeltaFlagSet flags)
 {
-  constexpr StorageItemRPCFlagSet kAllowedFlags =
+  constexpr StorageDeltaFlagSet kAllowedFlags =
       (0 | ... | std::to_underlying(Flags));
   return (flags & kAllowedFlags) == flags;
 }
@@ -740,11 +739,11 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring,
-                                  StorageItemRPCFlagSet input_flags)
+                                  StorageDeltaFlagSet input_flags)
 {
   assert(!is_read_only());
 
-  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -848,11 +847,11 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
                              int128_t add_value,
-                             StorageItemRPCFlagSet input_flags)
+                             StorageDeltaFlagSet input_flags)
 {
   assert(!is_read_only());
 
-  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -871,11 +870,12 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
-                                 StorageItemRPCFlagSet flags)
+                                 StorageDeltaFlagSet flags)
 {
   assert(!is_read_only());
 
-  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(flags)) {
+  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
+          flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 

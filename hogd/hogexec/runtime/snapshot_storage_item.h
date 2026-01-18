@@ -31,8 +31,8 @@ class DatabaseProxy;
 class SnapshotStorageItem {
 public:
   // Construct from a StorageItem (by value)
-  SnapshotStorageItem(StorageItem item, AddressAndKey addrkey, BlockID block_id,
-                      DatabaseProxy &db_proxy)
+  SnapshotStorageItem(WireStorageItem item, AddressAndKey addrkey,
+                      BlockID block_id, DatabaseProxy &db_proxy)
     : addrkey_(std::move(addrkey)),
       entry_(make_variant(std::move(item), addrkey_.key)), block_id_(block_id),
       db_proxy_(db_proxy)
@@ -162,8 +162,9 @@ private:
       std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
                    DeletedEntry, NativeTokenBalanceEntry, ReplayCacheEntry,
                    AddressAuthDataEntry>;
-  static variant_type make_variant(StorageItem item, StorageKey const &db_key);
-  static variant_type make_contract_key_variant(StorageItem item);
+  static variant_type make_variant(WireStorageItem item,
+                                   StorageKey const &db_key);
+  static variant_type make_contract_key_variant(WireStorageItem item);
 
   const AddressAndKey addrkey_;
   variant_type entry_;

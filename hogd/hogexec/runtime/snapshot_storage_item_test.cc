@@ -15,6 +15,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -40,7 +41,7 @@ protected:
   {
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
+        WireStorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
         BlockID{1}, *db_proxy_);
   }
 };
@@ -61,7 +62,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
                                      StorageItemWrapper(std::move(queue),
                                                         &cost_model));
 
-  SnapshotStorageItem test_item(StorageItem(
+  SnapshotStorageItem test_item(WireStorageItem(
                                     StorageItemType::kItemTypeRetrocausalQueue),
                                 AddressAndKey{}, BlockID{1}, *db_proxy_);
 
@@ -106,7 +107,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
 TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
 {
 
-  SnapshotStorageItem test_item(StorageItem(
+  SnapshotStorageItem test_item(WireStorageItem(
                                     StorageItemType::kItemTypeRetrocausalQueue),
                                 AddressAndKey{}, BlockID{1}, *db_proxy_);
   auto check_concurrent_entry =

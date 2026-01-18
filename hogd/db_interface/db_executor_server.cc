@@ -6,7 +6,6 @@
 #include "hogd/db_interface/block_state.h"
 #include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include <utility>
@@ -19,7 +18,7 @@ bool
 DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
                                  AddressAndKey const &addrkey,
                                  StorageDelta const &delta,
-                                 StorageItemRPCFlagSet flags)
+                                 StorageDeltaFlagSet flags)
 {
   if constexpr (is_debug_build()) {
     check_delta_type(addrkey.key.key_type(), delta.type());

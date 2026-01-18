@@ -60,7 +60,7 @@ public:
   }
 
   StorageItemType type() const;
-  StorageItem to_wire_item() const;
+  WireStorageItem to_wire_item() const;
 
   int128_t storage_cost(StorageCostModel const *cost_model = nullptr) const;
   StorageCostModel const *cost_model() const { return cost_model_; }
@@ -73,7 +73,7 @@ private:
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeBytestring;
     // Converts to wire format for network transmission
-    StorageItem to_wire_item() const;
+    WireStorageItem to_wire_item() const;
     // Returns storage cost based on bytestring length
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
@@ -85,7 +85,7 @@ private:
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeNonnegativeInt;
     // Converts to wire format for network transmission
-    StorageItem to_wire_item() const;
+    WireStorageItem to_wire_item() const;
     // Returns fixed storage cost for non-negative integers
     static int128_t storage_cost(StorageCostModel const *cost_model);
   };
@@ -100,7 +100,7 @@ private:
     // Note: The RCQ type is automatically fully serialized and transferred.
     // We merely send over the fact that an RCQ exists.
     // Other subsystems can then query individual blocks within the RCQ.
-    static StorageItem to_wire_item();
+    static WireStorageItem to_wire_item();
     // Returns storage cost based on total queue size and block count
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
@@ -110,7 +110,7 @@ private:
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeReplayCacheData;
     // Converts to wire format for network transmission
-    static StorageItem to_wire_item();
+    static WireStorageItem to_wire_item();
     // Returns storage cost based on replay cache metadata
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
@@ -120,7 +120,7 @@ private:
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeAuthData;
     // Converts to wire format for network transmission
-    StorageItem to_wire_item() const;
+    WireStorageItem to_wire_item() const;
     // Returns storage cost based on auth data size
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
@@ -130,7 +130,7 @@ private:
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeDeployedContractHash;
     // Converts to wire format for network transmission
-    StorageItem to_wire_item() const;
+    WireStorageItem to_wire_item() const;
     // Returns storage cost based on deployed contract hash size
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };

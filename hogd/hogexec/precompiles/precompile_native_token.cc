@@ -24,7 +24,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "standard_asset_events.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/format.h"
 
@@ -58,9 +58,9 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
   }
   int128_t new_add = add + amount;
   assert(set.has_value());
-  auto r2 =
-      handler.set_nnint(allow_key, set, new_add,
-                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = handler.set_nnint(allow_key, set, new_add,
+                              std::to_underlying(
+                                  StorageDeltaFlags::kStorageDeltaFlagNone));
   if (!r2.has_value()) {
     return r2.error();
   }

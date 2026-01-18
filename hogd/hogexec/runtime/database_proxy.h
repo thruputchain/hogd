@@ -7,7 +7,6 @@
 #include <variant>
 #include <vector>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
@@ -17,7 +16,6 @@
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_exec.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/srpc.h"
@@ -52,7 +50,7 @@ public:
   DatabaseProxy(DatabaseProxy &&) = delete;
   DatabaseProxy &operator=(DatabaseProxy &&) = delete;
 
-  SystemStatus<std::optional<StorageItem>>
+  SystemStatus<std::optional<WireStorageItem>>
   get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
 
   SystemStatus<std::optional<const Contract>>
@@ -100,7 +98,7 @@ public:
   {}
 
   void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
-                 StorageItemRPCFlagSet flags)
+                 StorageDeltaFlagSet flags)
   {
     current_subtransaction_batch_.push_back(FlaggedStorageDelta{
         .addrkey = addrkey, .delta = delta, .flags = flags});

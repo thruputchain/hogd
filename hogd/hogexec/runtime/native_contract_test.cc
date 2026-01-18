@@ -32,7 +32,6 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -319,7 +318,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         // does, in fact, throw errors if you get_bytestring from the snapshot
         auto [res, _gas] = syscall_BytestringSet_inner(
             handler, kBadKey, std::as_bytes(std::span(bstring)),
-            std::to_underlying(StorageItemRPCFlags::kStorageNone));
+            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -436,7 +435,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           // add ops shouldn't query db
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kBadKey, nullptr, 100,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -444,7 +443,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
               handler, kBadKey, nullptr, -200,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -466,7 +465,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           int128_t set_value = 100;
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kBadKey, &set_value, 200,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};

@@ -21,7 +21,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -82,7 +82,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
              // Write state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "ManualRevertBasicFunctionality: Failed to set "
@@ -164,7 +164,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              // Parent writes its own state
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, parent_key, std::as_bytes(std::span(parent_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
@@ -210,7 +210,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              // Child writes state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, child_key, std::as_bytes(std::span(child_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
@@ -294,7 +294,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                    NativeRuntime &) -> InvokeStatus<void> {
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ManualRevertVsNormalFailure: Failed to set "
@@ -315,7 +316,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                               NativeRuntime &) -> InvokeStatus<void> {
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ManualRevertVsNormalFailure: Failed to set "
@@ -416,7 +418,8 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                auto temp_key = make_storage_key("temp_" + std::to_string(i));
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, temp_key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "GasConsumptionWithManualRevert: Failed to "
@@ -513,7 +516,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              auto key = make_storage_key("level1");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(data1)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
@@ -547,7 +550,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              auto key = make_storage_key("level2");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(data2)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
@@ -581,7 +584,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              auto key = make_storage_key("level3");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(data3)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
@@ -663,7 +666,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                // Write state that should be reverted on error
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -685,7 +689,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                // Write state that should be reverted on error
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -709,7 +714,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                // Write state that should be reverted on error
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -732,7 +738,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                // Write state that should NOT be reverted (no error)
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(test_data)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "

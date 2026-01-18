@@ -19,7 +19,6 @@
 #include "hogd/storage_item/storage_lock_util.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -82,14 +81,14 @@ std::optional<MeteredStorageLock>
 StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
                                        StorageDelta const &delta,
                                        StorageLock const &lock,
-                                       StorageItemRPCFlagSet flags)
+                                       StorageDeltaFlagSet flags)
 {
   assert(!closed_);
 
   auto mod_lambda = [&delta, &lock,
                      &flags](auto &v) -> std::optional<MeteredStorageLock> {
     if (flags &
-        std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
       if (auto r = v->try_acquire_exclusive_lock(
               delta, lock.lock_type(),
               StorageLockType::kPermanentExclusiveLock)) {
