@@ -81,7 +81,7 @@ SyscallStatus<void>
 BytestringItem::validate() const
 {
   assert(bytestring_.size() <= kBytestringMaxLen);
-  
+
   return {};
 }
 
