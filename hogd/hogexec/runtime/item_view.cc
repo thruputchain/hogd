@@ -80,9 +80,8 @@ NNIntItem::get_delta() const
 SyscallStatus<void>
 BytestringItem::validate() const
 {
-  if (bytestring_.size() > kBytestringMaxLen)
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-
+  assert(bytestring_.size() <= kBytestringMaxLen);
+  
   return {};
 }
 
