@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -38,7 +39,7 @@ protected:
   {
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
+        WireStorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
         BlockID{1}, *db_proxy_);
   }
 
@@ -46,7 +47,7 @@ protected:
   {
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted),
+        WireStorageItem(StorageItemType::kItemTypeDeleted),
         AddressAndKey{
             .address = ContractAddress{},
             .key = StorageKey(
@@ -57,7 +58,7 @@ protected:
   std::unique_ptr<SnapshotStorageItem> make_rcq_item()
   {
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeRetrocausalQueue),
+        WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue),
         AddressAndKey{}, BlockID{1}, *db_proxy_);
   }
 };

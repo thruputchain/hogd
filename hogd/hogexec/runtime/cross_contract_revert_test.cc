@@ -19,7 +19,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -81,7 +81,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -130,7 +130,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, contract_b_key,
                  std::as_bytes(std::span(contract_b_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -232,7 +232,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -282,7 +282,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, contract_b_key,
                  std::as_bytes(std::span(contract_b_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -337,7 +337,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, contract_c_key,
                  std::as_bytes(std::span(contract_c_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -439,7 +439,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";

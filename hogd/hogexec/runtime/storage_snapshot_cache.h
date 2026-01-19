@@ -9,7 +9,6 @@
 #include <shared_mutex>
 #include <utility>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"

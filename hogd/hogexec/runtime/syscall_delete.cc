@@ -5,7 +5,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -18,7 +18,7 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
 {
   auto status =
       syscall_handler.delete_object(input_key,
-                                    static_cast<StorageItemRPCFlagSet>(flags));
+                                    static_cast<StorageDeltaFlagSet>(flags));
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }

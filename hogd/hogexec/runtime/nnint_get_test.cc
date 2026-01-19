@@ -20,7 +20,6 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -122,7 +121,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
              int128_t set_value = 100;
              auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, &set_value, 50,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -131,7 +130,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
              // Then delete it
              auto [r2, _gas2] = syscall_DeleteObject_inner(
                  handler, key,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r2.has_value() ||
                  r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -186,7 +185,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
              int128_t set_value = 200;
              auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, &set_value, 50,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -241,7 +240,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
              // Set with nullopt base, just add value
              auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, nullptr, 75,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -297,7 +296,7 @@ TEST_P(NNIntGetTest, GetOnBytestringKey)
              Bytestring bytestring_data = make_bytestring("test_data");
              auto [r, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(bytestring_data)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -409,7 +408,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
              int128_t set_value = 100;
              auto [r1, _gas1] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, &set_value, 10,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -424,7 +423,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
              // Then add without base (overwrites previous write)
              auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, nullptr, 25,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r2.has_value() ||
                  r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};

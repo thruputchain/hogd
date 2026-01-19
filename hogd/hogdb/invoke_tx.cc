@@ -19,7 +19,6 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -364,7 +363,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
 HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
-                           StorageItemRPCFlagSet flags)
+                           StorageDeltaFlagSet flags)
 {
   assert(!key.is_address_balance());
   // validate the nnint128. We can't assume it's in a valid state even if there
@@ -380,7 +379,8 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
 
   // nnint128 is valid; now try to request the change.
   auto change = ItemChange(NNInt128{base, delta});
-  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+  if (flags &
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(key, std::move(change));
@@ -388,7 +388,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
 
 HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
-                           StorageItemRPCFlagSet flags)
+                           StorageDeltaFlagSet flags)
 {
   if (key.is_address_balance()) {
     request_balance_change(key.get_address(), delta);
@@ -410,7 +410,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 HogDBStatus<void>
 InvokeTX::request_auth_data(Address const &addr,
                             const AuthDataChangeArgs &auth_data_change,
-                            StorageItemRPCFlagSet flags)
+                            StorageDeltaFlagSet flags)
 {
   auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
   if (!base_auth_data) {
@@ -434,7 +434,8 @@ InvokeTX::request_auth_data(Address const &addr,
     auth_data_item.set_new_gas_configs(*auth_data_change.new_gas_config_change);
   }
   auto change = ItemChange(std::move(auth_data_item));
-  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+  if (flags &
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(make_address_auth_data_item_key(addr),
@@ -443,11 +444,12 @@ InvokeTX::request_auth_data(Address const &addr,
 
 HogDBStatus<void>
 InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
-                                     StorageItemRPCFlagSet flags)
+                                     StorageDeltaFlagSet flags)
 {
   // We do not support setting exclusive locks on replay cache items;
   // consuming a nonce is already a unique event.
-  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+  if (flags &
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
     return HogDBError(HogDBCode::kConflict);
   }
 

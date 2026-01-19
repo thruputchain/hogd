@@ -6,7 +6,6 @@
 #include <optional>
 #include <utility>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -118,9 +117,10 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   }
 
   // cache both positive and negative lookups
-  StorageItem db_item = db_res.value().has_value()
-                            ? db_res.value().value()
-                            : StorageItem(StorageItemType::kItemTypeDeleted);
+  WireStorageItem db_item =
+      db_res.value().has_value()
+          ? db_res.value().value()
+          : WireStorageItem(StorageItemType::kItemTypeDeleted);
 
   auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
                                                block_id_, db_proxy_);

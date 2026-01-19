@@ -321,7 +321,7 @@ public:
                              ProposalModeCtor{}, runtime_context);
   }
 
-  std::optional<StorageItem>
+  std::optional<WireStorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
     auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);

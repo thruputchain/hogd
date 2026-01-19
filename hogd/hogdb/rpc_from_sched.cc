@@ -17,7 +17,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 #include "hogd/base/log.h"
@@ -297,9 +297,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
         auto item_key = make_item_key(AddressAndKey{
             .address = GenesisConfigurationLoader::kDeployContractAddress,
             .key = key});
-        auto r = itx->request_nnint128(item_key, value,
-                                       std::to_underlying(
-                                           StorageItemRPCFlags::kStorageNone));
+        auto r = itx->request_nnint128(
+            item_key, value,
+            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());
           failure = true;

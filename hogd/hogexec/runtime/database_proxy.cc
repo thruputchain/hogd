@@ -180,13 +180,13 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
     }())
 {}
 
-SystemStatus<std::optional<StorageItem>>
+SystemStatus<std::optional<WireStorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res = client_.get_snapshot_item(block_id, addrkey);
   return to_system_error_code<std::nullopt>(
-      res, [](StorageItem &&x) -> std::optional<StorageItem> {
-        return std::make_optional<StorageItem>(std::move(x));
+      res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
+        return std::make_optional<WireStorageItem>(std::move(x));
       });
 }
 

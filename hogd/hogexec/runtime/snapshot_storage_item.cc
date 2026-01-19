@@ -20,7 +20,7 @@
 namespace hogd {
 
 SnapshotStorageItem::variant_type
-SnapshotStorageItem::make_contract_key_variant(StorageItem item)
+SnapshotStorageItem::make_contract_key_variant(WireStorageItem item)
 {
   switch (item.type()) {
   case StorageItemType::kItemTypeBytestring:
@@ -46,7 +46,8 @@ SnapshotStorageItem::make_contract_key_variant(StorageItem item)
 }
 
 SnapshotStorageItem::variant_type
-SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
+SnapshotStorageItem::make_variant(WireStorageItem item,
+                                  StorageKey const &db_key)
 {
   // handle different key types differently
   switch (db_key.key_type()) {
