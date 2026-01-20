@@ -56,6 +56,10 @@ BUILD_DIR=$1
 ./metrics_history/scripts/make_metric_file.sh payments-bench-2 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 2 >metrics_history/metrics/payments-bench-2/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
+# payments_bench 10000 accounts
+./metrics_history/scripts/make_metric_file.sh payments-bench-10000 $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/payments_bench.sh $BUILD_DIR 10000 >metrics_history/metrics/payments-bench-10000/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
 ## tx size stats
 ./metrics_history/scripts/make_metric_file.sh tx-size-stats $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/txsize.sh $BUILD_DIR >metrics_history/metrics/tx-size-stats/$GIT_branch/${GIT_commit_time}_$GIT_commit
