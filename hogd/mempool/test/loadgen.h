@@ -159,8 +159,7 @@ public:
     info("Done initializing experiment. Now running.");
   }
 
-  x23::Detached get_transactions(x23::Vec<SignedTransaction> &txs,
-                                 x23::CoroCB<void> cb)
+  x23::Async<void> get_transactions(x23::Vec<SignedTransaction> &txs)
   {
     co_await default_coropoll().pool_.bg();
 
@@ -172,11 +171,10 @@ public:
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       txs += co_await handles[i];
     }
-    cb();
+    co_return;
   }
 
-  x23::Detached submit_vetted(x23::Vec<SignedTransaction> &txs,
-                              x23::CoroCB<void> cb)
+  x23::Async<void> submit_vetted(x23::Vec<SignedTransaction> &txs)
   {
     co_await default_coropoll().pool_.bg();
 
@@ -192,7 +190,7 @@ public:
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       co_await handles[i];
     }
-    cb();
+    co_return;
   }
 
   x23::Detached run(bool print_stats)
@@ -206,17 +204,8 @@ public:
     size_t total_transactions_nominated = 0;
 
     x23::Vec<SignedTransaction> txs;
-    {
-      x23::Awaitable<void> awaitable;
-      get_transactions(txs, x23::CoroCB<void>(awaitable));
-      co_await awaitable;
-    }
-
-    {
-      x23::Awaitable<void> awaitable;
-      submit_vetted(txs, x23::CoroCB<void>(awaitable));
-      co_await awaitable;
-    }
+    co_await get_transactions(txs);
+    co_await submit_vetted(txs);
 
     size_t block_iteration_count = 0;
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
@@ -228,12 +217,9 @@ public:
           sched_coord_clients_[0].schedulercoord_nominate(db_tip);
 
       txs.clear();
-      x23::Awaitable<void> get_transactions_handle;
-      get_transactions(txs, x23::CoroCB<void>(get_transactions_handle));
-      co_await get_transactions_handle;
+      co_await get_transactions(txs);
 
-      x23::Awaitable<void> submit_vetted_handle;
-      submit_vetted(txs, x23::CoroCB<void>(submit_vetted_handle));
+      x23::Async<void> submit_vetted_handle = submit_vetted(txs);
 
       SchedulerNominationResult res_nominate = co_await nominate_handle;
       CHECK_EQ(res_nominate.outcome(),
