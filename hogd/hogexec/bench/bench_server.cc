@@ -30,7 +30,7 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port)
 {
   // Create a temporary directory for the database
   Directory dir = Directory::open_temporary().value();
-  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+  constexpr static size_t kDefaultHeapSize = 64_GiB;
 
   // Open the database
   auto db_result = Database::open(dir.get_path(), kDefaultHeapSize);
