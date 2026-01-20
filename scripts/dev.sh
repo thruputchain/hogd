@@ -33,202 +33,202 @@ log_error() { echo -e "${RED}[dev]${NC} $1"; }
 
 # Detect container runtime (prefer docker for OrbStack compatibility, fall back to podman)
 detect_runtime() {
-    if command -v docker &> /dev/null; then
-        echo "docker"
-    elif command -v podman &> /dev/null; then
-        echo "podman"
+  if command -v docker &>/dev/null; then
+    echo "docker"
+  elif command -v podman &>/dev/null; then
+    echo "podman"
+  else
+    log_error "No container runtime found." >&2
+    echo "" >&2
+    echo "Recommended setup:" >&2
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      echo "  macOS: Install OrbStack (https://orbstack.dev)" >&2
+      echo "         brew install orbstack" >&2
     else
-        log_error "No container runtime found." >&2
-        echo "" >&2
-        echo "Recommended setup:" >&2
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            echo "  macOS: Install OrbStack (https://orbstack.dev)" >&2
-            echo "         brew install orbstack" >&2
-        else
-            echo "  Linux: Install Docker or Podman" >&2
-            echo "         sudo apt install docker.io  # Debian/Ubuntu" >&2
-            echo "         sudo dnf install podman     # Fedora" >&2
-        fi
-        exit 1
+      echo "  Linux: Install Docker or Podman" >&2
+      echo "         sudo apt install docker.io  # Debian/Ubuntu" >&2
+      echo "         sudo dnf install podman     # Fedora" >&2
     fi
+    exit 1
+  fi
 }
 
 # Detect platform and get memory in GB
 get_memory_gb() {
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        # macOS: sysctl returns bytes
-        local mem_bytes
-        mem_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 17179869184)  # default 16GB
-        echo $((mem_bytes / 1024 / 1024 / 1024))
-    else
-        # Linux: /proc/meminfo returns KB
-        awk '/MemTotal/ {print int($2/1024/1024)}' /proc/meminfo 2>/dev/null || echo 16
-    fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # macOS: sysctl returns bytes
+    local mem_bytes
+    mem_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 17179869184) # default 16GB
+    echo $((mem_bytes / 1024 / 1024 / 1024))
+  else
+    # Linux: /proc/meminfo returns KB
+    awk '/MemTotal/ {print int($2/1024/1024)}' /proc/meminfo 2>/dev/null || echo 16
+  fi
 }
 
 # Get mount options for the platform
 get_mount_options() {
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        # macOS: Use :cached for better I/O performance
-        echo ":cached"
-    else
-        echo ""
-    fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # macOS: Use :cached for better I/O performance
+    echo ":cached"
+  else
+    echo ""
+  fi
 }
 
 # Ensure the container image exists
 ensure_image() {
-    local runtime="$1"
-    local no_cache="${2:-}"
+  local runtime="$1"
+  local no_cache="${2:-}"
 
-    if [[ -n "$no_cache" ]] || ! $runtime image inspect "${IMAGE_NAME}:${IMAGE_TAG}" &>/dev/null; then
-        if [[ -z "$no_cache" ]]; then
-            log_warn "Container image not found: ${IMAGE_NAME}:${IMAGE_TAG}"
-        fi
-        log_info "Building image..."
-
-        local build_args=(
-            build
-            --build-arg "UID=$(id -u)"
-            --build-arg "GID=$(id -g)"
-            -t "${IMAGE_NAME}:${IMAGE_TAG}"
-            -f "${REPO_ROOT}/.devcontainer/Dockerfile"
-            "${REPO_ROOT}/.devcontainer"
-        )
-
-        if [[ -n "$no_cache" ]]; then
-            build_args+=(--no-cache)
-        fi
-
-        $runtime "${build_args[@]}"
-        log_info "Image built successfully"
+  if [[ -n "$no_cache" ]] || ! $runtime image inspect "${IMAGE_NAME}:${IMAGE_TAG}" &>/dev/null; then
+    if [[ -z "$no_cache" ]]; then
+      log_warn "Container image not found: ${IMAGE_NAME}:${IMAGE_TAG}"
     fi
+    log_info "Building image..."
+
+    local build_args=(
+      build
+      --build-arg "UID=$(id -u)"
+      --build-arg "GID=$(id -g)"
+      -t "${IMAGE_NAME}:${IMAGE_TAG}"
+      -f "${REPO_ROOT}/.devcontainer/Dockerfile"
+      "${REPO_ROOT}/.devcontainer"
+    )
+
+    if [[ -n "$no_cache" ]]; then
+      build_args+=(--no-cache)
+    fi
+
+    $runtime "${build_args[@]}"
+    log_info "Image built successfully"
+  fi
 }
 
 # Initialize submodules based on SSH agent availability
 init_submodules() {
-    cd "${REPO_ROOT}"
+  cd "${REPO_ROOT}"
 
-    # Check if SSH agent is available for private repos
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]] && ssh-add -l &>/dev/null; then
-        log_info "SSH agent detected - initializing ALL submodules..."
-        git submodule update --init --recursive
-    else
-        log_info "No SSH agent - initializing public submodules only..."
-        local public_submodules=(
-            "external/rocksdb"
-            "external/model-checker"
-            "external/googletest"
-            "external/benchmark"
-            "external/crc32c"
-            "external/blake3"
-            "external/corrosion"
-        )
+  # Check if SSH agent is available for private repos
+  if [[ -n "${SSH_AUTH_SOCK:-}" ]] && ssh-add -l &>/dev/null; then
+    log_info "SSH agent detected - initializing ALL submodules..."
+    git submodule update --init --recursive
+  else
+    log_info "No SSH agent - initializing public submodules only..."
+    local public_submodules=(
+      "external/rocksdb"
+      "external/model-checker"
+      "external/googletest"
+      "external/benchmark"
+      "external/crc32c"
+      "external/blake3"
+      "external/corrosion"
+    )
 
-        for submodule in "${public_submodules[@]}"; do
-            if [[ ! -d "${REPO_ROOT}/${submodule}/.git" ]] && [[ ! -f "${REPO_ROOT}/${submodule}/.git" ]]; then
-                log_info "Initializing ${submodule}..."
-                git submodule update --init --recursive "${submodule}" 2>/dev/null || \
-                    log_warn "Failed to init ${submodule} (may require SSH or be empty)"
-            fi
-        done
-    fi
+    for submodule in "${public_submodules[@]}"; do
+      if [[ ! -d "${REPO_ROOT}/${submodule}/.git" ]] && [[ ! -f "${REPO_ROOT}/${submodule}/.git" ]]; then
+        log_info "Initializing ${submodule}..."
+        git submodule update --init --recursive "${submodule}" 2>/dev/null ||
+          log_warn "Failed to init ${submodule} (may require SSH or be empty)"
+      fi
+    done
+  fi
 }
 
 # Main container run function
 run_container() {
-    local runtime="$1"
-    shift
-    local -a cmd_args=("$@")
+  local runtime="$1"
+  shift
+  local -a cmd_args=("$@")
 
-    # Default to interactive shell if no command given
-    if [[ ${#cmd_args[@]} -eq 0 ]]; then
-        cmd_args=("/bin/bash")
-    fi
+  # Default to interactive shell if no command given
+  if [[ ${#cmd_args[@]} -eq 0 ]]; then
+    cmd_args=("/bin/bash")
+  fi
 
-    # Ensure cache volumes exist
-    $runtime volume create hogd-ccache 2>/dev/null || true
-    $runtime volume create hogd-cargo-registry 2>/dev/null || true
-    $runtime volume create hogd-cargo-git 2>/dev/null || true
+  # Ensure cache volumes exist
+  $runtime volume create hogd-ccache 2>/dev/null || true
+  $runtime volume create hogd-cargo-registry 2>/dev/null || true
+  $runtime volume create hogd-cargo-git 2>/dev/null || true
 
-    # SSH agent forwarding
-    local ssh_agent_args=""
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
-        ssh_agent_args="-v ${SSH_AUTH_SOCK}:/ssh-agent:ro -e SSH_AUTH_SOCK=/ssh-agent"
-    fi
+  # SSH agent forwarding
+  local ssh_agent_args=""
+  if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+    ssh_agent_args="-v ${SSH_AUTH_SOCK}:/ssh-agent:ro -e SSH_AUTH_SOCK=/ssh-agent"
+  fi
 
-    # Calculate resource limits
-    local mem_gb
-    mem_gb=$(get_memory_gb)
+  # Calculate resource limits
+  local mem_gb
+  mem_gb=$(get_memory_gb)
 
-    # CPUs: RAM/5GB for clang memory requirements during parallel builds, capped at 6
-    local max_cpus=$((mem_gb / 5))
-    max_cpus=$((max_cpus > 6 ? 6 : max_cpus))
-    max_cpus=$((max_cpus < 2 ? 2 : max_cpus))
+  # CPUs: RAM/5GB for clang memory requirements during parallel builds, capped at 6
+  local max_cpus=$((mem_gb / 5))
+  max_cpus=$((max_cpus > 6 ? 6 : max_cpus))
+  max_cpus=$((max_cpus < 2 ? 2 : max_cpus))
 
-    # Memory: leave 2GB for host, min 4GB for container
-    local mem_limit_gb=$((mem_gb - 2))
-    mem_limit_gb=$((mem_limit_gb < 4 ? 4 : mem_limit_gb))
+  # Memory: leave 2GB for host, min 4GB for container
+  local mem_limit_gb=$((mem_gb - 2))
+  mem_limit_gb=$((mem_limit_gb < 4 ? 4 : mem_limit_gb))
 
-    # Get platform-specific mount options
-    local mount_opts
-    mount_opts=$(get_mount_options)
+  # Get platform-specific mount options
+  local mount_opts
+  mount_opts=$(get_mount_options)
 
-    log_info "Container: ${max_cpus} CPUs, ${mem_limit_gb}GB RAM (host: ${mem_gb}GB)"
+  log_info "Container: ${max_cpus} CPUs, ${mem_limit_gb}GB RAM (host: ${mem_gb}GB)"
 
-    # Build run arguments - use -it only if we have a TTY
-    local tty_args="-it"
-    if [[ ! -t 0 ]]; then
-        tty_args=""
-    fi
+  # Build run arguments - use -it only if we have a TTY
+  local tty_args="-it"
+  if [[ ! -t 0 ]]; then
+    tty_args=""
+  fi
 
-    local run_args=(
-        run ${tty_args} --rm
-        --name "${CONTAINER_NAME}"
-        --user builder
-        --cpus="${max_cpus}"
-        --memory="${mem_limit_gb}g"
-        --memory-swap="${mem_limit_gb}g"
-        -v "${REPO_ROOT}:/workspace${mount_opts}"
-        -v "hogd-ccache:/home/builder/.cache/ccache:rw"
-        -v "hogd-cargo-registry:/usr/local/cargo/registry:rw"
-        -v "hogd-cargo-git:/usr/local/cargo/git:rw"
-        -e "CCACHE_DIR=/home/builder/.cache/ccache"
-        -e "CCACHE_MAXSIZE=5G"
-        -e "CARGO_NET_GIT_FETCH_WITH_CLI=true"
-        -e "MAKEFLAGS=-j${max_cpus}"
-        -e "CI_CPUS=${max_cpus}"
-        -e "NPROC=${max_cpus}"
-        -w /workspace
-    )
+  local run_args=(
+    run ${tty_args} --rm
+    --name "${CONTAINER_NAME}"
+    --user builder
+    --cpus="${max_cpus}"
+    --memory="${mem_limit_gb}g"
+    --memory-swap="${mem_limit_gb}g"
+    -v "${REPO_ROOT}:/workspace${mount_opts}"
+    -v "hogd-ccache:/home/builder/.cache/ccache:rw"
+    -v "hogd-cargo-registry:/usr/local/cargo/registry:rw"
+    -v "hogd-cargo-git:/usr/local/cargo/git:rw"
+    -e "CCACHE_DIR=/home/builder/.cache/ccache"
+    -e "CCACHE_MAXSIZE=5G"
+    -e "CARGO_NET_GIT_FETCH_WITH_CLI=true"
+    -e "MAKEFLAGS=-j${max_cpus}"
+    -e "CI_CPUS=${max_cpus}"
+    -e "NPROC=${max_cpus}"
+    -w /workspace
+  )
 
-    # Add SSH agent args if available
-    if [[ -n "$ssh_agent_args" ]]; then
-        # shellcheck disable=SC2206
-        run_args+=($ssh_agent_args)
-    fi
+  # Add SSH agent args if available
+  if [[ -n "$ssh_agent_args" ]]; then
+    # shellcheck disable=SC2206
+    run_args+=($ssh_agent_args)
+  fi
 
-    # Add --replace for podman (removes existing container with same name)
-    if [[ "$runtime" == "podman" ]]; then
-        run_args+=(--replace)
-    fi
+  # Add --replace for podman (removes existing container with same name)
+  if [[ "$runtime" == "podman" ]]; then
+    run_args+=(--replace)
+  fi
 
-    # Add image and command
-    run_args+=("${IMAGE_NAME}:${IMAGE_TAG}")
+  # Add image and command
+  run_args+=("${IMAGE_NAME}:${IMAGE_TAG}")
 
-    # Execute
-    exec $runtime "${run_args[@]}" "${cmd_args[@]}"
+  # Execute
+  exec $runtime "${run_args[@]}" "${cmd_args[@]}"
 }
 
 # Run a CI workflow script inside the container
 run_ci_script() {
-    local runtime="$1"
-    local script_content="$2"
-    local extra_env="${3:-}"
+  local runtime="$1"
+  local script_content="$2"
+  local extra_env="${3:-}"
 
-    # Create temp script
-    local temp_script="${SCRIPT_DIR}/.ci-temp.sh"
-    cat > "$temp_script" << EOF
+  # Create temp script
+  local temp_script="${SCRIPT_DIR}/.ci-temp.sh"
+  cat >"$temp_script" <<EOF
 #!/bin/bash
 set -e
 
@@ -249,83 +249,83 @@ echo "=== Fetching Rust dependencies ==="
 
 ${script_content}
 EOF
-    chmod +x "$temp_script"
+  chmod +x "$temp_script"
 
-    # Build container args
-    local -a container_args=(bash /workspace/scripts/.ci-temp.sh)
+  # Build container args
+  local -a container_args=(bash /workspace/scripts/.ci-temp.sh)
 
-    # Run container (can't use run_container due to exec and cleanup needs)
-    # Ensure cache volumes exist
-    $runtime volume create hogd-ccache 2>/dev/null || true
-    $runtime volume create hogd-cargo-registry 2>/dev/null || true
-    $runtime volume create hogd-cargo-git 2>/dev/null || true
+  # Run container (can't use run_container due to exec and cleanup needs)
+  # Ensure cache volumes exist
+  $runtime volume create hogd-ccache 2>/dev/null || true
+  $runtime volume create hogd-cargo-registry 2>/dev/null || true
+  $runtime volume create hogd-cargo-git 2>/dev/null || true
 
-    local ssh_agent_args=""
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
-        ssh_agent_args="-v ${SSH_AUTH_SOCK}:/ssh-agent:ro -e SSH_AUTH_SOCK=/ssh-agent"
-    fi
+  local ssh_agent_args=""
+  if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+    ssh_agent_args="-v ${SSH_AUTH_SOCK}:/ssh-agent:ro -e SSH_AUTH_SOCK=/ssh-agent"
+  fi
 
-    local mem_gb
-    mem_gb=$(get_memory_gb)
-    local max_cpus=$((mem_gb / 3))
-    max_cpus=$((max_cpus > 8 ? 8 : max_cpus))
-    max_cpus=$((max_cpus < 2 ? 2 : max_cpus))
-    local mem_limit_gb=$((mem_gb - 2))
-    mem_limit_gb=$((mem_limit_gb < 4 ? 4 : mem_limit_gb))
-    local mount_opts
-    mount_opts=$(get_mount_options)
+  local mem_gb
+  mem_gb=$(get_memory_gb)
+  local max_cpus=$((mem_gb / 3))
+  max_cpus=$((max_cpus > 8 ? 8 : max_cpus))
+  max_cpus=$((max_cpus < 2 ? 2 : max_cpus))
+  local mem_limit_gb=$((mem_gb - 2))
+  mem_limit_gb=$((mem_limit_gb < 4 ? 4 : mem_limit_gb))
+  local mount_opts
+  mount_opts=$(get_mount_options)
 
-    local tty_args="-it"
-    if [[ ! -t 0 ]]; then
-        tty_args=""
-    fi
+  local tty_args="-it"
+  if [[ ! -t 0 ]]; then
+    tty_args=""
+  fi
 
-    log_info "Container: ${max_cpus} CPUs, ${mem_limit_gb}GB RAM (host: ${mem_gb}GB)"
+  log_info "Container: ${max_cpus} CPUs, ${mem_limit_gb}GB RAM (host: ${mem_gb}GB)"
 
-    local result=0
-    $runtime run ${tty_args} --rm \
-        --name "${CONTAINER_NAME}" \
-        --cpus="${max_cpus}" \
-        --memory="${mem_limit_gb}g" \
-        --memory-swap="${mem_limit_gb}g" \
-        -v "${REPO_ROOT}:/workspace${mount_opts}" \
-        -v "hogd-ccache:/root/.cache/ccache:rw" \
-        -v "hogd-cargo-registry:/usr/local/cargo/registry:rw" \
-        -v "hogd-cargo-git:/usr/local/cargo/git:rw" \
-        ${ssh_agent_args} \
-        ${extra_env} \
-        -e "CCACHE_DIR=/root/.cache/ccache" \
-        -e "CCACHE_MAXSIZE=5G" \
-        -e "CARGO_NET_GIT_FETCH_WITH_CLI=true" \
-        -e "MAKEFLAGS=-j${max_cpus}" \
-        -e "CI_CPUS=${max_cpus}" \
-        -e "NPROC=${max_cpus}" \
-        -w /workspace \
-        "${IMAGE_NAME}:${IMAGE_TAG}" \
-        "${container_args[@]}" || result=$?
+  local result=0
+  $runtime run ${tty_args} --rm \
+    --name "${CONTAINER_NAME}" \
+    --cpus="${max_cpus}" \
+    --memory="${mem_limit_gb}g" \
+    --memory-swap="${mem_limit_gb}g" \
+    -v "${REPO_ROOT}:/workspace${mount_opts}" \
+    -v "hogd-ccache:/root/.cache/ccache:rw" \
+    -v "hogd-cargo-registry:/usr/local/cargo/registry:rw" \
+    -v "hogd-cargo-git:/usr/local/cargo/git:rw" \
+    ${ssh_agent_args} \
+    ${extra_env} \
+    -e "CCACHE_DIR=/root/.cache/ccache" \
+    -e "CCACHE_MAXSIZE=5G" \
+    -e "CARGO_NET_GIT_FETCH_WITH_CLI=true" \
+    -e "MAKEFLAGS=-j${max_cpus}" \
+    -e "CI_CPUS=${max_cpus}" \
+    -e "NPROC=${max_cpus}" \
+    -w /workspace \
+    "${IMAGE_NAME}:${IMAGE_TAG}" \
+    "${container_args[@]}" || result=$?
 
-    # Cleanup
-    rm -f "$temp_script"
-    rm -f "${REPO_ROOT}/scripts/conf.sh"
+  # Cleanup
+  rm -f "$temp_script"
+  rm -f "${REPO_ROOT}/scripts/conf.sh"
 
-    return $result
+  return $result
 }
 
 # CI: Run C++ checks
 run_ci_cpp() {
-    local runtime="$1"
-    local no_test="$2"
+  local runtime="$1"
+  local no_test="$2"
 
-    if [[ -n "$no_test" ]]; then
-        log_info "Running C++ CI checks (format, build only - skipping tests)..."
-    else
-        log_info "Running C++ CI checks (format, build, test)..."
-    fi
-    init_submodules
+  if [[ -n "$no_test" ]]; then
+    log_info "Running C++ CI checks (format, build only - skipping tests)..."
+  else
+    log_info "Running C++ CI checks (format, build, test)..."
+  fi
+  init_submodules
 
-    local script_content
-    if [[ -n "$no_test" ]]; then
-        script_content='
+  local script_content
+  if [[ -n "$no_test" ]]; then
+    script_content='
 echo "=== Running format check ==="
 ./scripts/format.sh -c
 
@@ -343,26 +343,26 @@ ccache -s
 
 echo "=== All builds passed! ==="
 '
-    else
-        script_content='
+  else
+    script_content='
 echo "=== Running C++ checks (format, build, test - skipping tidy) ==="
 ./scripts/check.sh -p -s
 
 echo "=== All C++ checks passed! ==="
 '
-    fi
+  fi
 
-    run_ci_script "$runtime" "$script_content"
+  run_ci_script "$runtime" "$script_content"
 }
 
 # CI: Run tidy checks
 run_ci_tidy() {
-    local runtime="$1"
+  local runtime="$1"
 
-    log_info "Running tidy checks..."
-    init_submodules
+  log_info "Running tidy checks..."
+  init_submodules
 
-    local script_content='
+  local script_content='
 echo "=== Configuring build for tidy ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
@@ -375,17 +375,17 @@ echo "=== Running tidy checks ==="
 echo "=== All tidy checks passed! ==="
 '
 
-    run_ci_script "$runtime" "$script_content"
+  run_ci_script "$runtime" "$script_content"
 }
 
 # CI: Run full checks
 run_ci_full() {
-    local runtime="$1"
+  local runtime="$1"
 
-    log_info "Running full build + tidy checks..."
-    init_submodules
+  log_info "Running full build + tidy checks..."
+  init_submodules
 
-    local script_content='
+  local script_content='
 echo "=== Configuring Clang build ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
@@ -398,24 +398,24 @@ echo "=== Running tidy checks ==="
 echo "=== All checks passed! ==="
 '
 
-    run_ci_script "$runtime" "$script_content"
+  run_ci_script "$runtime" "$script_content"
 }
 
 # Clean up container resources
 clean() {
-    local runtime="$1"
+  local runtime="$1"
 
-    log_info "Cleaning up container resources..."
-    $runtime rmi "${IMAGE_NAME}:${IMAGE_TAG}" 2>/dev/null || true
-    $runtime volume rm hogd-ccache hogd-cargo-registry hogd-cargo-git 2>/dev/null || true
-    rm -rf "${REPO_ROOT}/build" 2>/dev/null || true
-    rm -f "${REPO_ROOT}/scripts/conf.sh" 2>/dev/null || true
-    log_info "Cleanup complete"
+  log_info "Cleaning up container resources..."
+  $runtime rmi "${IMAGE_NAME}:${IMAGE_TAG}" 2>/dev/null || true
+  $runtime volume rm hogd-ccache hogd-cargo-registry hogd-cargo-git 2>/dev/null || true
+  rm -rf "${REPO_ROOT}/build" 2>/dev/null || true
+  rm -f "${REPO_ROOT}/scripts/conf.sh" 2>/dev/null || true
+  log_info "Cleanup complete"
 }
 
 # Show help
 show_help() {
-    cat <<EOF
+  cat <<EOF
 Usage: $0 <command> [args...]
 
 Container-based development and CI for HOGD.
@@ -456,97 +456,97 @@ EOF
 
 # Handle commands
 handle_command() {
-    local runtime="$1"
-    shift
+  local runtime="$1"
+  shift
 
+  case "${1:-}" in
+  shell)
+    run_container "$runtime"
+    ;;
+  build)
+    shift
+    run_container "$runtime" bash -c "./scripts/fetch.sh && ./scripts/build.sh $*"
+    ;;
+  test)
+    shift
+    run_container "$runtime" make -C build test "$@"
+    ;;
+  ci)
+    shift
     case "${1:-}" in
-        shell)
-            run_container "$runtime"
-            ;;
-        build)
-            shift
-            run_container "$runtime" bash -c "./scripts/fetch.sh && ./scripts/build.sh $*"
-            ;;
-        test)
-            shift
-            run_container "$runtime" make -C build test "$@"
-            ;;
-        ci)
-            shift
-            case "${1:-}" in
-                cpp)
-                    local no_test=""
-                    if [[ "${2:-}" == "--no-test" ]]; then
-                        no_test="yes"
-                    fi
-                    run_ci_cpp "$runtime" "$no_test"
-                    ;;
-                tidy)
-                    run_ci_tidy "$runtime"
-                    ;;
-                full)
-                    run_ci_full "$runtime"
-                    ;;
-                *)
-                    log_error "Unknown CI command: ${1:-}"
-                    echo "Available: cpp, tidy, full"
-                    exit 1
-                    ;;
-            esac
-            ;;
-        image)
-            local no_cache=""
-            if [[ "${2:-}" == "--no-cache" ]]; then
-                no_cache="yes"
-            fi
-            ensure_image "$runtime" "$no_cache"
-            ;;
-        clean)
-            clean "$runtime"
-            ;;
-        -h|--help|help)
-            show_help
-            ;;
-        "")
-            show_help
-            exit 1
-            ;;
-        *)
-            # Pass through any other command
-            run_container "$runtime" "$@"
-            ;;
+    cpp)
+      local no_test=""
+      if [[ "${2:-}" == "--no-test" ]]; then
+        no_test="yes"
+      fi
+      run_ci_cpp "$runtime" "$no_test"
+      ;;
+    tidy)
+      run_ci_tidy "$runtime"
+      ;;
+    full)
+      run_ci_full "$runtime"
+      ;;
+    *)
+      log_error "Unknown CI command: ${1:-}"
+      echo "Available: cpp, tidy, full"
+      exit 1
+      ;;
     esac
+    ;;
+  image)
+    local no_cache=""
+    if [[ "${2:-}" == "--no-cache" ]]; then
+      no_cache="yes"
+    fi
+    ensure_image "$runtime" "$no_cache"
+    ;;
+  clean)
+    clean "$runtime"
+    ;;
+  -h | --help | help)
+    show_help
+    ;;
+  "")
+    show_help
+    exit 1
+    ;;
+  *)
+    # Pass through any other command
+    run_container "$runtime" "$@"
+    ;;
+  esac
 }
 
 # Main
 main() {
-    # Handle help before runtime detection
-    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
-        show_help
-        exit 0
-    fi
+  # Handle help before runtime detection
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+    show_help
+    exit 0
+  fi
 
-    # Show help if no command given
-    if [[ -z "${1:-}" ]]; then
-        show_help
-        exit 1
-    fi
+  # Show help if no command given
+  if [[ -z "${1:-}" ]]; then
+    show_help
+    exit 1
+  fi
 
-    local runtime
-    runtime=$(detect_runtime)
-    log_info "Using container runtime: $runtime"
+  local runtime
+  runtime=$(detect_runtime)
+  log_info "Using container runtime: $runtime"
 
-    # For commands that need the image, ensure it exists
-    case "${1:-}" in
-        clean|image|-h|--help|help)
-            # These don't need auto-build
-            ;;
-        *)
-            ensure_image "$runtime"
-            ;;
-    esac
+  # For commands that need the image, ensure it exists
+  case "${1:-}" in
+  clean | image | -h | --help | help)
+    # These don't need auto-build
+    ;;
+  *)
+    ensure_image "$runtime"
+    ;;
+  esac
 
-    handle_command "$runtime" "$@"
+  handle_command "$runtime" "$@"
 }
 
 main "$@"
