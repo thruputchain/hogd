@@ -198,30 +198,29 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     txs_per_thread++;
   }
 
-  std::array<x23::Awaitable<void>, kNumThreads> awaitables;
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(kNumThreads);
   for (size_t i = 0; i < kNumThreads; i++) {
-    [](size_t coro_idx, auto cb,
-       const x23::XdrVec<hogd::SignedTransaction> &txs, size_t txs_per_thread,
-       Scheduler &scheduler) -> x23::Detached {
-      co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * txs_per_thread;
-      size_t possible_end = (coro_idx + 1) * txs_per_thread;
-      size_t end = std::min(possible_end, txs.size());
+    handles.push_back(
+        [](size_t coro_idx, const x23::XdrVec<hogd::SignedTransaction> &txs,
+           size_t txs_per_thread, Scheduler &scheduler) -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          size_t start = coro_idx * txs_per_thread;
+          size_t possible_end = (coro_idx + 1) * txs_per_thread;
+          size_t end = std::min(possible_end, txs.size());
 
-      size_t num_added = 0;
-      for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
-        if (scheduler.add_txs_helper(txs[tx_idx])) {
-          num_added++;
-        }
-      }
-      scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
-      cb();
-      co_return;
-    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
-                             *this);
+          size_t num_added = 0;
+          for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
+            if (scheduler.add_txs_helper(txs[tx_idx])) {
+              num_added++;
+            }
+          }
+          scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
+          co_return;
+        }(/*coro_idx=*/i, txs, txs_per_thread, *this));
   }
-  for (x23::Awaitable<void> &awaitable : awaitables) {
-    co_await awaitable;
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
   }
 
   std::vector<AccountKey> account_keys;
@@ -444,10 +443,12 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-  std::array<x23::Awaitable<void>, kNumThreads> awaitables;
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(kNumThreads);
   for (size_t i = 0; i < kNumThreads; i++) {
-    [](size_t coro_idx, auto cb, const HogsTransferred &transfers,
-       size_t deltas_per_thread, Scheduler &scheduler) -> x23::Detached {
+    handles.push_back([](size_t coro_idx, const HogsTransferred &transfers,
+                         size_t deltas_per_thread,
+                         Scheduler &scheduler) -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
       size_t start = coro_idx * deltas_per_thread;
       size_t possible_end = (coro_idx + 1) * deltas_per_thread;
@@ -456,13 +457,11 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
         scheduler.process_transfers_helper(transfers.deltas[delta_idx],
                                            transfers.block);
       }
-      cb();
-    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), transfers,
-                                                       deltas_per_thread,
-                                                       *this);
+      co_return;
+    }(/*coro_idx=*/i, transfers, deltas_per_thread, *this));
   }
-  for (x23::Awaitable<void> &awaitable : awaitables) {
-    co_await awaitable;
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
   }
 }
 
@@ -682,13 +681,15 @@ Scheduler::remove_from_scheduler(
   constexpr size_t kNumThreads = 120;
   const std::vector<ChunkRange> chunks =
       make_chunks(tx_hashes.size(), kNumThreads);
-  std::array<x23::Awaitable<size_t>, kNumThreads> awaitables;
+  std::vector<x23::Async<size_t>> handles;
+  handles.reserve(chunks.size());
 
   for (size_t i = 0; i < chunks.size(); i++) {
-    [](const ChunkRange &chunk, auto cb,
-       x23::span<const SignedTransactionHash> tx_hashes,
-       SynchronizedMap<ContractAddress, char> &accounts, bool validated_block,
-       Scheduler &scheduler) -> x23::Detached {
+    handles.push_back([](const ChunkRange &chunk,
+                         x23::span<const SignedTransactionHash> tx_hashes,
+                         SynchronizedMap<ContractAddress, char> &accounts,
+                         bool validated_block,
+                         Scheduler &scheduler) -> x23::Async<size_t> {
       co_await default_coropoll().pool_.bg();
 
       x23::span<const SignedTransactionHash> hash_chunk(
@@ -729,10 +730,8 @@ Scheduler::remove_from_scheduler(
         }
       }
 
-      cb(num_removed_from_runqueue);
-      co_return;
-    }(chunks[i], /*cb=*/x23::CoroCB(awaitables[i]), tx_hashes, accounts,
-                             validated_block, *this);
+      co_return num_removed_from_runqueue;
+    }(chunks[i], tx_hashes, accounts, validated_block, *this));
   }
   size_t total_removed_from_runqueue = 0;
   // There may be fewer chunks that [kNumThreads], so we iterate through the
@@ -740,8 +739,8 @@ Scheduler::remove_from_scheduler(
   // we would deadlock waiting on awaitables for coroutines that do not have a
   // chunk.
   for (size_t i = 0; i < chunks.size(); i++) {
-    x23::Awaitable<size_t> &awaitable = awaitables[i];
-    total_removed_from_runqueue += co_await awaitable;
+    x23::Async<size_t> &handle = handles[i];
+    total_removed_from_runqueue += co_await handle;
   }
   double a = timer.elapsed();
 
