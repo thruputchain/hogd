@@ -1,6 +1,5 @@
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 
-#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <iterator>
@@ -212,8 +211,8 @@ ReplayCacheLock::try_atomic_change_lock(
   }
   auto &base = *r.value();
 
-  if (std::binary_search(base.data.nonces.begin(), base.data.nonces.end(),
-                         addition.nonce)) {
+  if (std::ranges::binary_search(base.data.nonces.begin(),
+                                 base.data.nonces.end(), addition.nonce)) {
     trace("attempted to consume {}.{} but it was already the base cache",
           addition.block_expiry_height, addition.nonce);
     return HogDBError{HogDBCode::kConflict};
