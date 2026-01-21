@@ -8,10 +8,12 @@ cleanup() {
   local exit_code=$1
 
   echo 'cleanup control servers'
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT stop
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
 
   exit "$exit_code"
@@ -21,10 +23,12 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM # 130 is conventional for SIGINT
 
 echo 'make sure bench servers are running'
+./scripts/wait-port.sh hog4 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog5 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog6 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog7 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog8 $CI_CONTROL_PORT
+./scripts/wait-port.sh hog9 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog11 $CI_CONTROL_PORT
 
 echo 'clone metrics history' # This is idempotent
@@ -38,6 +42,12 @@ echo 'launch multiexec runner two exec'
 
 echo 'launch multiexec runner three exec'
 ./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -s hog6 -a 100 >>multiexec_runner_log
+
+echo 'launch multiexec runner four exec'
+./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -s hog6 -s hog4 -a 100 >>multiexec_runner_log
+
+echo 'launch multiexec runner five exec'
+./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -s hog6 -s hog4 -s hog9 -a 100 >>multiexec_runner_log
 
 echo 'log multiexec runner logs'
 ./scripts/log_metric.sh multiexec_interface multiexec_runner_log
