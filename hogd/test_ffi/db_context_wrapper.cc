@@ -44,7 +44,7 @@ DBContext::DBContext() : db_proxy_(nullptr), snapshot_cache_(nullptr)
   auth_rpc_servers_->start_servers(0, 0);
 
   auth_server_->subscribe_to_auth_data_changes(
-      auth_rpc_servers_->make_auth_card())();
+      auth_rpc_servers_->make_auth_card("localhost"))();
 
   auto res =
       db_sched_client_.dbsched_load_genesis_configuration(GenesisConfiguration{

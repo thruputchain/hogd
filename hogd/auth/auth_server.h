@@ -37,6 +37,9 @@ public:
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client))
   {}
 
+  // The height supplied here should be the height returned by
+  // DB::get_dbtip().height. That height is the count of the number of blocks
+  // that have been committed.
   x23::Async<AuthErrorCodeBatch>
   verify_transactions(BlockHeight height,
                       x23::span<const SignedTransaction> txs,

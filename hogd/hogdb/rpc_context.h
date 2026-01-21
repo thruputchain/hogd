@@ -29,6 +29,7 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/rpc.h"
@@ -69,6 +70,8 @@ public:
   // getters.
   HogDBDAO &get_db() { return db_; }
   MerkleTriePrefix &get_trie() { return *trie_; }
+  // The tip height is the height of the next block to be committed.
+  // (Equivalently, the count of the number of blocks that have been committed.)
   DbTip &get_tip() { return tip_; }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
   {

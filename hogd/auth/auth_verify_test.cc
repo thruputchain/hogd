@@ -81,8 +81,9 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
   auth_data.gas_permissions.push_back(GasPermissionConfig{
       .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
 
+  mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
-  mock_db().increment_height();
+  mock_db().increment_height(); // height 2
 
   auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
@@ -100,7 +101,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(1, stx_span)();
+  auto result = auth_server().verify_transactions(2, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 }
@@ -137,11 +138,11 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   mock_db().set(address1, auth_data1);
   mock_db().set(address2, auth_data2);
   mock_db().set(address3, AddressAuthData{});
-  mock_db().increment_height();
+  mock_db().increment_height(); // height 1
 
-  auth_server().register_auth_data_updates(1,
+  auth_server().register_auth_data_updates(0,
                                            mock_db().get_key_changes_at_height(
-                                               1))();
+                                               0))();
 
   Transaction tx1{};
   tx1.invocation.invoked_address = address1;
