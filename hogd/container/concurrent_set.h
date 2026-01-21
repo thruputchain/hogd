@@ -169,7 +169,7 @@ private:
 
   std::atomic<T> *get_level(size_t level)
   {
-    if (level == 0) [[likely]] {
+    if (level == 0) {
       return initial_level_;
     }
     return extra_levels_[level - 1].get();
