@@ -165,16 +165,20 @@ enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
 void enable_syscall_logging();
 
+struct FFISourceAuthData {
+  const uint8_t *data;
+  uint32_t len;
+};
+
 // Serialized auth data for a single address
 struct FFISerializedAuthData {
-  uint8_t *data;
+  uint8_t address[32];
+  const uint8_t *data;
   uint32_t len;
 };
 
 // Array of auxiliary auth data (for other addresses referenced in auth claims)
 struct FFIAuxiliaryAuthData {
-  // Array of contract addresses (each 32 bytes)
-  uint8_t *addresses;
   // Array of serialized AddressAuthData
   FFISerializedAuthData *auth_data;
   // Number of auxiliary addresses
@@ -200,7 +204,7 @@ struct VerifyAuthResult {
 //                kAuthVerificationFull)
 struct VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISerializedAuthData source_auth_data,
+                               FFISourceAuthData source_auth_data,
                                FFIAuxiliaryAuthData aux_auth_data);
 
 // Verify authorization on a SignedTransaction using auth data from database

@@ -587,18 +587,17 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
 
 VerifyAuthResult
 verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
-                                    FFISerializedAuthData source_auth_data,
+                                    FFISourceAuthData source_auth_data,
                                     FFIAuxiliaryAuthData aux_auth_data) noexcept
 {
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
 
   ffi_trace("FFI: verify_signed_transaction_auth(signed_tx={}, "
-            "source_auth_data={}, aux_auth_data={})",
-            static_cast<const void *>(signed_tx.data), signed_tx.len,
+            "source_auth_data={}, aux_auth_data={}, count={})",
+            static_cast<const void *>(signed_tx.data),
             static_cast<const void *>(source_auth_data.data),
-            source_auth_data.len,
-            static_cast<const void *>(aux_auth_data.addresses),
+            static_cast<const void *>(aux_auth_data.auth_data),
             aux_auth_data.count);
 
   VerifyAuthResult error_result;
@@ -623,13 +622,14 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
     std::vector<std::unique_ptr<AddressAuthData>> aux_data_storage;
 
     if (aux_auth_data.count > 0) {
-      if (!aux_auth_data.addresses || !aux_auth_data.auth_data) {
+      if (!aux_auth_data.auth_data) {
         return kNullptrError;
       }
 
       for (uint32_t i = 0; i < aux_auth_data.count; i++) {
         ContractAddress addr;
-        std::memcpy(addr.data(), aux_auth_data.addresses + (i * 32), 32);
+        std::memcpy(addr.data(), aux_auth_data.auth_data[i].address,
+                    addr.size());
 
         auto aux_data = std::make_unique<AddressAuthData>();
         x23::deserialize(aux_data.get(),
@@ -862,7 +862,7 @@ get_event_log_len(void *syscall_handler)
 
 VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISerializedAuthData source_auth_data,
+                               FFISourceAuthData source_auth_data,
                                FFIAuxiliaryAuthData aux_auth_data)
 {
   return hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
