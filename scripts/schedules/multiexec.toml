@@ -40,6 +40,8 @@ bench_2 = "hog7"
 bench_3 = "hog8"
 bench_4 = "hog11"
 bench_5 = "hog5"
+bench_6 = "hog4"
+bench_7 = "hog9"
 
 
 [[jobs]]
@@ -69,6 +71,8 @@ echo 'wait for bench servers'
 ./scripts/wait-port.sh hog11 11111
 ./scripts/wait-port.sh hog6 11111
 ./scripts/wait-port.sh hog5 11111
+./scripts/wait-port.sh hog4 11111
+./scripts/wait-port.sh hog9 11111
 
 echo 'launch multiexec runner one exec'
 ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -a 100
@@ -79,6 +83,12 @@ echo 'launch multiexec runner two exec'
 echo 'launch multiexec runner three exec'
 ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -s hog5 -a 100
 
+echo 'launch multiexec runner four exec'
+./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -s hog5 -s hog4 -a 100
+
+echo 'launch multiexec runner five exec'
+./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -s hog5 -s hog4 -s hog9 -a 100
+
 """
 after = """
 
@@ -88,7 +98,8 @@ echo 'cleanup control servers'
 ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
 ./release/hogd/hogexec/bench/control_cli hog5 11111 shutdown
-
+./release/hogd/hogexec/bench/control_cli hog4 11111 shutdown
+./release/hogd/hogexec/bench/control_cli hog9 11111 shutdown
 """
 
 [jobs.env]
