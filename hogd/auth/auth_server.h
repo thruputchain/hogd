@@ -1,12 +1,15 @@
 #pragma once
 
 #include <format>
+#include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -23,6 +26,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -34,7 +38,8 @@ public:
   {}
 
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height, x23::span<SignedTransaction> txs,
+  verify_transactions(BlockHeight height,
+                      x23::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
@@ -123,7 +128,7 @@ public:
   authmempool_verify_transactions(BlockHeight height,
                                   SignedTransactionBatch txs)
   {
-    x23::span<SignedTransaction> txs_span(txs.begin(), txs.end());
+    x23::span<const SignedTransaction> txs_span(txs.begin(), txs.end());
     return auth_server_.verify_transactions(height, txs_span);
   }
 

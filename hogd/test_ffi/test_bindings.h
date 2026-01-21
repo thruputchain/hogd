@@ -207,11 +207,19 @@ verify_signed_transaction_auth(struct FFISerializedSignedTransaction signed_tx,
                                struct FFISourceAuthData source_auth_data,
                                struct FFIAuxiliaryAuthData aux_auth_data);
 
+// Note that AuthErrorCode is distinct from AuthVerifyErrorCode.
+// AuthErrorCode includes additional checks, such as missing auth data and block
+// height ranges.
+struct VerifyAuthResultFromDBResult {
+  int32_t auth_error_code; // AuthErrorCode
+  enum TestFFIErrorCode ffi_error_code;
+};
+
 // Verify authorization on a SignedTransaction using auth data from database
 //
 // db: database context to read auth data from
 // signed_tx: serialized SignedTransaction
-struct VerifyAuthResult verify_signed_transaction_auth_from_db(
+struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
     void *db, struct FFISerializedSignedTransaction signed_tx);
 
 #ifdef __cplusplus

@@ -26,6 +26,7 @@ target_link_libraries(
   auth_claim
   precompiles
   runtime
+  auth
   runtime_test_util
 )
 add_dependencies(test_ffi all_wasm_contracts)

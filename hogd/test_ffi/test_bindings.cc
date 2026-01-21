@@ -552,14 +552,14 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
 }
 
 // Helper function to deserialize a SignedTransaction
+template<typename T>
 std::optional<SignedTransaction>
 deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
-                               VerifyAuthResult *error_out)
+                               T *error_out)
 {
   if (!signed_tx.data) {
     if (error_out) {
-      *error_out = make_ffi_result_type<VerifyAuthResult>(
-          kTestFFIErrorCodeInvalidPointer);
+      *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeInvalidPointer);
     }
     return std::nullopt;
   }
@@ -571,15 +571,13 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
   } catch (x23::XdrBadInput const &e) {
     log_error("error deserializing signed transaction: {}", e);
     if (error_out) {
-      *error_out = make_ffi_result_type<VerifyAuthResult>(
-          kTestFFIErrorCodeDeserializeError);
+      *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeDeserializeError);
     }
     return std::nullopt;
   } catch (std::exception const &e) {
     log_error("unexpected error deserializing signed transaction: {}", e);
     if (error_out) {
-      *error_out = make_ffi_result_type<VerifyAuthResult>(
-          kTestFFIErrorCodeUnrecoverableError);
+      *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeUnrecoverableError);
     }
     return std::nullopt;
   }
@@ -661,18 +659,19 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
   }
 }
 
-VerifyAuthResult
+VerifyAuthResultFromDBResult
 verify_signed_transaction_auth_from_db_impl(
     void *db, FFISerializedSignedTransaction signed_tx) noexcept
 {
   constexpr auto kNullptrError =
-      make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
+      make_ffi_result_type<VerifyAuthResultFromDBResult>(
+          kTestFFIErrorCodeInvalidPointer);
 
   ffi_trace("FFI: verify_signed_transaction_auth_from_db(db={}, signed_tx={}, "
             "signed_tx_len={})",
             db, static_cast<const void *>(signed_tx.data), signed_tx.len);
 
-  VerifyAuthResult error_result;
+  VerifyAuthResultFromDBResult error_result;
   auto stx_opt = deserialize_signed_transaction(signed_tx, &error_result);
   if (!stx_opt) {
     return error_result;
@@ -687,49 +686,14 @@ verify_signed_transaction_auth_from_db_impl(
 
   try {
     auto *db_context = reinterpret_cast<DBContext *>(db);
-    auto &hogdb = db_context->get_base_db();
 
-    // Read source auth data
-    auto const &source_addr = stx.tx.invocation.invoked_address;
-    auto source_data_res = hogdb.get_db().read_address_auth_data(source_addr);
-    if (!source_data_res) {
-      error("Failed to read source auth data for address {}",
-            x23::show(stx.tx.invocation.invoked_address));
-      return make_ffi_result_type<VerifyAuthResult>(
-          kTestFFIErrorCodeUnrecoverableError);
-    }
-
-    // Get auxiliary addresses and read their auth data
-    auto aux_addresses = get_aux_addresses(stx.tx);
-    std::unordered_map<ContractAddress, const AddressAuthData *> aux_data_map;
-    std::vector<std::unique_ptr<AddressAuthData>> aux_data_storage;
-
-    for (const auto &addr : aux_addresses) {
-      auto aux_data_res = hogdb.get_db().read_address_auth_data(addr);
-      if (!aux_data_res) {
-        error("Failed to read aux auth data for address {}", x23::show(addr));
-        return make_ffi_result_type<VerifyAuthResult>(
-            kTestFFIErrorCodeUnrecoverableError);
-      }
-
-      auto aux_data = std::make_unique<AddressAuthData>(*aux_data_res);
-      aux_data_map[addr] = aux_data.get();
-      aux_data_storage.push_back(std::move(aux_data));
-    }
-
-    // Perform the appropriate level of verification
-    AuthVerifyStatus<void> result =
-        verify_auth(stx, *source_data_res, aux_data_map);
-
-    if (result.has_value()) {
-      return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
-    }
-    return {.auth_error_code = std::to_underlying(result.error().code()),
+    auto err_code = db_context->run_auth_checks(stx);
+    return {.auth_error_code = std::to_underlying(err_code),
             .ffi_error_code = kTestFFIErrorCodeNone};
 
   } catch (std::exception const &e) {
     log_error("error during verify_signed_transaction_auth_from_db: {}", e);
-    return make_ffi_result_type<VerifyAuthResult>(
+    return make_ffi_result_type<VerifyAuthResultFromDBResult>(
         kTestFFIErrorCodeUnrecoverableError);
   }
 }
@@ -869,7 +833,7 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
                                                    aux_auth_data);
 }
 
-VerifyAuthResult
+VerifyAuthResultFromDBResult
 verify_signed_transaction_auth_from_db(void *db,
                                        FFISerializedSignedTransaction signed_tx)
 {

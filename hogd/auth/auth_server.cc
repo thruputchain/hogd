@@ -173,7 +173,7 @@ AuthServer::populate_auth_data(BlockHeight height,
 
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
-                                x23::span<SignedTransaction> txs,
+                                x23::span<const SignedTransaction> txs,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
@@ -220,7 +220,7 @@ AuthServer::verify_transactions(BlockHeight height,
   std::vector<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   for (const ChunkRange &chunk : chunks) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
-    [](ChunkRange chunk, auto cb, x23::span<SignedTransaction> txs,
+    [](ChunkRange chunk, auto cb, x23::span<const SignedTransaction> txs,
        std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
        AuthErrorCodeBatch &results) -> x23::Detached {
       co_await default_coropoll().pool_.bg();
