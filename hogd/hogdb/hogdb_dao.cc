@@ -12,11 +12,14 @@
 
 // xdr types
 #include "address_auth.hh"
+#include "auth_claim.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "types.hh"
