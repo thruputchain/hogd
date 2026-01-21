@@ -23,6 +23,7 @@ target_include_directories(
 
 target_link_libraries(
   test_ffi
+  auth_claim
   precompiles
   runtime
   runtime_test_util

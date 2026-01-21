@@ -83,6 +83,11 @@ struct OpenRuntimeContextResult {
 struct OpenRuntimeContextResult open_runtime_context();
 enum TestFFIErrorCode close_runtime_context(void *context);
 
+struct FFISerializedSignedTransaction {
+  uint8_t *data;
+  uint32_t len;
+};
+
 // Returns 0 for success, nonzero for some error code
 // These errors should not be handled by a contract,
 // but are SDK or usage errors (i.e. invalid context pointer)
@@ -130,8 +135,9 @@ struct OpenSyscallHandlerResult {
 // db must have been returned by create_db()
 // rc must have been returned by open_runtime_context()
 struct OpenSyscallHandlerResult
-open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
-                     unsigned int signed_tx_len);
+open_syscall_handler(void *db, void *rc,
+                     FFISerializedSignedTransaction signed_tx);
+
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
 // Get the event log for the current transaction.
@@ -158,6 +164,55 @@ struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
 void enable_syscall_logging();
+
+struct FFISourceAuthData {
+  const uint8_t *data;
+  uint32_t len;
+};
+
+// Serialized auth data for a single address
+struct FFISerializedAuthData {
+  uint8_t address[32];
+  const uint8_t *data;
+  uint32_t len;
+};
+
+// Array of auxiliary auth data (for other addresses referenced in auth claims)
+struct FFIAuxiliaryAuthData {
+  // Array of serialized AddressAuthData
+  FFISerializedAuthData *auth_data;
+  // Number of auxiliary addresses
+  uint32_t count;
+};
+
+// Result of authorization verification
+struct VerifyAuthResult {
+  // 0 if authorization is valid, otherwise AuthVerifyErrorCode as i32
+  int32_t auth_error_code;
+  // FFI-level error code
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Verify authorization on a SignedTransaction
+//
+// signed_tx: serialized SignedTransaction
+// source_auth_data: serialized AddressAuthData for the invoked address
+//                   (required for kAuthVerificationLightweight and
+//                   kAuthVerificationFull)
+// aux_auth_data: auxiliary auth data for other addresses
+//                (required for kAuthVerificationLightweight and
+//                kAuthVerificationFull)
+struct VerifyAuthResult
+verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
+                               FFISourceAuthData source_auth_data,
+                               FFIAuxiliaryAuthData aux_auth_data);
+
+// Verify authorization on a SignedTransaction using auth data from database
+//
+// db: database context to read auth data from
+// signed_tx: serialized SignedTransaction
+struct VerifyAuthResult verify_signed_transaction_auth_from_db(
+    void *db, FFISerializedSignedTransaction signed_tx);
 
 #ifdef __cplusplus
 }
