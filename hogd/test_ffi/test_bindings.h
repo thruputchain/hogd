@@ -136,7 +136,7 @@ struct OpenSyscallHandlerResult {
 // rc must have been returned by open_runtime_context()
 struct OpenSyscallHandlerResult
 open_syscall_handler(void *db, void *rc,
-                     FFISerializedSignedTransaction signed_tx);
+                     struct FFISerializedSignedTransaction signed_tx);
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
@@ -180,7 +180,7 @@ struct FFISerializedAuthData {
 // Array of auxiliary auth data (for other addresses referenced in auth claims)
 struct FFIAuxiliaryAuthData {
   // Array of serialized AddressAuthData
-  FFISerializedAuthData *auth_data;
+  struct FFISerializedAuthData *auth_data;
   // Number of auxiliary addresses
   uint32_t count;
 };
@@ -203,16 +203,16 @@ struct VerifyAuthResult {
 //                (required for kAuthVerificationLightweight and
 //                kAuthVerificationFull)
 struct VerifyAuthResult
-verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISourceAuthData source_auth_data,
-                               FFIAuxiliaryAuthData aux_auth_data);
+verify_signed_transaction_auth(struct FFISerializedSignedTransaction signed_tx,
+                               struct FFISourceAuthData source_auth_data,
+                               struct FFIAuxiliaryAuthData aux_auth_data);
 
 // Verify authorization on a SignedTransaction using auth data from database
 //
 // db: database context to read auth data from
 // signed_tx: serialized SignedTransaction
 struct VerifyAuthResult verify_signed_transaction_auth_from_db(
-    void *db, FFISerializedSignedTransaction signed_tx);
+    void *db, struct FFISerializedSignedTransaction signed_tx);
 
 #ifdef __cplusplus
 }

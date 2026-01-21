@@ -6,7 +6,8 @@ members = [
     "unified",
     "contract_types",
     "common",
-    "synchronized_map"
+    "synchronized_map",
+    "test_ffi_bindings"
 ]
 resolver = "2"
 
