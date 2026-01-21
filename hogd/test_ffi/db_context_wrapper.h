@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 
+#include "db_sched.hh"
 #include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -18,6 +19,7 @@
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "types.hh"
+#include "x23/srpc.h"
 
 namespace hogd {
 
