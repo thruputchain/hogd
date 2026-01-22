@@ -15,6 +15,8 @@ public:
   {
     co_return;
   }
+
+  static bool event_server_connected() { return false; }
 };
 static_assert(is_IndexerEvent1<IndexerEventRpc *, x23::Async>);
 

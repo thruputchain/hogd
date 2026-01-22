@@ -5,7 +5,7 @@
 
 namespace hogd {
 
-class IndexerBlockExporerRpc {
+class IndexerBlockExplorerRpc {
 public:
   using rpc_service = IndexerBlockExplorer1;
 
@@ -15,6 +15,6 @@ public:
     co_return TxInfoResult(TxInfoOutcome::TxInfoNotFound);
   }
 };
-static_assert(is_IndexerBlockExplorer1<IndexerBlockExporerRpc *, x23::Async>);
+static_assert(is_IndexerBlockExplorer1<IndexerBlockExplorerRpc *, x23::Async>);
 
 } // namespace hogd
