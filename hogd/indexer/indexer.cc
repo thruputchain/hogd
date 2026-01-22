@@ -6,6 +6,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
+#include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/shared.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
