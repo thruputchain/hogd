@@ -33,3 +33,12 @@ target_link_libraries(indexer_bench
 )
 
 set_property(TARGET indexer_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION True)
+
+add_executable(
+  indexer_exec
+  indexer.cc
+)
+target_link_libraries(
+  indexer_exec
+  indexer
+)
