@@ -12,6 +12,7 @@
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -66,7 +67,7 @@ public:
 
     // Store the changes for this height
     if (!changes.empty()) {
-      changes_by_height_[new_height] = std::move(changes);
+      changes_by_height_[current_height_] = std::move(changes);
     }
     current_height_ = new_height;
   }
@@ -75,6 +76,7 @@ public:
   KeyChangeBatch get_key_changes_at_height(BlockHeight height) const
   {
     std::scoped_lock lock(mutex_);
+    CHECK(height < current_height_);
     auto it = changes_by_height_.find(height);
     if (it == changes_by_height_.end()) {
       return KeyChangeBatch{};

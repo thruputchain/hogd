@@ -5,16 +5,26 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
 
+BlockHeight
+HogDBAuthRpc::get_expected_query_height()
+{
+  // We want to make sure we don't answer stale queries incorrectly.
+  return ctx_.get_height_threadsafe();
+}
+
 x23::Async<DBAuthResult>
 HogDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
 {
-  BlockHeight current_height = ctx_.get_height_threadsafe();
-  if (height != current_height) {
+  if (height != get_expected_query_height()) {
+    info("Auth data is stale at height {}, expected height {}, returning stale "
+         "block height error",
+         height, get_expected_query_height());
     co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
   }
 
@@ -39,8 +49,7 @@ HogDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
   DBAuthResultBatch result;
   result.reserve(addresses.size());
 
-  BlockHeight current_height = ctx_.get_height_threadsafe();
-  if (height != current_height) {
+  if (height != get_expected_query_height()) {
     for (size_t i = 0; i < addresses.size(); i++) {
       result.emplace_back(DBAuthError::kDBAuthStaleBlockHeight);
     }

@@ -6,8 +6,11 @@
 #include <memory>
 #include <optional>
 
+#include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "event.hh"
+#include "hogd/auth/auth_server.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -18,8 +21,11 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/srpc.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -73,6 +79,16 @@ public:
 
   auto &get_base_db() { return hogdb_wrapper_; }
 
+  AuthErrorCode run_auth_checks(SignedTransaction const &tx)
+  {
+    x23::span<const SignedTransaction> txs(&tx, 1);
+    auto dbtip = get_base_db().get_db().read_dbtip();
+    CHECK(dbtip.has_value());
+    auto res = auth_server_->verify_transactions(dbtip->height, txs)();
+    CHECK_EQ(res.size(), 1);
+    return res[0];
+  }
+
 private:
   TransactionID allocate_txid() { return current_tx_id_.fetch_add(1); }
 
@@ -82,6 +98,9 @@ private:
   BlockID current_block_id_ = 0;
 
   HogdbWrapper hogdb_wrapper_{StorageCostModel(get_default_cost_model_xdr())};
+
+  std::unique_ptr<AuthServer> auth_server_;
+  std::unique_ptr<AuthRpcServers> auth_rpc_servers_;
 
   db_sched_client_t db_sched_client_;
 

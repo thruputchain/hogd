@@ -39,16 +39,16 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
       co_await current_height_futex_.wait(current_height);
       continue;
     }
-    if (current_height > height) {
+    if (current_height >= height) {
       co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
     }
-    if (current_height < height) {
+    if (current_height < height - 1) {
       co_await current_height_futex_.wait(current_height);
       continue;
     }
     break;
   }
-  CHECK(current_height == height);
+  CHECK(current_height == height - 1);
   CHECK(current_height != kUninitializedHeight);
   CHECK(current_height != kInitializing);
 
@@ -70,7 +70,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
   auto entry =
       std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
-          height, db_auth_data.value());
+          current_height, db_auth_data.value());
 
   auth_data_cache_.put(address, entry);
 
@@ -173,7 +173,7 @@ AuthServer::populate_auth_data(BlockHeight height,
 
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
-                                x23::span<SignedTransaction> txs,
+                                x23::span<const SignedTransaction> txs,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
@@ -220,7 +220,7 @@ AuthServer::verify_transactions(BlockHeight height,
   std::vector<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   for (const ChunkRange &chunk : chunks) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
-    [](ChunkRange chunk, auto cb, x23::span<SignedTransaction> txs,
+    [](ChunkRange chunk, auto cb, x23::span<const SignedTransaction> txs,
        std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
        AuthErrorCodeBatch &results) -> x23::Detached {
       co_await default_coropoll().pool_.bg();
