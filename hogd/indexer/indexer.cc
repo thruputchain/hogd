@@ -1,5 +1,7 @@
+#include <print>
 #include <string>
 
+#include "hogd/base/log.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -17,7 +19,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
 } // namespace hogd
 
 int
-main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
+main(int argc, char *argv[])
 {
   int ret = hogd::hogd_init(argc, argv);
   if (ret) {
