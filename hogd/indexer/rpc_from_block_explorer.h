@@ -1,6 +1,7 @@
 #pragma once
 
 #include "indexer.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

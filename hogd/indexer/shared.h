@@ -1,4 +1,5 @@
 #include "indexer.hh"
+#include "x23/rpc.h"
 
 namespace hogd {
 

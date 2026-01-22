@@ -2,6 +2,9 @@
 #include <string>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
+#include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/shared.h"
 #include "hogd/init.h"
@@ -29,8 +32,8 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
   // TODO(jhumphri): Initialize [RpcServer] for the indexer_event server.
 
   // Register with the event server.
-  event_indexer_client_t client = create_client<EventIndexer1>(
-      server_address_to_sockaddr(event_server_addr));
+  event_indexer_client_t client = make_rpc_client<EventIndexer1>(
+      server_address_to_sockaddr(event_server_addr), /*retry=*/true)();
   const std::string indexer_server_addr =
       create_address(/*port=*/kIndexerEventServerPort);
   const IndexerCard card{.protocol = version::kHogdProtocol(),
