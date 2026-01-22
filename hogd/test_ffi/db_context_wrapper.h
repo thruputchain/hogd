@@ -23,7 +23,6 @@
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/format.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
@@ -85,7 +84,7 @@ public:
     auto dbtip = get_base_db().get_db().read_dbtip();
     CHECK(dbtip.has_value());
     auto res = auth_server_->verify_transactions(dbtip->height, txs)();
-    CHECK_EQ(res.size(), 1);
+    CHECK_EQ(res.size(), 1U);
     return res[0];
   }
 
