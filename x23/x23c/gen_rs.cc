@@ -33,8 +33,6 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
-  bool needs_xdr_common_imports = false;
-
   constexpr static int kIndentWidth = 4;
 
   void process(const vector<Definition> &defs);
@@ -1044,7 +1042,6 @@ GenRs::type_name(const Declaration &d, bool generate,
   }
   case kVec:
   {
-    needs_xdr_common_imports = true;
     assert(tname != "string"s);
     if (tname == "u8") {
       if (d.bound.empty())
@@ -1113,14 +1110,6 @@ use xdrs::xdr_repr::*;
 )";
 
   gs.process(*defs);
-
-  // xdrs now re-exports xdr_common, so only include that here if not using xdrs
-  if (gs.needs_xdr_common_imports) {
-    preamble += R"(
-#[cfg(not(feature="xdrs"))]
-use xdr_common::*;
-)";
-  }
 
   preamble += R"(
 #[cfg(feature = "serde")]
