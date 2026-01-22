@@ -15,74 +15,20 @@ protected:
   void SetUp() override {}
 };
 
-// Test transaction key format - verify block_height is big-endian
+// Test transaction key format
 TEST_F(IndexerKeyFormatTest, TxKeyByteOrder)
 {
-  BlockHeight block_height = 0x0123456789ABCDEF;
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0xAA);
 
   std::string key;
-  IndexerKeyFormat::make_tx_key(key, block_height, tx_hash);
+  IndexerKeyFormat::make_tx_key(key, tx_hash);
 
   EXPECT_EQ(key.size(), IndexerKeyFormat::kTxKeySize);
 
-  // Verify block_height is stored in big-endian order
-  // First byte should be 0x01 (most significant byte)
-  EXPECT_EQ(static_cast<uint8_t>(key[0]), 0x01);
-  EXPECT_EQ(static_cast<uint8_t>(key[1]), 0x23);
-  EXPECT_EQ(static_cast<uint8_t>(key[2]), 0x45);
-  EXPECT_EQ(static_cast<uint8_t>(key[3]), 0x67);
-  EXPECT_EQ(static_cast<uint8_t>(key[4]), 0x89);
-  EXPECT_EQ(static_cast<uint8_t>(key[5]), 0xAB);
-  EXPECT_EQ(static_cast<uint8_t>(key[6]), 0xCD);
-  EXPECT_EQ(static_cast<uint8_t>(key[7]), 0xEF);
-
-  // Verify tx_hash follows immediately after
-  EXPECT_EQ(static_cast<uint8_t>(key[8]), 0xAA);
-  EXPECT_EQ(static_cast<uint8_t>(key[39]), 0xAA);
-}
-
-// Test transaction key with zero block height
-TEST_F(IndexerKeyFormatTest, TxKeyZeroHeight)
-{
-  BlockHeight block_height = 0;
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0xBB);
-
-  std::string key;
-  IndexerKeyFormat::make_tx_key(key, block_height, tx_hash);
-
-  EXPECT_EQ(key.size(), IndexerKeyFormat::kTxKeySize);
-
-  // All 8 bytes of block_height should be zero
-  for (size_t i = 0; i < 8; ++i) {
-    EXPECT_EQ(static_cast<uint8_t>(key[i]), 0);
-  }
-
-  // Verify tx_hash follows
-  EXPECT_EQ(static_cast<uint8_t>(key[8]), 0xBB);
-}
-
-// Test transaction key with maximum block height
-TEST_F(IndexerKeyFormatTest, TxKeyMaxHeight)
-{
-  BlockHeight block_height = 0xFFFFFFFFFFFFFFFF;
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0xCC);
-
-  std::string key;
-  IndexerKeyFormat::make_tx_key(key, block_height, tx_hash);
-
-  EXPECT_EQ(key.size(), IndexerKeyFormat::kTxKeySize);
-
-  // All 8 bytes of block_height should be 0xFF
-  for (size_t i = 0; i < 8; ++i) {
-    EXPECT_EQ(static_cast<uint8_t>(key[i]), 0xFF);
-  }
-
-  // Verify tx_hash follows
-  EXPECT_EQ(static_cast<uint8_t>(key[8]), 0xCC);
+  // Verify tx_hash
+  EXPECT_EQ(static_cast<uint8_t>(key[0]), 0xAA);
+  EXPECT_EQ(static_cast<uint8_t>(key[31]), 0xAA);
 }
 
 // Test contract key prefix format - verify block_height is big-endian
@@ -229,23 +175,6 @@ TEST_F(IndexerKeyFormatTest, ContractKeyParseWrongSize)
                                                       &height, &tx_hash, &seq);
 
   EXPECT_FALSE(success);
-}
-
-// Test that keys are lexicographically ordered by block_height
-TEST_F(IndexerKeyFormatTest, TxKeyLexicographicOrder)
-{
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0x88);
-
-  std::string key1, key2, key3;
-  IndexerKeyFormat::make_tx_key(key1, 100, tx_hash);
-  IndexerKeyFormat::make_tx_key(key2, 200, tx_hash);
-  IndexerKeyFormat::make_tx_key(key3, 300, tx_hash);
-
-  // Keys should be in lexicographic order (big-endian ensures this)
-  EXPECT_LT(key1, key2);
-  EXPECT_LT(key2, key3);
-  EXPECT_LT(key1, key3);
 }
 
 // Test that contract key prefixes are lexicographically ordered by block_height

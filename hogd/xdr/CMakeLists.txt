@@ -21,6 +21,7 @@ add_xdr(
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
   ../../protocol/hogexec_constants.x
+  ../../protocol/indexer.x
   ../../protocol/loadgen.x
   ../../protocol/network.x
   ../../protocol/nomination.x

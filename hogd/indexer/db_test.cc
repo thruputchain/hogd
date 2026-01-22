@@ -113,14 +113,14 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   ASSERT_TRUE(result.has_value());
 
   // Lookup first transaction
-  auto lookup1 = db->get_tx_events(block_height, tx_hash1);
+  auto lookup1 = db->get_tx_events(tx_hash1);
   ASSERT_TRUE(lookup1.has_value());
   EXPECT_EQ(lookup1->proposed_tx_hash, tx_hash1);
   EXPECT_EQ(lookup1->events.size(), 1);
   EXPECT_EQ(lookup1->events[0].contract_address, contract_addr1);
 
   // Lookup second transaction
-  auto lookup2 = db->get_tx_events(block_height, tx_hash2);
+  auto lookup2 = db->get_tx_events(tx_hash2);
   ASSERT_TRUE(lookup2.has_value());
   EXPECT_EQ(lookup2->proposed_tx_hash, tx_hash2);
   EXPECT_EQ(lookup2->events.size(), 1);
@@ -129,15 +129,15 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   // Lookup non-existent transaction
   SHA256Hash tx_hash3;
   std::ranges::fill(tx_hash3, 0x03);
-  auto lookup3 = db->get_tx_events(block_height, tx_hash3);
+  auto lookup3 = db->get_tx_events(tx_hash3);
   EXPECT_FALSE(lookup3.has_value());
   EXPECT_EQ(lookup3.error(), IndexerErrorCode::kDBNotFound);
 
   // Test is_tx_included
-  auto included1 = db->get_tx_events(block_height, tx_hash1);
+  auto included1 = db->get_tx_events(tx_hash1);
   ASSERT_TRUE(included1.has_value());
 
-  auto included3 = db->get_tx_events(block_height, tx_hash3);
+  auto included3 = db->get_tx_events(tx_hash3);
   ASSERT_FALSE(included3.has_value());
   EXPECT_EQ(included3.error(), IndexerErrorCode::kDBNotFound);
 }

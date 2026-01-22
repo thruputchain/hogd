@@ -10,14 +10,10 @@
 namespace hogd {
 
 void
-IndexerKeyFormat::make_tx_key(std::string &key, BlockHeight block_height,
-                              SHA256Hash const &tx_hash)
+IndexerKeyFormat::make_tx_key(std::string &key, SHA256Hash const &tx_hash)
 {
   key.clear();
   key.reserve(kTxKeySize);
-  // Append block_height as big-endian 8 bytes
-  uint64_t height_be = std::byteswap(static_cast<uint64_t>(block_height));
-  key.append(reinterpret_cast<const char *>(&height_be), 8);
   // Append tx_hash
   key.append(reinterpret_cast<const char *>(tx_hash.data()), 32);
 }
