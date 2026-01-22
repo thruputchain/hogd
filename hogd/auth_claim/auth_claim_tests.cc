@@ -11,6 +11,7 @@
 #include "hogd/init.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -56,8 +57,7 @@ protected:
   {
     Signature sig(CryptographicScheme::Ed25519);
     assert(sk.scheme() == CryptographicScheme::Ed25519);
-    auto msg = sha256(tx);
-    sig.ed25519() = ed25519_sign(sk.ed25519(), msg);
+    sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
     return {.public_key_id = pk_id, .signature = sig};
   }
 

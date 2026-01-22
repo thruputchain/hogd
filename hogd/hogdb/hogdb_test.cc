@@ -8,7 +8,6 @@
 #include <utility>
 
 // xdr types
-#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -21,6 +20,7 @@
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"

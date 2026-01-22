@@ -31,15 +31,12 @@ template<typename T> struct DefaultConcurrentSetTraits {
 
 template<concurrent_set_element T,
          typename TraitsT = DefaultConcurrentSetTraits<T>>
-class ConcurrentSet {
+class alignas(alignof(T)) ConcurrentSet {
 public:
   using Traits = TraitsT;
 
-  ConcurrentSet() : capacity_{kInitialCapacity}
-  {
-    levels_.emplace_back(
-        std::make_unique<std::atomic<T>[]>(entries_for_level(0)));
-  }
+  ConcurrentSet() : initial_level_{Traits::kEmpty}, capacity_{kInitialCapacity}
+  {}
 
   ConcurrentSet(const ConcurrentSet &other) = delete;
   ConcurrentSet &operator=(const ConcurrentSet &other) = delete;
@@ -60,17 +57,18 @@ public:
       panic("ConcurrentSet::try_insert called with reserved value");
     }
 
-    size_t level = 0;
-    size_t level_capacity = entries_for_level(level);
-    assert((level_capacity & (level_capacity - 1)) == 0);
-
     size_t hash = Traits::hash(value);
 
+    size_t level = -1;
     while (true) {
     outer:
+      ++level;
+      size_t level_capacity = entries_for_level(level);
+      assert((level_capacity & (level_capacity - 1)) == 0);
+
       for (size_t i = 0; i < level_capacity; i++) {
         size_t index = (hash + i) & (level_capacity - 1);
-        auto &l = levels_[level];
+        auto *l = get_level(level);
 
         T v = l[index].load(std::memory_order_acquire);
         if (v == value) {
@@ -81,9 +79,7 @@ public:
         }
         // if we found an empty slot, we can only insert to it if it is the
         // deepest level, otherwise we need to move down to the next level.
-        if (level < levels_.size() - 1) {
-          level++;
-          level_capacity = entries_for_level(level);
+        if (level < levels() - 1) {
           // jump to outer while
           goto outer;
         }
@@ -107,9 +103,7 @@ public:
       // isn't sufficient space in the level they started in for them all to
       // complete. If this does happen, first check to see if any levels have
       // been added, and restart there. Otherwise, try to add a level.
-      if (level < levels_.size() - 1) {
-        level++;
-        level_capacity = entries_for_level(level);
+      if (level < levels() - 1) {
         goto outer;
       }
       else {
@@ -133,7 +127,7 @@ public:
     {}
     T operator*() const
     {
-      return set_->levels_[level_][index_].load(std::memory_order_acquire);
+      return set_->get_level(level_)[index_].load(std::memory_order_acquire);
     }
 
     Iterator &operator++()
@@ -165,13 +159,23 @@ public:
     return it;
   }
 
-  Iterator end() { return Iterator(this, 0, levels_.size()); }
+  Iterator end() { return Iterator(this, 0, levels()); }
 
 private:
   constexpr static size_t entries_for_level(size_t level)
   {
     return kInitialCapacity * (1 << level);
   }
+
+  std::atomic<T> *get_level(size_t level)
+  {
+    if (level == 0) [[likely]] {
+      return initial_level_;
+    }
+    return extra_levels_[level - 1].get();
+  }
+
+  size_t levels() const { return extra_levels_.size() + 1; }
 
   // If the number of inserts hasn't exceeded the load factor of the set,
   // do nothing, otherwise, add a new level to the set.
@@ -202,9 +206,10 @@ private:
           return;
         }
 
-        size_t n_levels = levels_.size();
+        size_t n_levels = levels();
         size_t added_cap = entries_for_level(n_levels);
-        levels_.emplace_back(std::make_unique<std::atomic<T>[]>(added_cap));
+        extra_levels_.emplace_back(
+            std::make_unique<std::atomic<T>[]>(added_cap));
         capacity_.store(cap + added_cap, std::memory_order_release);
         break;
       }
@@ -233,7 +238,7 @@ private:
 
       for (size_t i = 0; i < level_capacity; i++) {
         size_t index = (hash + i) & (level_capacity - 1);
-        auto &l = levels_[level];
+        auto *l = get_level(level);
 
         T v = l[index].load(std::memory_order_acquire);
         if (v == value) {
@@ -259,7 +264,7 @@ private:
           continue;
         }
 
-        if (level < levels_.size() - 1) {
+        if (level < levels() - 1) {
           goto outer;
         }
 
@@ -268,7 +273,7 @@ private:
 
       // in case a level was added since we started looking for a value in the
       // current level, restart the search in the new level.
-      if (level < levels_.size() - 1) {
+      if (level < levels() - 1) {
         goto outer;
       }
 
@@ -291,11 +296,11 @@ private:
   // to get very slow.
   static constexpr double kResizeLoadFactor = 0.5;
 
-  using Level = std::unique_ptr<std::atomic<T>[]>;
+  std::atomic<T> initial_level_[kInitialCapacity];
   // Each level is an array of entries_for_level(level) entries. Once more than
   // kResizeLoadFactor of the entries are filled for the whole structure, a new
   // level is added which is twice as large as the previous level.
-  x23::NMVec<Level> levels_;
+  x23::NMVec<std::unique_ptr<std::atomic<T>[]>> extra_levels_;
 
   // Number of insertions over all time to the structure. Used to give back
   // approximate size for the structure and to decide on resizing.

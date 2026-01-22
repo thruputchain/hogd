@@ -10,6 +10,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -18,13 +19,13 @@ class Ed25519SignatureVerifier {
 public:
   void add_signature(const Ed25519PublicKey &public_key,
                      const Ed25519Signature &signature,
-                     SHA256Hash const &tx_hash);
+                     x23::BufView serialized_tx);
   bool verify();
 
 private:
   std::vector<Ed25519PublicKey> public_keys_;
   std::vector<Ed25519Signature> signatures_;
-  std::vector<SHA256Hash> tx_hashes_;
+  std::vector<x23::Buf> serialized_txs_;
 };
 
 // There are three steps to validating a transaction for scheduling:

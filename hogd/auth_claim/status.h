@@ -6,24 +6,10 @@
 #include <system_error>
 #include <utility>
 
+#include "auth_claim.hh"
 #include "hogd/base/status.h"
 
 namespace hogd {
-
-enum class AuthVerifyErrorCode {
-  // The transaction is malformed.
-  // These transactions should never be flooded over the network.
-  // Example: a public key id that is out of bounds.
-  kAuthMalformed,
-
-  // Signature verification failed.
-  kSignatureVerificationFailed,
-
-  // Mismatch between expectations about the auth data on an account
-  // and the actual auth data (i.e. referencing a pk that doesn't exist,
-  // or failing to satisfy a gas claim).
-  kAuthDataMismatch,
-};
 
 class AuthVerifyErrorCategory : public std::error_category {
 public:

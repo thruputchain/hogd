@@ -2,7 +2,11 @@
 #include <gtest/gtest.h>
 #include <span>
 #include <utility>
+#include <vector>
 
+#include "address_auth.hh"
+#include "auth_claim.hh"
+#include "auth_rpc.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -10,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
@@ -17,6 +22,7 @@
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -42,8 +48,11 @@ void *
 make_syscall_handler(void *db, void *rc, SignedTransaction const &stx)
 {
   auto serialized_stx = x23::serialize(stx);
-  auto result = open_syscall_handler(db, rc, serialized_stx.data(),
-                                     serialized_stx.size());
+  auto result = open_syscall_handler(
+      db, rc,
+      FFISerializedSignedTransaction{.data = serialized_stx.data(),
+                                     .len = static_cast<uint32_t>(
+                                         serialized_stx.size())});
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   return result.syscall_handler;
 }
@@ -233,6 +242,274 @@ TEST(TestBindingsTest, GrantStorageTokensTest)
             kTestFFIErrorCodeNone);
 
   ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+}
+
+namespace {
+
+std::pair<PublicKey, SecretKey>
+make_key_pair()
+{
+  auto [pk, sk] = ed25519_keygen();
+  PublicKey pk_wrapper(CryptographicScheme::Ed25519);
+  pk_wrapper.ed25519() = pk;
+  SecretKey sk_wrapper(CryptographicScheme::Ed25519);
+  sk_wrapper.ed25519() = sk;
+  return {pk_wrapper, sk_wrapper};
+}
+
+DecoratedSignature
+make_signature(SecretKey sk, Transaction const &tx, uint32_t pk_id)
+{
+  Signature sig(CryptographicScheme::Ed25519);
+  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
+  return {.public_key_id = pk_id, .signature = sig};
+}
+
+constexpr NonceConfig kAnyKeyNonceConfig =
+    NonceConfig{.accepted_keys = 0x000F'FFFF, .required_weight = 0};
+
+auto
+make_aux_auth_data(ContractAddress addr, x23::BufView serialized_auth_data)
+    -> FFISerializedAuthData
+{
+  FFISerializedAuthData result;
+  std::memcpy(result.address, addr.data(), addr.size());
+  result.data = serialized_auth_data.data();
+  result.len = static_cast<uint32_t>(serialized_auth_data.size());
+  return result;
+}
+
+auto
+make_source_auth_data(x23::BufView serialized_auth_data) -> FFISourceAuthData
+{
+  return {.data = serialized_auth_data.data(),
+          .len = static_cast<uint32_t>(serialized_auth_data.size())};
+}
+
+} // namespace
+
+TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaims)
+{
+  // Test verifying a transaction with:
+  // - One auth claim for the invoked address (key 0)
+  // - One auth claim for an auxiliary address (key 0)
+
+  // Generate keys for both addresses
+  auto [invoked_pk, invoked_sk] = make_key_pair();
+  auto [aux_pk, aux_sk] = make_key_pair();
+
+  ContractAddress invoked_addr{1};
+  ContractAddress aux_addr{2};
+
+  // Create auth claims
+  AuthClaim invoked_claim(AuthClaimType::kInvokedAddressSignature);
+  invoked_claim.invoked_address_signature_id() = 0;
+
+  AuthClaim aux_claim(AuthClaimType::kOtherAddressSignature);
+  aux_claim.other_address_signature_id().address = aux_addr;
+  aux_claim.other_address_signature_id().key_id = 0;
+
+  // Build transaction
+  Transaction tx{};
+  tx.invocation.invoked_address = invoked_addr;
+  tx.invocation.gas_limit = 100'000;
+  tx.auth_claims = {invoked_claim, aux_claim};
+
+  // Sign the transaction
+  DecoratedSignature invoked_sig = make_signature(invoked_sk, tx, 0);
+  DecoratedSignature aux_sig = make_signature(aux_sk, tx, 0);
+
+  SignedTransaction stx{
+      .tx = tx,
+      .signatures = {DecoratedSignatureList{.list = {invoked_sig}},
+                     DecoratedSignatureList{.list = {aux_sig}}}};
+
+  // Create auth data for both addresses
+  AddressAuthData invoked_auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = invoked_pk, .max_weight = Weight{1}})},
+      .gas_permissions = {GasPermissionConfig{.limit = 100'000,
+                                              .accepted_keys = 1 << 0,
+                                              .required_weight = 1}},
+      .nonce_config = kAnyKeyNonceConfig};
+
+  AddressAuthData aux_auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = aux_pk, .max_weight = Weight{1}})},
+      .nonce_config = kAnyKeyNonceConfig};
+
+  // Serialize everything
+  auto serialized_stx = x23::serialize(stx);
+  auto serialized_invoked_auth = x23::serialize(invoked_auth_data);
+  auto serialized_aux_auth = x23::serialize(aux_auth_data);
+
+  // Test good verification
+  {
+    std::vector<FFISerializedAuthData> aux_auth_array = {
+        make_aux_auth_data(aux_addr, serialized_aux_auth)};
+    uint32_t auth_count = aux_auth_array.size();
+
+    VerifyAuthResult result = verify_signed_transaction_auth(
+        {.data = serialized_stx.data(),
+         .len = static_cast<uint32_t>(serialized_stx.size())},
+        make_source_auth_data(serialized_invoked_auth),
+        {.auth_data = aux_auth_array.data(), .count = auth_count});
+
+    EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+    EXPECT_EQ(result.auth_error_code, 0);
+  }
+
+  // Test wrong signature
+  {
+    auto [wrong_pk, wrong_sk] = make_key_pair();
+    AddressAuthData wrong_invoked_auth{
+        .public_keys = {x23::Ptr<PublicKeyConfig>(
+            new PublicKeyConfig{.key = wrong_pk, .max_weight = Weight{1}})},
+        .gas_permissions = {GasPermissionConfig{.limit = 100'000,
+                                                .accepted_keys = 1 << 0,
+                                                .required_weight = 1}},
+        .nonce_config = kAnyKeyNonceConfig};
+
+    auto serialized_wrong_auth = x23::serialize(wrong_invoked_auth);
+
+    std::vector<uint8_t> addresses(64);
+    std::memcpy(addresses.data(), aux_addr.data(), 32);
+
+    std::vector<FFISerializedAuthData> aux_auth_array = {
+        {.data = serialized_aux_auth.data(),
+         .len = static_cast<uint32_t>(serialized_aux_auth.size())}};
+    uint32_t auth_count = aux_auth_array.size();
+
+    VerifyAuthResult result = verify_signed_transaction_auth(
+        {.data = serialized_stx.data(),
+         .len = static_cast<uint32_t>(serialized_stx.size())},
+        make_source_auth_data(serialized_wrong_auth),
+        {.auth_data = aux_auth_array.data(), .count = auth_count});
+
+    EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+    EXPECT_EQ(result.auth_error_code,
+              std::to_underlying(
+                  AuthVerifyErrorCode::kSignatureVerificationFailed));
+  }
+}
+
+TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
+{
+  // Test verifying a transaction with:
+  // - One auth claim for the invoked address (key 0)
+  // - One auth claim for an auxiliary address (key 0)
+  // This version reads auth data from the database instead of passing it
+  // directly
+
+  // Generate keys for both addresses
+  auto [invoked_pk, invoked_sk] = make_key_pair();
+  auto [aux_pk, aux_sk] = make_key_pair();
+
+  ContractAddress invoked_addr{1};
+  ContractAddress aux_addr{2};
+  ContractAddress missing_aux_addr = {3};
+
+  // Create auth claims
+  AuthClaim invoked_claim(AuthClaimType::kInvokedAddressSignature);
+  invoked_claim.invoked_address_signature_id() = 0;
+
+  AuthClaim aux_claim(AuthClaimType::kOtherAddressSignature);
+  aux_claim.other_address_signature_id().address = aux_addr;
+  aux_claim.other_address_signature_id().key_id = 0;
+
+  AuthClaim missing_aux_claim(AuthClaimType::kOtherAddressSignature);
+  missing_aux_claim.other_address_signature_id().address = missing_aux_addr;
+  missing_aux_claim.other_address_signature_id().key_id = 0;
+
+  // Build transaction
+  Transaction tx{};
+  tx.invocation.invoked_address = invoked_addr;
+  tx.invocation.gas_limit = 100'000;
+  tx.auth_claims = {invoked_claim, aux_claim};
+
+  // Sign the transaction
+  DecoratedSignature invoked_sig = make_signature(invoked_sk, tx, 0);
+  DecoratedSignature aux_sig = make_signature(aux_sk, tx, 0);
+
+  SignedTransaction stx{
+      .tx = tx,
+      .signatures = {DecoratedSignatureList{.list = {invoked_sig}},
+                     DecoratedSignatureList{.list = {aux_sig}}}};
+
+  // Create auth data for both addresses
+  AddressAuthData invoked_auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = invoked_pk, .max_weight = Weight{1}})},
+      .gas_permissions = {GasPermissionConfig{.limit = 100'000,
+                                              .accepted_keys = 1 << 0,
+                                              .required_weight = 1}},
+      .nonce_config = kAnyKeyNonceConfig};
+
+  AddressAuthData aux_auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = aux_pk, .max_weight = Weight{1}})},
+      .nonce_config = kAnyKeyNonceConfig};
+
+  // Create database and write auth data
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *db_context = reinterpret_cast<DBContext *>(db);
+  auto &dao = db_context->get_base_db().get_db();
+
+  // Write auth data to database
+  auto write_result =
+      dao.write_address_auth_data(invoked_addr, invoked_auth_data);
+  ASSERT_TRUE(write_result.has_value())
+      << "Failed to write invoked address auth data";
+
+  write_result = dao.write_address_auth_data(aux_addr, aux_auth_data);
+  ASSERT_TRUE(write_result.has_value())
+      << "Failed to write aux address auth data";
+
+  // Advance block so auth data is available
+  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+
+  // Serialize transaction
+  auto serialized_stx = x23::serialize(stx);
+
+  // Test good verification
+  {
+    VerifyAuthResultFromDBResult result =
+        verify_signed_transaction_auth_from_db(
+            db, {.data = serialized_stx.data(),
+                 .len = static_cast<uint32_t>(serialized_stx.size())});
+
+    EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+    EXPECT_EQ(result.auth_error_code,
+              std::to_underlying(AuthErrorCode::kAuthSuccess));
+  }
+
+  // Test missing auth data
+  {
+    tx.auth_claims = {invoked_claim, missing_aux_claim};
+
+    // Sign the transaction
+    DecoratedSignature invoked_sig = make_signature(invoked_sk, tx, 0);
+    DecoratedSignature aux_sig = make_signature(aux_sk, tx, 0);
+
+    SignedTransaction stx{
+        .tx = tx,
+        .signatures = {DecoratedSignatureList{.list = {invoked_sig}},
+                       DecoratedSignatureList{.list = {aux_sig}}}};
+
+    auto serialized_stx = x23::serialize(stx);
+
+    VerifyAuthResultFromDBResult result =
+        verify_signed_transaction_auth_from_db(
+            db, {.data = serialized_stx.data(),
+                 .len = static_cast<uint32_t>(serialized_stx.size())});
+
+    EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+    EXPECT_EQ(result.auth_error_code,
+              std::to_underlying(AuthErrorCode::kAuthFailed));
+  }
 }
 
 } // namespace hogd
