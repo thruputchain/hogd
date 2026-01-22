@@ -12,6 +12,7 @@ public:
   x23::Async<void> indexer_event_intro()
   {
     event_server_connected_.store(true, std::memory_order_release);
+    co_return;
   }
 
   static x23::Async<void>
