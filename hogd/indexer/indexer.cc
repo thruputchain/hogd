@@ -1,3 +1,5 @@
+#include <chrono>
+#include <future>
 #include <print>
 #include <string>
 
@@ -17,6 +19,7 @@ namespace hogd {
 namespace {
 
 constexpr uint16_t kIndexerEventServerPort = 8060;
+constexpr uint16_t kIndexerBlockExplorerServerPort = 8061;
 
 // TODO(jhumphri): This is the same as in other subsystems.
 std::string
@@ -30,7 +33,10 @@ create_address(uint16_t port)
 int
 indexer_init(const std::string &path, const std::string &event_server_addr)
 {
-  // TODO(jhumphri): Initialize [RpcServer] for the indexer_event server.
+  // Create the RPC server that the event server talks to.
+  RpcServer<IndexerEventRpc> event;
+  CHECK_EQ(event.start_server(kIndexerEventServerPort),
+           uint16_t{kIndexerEventServerPort});
 
   // Register with the event server.
   event_indexer_client_t client = make_rpc_client<EventIndexer1>(
@@ -40,8 +46,19 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
   const IndexerCard card{.protocol = version::kHogdProtocol(),
                          .address_for_event = indexer_server_addr.c_str()};
   client.event_indexer_intro(card)();
+  while (!event->impl()->event_server_connected()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 
-  // TODO(jhumphri): Initialize [RpcServer] for indexer_block_explorer server.
+  // Create the RPC server that the block explorers talk to.
+  RpcServer<IndexerBlockExplorerRpc> block_explorer;
+  CHECK_EQ(block_explorer.start_server(kIndexerBlockExplorerServerPort),
+           uint16_t{kIndexerBlockExplorerServerPort});
+
+  // The indexer is initialized. Now block forever.
+  info("indexer initialization complete.");
+  std::promise<void>().get_future().wait();
+
   return 0;
 }
 
