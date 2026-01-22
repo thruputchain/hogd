@@ -37,6 +37,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"
 #include "types.hh"
@@ -862,7 +863,8 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
     // Look up the transaction events from tx_index
     auto tx_events_result = get_tx_events(tx_hash);
     if (!tx_events_result.has_value()) {
-      error("Failed to look up transaction events for tx_hash {}", tx_hash);
+      error("Failed to look up transaction events for tx_hash {}",
+            HexArray(tx_hash).str());
       continue;
     }
 
