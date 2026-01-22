@@ -73,8 +73,7 @@ create_tx_index_sst_chunk(
                       serialized.size());
 
     // Index by transaction (in tx_index column family)
-    IndexerKeyFormat::make_tx_key(key_buffer, block_height,
-                                  event_log.proposed_tx_hash);
+    IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash);
     entries.emplace_back(key_buffer, value);
   }
 
@@ -761,15 +760,14 @@ IndexDB::log_stats() const
 }
 
 IndexerStatus<TxEventLog>
-IndexDB::get_tx_events(BlockHeight block_height,
-                       SHA256Hash const &tx_hash) const
+IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
   std::string key_buffer;
-  IndexerKeyFormat::make_tx_key(key_buffer, block_height, tx_hash);
+  IndexerKeyFormat::make_tx_key(key_buffer, tx_hash);
   std::string value;
 
   rocksdb::ReadOptions read_options;
@@ -862,10 +860,9 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
     }
 
     // Look up the transaction events from tx_index
-    auto tx_events_result = get_tx_events(block_height, tx_hash);
+    auto tx_events_result = get_tx_events(tx_hash);
     if (!tx_events_result.has_value()) {
-      error("Failed to look up transaction events for block_height={}, tx_hash",
-            block_height);
+      error("Failed to look up transaction events for tx_hash {}", tx_hash);
       continue;
     }
 
