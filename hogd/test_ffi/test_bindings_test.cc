@@ -261,8 +261,7 @@ DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t pk_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  auto msg = sha256(tx);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), msg);
+  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
   return {.public_key_id = pk_id, .signature = sig};
 }
 

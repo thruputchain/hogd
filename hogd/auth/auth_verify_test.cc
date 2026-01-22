@@ -10,6 +10,7 @@
 #include "hogd/crypto/crypto.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -49,7 +50,8 @@ make_signature(SecretKey sk, Transaction const &tx, uint8_t id)
   DecoratedSignature signature;
   signature.public_key_id = id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
-  signature.signature.ed25519() = ed25519_sign(sk.ed25519(), sha256(tx));
+  signature.signature.ed25519() =
+      ed25519_sign(sk.ed25519(), x23::serialize(tx));
   return signature;
 }
 
