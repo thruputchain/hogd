@@ -85,6 +85,9 @@ jobs:
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
+      
+      - name: Setup Environment
+        run: ./scripts/macos-setup.sh
 
       - name: Build Clang Debug
         run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
