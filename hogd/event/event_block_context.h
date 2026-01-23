@@ -18,6 +18,7 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -28,6 +29,9 @@
 #include "x23/corosync.h"
 
 namespace hogd {
+
+using indexer_event_client_t =
+    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 class EventBlockContext {
 public:
@@ -68,6 +72,25 @@ public:
   SHA256Hash get_root_hash();
   void finish_file_write();
   void finish_file(SHA256Hash const &hash);
+
+  x23::Async<void>
+  send_events_to_indexers(std::vector<indexer_event_client_t> &indexers)
+  {
+    std::vector<x23::Async<void>> handles;
+    handles.reserve(indexers.size());
+
+    x23::CoroGuard cg;
+    co_await cg(event_log_lock_);
+    for (indexer_event_client_t &indexer : indexers) {
+      handles.push_back(
+          // TODO(jhumphri): Set the correct block height.
+          indexer.indexer_event_process_events(/*block_height=*/0, event_log_));
+    }
+    for (x23::Async<void> &handle : handles) {
+      co_await handle;
+    }
+    co_return;
+  }
 
 private:
   void write_event(std::span<const uint8_t> data);

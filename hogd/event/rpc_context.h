@@ -19,9 +19,6 @@
 
 namespace hogd {
 
-using indexer_event_client_t =
-    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
 class EventRPCContext {
 public:
   EventRPCContext(std::string_view work_directory)
