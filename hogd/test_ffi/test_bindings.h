@@ -6,6 +6,12 @@ extern "C" {
 
 #include <stdint.h>
 
+// Version constants for test_ffi library
+// These are checked against release tags in CI
+#define TEST_FFI_VERSION_MAJOR 0
+#define TEST_FFI_VERSION_MINOR 1
+#define TEST_FFI_VERSION_PATCH 0
+
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
   // Nullptr passed as an argument
