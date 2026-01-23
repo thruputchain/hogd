@@ -12,7 +12,7 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
-  build-ubuntu-x86:
+  build-linux-x86_64:
     runs-on: namespace-profile-hogd-linux
 
     steps:
@@ -119,8 +119,8 @@ jobs:
           cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-ubuntu-x86_64.tar.gz libtest_ffi.so test_bindings.h
-          sha256sum libtest_ffi-ubuntu-x86_64.tar.gz > libtest_ffi-ubuntu-x86_64.tar.gz.sha256
+          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so test_bindings.h
+          sha256sum libtest_ffi-linux-x86_64.tar.gz > libtest_ffi-linux-x86_64.tar.gz.sha256
 
       - name: Show ccache stats
         if: always()
@@ -129,11 +129,11 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libtest_ffi-ubuntu-x86_64
-          path: release_artifacts/libtest_ffi-ubuntu-x86_64.tar.gz*
+          name: libtest_ffi-linux-x86_64
+          path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
 
   create-release:
-    needs: build-ubuntu-x86
+    needs: build-linux-x86_64
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -166,7 +166,7 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: libtest_ffi-ubuntu-x86_64
+          name: libtest_ffi-linux-x86_64
           path: artifacts
 
       - name: Generate release notes
@@ -191,12 +191,12 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ inputs.tag_name }}
-          name: test_ffi ${{ inputs.tag_name }}
+          name: Bindings for Rust SDK (${{ inputs.tag_name }})
           draft: false
           prerelease: false
           files: |
-            artifacts/libtest_ffi-ubuntu-x86_64.tar.gz
-            artifacts/libtest_ffi-ubuntu-x86_64.tar.gz.sha256
+            artifacts/libtest_ffi-linux-x86_64.tar.gz
+            artifacts/libtest_ffi-linux-x86_64.tar.gz.sha256
           body: |
             ## test_ffi Library Release ${{ inputs.tag_name }}
 
@@ -204,8 +204,8 @@ jobs:
 
             ### Artifacts
 
-            - `libtest_ffi-ubuntu-x86_64.tar.gz` - Shared library (.so) and header file for Ubuntu x86_64
-            - `libtest_ffi-ubuntu-x86_64.tar.gz.sha256` - SHA256 checksum
+            - `libtest_ffi-linux-x86_64.tar.gz` - Shared library (.so) and header file for Linux x86_64
+            - `libtest_ffi-linux-x86_64.tar.gz.sha256` - SHA256 checksum
 
             ### Contents
 
@@ -216,10 +216,10 @@ jobs:
 
             ```bash
             # Extract
-            tar -xzf libtest_ffi-ubuntu-x86_64.tar.gz
+            tar -xzf libtest_ffi-linux-x86_64.tar.gz
 
             # Verify checksum
-            sha256sum -c libtest_ffi-ubuntu-x86_64.tar.gz.sha256
+            sha256sum -c libtest_ffi-linux-x86_64.tar.gz.sha256
             ```
 
             ---
