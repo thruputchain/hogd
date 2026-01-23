@@ -215,6 +215,7 @@ jobs:
 
       - name: Build test_ffi Library
         run: |
+          source ./scripts/macos-env.sh
           make -C build -j$(sysctl -n hw.logicalcpu) test_ffi
 
       - name: Verify Library Built
