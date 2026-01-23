@@ -83,15 +83,6 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
-      - name: Configure Environment
-        run: |
-          ./scripts/macos-env.sh
-
-          # Configure ccache with namespace to avoid contention between parallel jobs
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=clang-debug-macos" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
-
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
