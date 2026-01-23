@@ -1,8 +1,5 @@
 name: C++ CI (Namespace macOS ARM64)
 
-# This workflow uses namespace-profile-hogd-arm64-macos.
-# Only runs on pushes to main branch.
-
 on:
   workflow_dispatch:
   push:
@@ -92,10 +89,11 @@ jobs:
       - name: Build Clang Debug
         run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
 
-      - name: Run Tests
-        run: |
-          cd build/clang
-          ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
+# Disabled, pending manual disable of the winch miscompile and fixes to macos pthread stack size defaults
+#      - name: Run Tests
+#        run: |
+#          cd build/clang
+#          ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
 
       - name: Show ccache stats
         if: always()
