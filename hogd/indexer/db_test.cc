@@ -115,16 +115,18 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   // Lookup first transaction
   auto lookup1 = db->get_tx_events(tx_hash1);
   ASSERT_TRUE(lookup1.has_value());
-  EXPECT_EQ(lookup1->proposed_tx_hash, tx_hash1);
-  EXPECT_EQ(lookup1->events.size(), 1);
-  EXPECT_EQ(lookup1->events[0].contract_address, contract_addr1);
+  EXPECT_EQ(lookup1->first, block_height);
+  EXPECT_EQ(lookup1->second.proposed_tx_hash, tx_hash1);
+  EXPECT_EQ(lookup1->second.events.size(), 1);
+  EXPECT_EQ(lookup1->second.events[0].contract_address, contract_addr1);
 
   // Lookup second transaction
   auto lookup2 = db->get_tx_events(tx_hash2);
   ASSERT_TRUE(lookup2.has_value());
-  EXPECT_EQ(lookup2->proposed_tx_hash, tx_hash2);
-  EXPECT_EQ(lookup2->events.size(), 1);
-  EXPECT_EQ(lookup2->events[0].contract_address, contract_addr2);
+  EXPECT_EQ(lookup2->first, block_height);
+  EXPECT_EQ(lookup2->second.proposed_tx_hash, tx_hash2);
+  EXPECT_EQ(lookup2->second.events.size(), 1);
+  EXPECT_EQ(lookup2->second.events[0].contract_address, contract_addr2);
 
   // Lookup non-existent transaction
   SHA256Hash tx_hash3;

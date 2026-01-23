@@ -18,10 +18,13 @@ public:
     co_return;
   }
 
-  static x23::Async<void>
+  x23::Async<void>
   indexer_event_process_events(BlockHeight block_height,
-                               TxEventLogBatch tx_events)
+                               const TxEventLogBatch &tx_events)
   {
+    // Careful! If we change this function to use [co_await], but sure to copy
+    // the [tx_events] parameter above rather than keep it as a reference.
+    db_.consume_events(block_height, tx_events);
     co_return;
   }
 
