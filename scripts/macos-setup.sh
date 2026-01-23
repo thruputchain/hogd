@@ -41,6 +41,7 @@ BREW_PACKAGES=(
   "snappy"    # Compression (for RocksDB)
   "wabt"      # WebAssembly tools (wat2wasm)
   "binaryen"  # WebAssembly optimizer (wasm-opt)
+  "ccache"    # CCache (for faster builds)
 )
 
 MISSING_PACKAGES=()
