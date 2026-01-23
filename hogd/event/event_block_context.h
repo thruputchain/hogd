@@ -21,9 +21,11 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "indexer.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -82,6 +84,9 @@ private:
   std::unique_ptr<MerkleTriePrefix> trie_;
   std::string work_directory_;
   BlockID block_id_;
+
+  x23::CoroLock event_log_lock_;
+  TxEventLogBatch event_log_;
 
   struct EventContext {
     std::vector<uint8_t> buf;

@@ -12,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
+#include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
@@ -49,6 +50,7 @@ event_init(const std::string &mempool_address,
   // Start the event servers.
   EventRPCContext ctx(work_directory);
   EventExecServer exec_server(ctx);
+  EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
 
   CHECK_EQ(exec_server.start_server(kEventExecutorServerPort),

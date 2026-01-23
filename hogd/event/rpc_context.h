@@ -8,14 +8,19 @@
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
+#include "indexer.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
 
 namespace hogd {
+
+using indexer_event_client_t =
+    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 class EventRPCContext {
 public:
@@ -47,6 +52,14 @@ public:
   // rpc from the executor is in flight.
   x23::Async<void> gc_context(BlockID block_id);
 
+  // Adds an indexer, which the event server will send events to.
+  x23::Async<void> add_indexer(indexer_event_client_t &&indexer)
+  {
+    x23::CoroGuard cg;
+    co_await cg(lock_);
+    indexers_.push_back(std::move(indexer));
+  }
+
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
@@ -73,6 +86,7 @@ private:
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
+  std::vector<indexer_event_client_t> indexers_;
 
   PerThread<ContextCache> cache_;
   std::string work_directory_;
