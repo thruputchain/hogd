@@ -1,8 +1,9 @@
-// large_stack_thread.h - jthread-compatible thread class with configurable stack size
+// large_stack_thread.h - jthread-compatible thread class with configurable
+// stack size
 //
-// On macOS, the default pthread stack size is too small for WebAssembly compilation.
-// This class provides a drop-in replacement for std::jthread that uses pthread APIs
-// to set a larger stack size.
+// On macOS, the default pthread stack size is too small for WebAssembly
+// compilation. This class provides a drop-in replacement for std::jthread that
+// uses pthread APIs to set a larger stack size.
 
 #pragma once
 
@@ -62,8 +63,7 @@ public:
 
   // Move constructor
   LargeStackThread(LargeStackThread &&other) noexcept
-    : thread_(other.thread_),
-      stop_source_(std::move(other.stop_source_)),
+    : thread_(other.thread_), stop_source_(std::move(other.stop_source_)),
       valid_(other.valid_)
   {
     other.valid_ = false;
@@ -103,10 +103,11 @@ private:
   void start_thread(size_t stack_size, Func &&func, Args &&...args)
   {
     // Create a wrapper that captures the function and arguments
-    auto *task = new std::function<void()>([
-      fn = std::forward<Func>(func), stop_token = stop_source_.get_token(),
-      ... args = std::forward<Args>(args)
-    ]() mutable { fn(stop_token, std::forward<Args>(args)...); });
+    auto *task = new std::function<void()>(
+        [fn = std::forward<Func>(func), stop_token = stop_source_.get_token(),
+         ... args = std::forward<Args>(args)]() mutable {
+          fn(stop_token, std::forward<Args>(args)...);
+        });
 
     pthread_attr_t attr;
     int result = pthread_attr_init(&attr);

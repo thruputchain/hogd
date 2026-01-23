@@ -78,9 +78,10 @@ protected:
 TEST_F(Sha2InContractTest, InvokeFFFFF)
 {
 #if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
-  GTEST_SKIP() << "This test is broken on ARM64, due to the winch miscompilation";
-  // TODO(everyone): make sure we deal with this somehow, when hopefully winch gets fixed
-  // or we swap to cranelift.
+  GTEST_SKIP()
+      << "This test is broken on ARM64, due to the winch miscompilation";
+  // TODO(everyone): make sure we deal with this somehow, when hopefully winch
+  // gets fixed or we swap to cranelift.
 #endif
   // This hash computation is performed within the wasm contract
   auto hash_expect = decode_hex(

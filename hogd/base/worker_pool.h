@@ -31,14 +31,15 @@
 
 #ifdef __APPLE__
 #include "hogd/base/large_stack_thread.h"
-#else 
+#else
 #include <thread>
 #endif
 
 namespace hogd {
 
 #ifdef __APPLE__
-// On macOS, use LargeStackThread to set a larger stack size for WASM compilation
+// On macOS, use LargeStackThread to set a larger stack size for WASM
+// compilation
 using WorkerThread = LargeStackThread;
 #else
 // On other platforms, use standard jthread
