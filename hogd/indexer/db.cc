@@ -70,8 +70,10 @@ create_tx_index_sst_chunk(
   for (const auto &event_log : events_chunk) {
     // Serialize the TxEventLog for storage
     auto serialized = x23::serialize(event_log);
-    std::string value(reinterpret_cast<const char *>(serialized.data()),
-                      serialized.size());
+    std::string value(reinterpret_cast<const char *>(&block_height),
+                      sizeof(block_height));
+    value.append(std::string(reinterpret_cast<const char *>(serialized.data()),
+                             serialized.size()));
 
     // Index by transaction (in tx_index column family)
     IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash);
@@ -760,7 +762,7 @@ IndexDB::log_stats() const
   }
 }
 
-IndexerStatus<TxEventLog>
+IndexerStatus<std::pair<BlockHeight, TxEventLog>>
 IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
 {
   if (!is_open()) {
@@ -784,17 +786,21 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
+  // TODO(jhumphri): Support different endianness.
+  BlockHeight block_height = *reinterpret_cast<BlockHeight *>(value.data());
   TxEventLog event_log;
   try {
-    x23::deserialize(&event_log, x23::BufView{reinterpret_cast<const uint8_t *>(
-                                                  value.data()),
-                                              value.size()});
+    CHECK_GE(value.size(), sizeof(BlockHeight));
+    x23::deserialize(&event_log,
+                     x23::BufView{reinterpret_cast<const uint8_t *>(
+                                      value.data() + sizeof(BlockHeight)),
+                                  value.size() - sizeof(BlockHeight)});
   } catch (const x23::XdrBadInput &e) {
     error("Failed to deserialize TxEventLog: {}", e.what());
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  return event_log;
+  return std::make_pair(block_height, event_log);
 }
 
 IndexerStatus<std::vector<IdentifiedEvent>>
@@ -868,7 +874,7 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
       continue;
     }
 
-    const TxEventLog &event_log = *tx_events_result;
+    const TxEventLog &event_log = tx_events_result->second;
 
     // Extract the event at the sequence_number
     if (sequence_number >= event_log.events.size()) {
