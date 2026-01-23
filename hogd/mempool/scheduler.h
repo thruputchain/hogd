@@ -25,8 +25,10 @@ namespace hogd {
 
 class Scheduler {
 public:
-  Scheduler(std::shared_ptr<db_sched_client_t> db_sched_client)
-    : db_sched_client_(std::move(db_sched_client))
+  Scheduler(BlockHeight current_block,
+            std::shared_ptr<db_sched_client_t> db_sched_client)
+    : current_block_(current_block),
+      db_sched_client_(std::move(db_sched_client))
   {}
 
   static x23::Async<void> shut_down() { co_return; }
@@ -108,6 +110,7 @@ public:
   // between them.
   static void cycle_groups(HogAge &current_averages);
 
+  BlockHeight current_block() const { return current_block_; }
   void increment_current_block() { current_block_++; }
   void decrement_current_block() { current_block_--; }
 
