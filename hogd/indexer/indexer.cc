@@ -33,8 +33,14 @@ create_address(uint16_t port)
 int
 indexer_init(const std::string &path, const std::string &event_server_addr)
 {
+  IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(path);
+  if (!db_status) {
+    panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
+  }
+  IndexDB &db = db_status.value();
+
   // Create the RPC server that the event server talks to.
-  RpcServer<IndexerEventRpc> event;
+  RpcServer<IndexerEventRpc> event(db);
   CHECK_EQ(event.start_server(kIndexerEventServerPort),
            uint16_t{kIndexerEventServerPort});
 
@@ -51,7 +57,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
   }
 
   // Create the RPC server that the block explorers talk to.
-  RpcServer<IndexerBlockExplorerRpc> block_explorer;
+  RpcServer<IndexerBlockExplorerRpc> block_explorer(db);
   CHECK_EQ(block_explorer.start_server(kIndexerBlockExplorerServerPort),
            uint16_t{kIndexerBlockExplorerServerPort});
 

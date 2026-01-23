@@ -45,6 +45,21 @@ public:
        rocksdb::CompressionType compression_algorithm =
            rocksdb::CompressionType::kLZ4Compression);
 
+  static IndexerStatus<IndexDB>
+  open_or_make_new(const std::filesystem::path &path,
+                   rocksdb::CompressionType compression_algorithm =
+                       rocksdb::CompressionType::kLZ4Compression)
+  {
+    if (std::filesystem::exists(path)) {
+      // [path] already exists, so open the existing database.
+      return open(path, compression_algorithm);
+    }
+    else {
+      // Nothing exists at [path], so create a new database there.
+      return make_new(path, compression_algorithm);
+    }
+  }
+
   ~IndexDB();
 
   // Delete copy, allow move

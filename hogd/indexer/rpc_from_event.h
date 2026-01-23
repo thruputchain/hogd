@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hogd/indexer/db.h"
 #include "indexer.hh"
 #include "x23/async.h"
 
@@ -8,6 +9,8 @@ namespace hogd {
 class IndexerEventRpc {
 public:
   using rpc_service = IndexerEvent1;
+
+  IndexerEventRpc(IndexDB &db) : db_(db) {}
 
   x23::Async<void> indexer_event_intro()
   {
@@ -28,6 +31,7 @@ public:
   }
 
 private:
+  IndexDB &db_;
   std::atomic<bool> event_server_connected_ = false;
 };
 static_assert(is_IndexerEvent1<IndexerEventRpc *, x23::Async>);
