@@ -70,7 +70,7 @@ create_tx_index_sst_chunk(
   for (const auto &event_log : events_chunk) {
     // Serialize the TxEventLog for storage
     auto serialized = x23::serialize(event_log);
-    std::string value(reinterpret_cast<const char *>(block_height),
+    std::string value(reinterpret_cast<const char *>(&block_height),
                       sizeof(block_height));
     value.append(std::string(reinterpret_cast<const char *>(serialized.data()),
                              serialized.size()));
