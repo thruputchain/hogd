@@ -1,8 +1,5 @@
 name: C++ CI (Namespace macOS ARM64)
 
-# This workflow uses namespace-profile-hogd-arm64-macos.
-# Only runs on pushes to main branch.
-
 on:
   workflow_dispatch:
   push:
@@ -83,25 +80,20 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
-      - name: Configure Environment
-        run: |
-          ./scripts/macos-env.sh
-
-          # Configure ccache with namespace to avoid contention between parallel jobs
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=clang-debug-macos" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
-
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
+      
+      - name: Setup Environment
+        run: ./scripts/macos-setup.sh
 
       - name: Build Clang Debug
         run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
 
-      - name: Run Tests
-        run: |
-          cd build/clang
-          ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
+# Disabled, pending manual disable of the winch miscompile and fixes to macos pthread stack size defaults
+#      - name: Run Tests
+#        run: |
+#          cd build/clang
+#          ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
 
       - name: Show ccache stats
         if: always()
