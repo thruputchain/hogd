@@ -1,12 +1,9 @@
 name: Release test_ffi Library
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Release tag name (e.g., test-ffi-v1.0.0)'
-        required: true
-        type: string
+  push:
+    tags:
+      - 'test-ffi-v*'
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -266,8 +263,8 @@ jobs:
       - name: Verify tag matches version
         run: |
           EXPECTED_TAG="test-ffi-v${{ steps.parse_version.outputs.version }}"
-          if [ "${{ inputs.tag_name }}" != "$EXPECTED_TAG" ]; then
-            echo "Error: Tag name '${{ inputs.tag_name }}' does not match expected tag '$EXPECTED_TAG'"
+          if [ "${{ github.ref_name }}" != "$EXPECTED_TAG" ]; then
+            echo "Error: Tag name '${{ github.ref_name }}' does not match expected tag '$EXPECTED_TAG'"
             echo "Please update version constants in hogd/test_ffi/test_bindings.h or use the correct tag"
             exit 1
           fi
@@ -293,7 +290,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             /repos/${{ github.repository }}/releases/generate-notes \
-            -f tag_name='${{ inputs.tag_name }}' \
+            -f tag_name='${{ github.ref_name }}' \
             --jq '.body')
 
           # Save to multiline output
@@ -306,8 +303,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ inputs.tag_name }}
-          name: Bindings for Rust SDK (${{ inputs.tag_name }})
+          tag_name: ${{ github.ref_name }}
+          name: Bindings for Rust SDK (${{ github.ref_name }})
           draft: false
           prerelease: false
           files: |
@@ -316,7 +313,7 @@ jobs:
             artifacts/libtest_ffi-macos-arm64.tar.gz
             artifacts/libtest_ffi-macos-arm64.tar.gz.sha256
           body: |
-            ## test_ffi Library Release ${{ inputs.tag_name }}
+            ## test_ffi Library Release ${{ github.ref_name }}
 
             FFI library for testing hogd contracts.
 
