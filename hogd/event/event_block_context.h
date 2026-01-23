@@ -74,7 +74,8 @@ public:
   void finish_file(SHA256Hash const &hash);
 
   x23::Async<void>
-  send_events_to_indexers(std::vector<indexer_event_client_t> &indexers)
+  send_events_to_indexers(BlockHeight block_height,
+                          std::vector<indexer_event_client_t> &indexers)
   {
     std::vector<x23::Async<void>> handles;
     handles.reserve(indexers.size());
@@ -83,8 +84,7 @@ public:
     co_await cg(event_log_lock_);
     for (indexer_event_client_t &indexer : indexers) {
       handles.push_back(
-          // TODO(jhumphri): Set the correct block height.
-          indexer.indexer_event_process_events(/*block_height=*/0, event_log_));
+          indexer.indexer_event_process_events(block_height, event_log_));
     }
     for (x23::Async<void> &handle : handles) {
       co_await handle;

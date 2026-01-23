@@ -42,7 +42,7 @@ TEST_F(EventRpcTest, BasicUsage)
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{})(),
             RPCError::kRPCNone);
 
-  auto result = mempool_rpc.eventsched_close_block(1)();
+  auto result = mempool_rpc.eventsched_close_block(1, 1)();
   EXPECT_EQ(result.error(), RPCError::kRPCNone);
 
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
@@ -79,7 +79,7 @@ TEST_F(EventRpcTest, TestEmptyBlock)
   EventMempoolRpc mempool_rpc(ctx);
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
-  EXPECT_EQ(mempool_rpc.eventsched_close_block(1)().error(),
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(1, 1)().error(),
             RPCError::kRPCNone);
 }
 
@@ -107,7 +107,7 @@ TEST_F(EventRpcTest, TestFromRPC)
 
   EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
-  EXPECT_EQ(mempool_client.eventsched_close_block(0).error(),
+  EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
             RPCError::kRPCNone);
 }
 

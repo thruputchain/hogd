@@ -179,7 +179,9 @@ NativeContractTestFramework::open_event_block(BlockID block_id)
 void
 NativeContractTestFramework::close_event_block(BlockID block_id)
 {
-  auto r = event_sched_wrapper_->client().eventsched_close_block(block_id);
+  // We use [block_id] as the height as well.
+  auto r =
+      event_sched_wrapper_->client().eventsched_close_block(block_id, block_id);
   if (r.error() != RPCError::kRPCNone) {
     throw std::runtime_error(
         "close_event_block: eventsched_close_block failed");

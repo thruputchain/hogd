@@ -37,7 +37,8 @@ public:
   // Closes a block.
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
-  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id);
+  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
+                                                  BlockHeight block_height);
 
   // Abandons a block.
   // Returns an error if the block is not open.

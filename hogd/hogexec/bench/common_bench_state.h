@@ -159,7 +159,9 @@ private:
   }
   void close_event_block(BlockID block_number)
   {
-    auto r = event_sched_client_->eventsched_close_block(block_number);
+    // We use [block_number] as the height as well.
+    auto r =
+        event_sched_client_->eventsched_close_block(block_number, block_number);
     if (r.error() != RPCError::kRPCNone) {
       throw std::runtime_error("Failed to close event block");
     }

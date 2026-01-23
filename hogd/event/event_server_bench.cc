@@ -204,7 +204,9 @@ run_event_bench(const std::string &exec_server_addr,
 
   // Close block
   auto close_start = x23::fastclock::get_ns();
-  auto close_res = event_sched_client.eventsched_close_block(block_number)();
+  // We use [block_number] as the height as well.
+  auto close_res =
+      event_sched_client.eventsched_close_block(block_number, block_number)();
   if (close_res.error() != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close block");
   }
@@ -294,7 +296,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   for (size_t i = 0; i < 20; i++) {
     hogd::run_event_bench(exec_server_addr, sched_server_addr, num_events,
-                          num_connections, coros_per_connection, i);
+                          num_connections, coros_per_connection,
+                          /*block_number=*/i);
   }
 
   std::fflush(stdout);

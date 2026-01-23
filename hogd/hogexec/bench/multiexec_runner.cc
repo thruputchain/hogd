@@ -246,7 +246,9 @@ close_block(db_sched_client_t &db_sched_client,
       }
     }(exec_client, block_number, n_remaining_execs, cb);
   }
-  auto event_async = event_sched_client.eventsched_close_block(block_number);
+  // We use [block_number] as the height as well.
+  auto event_async =
+      event_sched_client.eventsched_close_block(block_number, block_number);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
