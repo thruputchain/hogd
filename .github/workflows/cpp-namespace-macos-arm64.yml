@@ -89,11 +89,10 @@ jobs:
       - name: Build Clang Debug
         run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
 
-# Disabled, pending manual disable of the winch miscompile and fixes to macos pthread stack size defaults
-#      - name: Run Tests
-#        run: |
-#          cd build/clang
-#          ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
+      - name: Run Tests
+        run: |
+          cd build/clang
+          ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
 
       - name: Show ccache stats
         if: always()
