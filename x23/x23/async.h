@@ -252,7 +252,17 @@ public:
     // it has no work associated with it, meaning it's not an Async
     // and you haven't turned it into a CoroCB.  Otherwise, you could
     // destroy the Awaitable while it's in use by another thread.
-    x23assert(!flags());
+#ifndef NDEBUG
+    if (flags()) {
+      auto tr = trace(this, 4);
+      if (auto sz = tr.size())
+        // Trim newline as panic will add one
+        tr.resize(sz - 1);
+      panic("Premature destruction of a running Awaitable or Async\n"
+            "  Trace of destroyed Awaitable:\n{}",
+            tr);
+    }
+#endif // !NDEBUG
   }
 
   //
@@ -391,7 +401,10 @@ private:
     std::exception_ptr exception_;
   };
 
-  unsigned flags() const { return flags_.load(std::memory_order_relaxed); }
+  unsigned flags() const noexcept
+  {
+    return flags_.load(std::memory_order_relaxed);
+  }
 
   std::coroutine_handle<> non_null_caller()
   {
