@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <sys/socket.h>
+#include <vector>
 
 #include "coord_sched.hh"
 #include "db_sched.hh"
@@ -14,10 +16,15 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "loadgen.hh"
+#include "parallel.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
+#include "transaction.hh"
+#include "x23/async.h"
 #include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -106,7 +113,7 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     handles.push_back([](const ChunkRange &chunk, const ParallelBatch &parallel,
                          x23::XdrVec<T> &objs,
                          const std::vector<size_t> &byte_offsets,
-                         const std::vector<size_t> &obj_offsets)
+                         const std::vector<size_t> &obj_offsets) noexcept
                           -> x23::Async<bool> {
       co_await default_coropoll().pool_.bg();
 
@@ -169,7 +176,7 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
     handles.push_back([](const ChunkRange &chunk, size_t i,
                          ParallelBatch &parallel,
                          x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
-                         x23::span<T> &objs) -> x23::Async<void> {
+                         x23::span<T> &objs) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
 
       parallel.segment_tokens[i] = chunk.end - chunk.start;
