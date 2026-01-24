@@ -11,6 +11,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
