@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <expected>
+#include <format>
+#include <stdexcept>
 #include <sys/socket.h>
 #include <system_error>
 #include <thread>
@@ -35,6 +37,7 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
         warn_every_n_sec(5.0F, "RPC client is not ready");
         continue;
       }
+      error("could not create RPC client on {}: {}", x23::show_ipaddr(ss), res.error().error_code().message());
       throw std::runtime_error(
           std::format("could not create RPC client on {}: {}",
                       x23::show_ipaddr(ss),
