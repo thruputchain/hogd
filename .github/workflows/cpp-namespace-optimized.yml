@@ -271,6 +271,14 @@ jobs:
 
       - name: Run Tests
         run: |
+          ulimit -c unlimited
+          ulimit -a
+          sudo mkdir -p /cores
+          sudo chmod 1777 /cores
+          sudo sysctl -w kernel.core_pattern=/cores/%e.%p.%h.%t
+          sysctl kern.corefile
+          defaults write com.apple.CrashReporter DialogType none
+          
           cd build/llvm
           ctest --output-on-failure --parallel $(nproc) --timeout 100
 
