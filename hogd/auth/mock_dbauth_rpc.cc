@@ -7,6 +7,7 @@
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/types.h"
+#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {

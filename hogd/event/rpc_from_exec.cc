@@ -2,7 +2,6 @@
 
 #include "event.hh"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
