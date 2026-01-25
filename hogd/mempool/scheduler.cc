@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <exception>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -446,23 +447,48 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
   handles.reserve(kNumThreads);
-  for (size_t i = 0; i < kNumThreads; i++) {
-    handles.push_back([](size_t coro_idx, const HogsTransferred *transfers,
-                         size_t deltas_per_thread,
-                         Scheduler *scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * deltas_per_thread;
-      size_t possible_end = (coro_idx + 1) * deltas_per_thread;
-      size_t end = std::min(possible_end, transfers->deltas.size());
-      for (size_t delta_idx = start; delta_idx < end; delta_idx++) {
-        scheduler->process_transfers_helper(transfers->deltas[delta_idx],
-                                            transfers->block);
-      }
-      co_return;
-    }(/*coro_idx=*/i, &transfers, deltas_per_thread, this));
+
+  // Capture any exception during handle creation so we can await all handles
+  // before rethrowing. This prevents destroying coroutine frames that are
+  // still queued/running in the thread pool.
+  std::exception_ptr creation_exception;
+  try {
+    for (size_t i = 0; i < kNumThreads; i++) {
+      handles.push_back([](size_t coro_idx, const HogsTransferred *transfers,
+                           size_t deltas_per_thread,
+                           Scheduler *scheduler) noexcept -> x23::Async<void> {
+        co_await default_coropoll().pool_.bg();
+        size_t start = coro_idx * deltas_per_thread;
+        size_t possible_end = (coro_idx + 1) * deltas_per_thread;
+        size_t end = std::min(possible_end, transfers->deltas.size());
+        for (size_t delta_idx = start; delta_idx < end; delta_idx++) {
+          scheduler->process_transfers_helper(transfers->deltas[delta_idx],
+                                              transfers->block);
+        }
+        co_return;
+      }(/*coro_idx=*/i, &transfers, deltas_per_thread, this));
+    }
+  } catch (...) {
+    creation_exception = std::current_exception();
+    error("Exception thrown while creating process_transfers handles. "
+          "Created {} of {} handles. This should not happen.",
+          handles.size(), kNumThreads);
   }
+
+  // Await all handles, even if exception occurred during creation.
+  // This ensures we don't destroy coroutine frames that are still running.
   for (x23::Async<void> &handle : handles) {
-    co_await handle;
+    try {
+      co_await handle;
+    } catch (...) {
+      panic("Exception from noexcept child coroutine in process_transfers.  "
+            "Should be impossible");
+    }
+  }
+
+  // Rethrow the creation exception if one occurred
+  if (creation_exception) {
+    std::rethrow_exception(creation_exception);
   }
 }
 
