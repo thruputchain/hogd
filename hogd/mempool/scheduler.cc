@@ -685,7 +685,7 @@ Scheduler::remove_from_scheduler(
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
 
-  for (size_t i = 0; i < chunks.size(); i++) {
+  for (auto i : chunks) {
     handles.push_back([](const ChunkRange &chunk,
                          x23::span<const SignedTransactionHash> tx_hashes,
                          SynchronizedMap<ContractAddress, char> &accounts,
@@ -732,7 +732,7 @@ Scheduler::remove_from_scheduler(
       }
 
       co_return num_removed_from_runqueue;
-    }(chunks[i], tx_hashes, accounts, validated_block, *this));
+    }(i, tx_hashes, accounts, validated_block, *this));
   }
   size_t total_removed_from_runqueue = 0;
   // There may be fewer chunks that [kNumThreads], so we iterate through the

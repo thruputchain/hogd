@@ -1,4 +1,5 @@
 
+#include "auth_claim.hh"
 #include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 

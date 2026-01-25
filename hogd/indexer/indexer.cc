@@ -1,15 +1,21 @@
 #include <chrono>
+#include <cstdlib>
+#include <format>
 #include <future>
 #include <print>
 #include <string>
+#include <thread>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/types.h"
+#include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/shared.h"
+#include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "indexer.hh"
@@ -72,6 +78,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
 
 } // namespace hogd
 
+// NOLINTBEGIN(bugprone-exception-escape)
 int
 main(int argc, char *argv[])
 {
@@ -90,3 +97,5 @@ main(int argc, char *argv[])
   const std::string event_server_addr = argv[2];
   return hogd::indexer_init(path, event_server_addr);
 };
+
+// NOLINTEND(bugprone-exception-escape)
