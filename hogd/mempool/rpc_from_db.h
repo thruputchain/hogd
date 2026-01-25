@@ -4,7 +4,6 @@
 #include <utility>
 
 #include "db_sched.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -12,9 +11,7 @@
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
-#include "rpc_types.hh"
 #include "sched_db.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/format.h"
@@ -74,7 +71,10 @@ public:
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
-    cg.reset();
+    // @geoff to @jhumphri: Do we need the cg = nullptr here? The cg gets
+    // dropped automatically by going out of scope at the end of the function
+    // body
+    cg = nullptr; // cg.reset(); but CoroGuard also has a reset() method
   }
 
   x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
