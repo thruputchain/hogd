@@ -242,4 +242,77 @@ private:
   constexpr static int64_t kUninitializedValue = 0;
 };
 
+// RAII wrapper on PerThreadARC references.
+// Used to make sure that the PerThreadARC reference is released and never
+// forgotten. Does not trigger release_reference() in the destructor; instead,
+// will debug assert if the reference is not released.
+// (this is so that the release method can return the boolean regarding
+// whether other garbage collection should be triggered.)
+
+template<typename T> class PerThreadARCRef {
+public:
+  explicit PerThreadARCRef(PerThreadARC<T> *arc)
+    : arc_(arc), active_(arc != nullptr)
+  {}
+
+  // copy is disabled
+  PerThreadARCRef(const PerThreadARCRef &other) = delete;
+  PerThreadARCRef &operator=(const PerThreadARCRef &other) = delete;
+
+  // Move constructor
+  PerThreadARCRef(PerThreadARCRef &&other) noexcept
+    : arc_(other.arc_), active_(other.active_)
+  {
+    other.active_ = false;
+  }
+
+  // Move assignment
+  PerThreadARCRef &operator=(PerThreadARCRef &&other) noexcept
+  {
+    if (this != &other) {
+      arc_ = other.arc_;
+      active_ = other.active_;
+      other.active_ = false;
+    }
+    return *this;
+  }
+
+  ~PerThreadARCRef() { assert(!active_); }
+
+  // Pointer-like dereference operators
+  T &operator*()
+  {
+    assert(arc_);
+    return arc_->get();
+  }
+  const T &operator*() const
+  {
+    assert(arc_);
+    return arc_->get();
+  }
+  T *operator->()
+  {
+    assert(arc_);
+    return &arc_->get();
+  }
+  const T *operator->() const
+  {
+    assert(arc_);
+    return &arc_->get();
+  }
+
+  operator bool() const { return arc_ != nullptr; }
+
+  bool release_reference()
+  {
+    assert(arc_);
+    active_ = false;
+    return arc_->release_reference();
+  }
+
+private:
+  PerThreadARC<T> *arc_;
+  bool active_;
+};
+
 } // namespace hogd

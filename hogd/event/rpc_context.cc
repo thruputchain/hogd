@@ -118,7 +118,7 @@ EventRPCContext::gc_context_internal(
   event_block_contexts_.erase(it);
 }
 
-x23::Async<PerThreadARC<EventBlockContext> *>
+x23::Async<PerThreadARCRef<EventBlockContext>>
 EventRPCContext::get_context(BlockID block_id)
 {
   {
@@ -139,10 +139,11 @@ EventRPCContext::get_context(BlockID block_id)
     }
     // Return after releasing cache_->mtx_.
     if (found) {
-      co_return ctx;
+      co_return PerThreadARCRef<EventBlockContext>(ctx);
     }
   }
-  co_return co_await get_context_slow(block_id);
+  auto *ctx = co_await get_context_slow(block_id);
+  co_return PerThreadARCRef<EventBlockContext>(ctx);
 }
 
 x23::Async<PerThreadARC<EventBlockContext> *>

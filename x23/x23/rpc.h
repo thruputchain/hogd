@@ -119,7 +119,7 @@
 namespace x23 {
 
 struct RpcService {
-  virtual ~RpcService() {}
+  virtual ~RpcService() = default;
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
   virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd args) = 0;
