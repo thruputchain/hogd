@@ -1,6 +1,5 @@
 #include "hogd/event/event_block_context.h"
 
-#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
