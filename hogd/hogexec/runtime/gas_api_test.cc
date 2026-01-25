@@ -3,7 +3,6 @@
 #include <memory>
 #include <utility>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"

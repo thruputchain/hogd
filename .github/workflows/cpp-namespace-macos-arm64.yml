@@ -92,6 +92,16 @@ jobs:
       - name: Run Tests
         run: |
           echo "::warning::Known issue: Sha2InContractTest.InvokeFFFFF is broken on ARM64 due to winch miscompilation. The test will be skipped automatically."
+          
+          # Enable core dumps for debugging
+          ulimit -c unlimited
+          ulimit -a
+          sudo mkdir -p /cores
+          sudo chmod 1777 /cores
+          sudo sysctl -w kern.coredump=1
+          sysctl kern.coredump
+          defaults write com.apple.CrashReporter DialogType none
+          
           cd build/clang
           ctest --output-on-failure --parallel $(sysctl -n hw.logicalcpu) --timeout 100
 

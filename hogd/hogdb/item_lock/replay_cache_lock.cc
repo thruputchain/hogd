@@ -1,8 +1,10 @@
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <ranges>
 #include <span>

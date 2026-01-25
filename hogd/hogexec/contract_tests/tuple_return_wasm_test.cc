@@ -373,6 +373,8 @@ protected:
   std::unique_ptr<MultiplexedContext> multiplexed_context_;
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 //
 // Test existing basic two-element tuple.
 //
@@ -928,5 +930,7 @@ TEST_F(TupleReturnWasmTest, NestedEverything)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

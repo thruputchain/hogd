@@ -1,20 +1,13 @@
 #pragma once
 
 #include <cassert>
-#include <optional>
 
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/genesis/genesis_configuration.h"
-#include "nomination.hh"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 

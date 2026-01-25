@@ -18,6 +18,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "types.hh"

@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
+
 namespace hogd {
 
 class InstantiateTest : public ::testing::TestWithParam<WasmEngine>,

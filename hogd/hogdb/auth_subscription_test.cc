@@ -9,6 +9,7 @@
 
 #include "address_auth.hh"
 #include "auth_card.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/perthread_arc.h"

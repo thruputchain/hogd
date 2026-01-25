@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/init.h"

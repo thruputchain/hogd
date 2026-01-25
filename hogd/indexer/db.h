@@ -54,10 +54,8 @@ public:
       // [path] already exists, so open the existing database.
       return open(path, compression_algorithm);
     }
-    else {
-      // Nothing exists at [path], so create a new database there.
-      return make_new(path, compression_algorithm);
-    }
+    // Nothing exists at [path], so create a new database there.
+    return make_new(path, compression_algorithm);
   }
 
   ~IndexDB();

@@ -13,7 +13,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {

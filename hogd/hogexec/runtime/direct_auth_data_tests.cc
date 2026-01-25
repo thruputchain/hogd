@@ -1,10 +1,11 @@
-#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"

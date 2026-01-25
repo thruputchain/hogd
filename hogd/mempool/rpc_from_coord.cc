@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <ctime>
 #include <future>
@@ -21,6 +22,7 @@
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/allocator.h"
@@ -28,7 +30,9 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/mempool/shared.h"
 #include "nomination.hh"
+#include "parallel.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -507,10 +511,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   ElapsedTimer timer;
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::chrono::steady_clock::duration delta = end - last;
+  std::chrono::steady_clock::duration delta = end - last_;
+  // NOLINTNEXTLINE(modernize-use-auto):
   std::chrono::milliseconds delta_raw =
       std::chrono::duration_cast<std::chrono::milliseconds>(delta);
-  long long delta_count = delta_raw.count();
+  int64_t delta_count = delta_raw.count();
   info("NOMINATE, delta = {}", delta_count);
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
@@ -520,7 +525,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
     info("ret");
-    last = std::chrono::steady_clock::now();
+    last_ = std::chrono::steady_clock::now();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -579,7 +584,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
     info("ret");
-    last = std::chrono::steady_clock::now();
+    last_ = std::chrono::steady_clock::now();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -603,7 +608,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
   info("nominate() took {}", timer.elapsed());
-  last = std::chrono::steady_clock::now();
+  last_ = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
 }
 
@@ -782,16 +787,17 @@ x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::chrono::steady_clock::duration delta = end - last;
+  std::chrono::steady_clock::duration delta = end - last_;
+  // NOLINTNEXTLINE(modernize-use-auto):
   std::chrono::milliseconds delta_raw =
       std::chrono::duration_cast<std::chrono::milliseconds>(delta);
-  long long delta_count = delta_raw.count();
+  int64_t delta_count = delta_raw.count();
   info("schedulercoord_commit_block, delta = {}", delta_count);
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
     info("schedulercoord_commit_block ret");
-    last = std::chrono::steady_clock::now();
+    last_ = std::chrono::steady_clock::now();
     co_return SchedulerCommitOutcome::SchedulerCommitRace;
   }
   x23::CoroGuard nominate_cg;
@@ -803,7 +809,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     info("schedulercoord_commit_block ret");
-    last = std::chrono::steady_clock::now();
+    last_ = std::chrono::steady_clock::now();
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
 
@@ -891,7 +897,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   nominated_block_cache_.block_id = 0;
   validated_block_cache_.clear();
   info("schedulercoord_commit_block ret");
-  last = std::chrono::steady_clock::now();
+  last_ = std::chrono::steady_clock::now();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 

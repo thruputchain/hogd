@@ -6,12 +6,15 @@
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 

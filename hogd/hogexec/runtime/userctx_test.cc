@@ -2,7 +2,6 @@
 
 #include <gtest/gtest.h>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"

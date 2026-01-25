@@ -447,19 +447,19 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   std::vector<x23::Async<void>> handles;
   handles.reserve(kNumThreads);
   for (size_t i = 0; i < kNumThreads; i++) {
-    handles.push_back([](size_t coro_idx, const HogsTransferred &transfers,
+    handles.push_back([](size_t coro_idx, const HogsTransferred *transfers,
                          size_t deltas_per_thread,
-                         Scheduler &scheduler) noexcept -> x23::Async<void> {
+                         Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
       size_t start = coro_idx * deltas_per_thread;
       size_t possible_end = (coro_idx + 1) * deltas_per_thread;
-      size_t end = std::min(possible_end, transfers.deltas.size());
+      size_t end = std::min(possible_end, transfers->deltas.size());
       for (size_t delta_idx = start; delta_idx < end; delta_idx++) {
-        scheduler.process_transfers_helper(transfers.deltas[delta_idx],
-                                           transfers.block);
+        scheduler->process_transfers_helper(transfers->deltas[delta_idx],
+                                            transfers->block);
       }
       co_return;
-    }(/*coro_idx=*/i, transfers, deltas_per_thread, *this));
+    }(/*coro_idx=*/i, &transfers, deltas_per_thread, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -685,8 +685,9 @@ Scheduler::remove_from_scheduler(
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
 
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
-    handles.push_back([](const ChunkRange &chunk,
+    handles.push_back([](const ChunkRange *chunk,
                          x23::span<const SignedTransactionHash> tx_hashes,
                          SynchronizedMap<ContractAddress, char> &accounts,
                          bool validated_block,
@@ -694,7 +695,7 @@ Scheduler::remove_from_scheduler(
       co_await default_coropoll().pool_.bg();
 
       x23::span<const SignedTransactionHash> hash_chunk(
-          tx_hashes.begin() + chunk.start, tx_hashes.begin() + chunk.end);
+          tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
       size_t num_removed_from_runqueue = 0;
       for (const SignedTransactionHash &tx_hash : hash_chunk) {
         if (validated_block) {
@@ -732,7 +733,7 @@ Scheduler::remove_from_scheduler(
       }
 
       co_return num_removed_from_runqueue;
-    }(chunks[i], tx_hashes, accounts, validated_block, *this));
+    }(&chunks[i], tx_hashes, accounts, validated_block, *this));
   }
   size_t total_removed_from_runqueue = 0;
   // There may be fewer chunks that [kNumThreads], so we iterate through the

@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include "hogd/base/types.h"
+#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {

@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "address_auth.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"

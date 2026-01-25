@@ -8,7 +8,7 @@
 #include <span>
 #include <string_view>
 
-#include "address_auth.hh"
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/runtime.h"
