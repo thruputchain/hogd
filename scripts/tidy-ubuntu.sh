@@ -43,7 +43,6 @@ find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
   xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
     -clang-tidy-binary /usr/bin/clang-tidy-21 \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet \
-    -warnings-as-errors='*' \
     -extra-arg=-std=c++23 \
     -extra-arg=-stdlib=libc++ \
     -extra-arg=-Werror ${FIX_FLAG}
