@@ -2,6 +2,7 @@
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"

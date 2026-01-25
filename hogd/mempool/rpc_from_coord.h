@@ -25,6 +25,7 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "nomination.hh"
+#include "parallel.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "scheduler.h"
