@@ -6,7 +6,6 @@
 #include <string_view>
 #include <utility>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
