@@ -13,7 +13,7 @@
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "types.hh"
+#include "rpc_types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
 

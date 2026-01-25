@@ -52,7 +52,7 @@ public:
   // do not want that setup when using loadgen.
   template<typename SchedCoordClient>
   DbTip init_experiment(SchedCoordClient &sched_coord_client,
-                        CoordinatorSchedRpc &/*coord_sched_rpc*/,
+                        CoordinatorSchedRpc & /*coord_sched_rpc*/,
                         uint32_t num_accounts)
   {
     // Initialize the experiment.

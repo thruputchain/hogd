@@ -5,6 +5,7 @@
 #include <span>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -15,7 +16,6 @@
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/testlock.h"
 

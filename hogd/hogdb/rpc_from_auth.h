@@ -10,7 +10,6 @@
 #include "types.hh"
 #include "x23/async.h"
 
-
 namespace hogd {
 
 class HogDBAuthRpc {
