@@ -1,12 +1,12 @@
 #include "hogd/event/event_block_context.h"
 
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <type_traits>
 #include <unistd.h>
@@ -15,13 +15,13 @@
 #include <version>
 
 #include "event.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
@@ -62,11 +62,8 @@ EventBlockContext::get_root_hash()
 }
 
 void
-EventBlockContext::sync_file(std::unique_lock<std::mutex> &ul)
+EventBlockContext::sync_file(x23::CoroGuard const & /*unused*/)
 {
-  assert(ul.owns_lock());
-  assert(ul.mutex() == &file_mutex_);
-
   assert(events_file_);
   if (fsync(events_file_.get()) != 0) {
     panic("failed to fsync events file: {}", strerror(errno));
@@ -74,12 +71,9 @@ EventBlockContext::sync_file(std::unique_lock<std::mutex> &ul)
 }
 
 void
-EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
+EventBlockContext::rename_file(x23::CoroGuard const & /*unused*/,
                                SHA256Hash const &hash)
 {
-  assert(ul.owns_lock());
-  assert(ul.mutex() == &file_mutex_);
-
   auto old_name = temp_events_filename(work_directory_, block_id_);
   auto new_name = final_events_filename(work_directory_, hash);
   int rc = std::rename(old_name.c_str(), new_name.c_str());
@@ -87,6 +81,56 @@ EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
     panic("failed to rename events file '{}' to '{}': {}", old_name, new_name,
           strerror(errno));
   }
+}
+
+x23::Detached
+EventBlockContext::flush_buffer_async()
+{
+  using buf_t = std::decay_t<decltype(buffers_->buf)>;
+
+  // If we're going to extract from the buffer, we need to make sure the finish
+  // logic isn't running
+
+  buf_t buf;
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    buf = std::move(buffers_->buf);
+    buffers_->buf.clear();
+    pending_write_count_++;
+  }
+
+  co_await get_threadpool().bg();
+
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+
+    if (state_ == BlockState::kAbandoned) {
+      // nothing to do, just decrement the pending writes count
+      if (--pending_write_count_ == 0) {
+        all_writes_done_.store(true);
+        all_writes_done_.broadcast();
+      }
+      co_return;
+    }
+
+    if (state_ == BlockState::kFinished) {
+      panic("attempted to flush buffer after block has begun shutting down");
+    }
+
+    auto r = x23::fullwrite(events_file_, x23::BufView(buf));
+    if (!r) [[unlikely]] {
+      panic("failed to write events to file: {}", r.error());
+    }
+    if (--pending_write_count_ == 0) {
+      all_writes_done_.store(true);
+      all_writes_done_.broadcast();
+    }
+  }
+  // buf clear is out of the critical section holding the lock
+  buf.clear();
+  co_return;
 }
 
 void
@@ -100,44 +144,43 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
   buffers_->event_count++;
 
   if (buffers_->buf.size() >= kBufferThreshold) {
-    using buf_t = std::decay_t<decltype(buffers_->buf)>;
-    pending_writes_++;
-    [](buf_t buf, EventBlockContext *self) -> x23::Detached {
-      auto *pool = x23::ThreadPool::get_thread_pool();
-      if (!pool) {
-        pool = &default_threadpool();
-      }
-      co_await pool->bg();
-      // make sure the vector free is out of the critical section holding the
-      // lock
-      {
-        std::lock_guard lock(self->file_mutex_);
-        auto r = x23::fullwrite(self->events_file_, x23::BufView(buf));
-        if (!r) [[unlikely]] {
-          panic("failed to write events to file: {}", r.error());
-        }
-        if (self->pending_writes_.fetch_sub(1) == 1) {
-          self->file_cv_.notify_one();
-        }
-      }
-      co_return;
-    }(std::move(buffers_->buf), this);
-    buffers_->buf.clear();
+    flush_buffer_async();
   }
 }
 
-void
+x23::Async<void>
+EventBlockContext::await_pending_writes_done()
+{
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    assert(state_ != BlockState::kActive);
+    if (pending_write_count_ == 0) {
+      co_return;
+    }
+  }
+  co_await all_writes_done_.wait(false);
+}
+
+x23::Async<void>
 EventBlockContext::finish_file_write()
 {
   auto ts = x23::fastclock::now();
 
-  std::unique_lock<std::mutex> file_ul;
   size_t total_bytes = 0;
 
   {
-    file_ul = std::unique_lock<std::mutex>(file_mutex_);
-    file_cv_.wait(file_ul, [this] { return pending_writes_ == 0; });
+    x23::CoroGuard g;
+    co_await g(lock_);
+    state_ = BlockState::kFinished;
+  }
 
+  co_await await_pending_writes_done();
+
+  x23::CoroGuard g;
+  co_await g(lock_);
+
+  {
     auto ul = buffers_.lock_threads();
 
     buffers_.for_each(ul, [this, &total_bytes](EventContext &context) {
@@ -152,27 +195,40 @@ EventBlockContext::finish_file_write()
   auto ts3 = x23::fastclock::now();
   info("time to write events: {} ns total bytes at end: {}", ts3 - ts,
        total_bytes);
-  assert(file_ul.owns_lock());
 
-  sync_file(file_ul);
+  sync_file(g);
   auto ts4 = x23::fastclock::now();
   info("time to sync {} ns,", ts4 - ts3);
 }
 
-void
+x23::Async<void>
 EventBlockContext::finish_file(SHA256Hash const &hash)
 {
-  std::unique_lock<std::mutex> file_ul(file_mutex_);
+  x23::CoroGuard g;
+  co_await g(lock_);
   auto ts4 = x23::fastclock::now();
-  rename_file(file_ul, hash);
+  rename_file(g, hash);
   auto ts5 = x23::fastclock::now();
   info("time to rename file: {} ns", ts5 - ts4);
 }
 
+x23::Async<void>
+EventBlockContext::await_abandon()
+{
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    state_ = BlockState::kAbandoned;
+  }
+  co_await await_pending_writes_done();
+  co_return;
+}
+
 EventBlockContext::~EventBlockContext()
 {
-  std::unique_lock ul(file_mutex_);
-  file_cv_.wait(ul, [this] { return pending_writes_ == 0; });
+  assert(state_ != BlockState::kActive);
+  assert(pending_write_count_ == 0);
+
   trie_.reset();
 }
 

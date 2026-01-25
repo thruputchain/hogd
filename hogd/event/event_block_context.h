@@ -2,12 +2,10 @@
 
 #include <atomic>
 #include <cerrno>
-#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -15,15 +13,21 @@
 #include <vector>
 
 #include "event.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/node.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/corosync.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -64,12 +68,22 @@ public:
 
   void add_event(TxEventLog const &event);
   SHA256Hash get_root_hash();
-  void finish_file_write();
-  void finish_file(SHA256Hash const &hash);
+  x23::Async<void> finish_file_write();
+  x23::Async<void> finish_file(SHA256Hash const &hash);
+
+  x23::Async<void> await_abandon();
 
 private:
   void write_event(std::span<const uint8_t> data);
-  void sync_file(std::unique_lock<std::mutex> &ul);
+
+  // Flush the current thread's buffer to the file.
+  // WILL PANIC if the block has begun shutting down
+  // (i.e. if finish_file_write() has been called).
+  // That would indicate a race between the block finishing
+  // and a call to add_event().  We must synchronize those calls,
+  // so that we do not nondeterministically exclude events from the block.
+  x23::Detached flush_buffer_async();
+  void sync_file(x23::CoroGuard const &g);
   // The rename is slow if there's already a file of the same hash.
   // (the time to delete the previous file).
   // In actual practice, it should be impossible for this to occur,
@@ -77,7 +91,18 @@ private:
   // unless multiple replicas make the exact same nomination.  We could deal
   // with this edge case if this becomes a problem, but I suspect this will not
   // matter significantly.
-  void rename_file(std::unique_lock<std::mutex> &ul, SHA256Hash const &hash);
+  void rename_file(x23::CoroGuard const & /*unused*/, SHA256Hash const &hash);
+
+  static x23::ThreadPool &get_threadpool()
+  {
+    auto *threadpool = x23::ThreadPool::get_thread_pool();
+    if (!threadpool) {
+      threadpool = &default_threadpool();
+    }
+    return *threadpool;
+  }
+
+  x23::Async<void> await_pending_writes_done();
 
   std::unique_ptr<MerkleTriePrefix> trie_;
   std::string work_directory_;
@@ -90,9 +115,18 @@ private:
 
   PerThread<EventContext> buffers_;
 
-  std::atomic<size_t> pending_writes_{0};
-  std::mutex file_mutex_;
-  std::condition_variable file_cv_;
+  enum class BlockState : int32_t {
+    kActive,
+    kAbandoned,
+    kFinished,
+  };
+
+  x23::CoroLock lock_;
+  BlockState state_ = BlockState::kActive;
+  uint32_t pending_write_count_ = 0;
+
+  x23::CoroFutex<bool> all_writes_done_ = false;
+
   x23::UniqueFd events_file_;
 };
 
