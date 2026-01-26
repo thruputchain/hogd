@@ -134,13 +134,14 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
   if (buffers_->buf.size() >= kBufferThreshold) {
     std::decay_t<decltype(buffers_->buf)> buf;
     {
-      // By the time this coroutine returns, pending_write_count_ will have been incremented
-      // or the state_ has already been set as kAbandoned or kFinishing and we do not spawn 
-      // a new detached coroutine
+      // By the time this coroutine returns, pending_write_count_ will have been
+      // incremented or the state_ has already been set as kAbandoned or
+      // kFinishing and we do not spawn a new detached coroutine
       x23::CoroGuard g;
       co_await g(lock_);
       if (state_ != BlockState::kActive) {
-        x23assert(state_ == BlockState::kAbandoned || state_ == BlockState::kFinishing);
+        x23assert(state_ == BlockState::kAbandoned ||
+                  state_ == BlockState::kFinishing);
         co_return;
       }
       buf = std::move(buffers_->buf);
@@ -160,7 +161,8 @@ EventBlockContext::await_pending_writes_done()
     {
       x23::CoroGuard g;
       co_await g(lock_);
-      x23assert(looped || state_ == BlockState::kActive || state_ == BlockState::kAbandoned);
+      x23assert(looped || state_ == BlockState::kActive ||
+                state_ == BlockState::kAbandoned);
       state_ = BlockState::kFinishing;
       looped = true;
       if (pending_write_count_ == 0) {
