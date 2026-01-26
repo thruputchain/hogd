@@ -114,9 +114,16 @@ private:
 
   PerThread<EventContext> buffers_;
 
+  // State transitions:
+  // kActive -> kFinishing -> kFinished
+  // kActive -> kAbandoned
+  //
+  // Finishing or Abandoned signals the add_event method
+  // to stop dispatching async event writes.
   enum class BlockState : int32_t {
     kActive,
     kAbandoned,
+    kFinishing,
     kFinished,
   };
 

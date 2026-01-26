@@ -94,6 +94,9 @@ EventBlockContext::flush_buffer_async()
   {
     x23::CoroGuard g;
     co_await g(lock_);
+    if (state_ == BlockState::kAbandoned || state_ == BlockState::kFinishing) {
+      co_return;
+    }
     buf = std::move(buffers_->buf);
     buffers_->buf.clear();
     pending_write_count_++;
@@ -150,28 +153,33 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 x23::Async<void>
 EventBlockContext::await_pending_writes_done()
 {
-  {
-    x23::CoroGuard g;
-    co_await g(lock_);
-    assert(state_ == BlockState::kActive || state_ == BlockState::kAbandoned);
-    if (pending_write_count_ == 0) {
-      co_return;
+  while (true) {
+    {
+      x23::CoroGuard g;
+      co_await g(lock_);
+      assert(state_ == BlockState::kActive || state_ == BlockState::kAbandoned);
+      if (pending_write_count_ == 0) {
+        if (state_ == BlockState::kActive) {
+          state_ = BlockState::kFinishing;
+        }
+        co_return;
+      }
     }
+    co_await all_writes_done_.wait(false);
   }
-  co_await all_writes_done_.wait(false);
 }
 
 x23::Async<void>
 EventBlockContext::finish_file_write()
 {
   auto ts = x23::fastclock::now();
-
   size_t total_bytes = 0;
 
   co_await await_pending_writes_done();
 
   x23::CoroGuard g;
   co_await g(lock_);
+  assert(state_ == BlockState::kFinishing);
   state_ = BlockState::kFinished;
 
   {
