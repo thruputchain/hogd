@@ -28,8 +28,12 @@ public:
 
   ~MempoolDbRpc()
   {
-    auto cg = std::make_unique<x23::CoroGuard>();
-    co_await (*cg)(scheduler_lock_);
+    // We need to acquire [scheduler_lock_] with [cg], but doing
+    // [cg(scheduler_lock_)()] results in a compiler error.
+    [&]() -> x23::Async<void> {
+      x23::CoroGuard cg;
+      co_await cg(scheduler_lock_);
+    }()();
   }
 
   // Disable copy and move.
