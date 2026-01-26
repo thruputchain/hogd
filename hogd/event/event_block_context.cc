@@ -156,15 +156,15 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 x23::Async<void>
 EventBlockContext::await_pending_writes_done()
 {
+  bool looped = false;
   while (true) {
     {
       x23::CoroGuard g;
       co_await g(lock_);
-      assert(state_ == BlockState::kActive || state_ == BlockState::kAbandoned);
+      x23assert(looped || state_ == BlockState::kActive || state_ == BlockState::kAbandoned);
+      state_ = BlockState::kFinishing;
+      looped = true;
       if (pending_write_count_ == 0) {
-        if (state_ == BlockState::kActive) {
-          state_ = BlockState::kFinishing;
-        }
         co_return;
       }
     }
@@ -182,7 +182,7 @@ EventBlockContext::finish_file_write()
 
   x23::CoroGuard g;
   co_await g(lock_);
-  assert(state_ == BlockState::kFinishing);
+  x23assert(state_ == BlockState::kFinishing);
   state_ = BlockState::kFinished;
 
   {
