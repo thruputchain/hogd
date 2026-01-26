@@ -26,6 +26,12 @@ public:
 
   MempoolDbRpc() = default;
 
+  ~MempoolDbRpc()
+  {
+    auto cg = std::make_unique<x23::CoroGuard>();
+    co_await (*cg)(scheduler_lock_);
+  }
+
   // Disable copy and move.
   MempoolDbRpc(const MempoolDbRpc &) = delete;
   MempoolDbRpc &operator=(const MempoolDbRpc &) = delete;
