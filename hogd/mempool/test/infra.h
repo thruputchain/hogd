@@ -316,9 +316,9 @@ private:
 
   // The mempool servers.
   // We keep the [mempool_coord_server_] declaration below the various
-  // database-related declarations above so that it is destructed first. We
-  // want the database RPC server and its backend to be running so that the
-  // mempool can flush its cache.
+  // database-related declarations above so that it is destructed first. We want
+  // the database RPC server and its backend to be running so that the mempool
+  // can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
