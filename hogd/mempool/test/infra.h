@@ -161,6 +161,8 @@ public:
     return *coordinator_sched_server_->impl();
   }
 
+  MempoolDbRpc &mempool_db_rpc() { return *sched_db_server_->impl(); }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
@@ -316,9 +318,9 @@ private:
 
   // The mempool servers.
   // We keep the [mempool_coord_server_] declaration below the various
-  // database-related declarations above so that it is destructed first. We want
-  // the database RPC server and its backend to be running so that the mempool
-  // can flush its cache.
+  // database-related declarations above so that it is destructed first. We
+  // want the database RPC server and its backend to be running so that the
+  // mempool can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());

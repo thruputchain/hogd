@@ -117,8 +117,11 @@ public:
     // TODO(jhumphri): Implement.
   }
 
-private:
+  // Tests may call [scheduler_->process_transfers()] directly, so we expose
+  // [scheduler_lock_] publicly so the tests can acquire the lock.
   x23::CoroLock scheduler_lock_;
+
+private:
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
