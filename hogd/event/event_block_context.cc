@@ -153,7 +153,7 @@ EventBlockContext::await_pending_writes_done()
   {
     x23::CoroGuard g;
     co_await g(lock_);
-    assert(state_ != BlockState::kActive);
+    assert(state_ == BlockState::kActive || state_ == BlockState::kAbandoned);
     if (pending_write_count_ == 0) {
       co_return;
     }
@@ -168,16 +168,11 @@ EventBlockContext::finish_file_write()
 
   size_t total_bytes = 0;
 
-  {
-    x23::CoroGuard g;
-    co_await g(lock_);
-    state_ = BlockState::kFinished;
-  }
-
   co_await await_pending_writes_done();
 
   x23::CoroGuard g;
   co_await g(lock_);
+  state_ = BlockState::kFinished;
 
   {
     auto ul = buffers_.lock_threads();
