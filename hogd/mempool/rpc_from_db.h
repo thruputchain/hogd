@@ -52,10 +52,7 @@ public:
     co_return;
   }
 
-  // We mark [transfers] as a const reference because we copy it when passing it
-  // to [handle_transfer] below. If we change this in the future, then we may
-  // want to remove the const reference.
-  x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
+  x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
   {
     auto cg = std::make_unique<x23::CoroGuard>();
     co_await (*cg)(scheduler_lock_);
