@@ -26,16 +26,6 @@ public:
 
   MempoolDbRpc() = default;
 
-  ~MempoolDbRpc()
-  {
-    // We need to acquire [scheduler_lock_] with [cg], but doing
-    // [cg(scheduler_lock_)()] results in a compiler error.
-    [&]() -> x23::Async<void> {
-      x23::CoroGuard cg;
-      co_await cg(scheduler_lock_);
-    }()();
-  }
-
   // Disable copy and move.
   MempoolDbRpc(const MempoolDbRpc &) = delete;
   MempoolDbRpc &operator=(const MempoolDbRpc &) = delete;
@@ -124,11 +114,8 @@ public:
     // TODO(jhumphri): Implement.
   }
 
-  // Tests may call [scheduler_->process_transfers()] directly, so we expose
-  // [scheduler_lock_] publicly so the tests can acquire the lock.
-  x23::CoroLock scheduler_lock_;
-
 private:
+  x23::CoroLock scheduler_lock_;
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);

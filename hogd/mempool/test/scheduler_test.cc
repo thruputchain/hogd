@@ -150,13 +150,7 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
       Delta{.address = account,
             .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
 
-  // We need to acquire [scheduler_lock_] with [cg], but doing
-  // [cg(scheduler_lock_)()] results in a compiler error.
-  [&]() -> x23::Async<void> {
-    x23::CoroGuard cg;
-    co_await cg(server.mempool_db_rpc().scheduler_lock_);
-    co_await scheduler->process_transfers(transfer);
-  }()();
+  scheduler->process_transfers(transfer)();
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
@@ -183,13 +177,7 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
   transfer.deltas.push_back(
       Delta{.address = account, .hog_delta = to_xdr(delta_value)});
 
-  // We need to acquire [scheduler_lock_] with [cg], but doing
-  // [cg(scheduler_lock_)()] results in a compiler error.
-  [&]() -> x23::Async<void> {
-    x23::CoroGuard cg;
-    co_await cg(server.mempool_db_rpc().scheduler_lock_);
-    co_await scheduler->process_transfers(transfer);
-  }()();
+  scheduler->process_transfers(transfer)();
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),

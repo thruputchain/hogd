@@ -161,8 +161,6 @@ public:
     return *coordinator_sched_server_->impl();
   }
 
-  MempoolDbRpc &mempool_db_rpc() { return *sched_db_server_->impl(); }
-
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
