@@ -80,7 +80,7 @@ TEST_F(EventBlockContextTest, Test)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
 
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -106,7 +106,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -123,7 +123,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_EQ(hash, hash2);
@@ -148,7 +148,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -165,7 +165,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                  .events = {TxEmittedEvent{
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_NE(hash, hash2);
@@ -193,7 +193,7 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
 
   // Abandon the block - this should wait for any pending writes to complete
   context.await_abandon()();
@@ -206,7 +206,7 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address2"},
                      .serialized_event = {4, 5, 6},
-                 }}});
+                 }}})();
 
   // Verify the context can be destroyed without issues
   // (destructor asserts state is not kActive and pending_writes is 0)

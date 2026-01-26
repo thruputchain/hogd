@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <type_traits>
 #include <vector>
 
 #include "event.hh"
@@ -65,7 +66,7 @@ public:
 
   ~EventBlockContext();
 
-  void add_event(TxEventLog const &event);
+  x23::Async<void> add_event(TxEventLog const &event);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
@@ -73,7 +74,7 @@ public:
   x23::Async<void> await_abandon();
 
 private:
-  void write_event(std::span<const uint8_t> data);
+  x23::Async<void> write_event(std::span<const uint8_t> data);
 
   // Flush the current thread's buffer to the file.
   // WILL PANIC if the block has begun shutting down
@@ -81,7 +82,7 @@ private:
   // That would indicate a race between the block finishing
   // and a call to add_event().  We must synchronize those calls,
   // so that we do not nondeterministically exclude events from the block.
-  x23::Detached flush_buffer_async();
+  x23::Detached flush_buffer_async(std::vector<uint8_t> buf);
   void sync_file(x23::CoroGuard const &g);
   // The rename is slow if there's already a file of the same hash.
   // (the time to delete the previous file).

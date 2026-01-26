@@ -16,7 +16,7 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
     co_return RPCError::kRPCBadBlockID;
   }
 
-  context->add_event(event_log);
+  co_await context->add_event(event_log);
 
   if (context.release_reference()) [[unlikely]] {
     co_await ctx_.gc_context(block_id);

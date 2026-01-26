@@ -66,7 +66,7 @@ TEST_F(EventRpcTest, TestAbandonBlock)
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
             RPCError::kRPCNone);
 
-  tx_ctx->add_event(TxEventLog{});
+  tx_ctx->add_event(TxEventLog{})();
 
   ASSERT_TRUE(tx_ctx.release_reference());
   ctx.gc_context(1)();

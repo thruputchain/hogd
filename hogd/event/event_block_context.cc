@@ -34,7 +34,7 @@ constexpr static size_t kBufferThreshold = 500_KiB;
 
 // TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
 
-void
+x23::Async<void>
 EventBlockContext::add_event(TxEventLog const &event)
 {
   static PerThread<x23::Buf> serialize_buf;
@@ -50,7 +50,7 @@ EventBlockContext::add_event(TxEventLog const &event)
   auto key = data.subspan(0, 32);
   auto value = data.subspan(32);
 
-  write_event(std::span(*serialize_buf));
+  co_await write_event(std::span(*serialize_buf));
   CHECK(trie_->insert_or_update(key, value));
 }
 
@@ -84,25 +84,8 @@ EventBlockContext::rename_file(x23::CoroGuard const & /*unused*/,
 }
 
 x23::Detached
-EventBlockContext::flush_buffer_async()
+EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
 {
-  using buf_t = std::decay_t<decltype(buffers_->buf)>;
-
-  // If we're going to extract from the buffer, we need to make sure the finish
-  // logic isn't running
-
-  buf_t buf;
-  {
-    x23::CoroGuard g;
-    co_await g(lock_);
-    if (state_ != BlockState::kActive) {
-      co_return;
-    }
-    buf = std::move(buffers_->buf);
-    buffers_->buf.clear();
-    pending_write_count_++;
-  }
-
   co_await get_threadpool().bg();
 
   {
@@ -138,7 +121,7 @@ EventBlockContext::flush_buffer_async()
   co_return;
 }
 
-void
+x23::Async<void>
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
 #if __cpp_lib_containers_ranges >= 202202L
@@ -149,7 +132,23 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
   buffers_->event_count++;
 
   if (buffers_->buf.size() >= kBufferThreshold) {
-    flush_buffer_async();
+    std::decay_t<decltype(buffers_->buf)> buf;
+    {
+      // By the time this coroutine returns, pending_write_count_ will have been incremented
+      // or the state_ has already been set as kAbandoned or kFinishing and we do not spawn 
+      // a new detached coroutine
+      x23::CoroGuard g;
+      co_await g(lock_);
+      if (state_ != BlockState::kActive) {
+        x23assert(state_ == BlockState::kAbandoned || state_ == BlockState::kFinishing);
+        co_return;
+      }
+      buf = std::move(buffers_->buf);
+      buffers_->buf.clear();
+      pending_write_count_++;
+    }
+
+    flush_buffer_async(std::move(buf));
   }
 }
 
