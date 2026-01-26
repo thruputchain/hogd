@@ -21,6 +21,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
@@ -94,7 +95,7 @@ EventBlockContext::flush_buffer_async()
   {
     x23::CoroGuard g;
     co_await g(lock_);
-    if (state_ == BlockState::kAbandoned || state_ == BlockState::kFinishing) {
+    if (state_ != BlockState::kActive) {
       co_return;
     }
     buf = std::move(buffers_->buf);
@@ -120,6 +121,7 @@ EventBlockContext::flush_buffer_async()
     if (state_ == BlockState::kFinished) {
       panic("attempted to flush buffer after block has begun shutting down");
     }
+    x23assert(state_ == BlockState::kActive || state_ == BlockState::kFinishing);
 
     auto r = x23::fullwrite(events_file_, x23::BufView(buf));
     if (!r) [[unlikely]] {
