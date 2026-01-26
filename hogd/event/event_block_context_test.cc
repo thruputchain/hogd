@@ -66,8 +66,8 @@ namespace {
 void
 finish_file(EventBlockContext &context)
 {
-  context.finish_file_write();
-  context.finish_file(context.get_root_hash());
+  context.finish_file_write()();
+  context.finish_file(context.get_root_hash())();
 }
 
 } // namespace
@@ -80,7 +80,7 @@ TEST_F(EventBlockContextTest, Test)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
 
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -106,7 +106,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -123,7 +123,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_EQ(hash, hash2);
@@ -148,7 +148,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -165,7 +165,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                  .events = {TxEmittedEvent{
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
-                 }}});
+                 }}})();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_NE(hash, hash2);
@@ -180,6 +180,36 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 
   EXPECT_NE(EventBlockContext::final_events_filename(temp_dir_, hash),
             EventBlockContext::final_events_filename(temp_dir_, hash2));
+}
+
+// Test that abandoning a block and then trying to write an event doesn't crash
+TEST_F(EventBlockContextTest, AbandonThenAddEvent)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Add an initial event to potentially trigger async buffer flushing
+  context.add_event(
+      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event1"))),
+                 .events = {TxEmittedEvent{
+                     .contract_address = {"test_address"},
+                     .serialized_event = {1, 2, 3},
+                 }}})();
+
+  // Abandon the block - this should wait for any pending writes to complete
+  context.await_abandon()();
+
+  // Try to add an event after abandoning - this shouldn't crash
+  // The event won't be written to the file (since state is kAbandoned),
+  // but it should still update the trie and not panic
+  context.add_event(
+      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event2"))),
+                 .events = {TxEmittedEvent{
+                     .contract_address = {"test_address2"},
+                     .serialized_event = {4, 5, 6},
+                 }}})();
+
+  // Verify the context can be destroyed without issues
+  // (destructor asserts state is not kActive and pending_writes is 0)
 }
 
 } // namespace hogd
