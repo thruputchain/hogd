@@ -53,7 +53,7 @@ endif()
 message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
 message(STATUS "GIT_COMMIT_HASH: ${GIT_COMMIT_HASH}")
 
-set(USE_NDEBUG OFF CACHE BOOL)
+set(USE_NDEBUG OFF CACHE BOOL "Use NDEBUG for no asserts in release builds")
 
 if (USE_NDEBUG)
   if (CMAKE_BUILD_TYPE STREQUAL "Debug")
