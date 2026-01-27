@@ -53,6 +53,10 @@ endif()
 message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
 message(STATUS "GIT_COMMIT_HASH: ${GIT_COMMIT_HASH}")
 
+set(USE_NDEBUG OFF CACHE BOOL)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  message(FATAL_ERROR "Do not use NDEBUG with Debug builds")
+endif()
 # Handle configuration options
 #if(NOT CMAKE_BUILD_TYPE)
 #  set(CMAKE_BUILD_TYPE Release)
@@ -210,10 +214,10 @@ set(WITH_CORE_TOOLS OFF CACHE BOOL "" FORCE)
 set(ROCKSDB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(FAIL_ON_WARNINGS OFF CACHE BOOL "" FORCE)
 # Performance optimizations
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(USE_NDEBUG)
   set(USE_RTTI OFF CACHE BOOL "" FORCE)
 else()
-  # Required in debug builds: rocksdb uses dynamic_cast in assertions.
+  # Required in builds with asserts: rocksdb uses dynamic_cast in assertions.
   set(USE_RTTI ON CACHE BOOL "" FORCE)
 endif()
 
