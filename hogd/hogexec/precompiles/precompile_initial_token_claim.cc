@@ -29,10 +29,21 @@
 
 namespace hogd {
 
-
-
-std::unique_ptr<NativeContract> make_native_initial_token_claim_contract()
+std::unique_ptr<NativeContract>
+make_native_initial_token_claim_contract()
 {
-    return nullptr;
+  NativeContractBuilder builder;
+
+  builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
+      [](SystemCallHandler &handler, NativeRuntime &runtime,
+         ContractAddress contract_address, ContractAddress token_address,
+         ContractEntrypointID method,
+         x23::Vec<uint8_t, 4294967295> calldata) -> InvokeStatus<void> {
+        trace("initial token claim claim_initial_tokens");
+        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+      });
+
+  assert(builder.check_methods<initial_token_claim::InitialTokenClaim>());
+  return builder.build();
 }
 } // namespace hogd
