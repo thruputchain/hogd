@@ -93,7 +93,7 @@ is_debug_build()
 // See:
 // https://akrzemi1.wordpress.com/2017/05/18/asserts-in-constexpr-functions/
 // https://github.com/abseil/abseil-cpp/blob/master/absl/base/macros.h
-#ifndef DEBUG
+#ifdef NDEBUG
 #define ASSERT_CONSTEXPR(x)                                                    \
   (false ? static_cast<void>(x) : static_cast<void>(0))
 #else
