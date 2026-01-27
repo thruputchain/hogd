@@ -14,7 +14,7 @@ namespace hogd {
 
 // Convert between generated FFI types and C++ types
 //
-// Note that the generated FFI types may come from a contract, 
+// Note that the generated FFI types may come from a contract,
 // which are NOT TRUSTED.  Therefore, any possibly fallible method
 // that converts to C++ types must be infallible.
 
@@ -24,7 +24,8 @@ static_assert(std::is_trivially_copyable_v<ContractAddress>);
 template<typename T> struct FFIHelperType;
 
 template<> struct FFIHelperType<generated::AuthClaim> {
-  static std::optional<AuthClaim> to_cpp(generated::AuthClaim const &ffi_auth_claim)
+  static std::optional<AuthClaim>
+  to_cpp(generated::AuthClaim const &ffi_auth_claim)
   {
     AuthClaim auth_claim;
 
@@ -64,9 +65,10 @@ template<> struct FFIHelperType<generated::AuthClaim> {
                                  .other_address_signed_weight.required_weight,
       };
       return auth_claim;
-    // TODO(geoff): Implement PubkeySignature
+      // TODO(geoff): Implement PubkeySignature
     }
-    error("Unknown auth claim type: {}", static_cast<int32_t>(ffi_auth_claim.tag));
+    error("Unknown auth claim type: {}",
+          static_cast<int32_t>(ffi_auth_claim.tag));
     return std::nullopt;
   }
 
