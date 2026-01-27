@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/precompile_initial_token_claim.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
