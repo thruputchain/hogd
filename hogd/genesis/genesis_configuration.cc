@@ -38,7 +38,7 @@ make_native_contract(HogexecPrecompiledNativeContracts contract_id)
 {
   auto out = std::make_shared<Contract>();
   out->contract_type(ContractType::kNative);
-  out->native_contract_id() = std::to_underlying(contract_id);
+  out->native_contract_id() = contract_id;
   return out;
 }
 

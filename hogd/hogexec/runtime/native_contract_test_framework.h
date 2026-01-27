@@ -18,9 +18,6 @@
 #include <utility>
 #include <variant>
 
-#include "x23/format.h"
-#include "x23/x23.h"
-
 #include "contract.hh"
 #include "db_sched.hh"
 #include "event.hh"
@@ -48,16 +45,19 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
+#include "precompiles.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -353,7 +353,8 @@ public:
   static auto make_native_contract(int32_t contract_id)
   {
     auto contract = std::make_shared<Contract>(ContractType::kNative);
-    contract->native_contract_id() = contract_id;
+    contract->native_contract_id() =
+        static_cast<HogexecPrecompiledNativeContracts>(contract_id);
     return contract;
   }
 

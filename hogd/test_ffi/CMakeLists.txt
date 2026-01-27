@@ -29,7 +29,6 @@ target_link_libraries(
   auth
   runtime_test_util
 )
-add_dependencies(test_ffi all_wasm_contracts)
 
 add_executable(
   test_ffi_test

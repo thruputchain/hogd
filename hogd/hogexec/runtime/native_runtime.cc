@@ -62,7 +62,7 @@ NativeContext::make_new_runtime(
 
   auto host_index = contract.value()->native_contract_id();
 
-  auto it = contracts_.find(host_index);
+  auto it = contracts_.find(std::to_underlying(host_index));
   if (it == contracts_.end()) {
     warn("Attempt made to access a native contract that is not defined: {}",
          host_index);
