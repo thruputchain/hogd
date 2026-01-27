@@ -53,6 +53,13 @@ endif()
 message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
 message(STATUS "GIT_COMMIT_HASH: ${GIT_COMMIT_HASH}")
 
+set(USE_NDEBUG OFF CACHE BOOL "Use NDEBUG for no asserts in release builds")
+
+if (USE_NDEBUG)
+  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(FATAL_ERROR "Do not use NDEBUG with Debug builds")
+  endif()
+endif()
 # Handle configuration options
 #if(NOT CMAKE_BUILD_TYPE)
 #  set(CMAKE_BUILD_TYPE Release)
@@ -80,10 +87,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
   link_libraries(atomic) # needed for std::atomic<int128_t>
 endif()
+
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
-set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
+set(CMAKE_C_FLAGS_RELEASE "-O3")
+if (USE_NDEBUG)
+  set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
+endif()
+
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+if (USE_NDEBUG)
+  set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+endif()
 
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
@@ -210,10 +225,10 @@ set(WITH_CORE_TOOLS OFF CACHE BOOL "" FORCE)
 set(ROCKSDB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(FAIL_ON_WARNINGS OFF CACHE BOOL "" FORCE)
 # Performance optimizations
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(USE_NDEBUG)
   set(USE_RTTI OFF CACHE BOOL "" FORCE)
 else()
-  # Required in debug builds: rocksdb uses dynamic_cast in assertions.
+  # Required in builds with asserts: rocksdb uses dynamic_cast in assertions.
   set(USE_RTTI ON CACHE BOOL "" FORCE)
 endif()
 

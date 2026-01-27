@@ -82,7 +82,7 @@ prefetch(const void *addr)
 constexpr bool
 is_debug_build()
 {
-#ifndef NDEBUG
+#ifdef DEBUG
   return true;
 #else
   return false;
