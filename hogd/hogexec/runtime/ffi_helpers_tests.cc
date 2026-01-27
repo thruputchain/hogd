@@ -51,6 +51,14 @@ TEST(FFIHelpers, AuthClaimRoundtrip)
   ASSERT_EQ(a, *b);
 }
 
+TEST(FFIHelpers, AuthClaimInvalid)
+{
+  generated::AuthClaim ffi_auth_claim;
+  ffi_auth_claim.tag = static_cast<generated::AuthClaim::Tag>(-1);
+  auto b = FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
+  ASSERT_FALSE(b.has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
