@@ -20,6 +20,7 @@
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "precompiles.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
@@ -234,7 +235,8 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   Address addr3 = make_address(kAddress + 2);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 1;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(1);
 
   ASSERT_TRUE(
       db_.write_address_metadata(addr,

@@ -99,7 +99,7 @@ jobs:
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -n
+          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
 
       - name: Build test_ffi Library
         run: |
@@ -208,7 +208,7 @@ jobs:
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -n
+          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
 
       - name: Build test_ffi Library
         run: |
