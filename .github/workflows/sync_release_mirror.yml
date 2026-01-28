@@ -2,7 +2,8 @@ name: Sync groundhog-dev release mirror
 
 on:
   workflow_dispatch:
-  cron: "0 14 * * *" # Daily at 6am PST
+  schedule:
+    - cron: "0 14 * * *" # Daily at 6am PST
   workflow_run:
     workflows: [release_test_ffi]
     types: [completed]
