@@ -1,0 +1,21 @@
+name: Sync groundhog-dev release mirror
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  sync:
+    permissions:
+      contents: read
+    runs-on: hog1
+
+    steps:
+      #gh already supplies GITHUB_TOKEN, which has permissions to read artifacts
+      - name: Sync release mirror
+        run: ./scripts/sync_release_mirror.sh
+          
+
+
