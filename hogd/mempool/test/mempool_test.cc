@@ -536,17 +536,18 @@ TEST(Mempool, AuthChanged)
     decorated_signatures.list.push_back(make_signature(sk, auth_tx.tx, 0));
     auth_tx.signatures.push_back(decorated_signatures);
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted({auth_tx})();
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batcj({auth_tx}))();
   }
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(txs))();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  nomination = res_nominate.nominated_block().nomination;
   EXPECT_EQ(nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
@@ -560,8 +561,12 @@ TEST(Mempool, AuthChanged)
   res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
-  nomination = server.coord_sched_rpc().get_nomination()().nomination;
-  EXPECT_TRUE(nomination.transaction_hashes.empty());
+  nomination = res_nominate.nominated_block().nomination;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_TRUE(tx_hashes.empty());
+  }
 
   // Check that if we resubmit [txs], they are all discarded.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
