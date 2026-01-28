@@ -14,7 +14,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
-set(ARCH_FLAGS "-march=native" CACHE STRING "Architecture flags")
+set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 # Enable WASM debug backtraces (preserves function names in stack traces)
 # When OFF (default): builds release WASMs, minimal size, no backtraces
 # When ON: builds debug WASMs with name section for useful backtraces
@@ -66,8 +66,8 @@ if(ENABLE_TEST_FFI)
 endif()
 
 # Set up compiler flags for release and debug build types
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g ${ARCH_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g ${ARCH_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
