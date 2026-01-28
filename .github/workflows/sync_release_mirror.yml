@@ -2,22 +2,29 @@ name: Sync groundhog-dev release mirror
 
 on:
   workflow_dispatch:
-
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  cron: "0 14 * * *" # Daily at 6am PST
+  workflow_run:
+    workflows: [release_test_ffi]
+    types: [completed]
 
 jobs:
   sync:
     permissions:
       contents: read
+    # run if manually triggered or if the release_test_ffi workflow completed successfully
+    if: github.event_name != 'workflow_run' || github.event.workflow.conclusion == 'success'
     runs-on: hog1
 
-
     steps:
+      - name: Clear .gitconfig
+        run: |
+          echo "Cleaning up .gitconfig"
+          rm -f /home/hogci/.gitconfig
       - name: Checkout code
         uses: actions/checkout@v4
-      #gh already supplies GITHUB_TOKEN, which has permissions to read artifacts
       - name: Sync release mirror
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/sync_release_mirror.sh
           
 

@@ -13,8 +13,8 @@ set -e
 
 : "${GITHUB_TOKEN:?Error: GITHUB_TOKEN environment variable is not set.}"
 
-REPOSITORY="groundhogchain/hogd.git"
-MIRROR_PATH="/hogd/hog12/www/builds/test_ffi"
+REPOSITORY="groundhogchain/hogd"
+MIRROR_PATH="/home/hog12/www/builds/test_ffi"
 # --- End of Configuration ---
 
 # --- Prerequisite Check ---
