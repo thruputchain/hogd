@@ -10,9 +10,13 @@ env:
 
 jobs:
   build-linux-x86_64:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: hog1
 
     steps:
+      - name: Clean up .gitconfig
+        run: |
+            echo "Cleaning up .gitconfig"
+            rm -f /home/hogci/.gitconfig
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
         with:
@@ -36,71 +40,14 @@ jobs:
             ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
-      - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+      - uses: actions/checkout@v4
         with:
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-
-      - name: Initialize Submodules
-        run: git submodule update --init --recursive
-
-      - name: Configure Environment
-        run: |
-          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
-          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
-          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
-          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
-          echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
-          chmod u+x ./scripts/conf.sh
-
-          # Configure ccache
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=test-ffi-release" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
-
-      - name: Cargo Fetch
-        run: ./scripts/fetch.sh
+          submodules: recursive
+      - uses: ./.github/actions/prepare_env
 
       - name: Configure Build
         run: |
-          sudo apt-get install -y libclang-rt-21-dev
-          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
+          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
 
       - name: Build test_ffi Library
         run: |
@@ -209,7 +156,7 @@ jobs:
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
+          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
 
       - name: Build test_ffi Library
         run: |
