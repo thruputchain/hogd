@@ -14,6 +14,11 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
+# Enable WASM debug backtraces (preserves function names in stack traces)
+# When OFF (default): builds release WASMs, minimal size, no backtraces
+# When ON: builds debug WASMs with name section for useful backtraces
+option(WASM_DEBUG_BACKTRACES "Enable WASM debug backtraces with function names" OFF)
 # Enable logging of build failures to a file
 # This is used to track build failures in CI,
 # so that we can see what failed more easily (without info buried under pages of logs).
@@ -61,8 +66,8 @@ if(ENABLE_TEST_FFI)
 endif()
 
 # Set up compiler flags for release and debug build types
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=native")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=native")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
@@ -76,10 +81,19 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
   link_libraries(atomic) # needed for std::atomic<int128_t>
 endif()
+
+message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
+message(STATUS "Using CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+
+message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
+message(STATUS "Using CMAKE_C_FLAGS_RELEASE: ${CMAKE_C_FLAGS_RELEASE}")
+message(STATUS "Using CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
+message(STATUS "Using CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)

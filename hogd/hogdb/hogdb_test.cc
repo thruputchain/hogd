@@ -8,7 +8,6 @@
 #include <utility>
 
 // xdr types
-#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -21,8 +20,10 @@
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "precompiles.hh"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -234,7 +235,8 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   Address addr3 = make_address(kAddress + 2);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 1;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(1);
 
   ASSERT_TRUE(
       db_.write_address_metadata(addr,
@@ -256,10 +258,10 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
       DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(addr), -100000,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(addr2), 100000,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
 
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr3,
@@ -269,10 +271,10 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   CHECK(cost < 100000); // for the test, given the above constant
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(addr3), -cost,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(addr3), cost,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   invoke_tx.commit();
@@ -405,10 +407,10 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   constexpr int128_t kTransferAmount = 50000;
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(sender_addr), -kTransferAmount,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(recipient_addr), kTransferAmount,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
 
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   invoke_tx.commit();
@@ -458,10 +460,10 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 
     ASSERT_TRUE(invoke_tx1.request_nnint128(
         make_address_balance_item_key(sender_addr), -kFirstTransferAmount,
-        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
     ASSERT_TRUE(invoke_tx1.request_nnint128(
         make_address_balance_item_key(recipient_addr), kFirstTransferAmount,
-        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
 
     ASSERT_TRUE(invoke_tx1.sync_balance_locks());
     invoke_tx1.commit();
@@ -475,10 +477,10 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 
     ASSERT_TRUE(invoke_tx2.request_nnint128(
         make_address_balance_item_key(sender_addr), -kSecondTransferAmount,
-        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
     ASSERT_TRUE(invoke_tx2.request_nnint128(
         make_address_balance_item_key(recipient_addr), kSecondTransferAmount,
-        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
 
     ASSERT_TRUE(invoke_tx2.sync_balance_locks());
     invoke_tx2.commit();

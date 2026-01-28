@@ -5,7 +5,8 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -38,11 +39,11 @@ make_deletion_change()
   return Deletion();
 }
 
-AccountAuthData
+AddressAuthData
 make_base_auth_data(
     std::unordered_map<uint32_t, PublicKeyConfigOpt> public_keys)
 {
-  AccountAuthData base_auth_data{};
+  AddressAuthData base_auth_data{};
   for (auto &[key_id, pk] : public_keys) {
     base_auth_data.public_keys[key_id] = std::move(pk);
   }

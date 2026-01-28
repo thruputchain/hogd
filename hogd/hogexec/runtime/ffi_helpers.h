@@ -1,8 +1,9 @@
 #pragma once
 
+#include <optional>
 #include <type_traits>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -12,6 +13,10 @@
 namespace hogd {
 
 // Convert between generated FFI types and C++ types
+//
+// Note that the generated FFI types may come from a contract,
+// which are NOT TRUSTED.  Therefore, any possibly fallible method
+// that converts to C++ types must be infallible.
 
 static_assert(std::is_trivially_copyable_v<generated::AuthClaim>);
 static_assert(std::is_trivially_copyable_v<ContractAddress>);
@@ -19,7 +24,8 @@ static_assert(std::is_trivially_copyable_v<ContractAddress>);
 template<typename T> struct FFIHelperType;
 
 template<> struct FFIHelperType<generated::AuthClaim> {
-  static AuthClaim to_cpp(generated::AuthClaim const &ffi_auth_claim)
+  static std::optional<AuthClaim>
+  to_cpp(generated::AuthClaim const &ffi_auth_claim)
   {
     AuthClaim auth_claim;
 
@@ -29,7 +35,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
       auth_claim.invoked_address_signature_id() =
           ffi_auth_claim.k_invoked_address_signature
               .invoked_address_signature_id;
-      break;
+      return auth_claim;
     case generated::AuthClaim::AuthClaim_kInvokedAddressSignedWeight:
       auth_claim.claim_type(AuthClaimType::kInvokedAddressSignedWeight);
       auth_claim.invoked_address_signed_weight().accepted_keys =
@@ -38,7 +44,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
       auth_claim.invoked_address_signed_weight().required_weight =
           ffi_auth_claim.k_invoked_address_signed_weight
               .invoked_address_signed_weight.required_weight;
-      break;
+      return auth_claim;
     case generated::AuthClaim::AuthClaim_kOtherAddressSignature:
       auth_claim.claim_type(AuthClaimType::kOtherAddressSignature);
       auth_claim.other_address_signature_id().address =
@@ -47,7 +53,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
       auth_claim.other_address_signature_id().key_id =
           ffi_auth_claim.k_other_address_signature.other_address_signature_id
               .key_id;
-      break;
+      return auth_claim;
     case generated::AuthClaim::AuthClaim_kOtherAddressSignedWeight:
       auth_claim.claim_type(AuthClaimType::kOtherAddressSignedWeight);
       auth_claim.other_address_signed_weight() = {
@@ -58,13 +64,12 @@ template<> struct FFIHelperType<generated::AuthClaim> {
           .required_weight = ffi_auth_claim.k_other_address_signed_weight
                                  .other_address_signed_weight.required_weight,
       };
-      break;
-    default:
-      panic("Unknown auth claim type: {}",
-            static_cast<int32_t>(ffi_auth_claim.tag));
+      return auth_claim;
+      // TODO(geoff): Implement PubkeySignature
     }
-
-    return auth_claim;
+    error("Unknown auth claim type: {}",
+          static_cast<int32_t>(ffi_auth_claim.tag));
+    return std::nullopt;
   }
 
   static generated::AuthClaim to_ffi(AuthClaim const &cpp_auth_claim)
@@ -118,6 +123,8 @@ template<> struct FFIHelperType<generated::AuthClaim> {
               },
       };
       return ffi_auth_claim;
+    case AuthClaimType::kPubkeySignature:
+      panic("Unimplemented auth claim type: {}", cpp_auth_claim.claim_type());
     }
     panic("Unknown auth claim type: {}", cpp_auth_claim.claim_type());
   }

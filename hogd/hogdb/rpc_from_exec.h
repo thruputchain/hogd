@@ -12,7 +12,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -63,7 +62,7 @@ private:
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageItemRPCFlagSet flags);
+                              StorageDeltaFlagSet flags);
 };
 static_assert(
     is_DatabaseToExecutorInterfaceV1<HogDBExecutorRpc *, std::type_identity_t>);

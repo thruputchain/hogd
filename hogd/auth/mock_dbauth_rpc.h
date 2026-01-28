@@ -8,10 +8,11 @@
 #include <unordered_set>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -33,11 +34,11 @@ public:
   BlockHeight get_current_height() const { return current_height_; }
 
   // Set auth data for an address (modifies current state)
-  void set(ContractAddress address, const AccountAuthData &auth_data)
+  void set(ContractAddress address, const AddressAuthData &auth_data)
   {
     std::scoped_lock lock(mutex_);
     current_auth_state_[address] = auth_data;
-    x23::Ptr<AccountAuthData> auth_data_ptr;
+    x23::Ptr<AddressAuthData> auth_data_ptr;
     auth_data_ptr.emplace(current_auth_state_[address]);
     current_key_changes_[address] =
         KeyChange{.address = address, .auth_data = std::move(auth_data_ptr)};
@@ -66,7 +67,7 @@ public:
 
     // Store the changes for this height
     if (!changes.empty()) {
-      changes_by_height_[new_height] = std::move(changes);
+      changes_by_height_[current_height_] = std::move(changes);
     }
     current_height_ = new_height;
   }
@@ -75,6 +76,7 @@ public:
   KeyChangeBatch get_key_changes_at_height(BlockHeight height) const
   {
     std::scoped_lock lock(mutex_);
+    CHECK(height < current_height_);
     auto it = changes_by_height_.find(height);
     if (it == changes_by_height_.end()) {
       return KeyChangeBatch{};
@@ -100,7 +102,7 @@ public:
 
 private:
   // Find the most recent auth data for an address at or before the given height
-  std::optional<AccountAuthData>
+  std::optional<AddressAuthData>
   find_auth_data_at_height(ContractAddress address, BlockHeight height) const;
 
   void check_should_be_cached(ContractAddress address) const
@@ -110,7 +112,7 @@ private:
     }
   }
 
-  std::unordered_map<ContractAddress, AccountAuthData> current_auth_state_;
+  std::unordered_map<ContractAddress, AddressAuthData> current_auth_state_;
   std::unordered_map<ContractAddress, KeyChange> current_key_changes_;
 
   std::unordered_set<ContractAddress> addresses_that_should_be_cached_;

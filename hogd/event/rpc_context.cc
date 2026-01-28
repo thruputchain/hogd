@@ -11,6 +11,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -56,7 +57,7 @@ EventRPCContext::close_block(BlockID block_id)
       pool = &default_threadpool();
     }
     co_await pool->bg();
-    context.finish_file_write();
+    co_await context.finish_file_write();
     co_return;
   }(context.get());
 
@@ -64,7 +65,7 @@ EventRPCContext::close_block(BlockID block_id)
   auto ts2 = x23::fastclock::now();
   co_await file_wait;
   auto ts3 = x23::fastclock::now();
-  context.get().finish_file(out_hash);
+  co_await context.get().finish_file(out_hash);
   gc_context_internal(it, g);
   auto ts4 = x23::fastclock::now();
   info("time to get hash: {} ns, time to finish file: {} ns, time to gc "
@@ -84,6 +85,9 @@ EventRPCContext::abandon_block(BlockID block_id)
     co_return EventError{EventErrorCode::kBadBlockID};
   }
   auto &context = it->second;
+
+  co_await context.get().await_abandon();
+
   if (context.initiate_shutdown()) {
     gc_context_internal(it, g);
   }
@@ -117,7 +121,7 @@ EventRPCContext::gc_context_internal(
   event_block_contexts_.erase(it);
 }
 
-x23::Async<PerThreadARC<EventBlockContext> *>
+x23::Async<PerThreadARCRef<EventBlockContext>>
 EventRPCContext::get_context(BlockID block_id)
 {
   {
@@ -138,10 +142,11 @@ EventRPCContext::get_context(BlockID block_id)
     }
     // Return after releasing cache_->mtx_.
     if (found) {
-      co_return ctx;
+      co_return PerThreadARCRef<EventBlockContext>(ctx);
     }
   }
-  co_return co_await get_context_slow(block_id);
+  auto *ctx = co_await get_context_slow(block_id);
+  co_return PerThreadARCRef<EventBlockContext>(ctx);
 }
 
 x23::Async<PerThreadARC<EventBlockContext> *>

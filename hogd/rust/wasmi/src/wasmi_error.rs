@@ -8,7 +8,7 @@ use core::fmt::Display;
 use wasmi::core::HostError;
 
 use crate::wasmi_invoke_result::WasmiInvokeResult;
-use common::HostFnErrorCode;
+use common::{to_invoke_result, HostFnErrorCode};
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
@@ -17,8 +17,7 @@ pub struct TrampolineError {
 
 impl TrampolineError {
     pub fn to_wasmi_invoke_result(self) -> WasmiInvokeResult {
-        self.error
-            .to_invoke_result()
+        to_invoke_result(self.error)
             .map_or_else(WasmiInvokeResult::error, |_| {
                 WasmiInvokeResult::success()
             })

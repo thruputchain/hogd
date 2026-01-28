@@ -45,7 +45,7 @@ protected:
   void SetUp() override
   {
     std::unique_ptr<NativeContract> native_contract = std::make_unique<
-        NativeContract>(std::unordered_map<MethodID,
+        NativeContract>(std::unordered_map<Runtime::MethodID,
                                            NativeContract::function_t>{
         {0,
          [this](SystemCallHandler &handler,

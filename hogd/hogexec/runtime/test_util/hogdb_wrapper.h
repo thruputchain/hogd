@@ -3,13 +3,13 @@
 #include <map>
 #include <memory>
 
-#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/test_util/test_sched_db_server.h"
@@ -31,10 +31,12 @@ public:
   {
     db_sched_server_.start_server(/*port=*/0);
     db_executor_server_.start_server(/*port=*/0);
+    db_auth_server_.start_server(/*port=*/0);
   }
 
   uint16_t exec_port() { return db_executor_server_.port(); }
   uint16_t coord_port() { return db_sched_server_.port(); }
+  uint16_t auth_port() { return db_auth_server_.port(); }
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
 
@@ -72,5 +74,6 @@ private:
   RPCContext ctx_;
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
   HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
+  HogDBAuthServer db_auth_server_ = HogDBAuthServer(ctx_);
 };
 } // namespace hogd

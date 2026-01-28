@@ -392,7 +392,7 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/rust/contract_types/bindings.h"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"

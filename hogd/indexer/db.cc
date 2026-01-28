@@ -37,6 +37,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"
 #include "types.hh"
@@ -69,12 +70,13 @@ create_tx_index_sst_chunk(
   for (const auto &event_log : events_chunk) {
     // Serialize the TxEventLog for storage
     auto serialized = x23::serialize(event_log);
-    std::string value(reinterpret_cast<const char *>(serialized.data()),
-                      serialized.size());
+    std::string value(reinterpret_cast<const char *>(&block_height),
+                      sizeof(block_height));
+    value.append(std::string(reinterpret_cast<const char *>(serialized.data()),
+                             serialized.size()));
 
     // Index by transaction (in tx_index column family)
-    IndexerKeyFormat::make_tx_key(key_buffer, block_height,
-                                  event_log.proposed_tx_hash);
+    IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash);
     entries.emplace_back(key_buffer, value);
   }
 
@@ -760,16 +762,15 @@ IndexDB::log_stats() const
   }
 }
 
-IndexerStatus<TxEventLog>
-IndexDB::get_tx_events(BlockHeight block_height,
-                       SHA256Hash const &tx_hash) const
+IndexerStatus<std::pair<BlockHeight, TxEventLog>>
+IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
   std::string key_buffer;
-  IndexerKeyFormat::make_tx_key(key_buffer, block_height, tx_hash);
+  IndexerKeyFormat::make_tx_key(key_buffer, tx_hash);
   std::string value;
 
   rocksdb::ReadOptions read_options;
@@ -785,17 +786,21 @@ IndexDB::get_tx_events(BlockHeight block_height,
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
+  // TODO(jhumphri): Support different endianness.
+  BlockHeight block_height = *reinterpret_cast<BlockHeight *>(value.data());
   TxEventLog event_log;
   try {
-    x23::deserialize(&event_log, x23::BufView{reinterpret_cast<const uint8_t *>(
-                                                  value.data()),
-                                              value.size()});
+    CHECK_GE(value.size(), sizeof(BlockHeight));
+    x23::deserialize(&event_log,
+                     x23::BufView{reinterpret_cast<const uint8_t *>(
+                                      value.data() + sizeof(BlockHeight)),
+                                  value.size() - sizeof(BlockHeight)});
   } catch (const x23::XdrBadInput &e) {
     error("Failed to deserialize TxEventLog: {}", e.what());
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  return event_log;
+  return std::make_pair(block_height, event_log);
 }
 
 IndexerStatus<std::vector<IdentifiedEvent>>
@@ -862,14 +867,14 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
     }
 
     // Look up the transaction events from tx_index
-    auto tx_events_result = get_tx_events(block_height, tx_hash);
+    auto tx_events_result = get_tx_events(tx_hash);
     if (!tx_events_result.has_value()) {
-      error("Failed to look up transaction events for block_height={}, tx_hash",
-            block_height);
+      error("Failed to look up transaction events for tx_hash {}",
+            HexArray(tx_hash).str());
       continue;
     }
 
-    const TxEventLog &event_log = *tx_events_result;
+    const TxEventLog &event_log = tx_events_result->second;
 
     // Extract the event at the sequence_number
     if (sequence_number >= event_log.events.size()) {

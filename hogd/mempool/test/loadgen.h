@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "hogd/base/coropoll.h"
@@ -20,9 +19,10 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "loadgen.hh"
+#include "nomination.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
@@ -52,12 +52,12 @@ public:
   // do not want that setup when using loadgen.
   template<typename SchedCoordClient>
   DbTip init_experiment(SchedCoordClient &sched_coord_client,
-                        CoordinatorSchedRpc &coord_sched_rpc,
+                        CoordinatorSchedRpc & /*coord_sched_rpc*/,
                         uint32_t num_accounts)
   {
     // Initialize the experiment.
     ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
-    config.erc20_payments().num_accounts = num_accounts;
+    config.erc20_payments().num_addresses = num_accounts;
 
     LoadgenResult result = client_->generate_experiment(config)();
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
@@ -76,12 +76,14 @@ public:
     constexpr ValidatorID kValidatorId{};
     DbTip ret{};
     for (const InitializationBlock &init_tx : init_txs) {
-      sched_coord_client.schedulercoord_submit_vetted(kValidatorId, init_tx)();
+      sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
+                                                      t_to_parallel_batch(
+                                                          init_tx)())();
 
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
       size_t num_nominated_txs = 0;
-      SchedulerNomination nomination{};
+      SchedulerNominatedBlock nomination{};
       while (num_nominated_txs < init_tx.size()) {
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
@@ -90,12 +92,17 @@ public:
             sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
-        nomination = coord_sched_rpc.get_nomination()();
-        CHECK_EQ(res_nominate.block_id(), nomination.block_id);
-        num_nominated_txs += nomination.nomination.transaction_hashes.size();
+        nomination = res_nominate.nominated_block();
+        CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
+        {
+          SignedTransactionHashBatch tx_hashes;
+          CHECK(parallel_batch_to_t(nomination.nomination.transactions_hash,
+                                    tx_hashes)());
+          num_nominated_txs += tx_hashes.size();
+        }
 
         CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
-                     res_nominate.block_id())(),
+                     res_nominate.nominated_block().block_id)(),
                  SchedulerCommitOutcome::SchedulerCommitOK);
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
@@ -152,8 +159,7 @@ public:
     info("Done initializing experiment. Now running.");
   }
 
-  x23::Detached get_transactions(x23::Vec<SignedTransaction> &txs,
-                                 x23::CoroCB<void> cb)
+  x23::Async<void> get_transactions(x23::Vec<SignedTransaction> &txs)
   {
     co_await default_coropoll().pool_.bg();
 
@@ -165,27 +171,26 @@ public:
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       txs += co_await handles[i];
     }
-    cb();
+    co_return;
   }
 
-  x23::Detached submit_vetted(x23::Vec<SignedTransaction> &txs,
-                              x23::CoroCB<void> cb)
+  x23::Async<void> submit_vetted(x23::Vec<SignedTransaction> &txs)
   {
     co_await default_coropoll().pool_.bg();
 
     constexpr ValidatorID kValidatorId{};
     x23::Vec<x23::Async<void>> handles;
     for (size_t i = 0; i < kNumSchedClients; i++) {
-      x23::span tx_chunk(txs.begin() + (i * kSchedTxBatchSize),
-                         txs.begin() + ((i + 1) * kSchedTxBatchSize));
-      handles.push_back(
-          sched_coord_clients_[i].schedulercoord_submit_vetted(kValidatorId,
-                                                               tx_chunk));
+      x23::span<const SignedTransaction> tx_chunk(
+          txs.begin() + (i * kSchedTxBatchSize),
+          txs.begin() + ((i + 1) * kSchedTxBatchSize));
+      handles.push_back(sched_coord_clients_[i].schedulercoord_submit_vetted(
+          kValidatorId, t_to_parallel_batch(tx_chunk)()));
     }
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       co_await handles[i];
     }
-    cb();
+    co_return;
   }
 
   x23::Detached run(bool print_stats)
@@ -199,17 +204,8 @@ public:
     size_t total_transactions_nominated = 0;
 
     x23::Vec<SignedTransaction> txs;
-    {
-      x23::Awaitable<void> awaitable;
-      get_transactions(txs, x23::CoroCB<void>(awaitable));
-      co_await awaitable;
-    }
-
-    {
-      x23::Awaitable<void> awaitable;
-      submit_vetted(txs, x23::CoroCB<void>(awaitable));
-      co_await awaitable;
-    }
+    co_await get_transactions(txs);
+    co_await submit_vetted(txs);
 
     size_t block_iteration_count = 0;
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
@@ -221,19 +217,16 @@ public:
           sched_coord_clients_[0].schedulercoord_nominate(db_tip);
 
       txs.clear();
-      x23::Awaitable<void> get_transactions_handle;
-      get_transactions(txs, x23::CoroCB<void>(get_transactions_handle));
-      co_await get_transactions_handle;
+      co_await get_transactions(txs);
 
-      x23::Awaitable<void> submit_vetted_handle;
-      submit_vetted(txs, x23::CoroCB<void>(submit_vetted_handle));
+      x23::Async<void> submit_vetted_handle = submit_vetted(txs);
 
       SchedulerNominationResult res_nominate = co_await nominate_handle;
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
       x23::Async<SchedulerCommitOutcome> commit_handle =
           sched_coord_clients_[0].schedulercoord_commit_block(
-              res_nominate.block_id());
+              res_nominate.nominated_block().block_id);
 
       co_await submit_vetted_handle;
 
@@ -242,13 +235,18 @@ public:
                SchedulerCommitOutcome::SchedulerCommitOK);
       info("commit handle took {} seconds", timer.elapsed());
 
-      const auto &[nomination, num_txs] =
-          coord_sched_rpc_.get_nomination_no_txs()();
-      CHECK_EQ(res_nominate.block_id(), nomination.block_id);
+      const Nomination &nomination = res_nominate.nominated_block().nomination;
+      size_t num_txs = 0;
+      {
+        SignedTransactionHashBatch tx_hashes;
+        CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
+                                           tx_hashes));
+        num_txs = tx_hashes.size();
+      }
 
-      db_tip = {.height = nomination.nomination.block_height,
-                .hash = nomination.nomination.block_hash,
-                .id = nomination.block_id};
+      db_tip = {.height = nomination.block_height,
+                .hash = nomination.block_hash,
+                .id = res_nominate.nominated_block().block_id};
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.

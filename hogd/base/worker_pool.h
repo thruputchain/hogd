@@ -17,7 +17,6 @@
 #include <queue>
 #include <ranges>
 #include <stop_token>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -30,7 +29,22 @@
 #include "hogd/base/types.h"
 #include "hogd/base/unique_function.h"
 
+#ifdef __APPLE__
+#include "hogd/base/large_stack_thread.h"
+#else
+#include <thread>
+#endif
+
 namespace hogd {
+
+#ifdef __APPLE__
+// On macOS, use LargeStackThread to set a larger stack size for WASM
+// compilation
+using WorkerThread = LargeStackThread;
+#else
+// On other platforms, use standard jthread
+using WorkerThread = std::jthread;
+#endif
 
 // WorkerPool multiplexes jobs across a fixed pool of threads.
 class WorkerPool {
@@ -189,7 +203,7 @@ private:
   std::queue<UniqueFunction<void()>> jobs_;
   int target_workers_;
   int active_workers_;
-  std::vector<std::jthread> workers_;
+  std::vector<WorkerThread> workers_;
   std::atomic<size_t> pending_jobs_{0};
 
   // worker_loop is the main loop run by each worker thread.

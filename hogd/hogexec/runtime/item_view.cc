@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -51,7 +50,7 @@ make_nnint128_add(int128_t add)
 
 } // namespace
 
-std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
+std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
 ItemView::get_delta() const
 {
   return {std::visit(
@@ -80,8 +79,15 @@ NNIntItem::get_delta() const
 SyscallStatus<void>
 BytestringItem::validate() const
 {
-  if (bytestring_.size() > kBytestringMaxLen)
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  // The bytestring is coming from untrusted contract input.
+  // We should not get to this point with a bytestring that is too long.
+  // That might be a security risk in extreme cases --- a contract could ask us
+  // to allocate a Bytestring that is extremely long (as long as its linear
+  // memory).  Given current linear memory limits, it would not be possible to
+  // allocate a bytestring long enough to exhaust memory resources and/or cause
+  // malloc to fail, but a contract could still adversarially waste system
+  // resources.
+  assert(bytestring_.size() <= kBytestringMaxLen);
 
   return {};
 }
@@ -323,7 +329,7 @@ ReplayCacheItem::get_delta() const
 }
 
 StorageDelta
-AccountAuthDataItem::get_delta() const
+AddressAuthDataItem::get_delta() const
 {
   auto delta = StorageDelta(StorageDeltaType::kDeltaTypeAuthDataChange);
   for (auto const &[key_index, new_key] : pk_changes_) {

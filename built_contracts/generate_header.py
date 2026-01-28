@@ -5,6 +5,7 @@ import json
 import sys
 import os
 import re
+import traceback
 
 def generate_header(json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None):
     """Generate a C++ header file from a JSON contract spec."""
@@ -16,7 +17,17 @@ def generate_header(json_file, output_file=None, namespace=None, extra_includes=
     # Replace the problematic typespec patterns
     content = re.sub(r'"typespec": "([^"]*)"', r'"typespec": "\1"', content)
     
-    spec = json.loads(content)
+    try:
+        spec = json.loads(content)
+    except json.JSONDecodeError as e:
+        # Show which file failed and context around the error
+        lines = content.split('\n')
+        error_line = e.lineno - 1  # JSONDecodeError uses 1-based indexing
+        start_line = max(0, error_line - 4)
+        end_line = min(len(lines), error_line + 5)
+        context = '\n'.join(f"{i+1:4d}: {lines[i]}" for i in range(start_line, end_line))
+        error_msg = f"Failed to parse {json_file} at line {e.lineno}, column {e.colno}:\n{context}\n\nOriginal error: {e}"
+        raise ValueError(error_msg) from e
     
     interface_name = spec['interface']
     version = spec['version']
@@ -32,26 +43,32 @@ def generate_header(json_file, output_file=None, namespace=None, extra_includes=
     function_signatures = []
     forward_decls = []
     for method in methods:
-        # Map JSON types to C++ types
-        return_type = map_type_from_typespec(method['return'])
-        err_type = None
-        if "err" in method:
-            err_type = method['err'] # Possible TODO(geoff): swap the error type to a typespec, instead of a string
-            forward_decls.append(f"class {err_type};")
+        try:
+            # Map JSON types to C++ types
+            return_typespec = method['return']
+            return_type = map_type_from_typespec(return_typespec)
+            err_type = None
+            if "err" in method:
+                err_type = method['err'] # Possible TODO(geoff): swap the error type to a typespec, instead of a string
+                forward_decls.append(f"class {err_type};")
 
-        args = []
-        for arg in method['args']:
-            arg_type = map_type_from_typespec(arg['typespec'])
-            args.append(arg_type)
+            args = []
+            for arg in method['args']:
+                arg_type = map_type_from_typespec(arg['typespec'])
+                args.append(arg_type)
 
-        if err_type:
-            return_type = f"Result<{return_type}, {err_type}>"
-        
-        if args:
-            signature = f"{return_type}(*)({', '.join(args)})"
-        else:
-            signature = f"{return_type}(*)()"
-        function_signatures.append(signature)
+            if err_type:
+                return_type = f"Result<{return_type}, {err_type}>"
+            
+            if args:
+                signature = f"{return_type}(*)({', '.join(args)})"
+            else:
+                signature = f"{return_type}(*)()"
+            function_signatures.append(signature)
+        except Exception as e:
+            print(f"Error processing method {method}: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            raise
     
     signatures_str = ',\n             '.join(function_signatures)
 
@@ -71,11 +88,11 @@ def generate_header(json_file, output_file=None, namespace=None, extra_includes=
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <string_view>
 #include <tuple>
 
 #include "x23/vec.h"
+#include "x23/x23.h"
 #include "types.hh"
 #include "hogd/hogexec/runtime/contract_result.h"
 
@@ -120,7 +137,11 @@ struct {interface_name} {{
         print(header_content)
 
 def map_type_from_typespec(typespec):
-    """Map typespec JSON strings to C++ types."""
+    """Map typespec JSON strings to C++ types.
+
+    Args:
+        typespec: The typespec dict to map
+    """
 
     t = typespec["type"]
     if t == "unsigned":
@@ -137,10 +158,10 @@ def map_type_from_typespec(typespec):
         max_len = typespec["max"]
         return f"x23::Vec<uint8_t, {max_len}>"
     elif t == "fixed opaque":
-        max_len = typespec["max"]
+        max_len = typespec["len"]
         return f"std::array<uint8_t, {max_len}>"
     elif t == "fixed array":
-        max_len = typespec["max"]
+        max_len = typespec["len"]
         elem_type = map_type_from_typespec(typespec["elt_ty"])
         return f"std::array<{elem_type}, {max_len}>"
     elif t == "variable array":
@@ -149,11 +170,48 @@ def map_type_from_typespec(typespec):
         return f"x23::Vec<{elem_type}, {max_len}>"
     elif t == "optional":
         elem_type = map_type_from_typespec(typespec["opt_ty"])
-        return f"std::optional<{elem_type}>"
+        return f"x23::Ptr<{elem_type}>"
     elif t == "void":
         return "void"
+    elif t == "struct":
+        # Check if this is a tuple (all fields named "unnamed_N" or "unnamed_optional")
+        fields = typespec.get("fields", [])
+        if is_tuple_struct(fields):
+            # Special case: single-element struct is used as wrapper for array dimensions or optionals
+            # For nested arrays like [[u8; 4]; 5], xdrs wraps each dimension in a single-element struct with "unnamed_0"
+            # For optional arrays like [Option<u64>; 2], xdrs wraps optionals in struct with "unnamed_optional"
+            if len(fields) == 1 and fields[0]["name"] in ("unnamed_0", "unnamed_optional"):
+                field_typespec = fields[0]["field_type"]
+                return map_type_from_typespec(field_typespec)
+
+            # Multi-element tuple OR single-element tuple at top level: Map to std::tuple<...>
+            field_types = []
+            for field in fields:
+                field_typespec = field["field_type"]
+                field_types.append(map_type_from_typespec(field_typespec))
+            return f"std::tuple<{', '.join(field_types)}>"
+        else:
+            # Named struct shouldn't appear in return types
+            raise ValueError(f"Named structs not supported in return types: {typespec}")
     else:
         return t
+
+def is_tuple_struct(fields):
+    """Check if struct fields match tuple pattern (unnamed_0, unnamed_1, ...) or wrapper patterns (unnamed_optional)."""
+    if not fields:
+        return False
+
+    # Single-element wrapper patterns: unnamed_0 (array dimension) or unnamed_optional (optional in array)
+    if len(fields) == 1 and fields[0].get("name") in ("unnamed_0", "unnamed_optional"):
+        return True
+
+    # Multi-element tuple pattern: unnamed_0, unnamed_1, unnamed_2, ...
+    for i, field in enumerate(fields):
+        expected_name = f"unnamed_{i}"
+        if field.get("name") != expected_name:
+            return False
+
+    return True
 
 def main():
     parser = argparse.ArgumentParser(

@@ -7,7 +7,7 @@ use core::fmt;
 use core::fmt::Display;
 
 use crate::invoke_result::WasmtimeInvokeResult;
-use common::HostFnErrorCode;
+use common::{to_invoke_result, HostFnErrorCode};
 
 use std::error::Error;
 
@@ -18,8 +18,7 @@ pub struct TrampolineError {
 
 impl TrampolineError {
     pub fn to_wasmtime_invoke_result(self) -> WasmtimeInvokeResult {
-        self.error
-            .to_invoke_result()
+        to_invoke_result(self.error)
             .map_or_else(WasmtimeInvokeResult::error, |_| {
                 WasmtimeInvokeResult::success()
             })

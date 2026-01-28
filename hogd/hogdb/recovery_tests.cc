@@ -18,8 +18,9 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
 
@@ -81,23 +82,25 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     auto cleanup =
         x23::Defer([itx, sp]() { itx->rollback_to_savepoint(sp - 1); });
 
-    ASSERT_TRUE(itx->request_nnint128(
-                       make_address_balance_item_key(ContractAddress{0}),
-                       ctx.get_cost_model().get_nnint_cost() +
-                           ctx.get_cost_model().get_bytestring_cost(6) +
-                           ctx.get_cost_model().get_balance_cost(),
-                       std::to_underlying(StorageItemRPCFlags::kStorageNone))
-                    .has_value());
-    ASSERT_TRUE(itx->request_nnint128(
-                       ItemKey(ContractAddress{0}, StorageKeyContractData{0}),
-                       10,
-                       std::to_underlying(StorageItemRPCFlags::kStorageNone))
-                    .has_value());
-    ASSERT_TRUE(itx->request_bytes(
-                       ItemKey(ContractAddress{0}, StorageKeyContractData{1}),
-                       std::as_bytes(std::span("hello")),
-                       std::to_underlying(StorageItemRPCFlags::kStorageNone))
-                    .has_value());
+    ASSERT_TRUE(
+        itx->request_nnint128(make_address_balance_item_key(ContractAddress{0}),
+                              ctx.get_cost_model().get_nnint_cost() +
+                                  ctx.get_cost_model().get_bytestring_cost(6) +
+                                  ctx.get_cost_model().get_balance_cost(),
+                              std::to_underlying(
+                                  StorageDeltaFlags::kStorageDeltaFlagNone))
+            .has_value());
+    ASSERT_TRUE(
+        itx->request_nnint128(
+               ItemKey(ContractAddress{0}, StorageKeyContractData{0}), 10,
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone))
+            .has_value());
+    ASSERT_TRUE(
+        itx->request_bytes(
+               ItemKey(ContractAddress{0}, StorageKeyContractData{1}),
+               std::as_bytes(std::span("hello")),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone))
+            .has_value());
 
     // invoketx assertions fail if you call the dtor in an invalid state (where
     // i.e requests failed).

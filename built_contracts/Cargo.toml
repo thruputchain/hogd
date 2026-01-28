@@ -18,6 +18,7 @@ members = [
     "integration_test_contracts/htlc",
     "integration_test_contracts/payment_channel",
     "integration_test_contracts/return_fault_test",
+    "integration_test_contracts/tuple_return",
 ]
 resolver = "2"
 
@@ -27,7 +28,7 @@ sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 serde = { version = "1.0.217", default-features = false }
 xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git" }
 xdr_common = { git = "ssh://git@github.com/groundhogchain/xdr_common.git" }
-groundhog_xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git" }
+groundhog-xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git" }
 groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 groundhog-erc1271-if = {  git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
@@ -38,7 +39,7 @@ bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 opt-level = "z"
 overflow-checks = false
 debug = false
-strip = "debuginfo"
+strip = "none"
 panic = "abort"
 
 [profile.release]

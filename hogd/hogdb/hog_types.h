@@ -98,7 +98,7 @@ make_address(std::integral auto val)
 enum class ItemKeyType {
   kItemKeyTypeContractData = 0,
   kItemKeyTypeFreeNativeTokenBalance = 1,
-  kItemKeyTypeAccountAuthData = 2,
+  kItemKeyTypeAddressAuthData = 2,
   kItemKeyTypeAddressMetadata = 3,
   kItemKeyTypeContractCode = 4,
   kItemKeyTypeContractRefcount = 5,
@@ -117,8 +117,8 @@ template<> struct std::formatter<hogd::ItemKeyType> {
       return format_to(ctx.out(), "kItemKeyTypeContractData");
     case hogd::ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
       return format_to(ctx.out(), "kItemKeyTypeFreeNativeTokenBalance");
-    case hogd::ItemKeyType::kItemKeyTypeAccountAuthData:
-      return format_to(ctx.out(), "kItemKeyTypeAccountAuthData");
+    case hogd::ItemKeyType::kItemKeyTypeAddressAuthData:
+      return format_to(ctx.out(), "kItemKeyTypeAddressAuthData");
     case hogd::ItemKeyType::kItemKeyTypeAddressMetadata:
       return format_to(ctx.out(), "kItemKeyTypeAddressMetadata");
     case hogd::ItemKeyType::kItemKeyTypeContractCode:
@@ -148,7 +148,7 @@ public:
     switch (key_type_) {
     // ItemKeyTypes that do not use the .key field
     case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
-    case ItemKeyType::kItemKeyTypeAccountAuthData:
+    case ItemKeyType::kItemKeyTypeAddressAuthData:
     case ItemKeyType::kItemKeyTypeAddressMetadata:
     // These ItemKeyTypes use the .addr field, but as a SHA256Hash,
     // not an Address.
@@ -168,7 +168,7 @@ public:
     switch (key_type_) {
     // ItemKeyTypes that do not use the .key field
     case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
-    case ItemKeyType::kItemKeyTypeAccountAuthData:
+    case ItemKeyType::kItemKeyTypeAddressAuthData:
     case ItemKeyType::kItemKeyTypeAddressMetadata:
     // These ItemKeyTypes use the .addr field, but as a SHA256Hash,
     // not an Address.
@@ -187,9 +187,9 @@ public:
   {
     return key_type_ == ItemKeyType::kItemKeyTypeFreeNativeTokenBalance;
   }
-  constexpr bool is_account_auth_data() const
+  constexpr bool is_address_auth_data() const
   {
-    return key_type_ == ItemKeyType::kItemKeyTypeAccountAuthData;
+    return key_type_ == ItemKeyType::kItemKeyTypeAddressAuthData;
   }
   constexpr bool is_address_metadata() const
   {
@@ -262,10 +262,10 @@ make_address_balance_item_key(const Address &addr)
 }
 
 [[nodiscard]] constexpr ItemKey
-make_account_auth_data_item_key(const Address &addr)
+make_address_auth_data_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeAccountAuthData);
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeAddressAuthData);
 }
 
 [[nodiscard]] constexpr ItemKey
@@ -302,8 +302,8 @@ make_item_key(const AddressAndKey &addrkey)
   switch (addrkey.key.key_type()) {
   case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
     return make_address_balance_item_key(addrkey.address);
-  case StorageKeyType::kStorageKeyTypeAccountAuthData:
-    return make_account_auth_data_item_key(addrkey.address);
+  case StorageKeyType::kStorageKeyTypeAddressAuthData:
+    return make_address_auth_data_item_key(addrkey.address);
   case StorageKeyType::kStorageKeyTypeAddressMetadata:
     return make_address_metadata_item_key(addrkey.address);
   case StorageKeyType::kStorageKeyTypeContractData:

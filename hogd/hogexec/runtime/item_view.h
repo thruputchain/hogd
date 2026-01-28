@@ -6,13 +6,12 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -128,11 +127,11 @@ private:
   Uniquifier consumed_uniquifier_;
 };
 
-class AccountAuthDataItem {
+class AddressAuthDataItem {
 public:
   StorageDelta get_delta() const;
 
-  constexpr static ItemViewType kItemType = ItemViewType::kAccountAuthData;
+  constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
 
   void change_public_key(uint32_t key_index, PublicKeyConfigOpt new_key)
   {
@@ -228,8 +227,8 @@ public:
 
   template<typename ItemType>
   SyscallStatus<void> set(ItemType const &type,
-                          StorageItemRPCFlagSet flags = std::to_underlying(
-                              StorageItemRPCFlags::kStorageNone))
+                          StorageDeltaFlagSet flags = std::to_underlying(
+                              StorageDeltaFlags::kStorageDeltaFlagNone))
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -256,16 +255,15 @@ public:
     return {};
   }
 
-  std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
-  get_delta() const;
+  std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet> get_delta() const;
 
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
-               AccountAuthDataItem>
+               AddressAuthDataItem>
       delta_args_;
-  StorageItemRPCFlagSet flags_ =
-      std::to_underlying(StorageItemRPCFlags::kStorageNone);
+  StorageDeltaFlagSet flags_ =
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone);
 };
 
 } // namespace hogd

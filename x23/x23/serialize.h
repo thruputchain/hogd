@@ -340,7 +340,7 @@ struct Serializer {
   {
     if (!union_valid(u)) [[unlikely]]
       throw XdrBadUnionAccess(
-          "Attempt to serialize {} with invalid discrminant {}",
+          "Attempt to serialize {} with invalid discriminant {}",
           xdr_meta<X>::type_name, get<0>(u));
     put32(uint32_t(get<0>(u)));
     union_visit_arm(*this, u);

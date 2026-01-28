@@ -7,7 +7,7 @@
 #include <type_traits>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

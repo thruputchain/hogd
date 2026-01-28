@@ -7,7 +7,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -48,7 +48,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
                                    int128_t input_add_value,
-                                   StorageItemRPCFlagSet input_flags)
+                                   StorageDeltaFlagSet input_flags)
 {
   std::optional<int128_t> set_value = std::nullopt;
   if (optional_input_set_value) {

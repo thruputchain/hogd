@@ -10,7 +10,6 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -67,8 +66,7 @@ public:
   // same addrkey at the same time.  This is not enforced by the interface.
   bool try_reserve_storage_delta(TransactionID txid,
                                  AddressAndKey const &addrkey,
-                                 StorageDelta delta,
-                                 StorageItemRPCFlagSet flags);
+                                 StorageDelta delta, StorageDeltaFlagSet flags);
 
   void commit_transaction(TransactionID txid, NewContractBatch new_contracts);
   void abort_transaction(TransactionID txid);

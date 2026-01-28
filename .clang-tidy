@@ -59,3 +59,5 @@ CheckOptions:
   # Silence false positives on x23assert macro
   - { key: readability-simplify-boolean-expr.IgnoreMacros,       value: true }
   - { key: performance-unnecessary-value-param.AllowedTypes,     value: "std::exception_ptr" }
+
+WarningsAsErrors: '*'

@@ -3,7 +3,8 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -39,11 +40,11 @@ make_test_pk_config(uint8_t value, Weight weight = 100)
       new PublicKeyConfig{.key = key, .max_weight = weight});
 }
 
-// Helper to create an AccountAuthData with some keys
-AccountAuthData
+// Helper to create an AddressAuthData with some keys
+AddressAuthData
 make_base_auth_data(std::vector<uint8_t> const &key_ids = {})
 {
-  AccountAuthData auth_data{};
+  AddressAuthData auth_data{};
   for (size_t i = 0; i < kMaxSigners; ++i) {
     auth_data.public_keys[i] = nullptr;
   }
@@ -58,7 +59,7 @@ make_base_auth_data(std::vector<uint8_t> const &key_ids = {})
 // Helper to create an AuthDataItem with specific key modifications
 PointerItem<AuthDataItem>
 make_auth_item(
-    AccountAuthData base,
+    AddressAuthData base,
     std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> const &changes)
 {
   PointerItem<AuthDataItem> item(std::move(base));
@@ -82,7 +83,7 @@ make_dummy_context()
 
 TEST(AuthLockTest, BasicAcquireAndRelease)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Acquire lock on key 0
@@ -99,7 +100,7 @@ TEST(AuthLockTest, BasicAcquireAndRelease)
 
 TEST(AuthLockTest, MultipleKeysSameTransaction)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Acquire locks on keys 0, 1, 2
@@ -118,7 +119,7 @@ TEST(AuthLockTest, MultipleKeysSameTransaction)
 
 TEST(AuthLockTest, DISABLED_ConcurrentNonConflicting)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Tx1 acquires lock on key 0
@@ -144,7 +145,7 @@ TEST(AuthLockTest, DISABLED_ConcurrentNonConflicting)
 
 TEST(AuthLockTest, DISABLED_ConcurrentSameKeySameValue)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -172,7 +173,7 @@ TEST(AuthLockTest, DISABLED_ConcurrentSameKeySameValue)
 
 TEST(AuthLockTest, DISABLED_ConcurrentSameKeyDifferentValue)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Tx1 acquires lock on key 0
@@ -200,7 +201,7 @@ TEST(AuthLockTest, DISABLED_ConcurrentSameKeyDifferentValue)
 
 TEST(AuthLockTest, DISABLED_ExclusiveLockBasic)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Acquire exclusive lock on key 0
@@ -228,7 +229,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveLockBasic)
 
 TEST(AuthLockTest, DISABLED_ExclusiveLockBlocksOthers)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Tx1 acquires non-exclusive lock
@@ -258,7 +259,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveLockBlocksOthers)
 
 TEST(AuthLockTest, DISABLED_UpgradeToExclusive)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -281,7 +282,7 @@ TEST(AuthLockTest, DISABLED_UpgradeToExclusive)
 
 TEST(AuthLockTest, DISABLED_CannotUpgradeToExclusiveWhenOthersHold)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -308,7 +309,7 @@ TEST(AuthLockTest, DISABLED_CannotUpgradeToExclusiveWhenOthersHold)
 
 TEST(AuthLockTest, DISABLED_DowngradeFromExclusive)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -334,7 +335,7 @@ TEST(AuthLockTest, DISABLED_DowngradeFromExclusive)
 
 TEST(AuthLockTest, CommitSingleKey)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -353,7 +354,7 @@ TEST(AuthLockTest, CommitSingleKey)
 
 TEST(AuthLockTest, CommitMultipleKeys)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto item = make_auth_item(base, {{0, make_test_pk_config(1)},
@@ -374,7 +375,7 @@ TEST(AuthLockTest, CommitMultipleKeys)
 TEST(AuthLockTest, CommitWithBaseKeys)
 {
   // Start with 2 keys already in base
-  AccountAuthData base = make_base_auth_data({0, 1});
+  AddressAuthData base = make_base_auth_data({0, 1});
   AuthLock lock(base);
 
   // Add key 2
@@ -393,7 +394,7 @@ TEST(AuthLockTest, CommitWithBaseKeys)
 
 TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -416,7 +417,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
 
 TEST(AuthLockTest, StorageCostWithDeletedKey)
 {
-  AccountAuthData base = make_base_auth_data({0, 1, 2});
+  AddressAuthData base = make_base_auth_data({0, 1, 2});
   AuthLock lock(base);
 
   // Delete key 1 (set to nullptr)
@@ -441,7 +442,7 @@ TEST(AuthLockTest, StorageCostWithDeletedKey)
 
 TEST(AuthLockTest, DISABLED_PartialCommit)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Tx1 modifies key 0
@@ -467,7 +468,7 @@ TEST(AuthLockTest, DISABLED_PartialCommit)
 
 TEST(AuthLockTest, DISABLED_MultipleKeysPartialOverlap)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -495,7 +496,7 @@ TEST(AuthLockTest, DISABLED_MultipleKeysPartialOverlap)
 
 TEST(AuthLockTest, DISABLED_KeepLockNoChange)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -516,7 +517,7 @@ TEST(AuthLockTest, DISABLED_KeepLockNoChange)
 
 TEST(AuthLockTest, DISABLED_ConcurrentExclusiveLocks)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
@@ -541,7 +542,7 @@ TEST(AuthLockTest, DISABLED_ConcurrentExclusiveLocks)
 TEST(AuthLockTest, AcquireCosts1)
 {
   // start with 3 keys in base
-  const AccountAuthData base = make_base_auth_data({0, 1, 2});
+  const AddressAuthData base = make_base_auth_data({0, 1, 2});
   AuthLock lock(base);
 
   auto item1 =
@@ -560,7 +561,7 @@ TEST(AuthLockTest, AcquireCosts1)
 TEST(AuthLockTest, DISABLED_AcquireCosts2)
 {
   // start with 1 key in base
-  const AccountAuthData base = make_base_auth_data({0});
+  const AddressAuthData base = make_base_auth_data({0});
   const int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(1);
   AuthLock lock(base);
 
@@ -593,7 +594,7 @@ TEST(AuthLockTest, DISABLED_AcquireCosts2)
 
 TEST(AuthLockTest, DISABLED_SwapKeys)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Tx acquires key 0
@@ -619,7 +620,7 @@ TEST(AuthLockTest, DISABLED_SwapKeys)
 
 TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   auto pk = make_test_pk_config(1);
@@ -656,7 +657,7 @@ TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
 
 TEST(AuthLockTest, SetNonceConfig)
 {
-  AccountAuthData base = make_base_auth_data({0, 1});
+  AddressAuthData base = make_base_auth_data({0, 1});
   AuthLock lock(base);
 
   // Create an item that sets nonce config
@@ -679,14 +680,14 @@ TEST(AuthLockTest, SetNonceConfig)
   EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
 
   // Verify the nonce config was set
-  AccountAuthData result = lock.build_result();
+  AddressAuthData result = lock.build_result();
   EXPECT_EQ(result.nonce_config.accepted_keys, 0x03);
   EXPECT_EQ(result.nonce_config.required_weight, Weight{2});
 }
 
 TEST(AuthLockTest, SetGasPermissionConfigs)
 {
-  AccountAuthData base = make_base_auth_data({0, 1, 2});
+  AddressAuthData base = make_base_auth_data({0, 1, 2});
   AuthLock lock(base);
 
   // Create an item that sets gas permission configs
@@ -721,7 +722,7 @@ TEST(AuthLockTest, SetGasPermissionConfigs)
   EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
 
   // Verify the gas configs were set
-  AccountAuthData result = lock.build_result();
+  AddressAuthData result = lock.build_result();
   EXPECT_EQ(result.gas_permissions.size(), 2);
   EXPECT_EQ(result.gas_permissions[0].limit, GasAmount{1000});
   EXPECT_EQ(result.gas_permissions[0].accepted_keys, 0x01);
@@ -733,7 +734,7 @@ TEST(AuthLockTest, SetGasPermissionConfigs)
 
 TEST(AuthLockTest, NonceConfigRollback)
 {
-  AccountAuthData base = make_base_auth_data({0, 1});
+  AddressAuthData base = make_base_auth_data({0, 1});
   AuthLock lock(base);
 
   // First change: set nonce config
@@ -776,14 +777,14 @@ TEST(AuthLockTest, NonceConfigRollback)
   lock.commit_change(false, snapshot_cost, item2, &kTestCostModel);
 
   // Verify final state matches item2 (the middle state)
-  AccountAuthData result = lock.build_result();
+  AddressAuthData result = lock.build_result();
   EXPECT_EQ(result.nonce_config.accepted_keys, 0x03);
   EXPECT_EQ(result.nonce_config.required_weight, Weight{2});
 }
 
 TEST(AuthLockTest, AllKeysUsed)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Create a transaction that modifies all MAX_SIGNERS keys
@@ -806,7 +807,7 @@ TEST(AuthLockTest, AllKeysUsed)
 
 TEST(AuthLockTest, DISABLED_PartialRelease)
 {
-  AccountAuthData base = make_base_auth_data();
+  AddressAuthData base = make_base_auth_data();
   AuthLock lock(base);
 
   // Tx acquires keys 0, 1, 2

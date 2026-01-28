@@ -33,7 +33,6 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -65,7 +64,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   // read correctly.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<
-        NativeContract>(std::unordered_map<MethodID,
+        NativeContract>(std::unordered_map<Runtime::MethodID,
                                            NativeContract::function_t>{
         {0,
          [](SystemCallHandler &handler,
@@ -74,7 +73,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
            auto key = make_storage_key("test");
            auto [res, _gas] = syscall_BytestringSet_inner(
                handler, key, std::as_bytes(std::span(calldata)),
-               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
            if (!res.has_value() ||
                res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
              ADD_FAILURE()
@@ -214,7 +213,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   // 1: Makes a bytestring write.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -239,7 +238,8 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
@@ -307,14 +307,15 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
   // try_invoke frame.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
@@ -329,7 +330,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span{"world"}),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
@@ -533,7 +535,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   // failure, then returns error
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -546,10 +548,10 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                // Interpret calldata bytes as int8_t for set_value and add_value
                auto add_value = static_cast<int8_t>(calldata[0]);
 
-               auto system_res =
-                   handler.set_nnint(key, std::nullopt, add_value,
-                                     std::to_underlying(
-                                         StorageItemRPCFlags::kStorageNone));
+               auto system_res = handler.set_nnint(
+                   key, std::nullopt, add_value,
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
 
                if (!system_res.has_value()) {
                  ADD_FAILURE() << "set_nnint should have succeeded";
@@ -669,7 +671,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // return error
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -677,7 +679,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(calldata)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring in method 0";
@@ -814,7 +817,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // return error
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -822,7 +825,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(calldata)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring in method 0";
@@ -980,7 +984,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   // returns error 2: Invokes method 0 with [1], checks success
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -992,10 +996,10 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Interpret calldata bytes as int8_t for add_value
                auto add_value = static_cast<int8_t>(calldata[0]);
 
-               auto system_res =
-                   handler.set_nnint(key, std::nullopt, add_value,
-                                     std::to_underlying(
-                                         StorageItemRPCFlags::kStorageNone));
+               auto system_res = handler.set_nnint(
+                   key, std::nullopt, add_value,
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
 
                if (!system_res.has_value()) {
                  // System-level error during async operation
@@ -1143,7 +1147,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_db_failure = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -1156,10 +1160,10 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                auto set_value = static_cast<int8_t>(calldata[0]);
                auto add_value = static_cast<int8_t>(calldata[1]);
 
-               auto system_res =
-                   handler.set_nnint(key, set_value, add_value,
-                                     std::to_underlying(
-                                         StorageItemRPCFlags::kStorageNone));
+               auto system_res = handler.set_nnint(
+                   key, set_value, add_value,
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
 
                if (!system_res.has_value()) {
                  // System-level error during async operation
@@ -1416,14 +1420,15 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // 2: Root method: try_invoke method 0 (succeeds), then try_invoke method 1
   // (fails)
   auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      NativeContract>(std::unordered_map<Runtime::MethodID,
+                                         NativeContract::function_t>{
       {0,
        [str_abc](SystemCallHandler &handler,
                  NativeRuntime &) -> InvokeStatus<void> {
          auto key0 = make_storage_key("test0");
          auto [res, _gas] = syscall_BytestringSet_inner(
              handler, key0, std::as_bytes(std::span(str_abc)),
-             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
          if (!res.has_value() ||
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
@@ -1439,7 +1444,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
          auto key1 = make_storage_key("test1");
          auto [res0, _gas0] = syscall_BytestringSet_inner(
              handler, key0, std::as_bytes(std::span(str_abc)),
-             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
          if (!res0.has_value() ||
              res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
@@ -1448,7 +1453,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
          }
          auto [res1, _gas1] = syscall_BytestringSet_inner(
              handler, key1, std::as_bytes(std::span(str_def)),
-             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
          if (!res1.has_value() ||
              res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
@@ -1526,7 +1531,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());
-  const StorageItem &data_item0 = data_item0_opt.value();
+  const auto &data_item0 = data_item0_opt.value();
   ASSERT_EQ(data_item0.bytestring(), str_abc);
 
   auto data_addrkey1 = make_contract_data_addrkey(contract_addr, "test1");
@@ -1563,14 +1568,14 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   // 2: Write "abc" to key2
   // 3: Root method: try_invoke method 0, then 1, then 2
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_abc](SystemCallHandler &handler,
                      NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key0, std::as_bytes(std::span(str_abc)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
@@ -1585,7 +1590,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              auto key1 = make_storage_key("test1");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key1, std::as_bytes(std::span(str_def)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
@@ -1600,7 +1605,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              auto key2 = make_storage_key("test2");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key2, std::as_bytes(std::span(str_ghi)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
@@ -1737,14 +1742,15 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // 2: Write "abc" to key2
   // 3: Root method: try_invoke method 0, then 1, then 2
   auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      NativeContract>(std::unordered_map<Runtime::MethodID,
+                                         NativeContract::function_t>{
       {0,
        [str_short](SystemCallHandler &handler,
                    NativeRuntime &) -> InvokeStatus<void> {
          auto key0 = make_storage_key("test0");
          auto [res, _gas] = syscall_BytestringSet_inner(
              handler, key0, std::as_bytes(std::span(str_short)),
-             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
          if (!res.has_value() ||
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
@@ -1759,7 +1765,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
          auto key0 = make_storage_key("test0");
          auto [res, _gas] = syscall_BytestringSet_inner(
              handler, key0, std::as_bytes(std::span(str_medium)),
-             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
          if (!res.has_value() ||
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
@@ -1774,7 +1780,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
          auto key0 = make_storage_key("test0");
          auto [res, _gas] = syscall_BytestringSet_inner(
              handler, key0, std::as_bytes(std::span(str_long)),
-             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
          if (!res.has_value() ||
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
@@ -1895,14 +1901,14 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   // 1: Write short string
   // 2: Root method: try_invoke method 0, then try_invoke method 1
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_long](SystemCallHandler &handler,
                       NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key0, std::as_bytes(std::span(str_long)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
@@ -1917,7 +1923,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
              auto key0 = make_storage_key("test0");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key0, std::as_bytes(std::span(str_short)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
@@ -2029,14 +2035,14 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   // 2: Try-invoke method 1, then return error
   // 3: Root method: try_invoke method 0, then try_invoke method 2
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_long](SystemCallHandler &handler,
                       NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key0, std::as_bytes(std::span(str_long)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
@@ -2051,7 +2057,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
              auto key0 = make_storage_key("test0");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key0, std::as_bytes(std::span(str_short)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
@@ -2196,7 +2202,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Sender contract
   auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [token_contract_addr, receiver_addr,
             write_cost](SystemCallHandler &handler,
@@ -2242,14 +2248,14 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Receiver contract
   auto receiver_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_hello](SystemCallHandler &handler,
                        NativeRuntime &) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
@@ -2359,7 +2365,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           int128_t set_128 = set_amount;
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kKey, &set_128, add_amount,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
 
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2375,7 +2381,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
            int64_t add_amount) -> InvokeStatus<void> {
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kKey, nullptr, add_amount,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -2423,7 +2429,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           int128_t set_value = 35;
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kKey, &set_value, 0,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           // auto r = handler.set_nnint(key, 35, 0);
           // if (!r.has_value() || !r.value().has_value()) {
           if (!r.has_value() ||
@@ -2603,7 +2609,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
 
   // Contract 0: always errors, consumes 100 gas
   auto error_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler & /*handler*/,
               NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2618,7 +2624,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
 
   // Contract 1: performs the four try_invoke error cases
   auto caller_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [=](SystemCallHandler &handler,
                NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2765,7 +2771,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   // 1: try_invoke method 2, then manually revert
   // 2: Write "hello" to storage and return success
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [key](SystemCallHandler &handler,
                  NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2828,7 +2834,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                             NativeRuntime &) -> InvokeStatus<void> {
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "ManualRevertUndoesTryInvokeLocks: Failed to "

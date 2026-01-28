@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -17,10 +18,6 @@
 #include <utility>
 #include <variant>
 
-#include "x23/format.h"
-#include "x23/x23.h"
-
-#include "account.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "event.hh"
@@ -48,16 +45,19 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
+#include "precompiles.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -249,12 +249,22 @@ public:
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
     : db_wrapper_(make_db_wrapper(test_db))
   {
-    if (log) {
+    if (log || do_logging_env()) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
     initialize(mode, empty_genesis);
     HogexecMetrics::launch_log_worker();
+  }
+
+  static bool do_logging_env() noexcept
+  {
+    if (char *p = getenv("HOGEXEC_TRACE")) {
+      if (int n = atoi(p); n > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void enable_logging();
@@ -311,7 +321,7 @@ public:
                              ProposalModeCtor{}, runtime_context);
   }
 
-  std::optional<StorageItem>
+  std::optional<WireStorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
     auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
@@ -343,7 +353,8 @@ public:
   static auto make_native_contract(int32_t contract_id)
   {
     auto contract = std::make_shared<Contract>(ContractType::kNative);
-    contract->native_contract_id() = contract_id;
+    contract->native_contract_id() =
+        static_cast<HogexecPrecompiledNativeContracts>(contract_id);
     return contract;
   }
 
@@ -391,11 +402,11 @@ public:
   }
 
   constexpr static AddressAndKey
-  make_account_auth_data_addrkey(ContractAddress const &address)
+  make_address_auth_data_addrkey(ContractAddress const &address)
   {
     return AddressAndKey{.address = address,
                          .key = StorageKey(
-                             StorageKeyType::kStorageKeyTypeAccountAuthData)};
+                             StorageKeyType::kStorageKeyTypeAddressAuthData)};
   }
 
   constexpr static AddressAndKey

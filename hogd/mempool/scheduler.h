@@ -189,7 +189,8 @@ private:
       const std::unordered_set<ContractAddress> &accounts,
       const TxKey &lower_bound);
 
-  void process_transfers_helper(const Delta &delta, BlockHeight block_height);
+  void process_transfers_helper(const Delta &delta,
+                                BlockHeight block_height) noexcept;
 
   static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
                                                    uint128_t num_hogs,

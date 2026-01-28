@@ -26,7 +26,6 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -58,7 +57,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
   //    Expected behavior: all three of those calls should succeed.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -84,7 +83,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                Bytestring bytestring = make_bytestring("hello");
                auto [write_status, _g2] = syscall_BytestringSet_inner(
                    handler, key, std::as_bytes(std::span(bytestring)),
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write bytestring: " << write_status.error();
@@ -213,7 +213,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   //    Expected behavior: all three of those calls should succeed.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -241,7 +241,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                int128_t set_value = 42;
                auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
                    handler, key, &set_value, 0,
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write nnint: " << write_status.error();
@@ -376,7 +377,7 @@ TEST_P(DeleteRecreateTest, DISABLED_DeleteRecreateRetrocausalQueue)
   //    Expected behavior: all three of those calls should succeed.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -526,7 +527,7 @@ TEST_P(DeleteRecreateTest, DISABLED_DeleteRecreateRetrocausalQueue)
   // second should fail
   auto make_verify_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {

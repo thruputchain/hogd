@@ -4,7 +4,8 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -34,7 +35,7 @@ StorageItemWrapper::StorageItemWrapper(ReplayCache replay_cache,
   : storage_item_(ReplayCacheWrapper{.cache_ = std::move(replay_cache)}),
     cost_model_(cost_model)
 {}
-StorageItemWrapper::StorageItemWrapper(AccountAuthData auth_data,
+StorageItemWrapper::StorageItemWrapper(AddressAuthData auth_data,
                                        StorageCostModel const *cost_model)
   : storage_item_(AuthDataWrapper{.auth_data_ = std::move(auth_data)}),
     cost_model_(cost_model)
@@ -53,54 +54,54 @@ StorageItemWrapper::type() const
   return std::visit([](auto const &v) { return v.kItemType; }, storage_item_);
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::to_wire_item() const
 {
   return std::visit([](auto const &v) { return v.to_wire_item(); },
                     storage_item_);
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::BytestringWrapper::to_wire_item() const
 {
-  StorageItem item(StorageItemType::kItemTypeBytestring);
+  WireStorageItem item(StorageItemType::kItemTypeBytestring);
   item.bytestring() = bytestring_;
   return item;
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::NonnegativeIntWrapper::to_wire_item() const
 {
-  StorageItem item(StorageItemType::kItemTypeNonnegativeInt);
+  WireStorageItem item(StorageItemType::kItemTypeNonnegativeInt);
   item.nnint() = to_xdr(nnint_);
   return item;
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 {
-  return StorageItem(StorageItemType::kItemTypeRetrocausalQueue);
+  return WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue);
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::ReplayCacheWrapper::to_wire_item()
 {
-  StorageItem item(StorageItemType::kItemTypeReplayCacheData);
+  WireStorageItem item(StorageItemType::kItemTypeReplayCacheData);
   return item;
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::AuthDataWrapper::to_wire_item() const
 {
-  StorageItem item(StorageItemType::kItemTypeAuthData);
+  WireStorageItem item(StorageItemType::kItemTypeAuthData);
   item.auth_data() = auth_data_;
   return item;
 }
 
-StorageItem
+WireStorageItem
 StorageItemWrapper::DeployedContractHashWrapper::to_wire_item() const
 {
-  StorageItem item(StorageItemType::kItemTypeDeployedContractHash);
+  WireStorageItem item(StorageItemType::kItemTypeDeployedContractHash);
   item.deployed_contract_hash() = deployed_contract_hash_;
   return item;
 }

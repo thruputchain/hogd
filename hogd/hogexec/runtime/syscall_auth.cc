@@ -1,4 +1,5 @@
 
+#include "auth_claim.hh"
 #include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
@@ -7,7 +8,7 @@
 #include <span>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"

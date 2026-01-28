@@ -18,7 +18,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -53,14 +53,14 @@ TEST_P(RevertTest, RootFrameReverts)
 
   // Deploy contract with one method that writes a bytestring and then reverts
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_hello, key](SystemCallHandler &handler,
                             NativeRuntime &) -> InvokeStatus<void> {
              // Write the bytestring to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
@@ -141,7 +141,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   // 2: Write "hello" to storage, try_invoke method 3, then return success
   // 3: Write "world" to storage, then return success
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -206,7 +206,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              // Write "hello" to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key1, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: Failed to "
@@ -234,7 +234,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              // Write "world" to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
                  handler, key2, std::as_bytes(std::span(str_world)),
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: Failed to "

@@ -4,7 +4,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/auth/auth_data_cache.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -30,9 +30,9 @@ TEST(AuthDataCacheTest, BasicPutAndGet)
 
   ContractAddress addr1 = make_test_address(1);
   BlockHeight height1 = 100;
-  AccountAuthData auth_data1{};
+  AddressAuthData auth_data1{};
   auto data1 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height1, auth_data1);
 
   // Put data into cache
@@ -52,9 +52,9 @@ TEST(AuthDataCacheTest, GetNonExistentAddress)
   ContractAddress addr2 = make_test_address(2);
 
   BlockHeight height1 = 100;
-  AccountAuthData auth_data1{};
+  AddressAuthData auth_data1{};
   auto data1 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height1, auth_data1);
 
   cache.put(addr1, data1);
@@ -71,14 +71,14 @@ TEST(AuthDataCacheTest, UpdateWithNewerHeight)
   ContractAddress addr1 = make_test_address(1);
   BlockHeight height1 = 100;
   BlockHeight height2 = 200;
-  AccountAuthData auth_data1{};
-  AccountAuthData auth_data2{};
+  AddressAuthData auth_data1{};
+  AddressAuthData auth_data2{};
 
   auto data1 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height1, auth_data1);
   auto data2 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height2, auth_data2);
 
   cache.put(addr1, data1);
@@ -97,14 +97,14 @@ TEST(AuthDataCacheTest, IgnoreOlderUpdate)
   ContractAddress addr1 = make_test_address(1);
   BlockHeight height1 = 200;
   BlockHeight height2 = 100; // Older than height1
-  AccountAuthData auth_data1{};
-  AccountAuthData auth_data2{};
+  AddressAuthData auth_data1{};
+  AddressAuthData auth_data2{};
 
   auto data1 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height1, auth_data1);
   auto data2 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height2, auth_data2);
 
   cache.put(addr1, data1);
@@ -128,18 +128,18 @@ TEST(AuthDataCacheTest, MultipleAddresses)
   BlockHeight height2 = 200;
   BlockHeight height3 = 300;
 
-  AccountAuthData auth_data1{};
-  AccountAuthData auth_data2{};
-  AccountAuthData auth_data3{};
+  AddressAuthData auth_data1{};
+  AddressAuthData auth_data2{};
+  AddressAuthData auth_data3{};
 
   auto data1 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height1, auth_data1);
   auto data2 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height2, auth_data2);
   auto data3 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           height3, auth_data3);
 
   cache.put(addr1, data1);
@@ -171,7 +171,7 @@ TEST(AuthDataCacheTest, Eviction)
   for (const auto &addr : addresses) {
     bucket.put(addr,
                std::make_shared<
-                   std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+                   std::pair<BlockHeight, std::optional<AddressAuthData>>>(
                    0, std::nullopt));
   }
   for (size_t i = 0; i < 100 - 16; i++) {
@@ -188,11 +188,11 @@ TEST(AuthDataCacheTest, RejectOlderUpdateAfterEviction)
 
   ContractAddress addr1 = make_test_address(1);
   ContractAddress addr2 = make_test_address(2);
-  AccountAuthData auth_data{};
+  AddressAuthData auth_data{};
 
   // Insert at height 10
   auto data10 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           10, auth_data);
   cache.put(addr1, data10);
 
@@ -210,7 +210,7 @@ TEST(AuthDataCacheTest, RejectOlderUpdateAfterEviction)
 
   // Try to reinsert at height 9 (older than height 10)
   auto data9 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           9, auth_data);
   cache.put(addr1, data9);
 
@@ -221,7 +221,7 @@ TEST(AuthDataCacheTest, RejectOlderUpdateAfterEviction)
 
   // an update for a different address at height 9 should be rejected
   auto data9_2 =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
           9, auth_data);
   cache.put(addr2, data9_2);
   retrieved = cache.get(addr2);

@@ -45,6 +45,19 @@ public:
        rocksdb::CompressionType compression_algorithm =
            rocksdb::CompressionType::kLZ4Compression);
 
+  static IndexerStatus<IndexDB>
+  open_or_make_new(const std::filesystem::path &path,
+                   rocksdb::CompressionType compression_algorithm =
+                       rocksdb::CompressionType::kLZ4Compression)
+  {
+    if (std::filesystem::exists(path)) {
+      // [path] already exists, so open the existing database.
+      return open(path, compression_algorithm);
+    }
+    // Nothing exists at [path], so create a new database there.
+    return make_new(path, compression_algorithm);
+  }
+
   ~IndexDB();
 
   // Delete copy, allow move
@@ -66,10 +79,10 @@ public:
   IndexerStatus<void> consume_events(BlockHeight block_height,
                                      std::span<const TxEventLog> events);
 
-  // Lookup events for a specific transaction in a block
-  // Returns the TxEventLog if found, or an error if not found
-  IndexerStatus<TxEventLog> get_tx_events(BlockHeight block_height,
-                                          SHA256Hash const &tx_hash) const;
+  // Look up the block height and events for a specific transaction.
+  // Returns the block height and TxEventLog if found, or an error if not found.
+  IndexerStatus<std::pair<BlockHeight, TxEventLog>>
+  get_tx_events(SHA256Hash const &tx_hash) const;
 
   // Get all events for a specific contract address
   // Returns a vector of IdentifiedEvent entries

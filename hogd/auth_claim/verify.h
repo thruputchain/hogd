@@ -4,12 +4,13 @@
 #include <unordered_set>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -18,13 +19,13 @@ class Ed25519SignatureVerifier {
 public:
   void add_signature(const Ed25519PublicKey &public_key,
                      const Ed25519Signature &signature,
-                     SHA256Hash const &tx_hash);
+                     x23::BufView serialized_tx);
   bool verify();
 
 private:
   std::vector<Ed25519PublicKey> public_keys_;
   std::vector<Ed25519Signature> signatures_;
-  std::vector<SHA256Hash> tx_hashes_;
+  std::vector<x23::Buf> serialized_txs_;
 };
 
 // There are three steps to validating a transaction for scheduling:
@@ -51,8 +52,8 @@ AuthVerifyStatus<void> auth_claim_is_well_formed(const SignedTransaction &stx);
 // as well as checks that the signatures correspond to public keys that exist,
 // and that claims about signature weights are satisfied.
 AuthVerifyStatus<void> lightweight_validate_auth_claims(
-    const SignedTransaction &stx, const AccountAuthData &source_auth_data,
-    std::unordered_map<ContractAddress, const AccountAuthData *> const
+    const SignedTransaction &stx, const AddressAuthData &source_auth_data,
+    std::unordered_map<ContractAddress, const AddressAuthData *> const
         &aux_auth_data);
 
 // Verifies that the signatures on the transaction match the claims about the
@@ -61,8 +62,8 @@ AuthVerifyStatus<void> lightweight_validate_auth_claims(
 // verification.
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
-            const AccountAuthData &source_auth_data,
-            std::unordered_map<ContractAddress, const AccountAuthData *> const
+            const AddressAuthData &source_auth_data,
+            std::unordered_map<ContractAddress, const AddressAuthData *> const
                 &aux_auth_data,
             Ed25519SignatureVerifier *signature_verifier = nullptr);
 

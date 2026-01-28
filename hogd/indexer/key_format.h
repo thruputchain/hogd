@@ -17,7 +17,7 @@ public:
   // Column family: tx_index
   // This is the primary index, and is responsible for storing the list of
   // events per each transaction. Key format:
-  //   block_height (8 bytes BE) + tx_hash (32 bytes) (total: 40 bytes)
+  //   tx_hash (32 bytes) (total: 32 bytes)
   // Value format:
   //   serialized TxEventLog
   // The first bytes of the key are the block height, so that appending new elts
@@ -46,12 +46,9 @@ public:
   static constexpr const char *kContractIndexColumnFamily = "contract_index";
 
   // Transaction index key format:
-  //   block_height (8 bytes BE) + tx_hash (32 bytes)
-  // Total: 40 bytes
-  // The intent is to support efficient range queries by block_height
-  // (for efficient deletes of old data), and to efficiently query
-  // for individual transactions.
-  static constexpr size_t kTxKeySize = 8 + 32;
+  //   tx_hash (32 bytes)
+  // Total: 32 bytes
+  static constexpr size_t kTxKeySize = 32;
 
   // Contract index key format:
   //   contract_address (32 bytes) + block_height (8 bytes BE) +
@@ -65,8 +62,7 @@ public:
   static constexpr size_t kContractKeyPrefixSize = 32 + 8;
 
   // Build a transaction index key into the provided buffer
-  static void make_tx_key(std::string &key, BlockHeight block_height,
-                          SHA256Hash const &tx_hash);
+  static void make_tx_key(std::string &key, SHA256Hash const &tx_hash);
 
   // Build a contract index key prefix into the provided buffer
   static void make_contract_key_prefix(std::string &key,

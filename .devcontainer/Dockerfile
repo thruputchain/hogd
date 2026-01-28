@@ -42,6 +42,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     git \
     openssh-client \
     clang-21 \
+    clangd-21 \
     clang-format-21 \
     clang-tidy-21 \
     clang-tools-21 \
@@ -74,7 +75,8 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     && $SUDO update-alternatives --set clang++ /usr/bin/clang++-21 \
     && $SUDO update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100 \
     && $SUDO update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-21 100 \
-    && $SUDO update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-21 100
+    && $SUDO update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-21 100 \
+    && $SUDO update-alternatives --install /usr/bin/clangd clangd /usr/bin/clangd-21 100
 
 # Set up LLVM tools alternatives
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
@@ -103,19 +105,24 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     && rustup toolchain install nightly-2025-09-24 \
     && rustup target add wasm32-unknown-unknown --toolchain nightly-2025-09-24 \
     && rustup component add rust-src --toolchain nightly-2025-09-24 \
+    && rustup component add clippy --toolchain nightly-2025-09-24 \
+    && rustup component add rustfmt --toolchain nightly-2025-09-24 \
     && rustup component add clippy --toolchain 1.90.0 \
+    && rustup component add rustfmt --toolchain 1.90.0 \
     && rustup component add clippy --toolchain stable \
+    && rustup component add rustfmt --toolchain stable \
     && cargo install cbindgen \
-    && $SUDO chmod -R a+rx /usr/local/rustup /usr/local/cargo
+    && $SUDO chmod -R a+rwx /usr/local/rustup /usr/local/cargo
 
-# Create non-root user for local development (skipped on Namespace.so which has its own user)
-ARG UID=1000
-ARG GID=1000
-RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
-    $SUDO groupadd -g ${GID} builder 2>/dev/null || true \
-    && $SUDO useradd -m -u ${UID} -g ${GID} -s /bin/bash builder 2>/dev/null || true
+# Create non-root user for local development
+RUN useradd -m -s /bin/bash builder \
+    && mkdir -p /home/builder/.cache/ccache /home/builder/.ssh \
+    && ssh-keyscan github.com >> /home/builder/.ssh/known_hosts 2>/dev/null \
+    && chmod 700 /home/builder/.ssh \
+    && chmod 600 /home/builder/.ssh/known_hosts || true \
+    && chown -R builder:builder /home/builder
 
-# Add GitHub to known_hosts for SSH access (works for any user via $HOME)
+# Add GitHub to known_hosts for root
 RUN mkdir -p ~/.ssh \
     && ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null \
     && chmod 700 ~/.ssh && chmod 600 ~/.ssh/known_hosts

@@ -11,6 +11,7 @@
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -26,7 +27,7 @@ public:
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
   // Returns nullptr if the block is not open.
-  x23::Async<PerThreadARC<EventBlockContext> *> get_context(BlockID block_id);
+  x23::Async<PerThreadARCRef<EventBlockContext>> get_context(BlockID block_id);
 
   // Opens a new block.
   // Returns an error if the block already exists.

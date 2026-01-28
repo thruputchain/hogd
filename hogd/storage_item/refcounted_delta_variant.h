@@ -9,7 +9,8 @@
 #include <variant>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/wide_integral.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -304,11 +305,11 @@ private:
 
 class AuthDataArgs {
 public:
-  AuthDataArgs(const AccountAuthData *base_auth_data)
+  AuthDataArgs(const AddressAuthData *base_auth_data)
     : base_auth_data_(base_auth_data)
   {}
 
-  static bool typeclass_match(const AccountAuthData * /*unused*/)
+  static bool typeclass_match(const AddressAuthData * /*unused*/)
   {
     return true;
   }
@@ -336,7 +337,7 @@ public:
                                        StorageItemWrapper const *base_item);
 
 private:
-  const AccountAuthData *base_auth_data_;
+  const AddressAuthData *base_auth_data_;
 
   std::set<uint32_t> modified_key_ids_;
   std::map<uint32_t, x23::Ptr<PublicKeyConfig>> committed_changes_;

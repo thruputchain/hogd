@@ -9,7 +9,7 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"
@@ -28,7 +28,7 @@
 #include "hogd/hogexec/runtime/transaction_stats.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -127,8 +127,8 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-  invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
-         Calldata calldata, InvokeFlagSet flags);
+  invoke(ContractAddress const &address, Runtime::MethodID method,
+         GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -188,7 +188,7 @@ public:
   SystemStatus<SyscallStatus<void>>
   set_bytestring(StorageKeyContractData const &storage_key,
                  std::span<const std::byte> input_bytestring,
-                 StorageItemRPCFlagSet input_flags);
+                 StorageDeltaFlagSet input_flags);
 
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
@@ -201,12 +201,12 @@ public:
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key,
             std::optional<int128_t> set_value, int128_t add_value,
-            StorageItemRPCFlagSet input_flags);
+            StorageDeltaFlagSet input_flags);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
   delete_object(StorageKeyContractData const &storage_key,
-                StorageItemRPCFlagSet flags);
+                StorageDeltaFlagSet flags);
 
   // === Retrocausal Queue syscalls ===
   SystemStatus<SyscallStatus<void>>

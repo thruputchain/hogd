@@ -6,18 +6,17 @@
 #include <string_view>
 #include <utility>
 
-#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "types.hh"
 
 namespace hogd {
 
 InvokeStatus<void>
-NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
+NativeContract::invoke(Runtime::MethodID method,
+                       SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime) const
 {
   // Note: this doesn't build on gcc 15.1; not clear why, but it works on <=14.3
@@ -63,7 +62,7 @@ NativeContext::make_new_runtime(
 
   auto host_index = contract.value()->native_contract_id();
 
-  auto it = contracts_.find(host_index);
+  auto it = contracts_.find(std::to_underlying(host_index));
   if (it == contracts_.end()) {
     warn("Attempt made to access a native contract that is not defined: {}",
          host_index);

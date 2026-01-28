@@ -7,7 +7,7 @@
 #include <utility>
 
 // generated x23 headers
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
@@ -15,7 +15,6 @@
 #include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -76,7 +75,7 @@ to_span(const Bytestring &bs)
 RPCError
 HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageItemRPCFlagSet flags)
+                              StorageDeltaFlagSet flags)
 {
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
@@ -101,7 +100,7 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                                    delta.deployed_contract_hash()));
   case StorageDeltaType::kDeltaTypeAuthDataChange:
     assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeAccountAuthData);
+           StorageKeyType::kStorageKeyTypeAddressAuthData);
     return to_rpc_error(
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
@@ -224,19 +223,19 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
         ctx_.get_db().read_address_balance(key.get_address());
     if (!nnint)
       return ExpectedStorageItem(to_rpc_error(nnint.error()));
-    StorageItem out(StorageItemType::kItemTypeNonnegativeInt);
+    WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
     ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
     ret.item() = out;
     return ret;
   }
-  if (key.is_account_auth_data()) {
-    HogDBStatus<AccountAuthData> auth_data =
-        ctx_.get_db().read_address_account_auth_data(key.get_address());
+  if (key.is_address_auth_data()) {
+    HogDBStatus<AddressAuthData> auth_data =
+        ctx_.get_db().read_address_auth_data(key.get_address());
     if (!auth_data)
       return ExpectedStorageItem(to_rpc_error(auth_data.error()));
-    StorageItem out(StorageItemType::kItemTypeAuthData);
+    WireStorageItem out(StorageItemType::kItemTypeAuthData);
     out.auth_data() = *auth_data;
     ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
@@ -248,7 +247,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
   if (!item)
     return ExpectedStorageItem(to_rpc_error(item.error()));
 
-  StorageItem out;
+  WireStorageItem out;
   switch (item->type) {
   case kNNInt128:
   {

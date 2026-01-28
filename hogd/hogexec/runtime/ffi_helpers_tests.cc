@@ -11,7 +11,7 @@ namespace hogd {
 
 namespace {
 
-AuthClaim
+auto
 roundtrip_auth_claim(AuthClaim const &auth_claim)
 {
   auto ffi_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(auth_claim);
@@ -20,9 +20,9 @@ roundtrip_auth_claim(AuthClaim const &auth_claim)
 
 } // namespace
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(FFIHelpers, AuthClaimRoundtrip)
 {
-
   AuthClaim a(AuthClaimType::kInvokedAddressSignature);
   a.invoked_address_signature_id() = 1;
   auto b = roundtrip_auth_claim(a);
@@ -32,20 +32,33 @@ TEST(FFIHelpers, AuthClaimRoundtrip)
   a.invoked_address_signed_weight().accepted_keys = 1;
   a.invoked_address_signed_weight().required_weight = 1;
   b = roundtrip_auth_claim(a);
-  ASSERT_EQ(a, b);
+  ASSERT_TRUE(b.has_value());
+  ASSERT_EQ(a, *b);
 
   a.claim_type(AuthClaimType::kOtherAddressSignature);
   a.other_address_signature_id().address = ContractAddress{1};
   a.other_address_signature_id().key_id = 1;
   b = roundtrip_auth_claim(a);
-  ASSERT_EQ(a, b);
+  ASSERT_TRUE(b.has_value());
+  ASSERT_EQ(a, *b);
 
   a.claim_type(AuthClaimType::kOtherAddressSignedWeight);
   a.other_address_signed_weight().address = ContractAddress{123};
   a.other_address_signed_weight().accepted_keys = 1;
   a.other_address_signed_weight().required_weight = 1;
   b = roundtrip_auth_claim(a);
-  ASSERT_EQ(a, b);
+  ASSERT_TRUE(b.has_value());
+  ASSERT_EQ(a, *b);
 }
+
+TEST(FFIHelpers, AuthClaimInvalid)
+{
+  generated::AuthClaim ffi_auth_claim;
+  ffi_auth_claim.tag = static_cast<generated::AuthClaim::Tag>(-1);
+  auto b = FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
+  ASSERT_FALSE(b.has_value());
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

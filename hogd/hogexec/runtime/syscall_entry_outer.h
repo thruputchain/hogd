@@ -287,7 +287,7 @@ show_type(T const &arg)
   else if constexpr (is_std_optional<T>) {
     static_assert(!std::same_as<T, ContractAddress>);
     if (arg) {
-      return "[" + show_type<T::value_type>(arg.value()) + "]";
+      return "[" + show_type<typename T::value_type>(arg.value()) + "]";
     }
     return "[null]";
   }

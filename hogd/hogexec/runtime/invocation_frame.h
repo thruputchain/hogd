@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "contract.hh"
 #include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep

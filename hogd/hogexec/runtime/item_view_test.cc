@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -38,7 +39,7 @@ protected:
   {
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
+        WireStorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
         BlockID{1}, *db_proxy_);
   }
 
@@ -46,7 +47,7 @@ protected:
   {
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted),
+        WireStorageItem(StorageItemType::kItemTypeDeleted),
         AddressAndKey{
             .address = ContractAddress{},
             .key = StorageKey(
@@ -57,7 +58,7 @@ protected:
   std::unique_ptr<SnapshotStorageItem> make_rcq_item()
   {
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeRetrocausalQueue),
+        WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue),
         AddressAndKey{}, BlockID{1}, *db_proxy_);
   }
 };
@@ -83,8 +84,7 @@ TEST_F(ItemViewTest, SetBytestring)
 {
   ItemView proxy;
 
-  Bytestring bytes{0, 1, 2, 3}, bytes2{3, 2, 1, 0},
-      bytes_long(kBytestringMaxLen + 10, 0);
+  Bytestring bytes{0, 1, 2, 3}, bytes2{3, 2, 1, 0};
   EXPECT_TRUE(proxy.set(BytestringItem(bytes)));
 
   const auto *get_res = proxy.template get<BytestringItem>();
@@ -92,10 +92,6 @@ TEST_F(ItemViewTest, SetBytestring)
   EXPECT_EQ(get_res->bytestring_, bytes);
 
   EXPECT_TRUE(proxy.set(BytestringItem(bytes2)));
-  ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
-  EXPECT_EQ(get_res->bytestring_, bytes2);
-
-  EXPECT_FALSE(proxy.set(BytestringItem(bytes_long)));
   ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
   EXPECT_EQ(get_res->bytestring_, bytes2);
 }

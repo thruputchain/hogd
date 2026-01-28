@@ -20,7 +20,6 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -61,14 +60,14 @@ protected:
 TEST_P(NNIntAddTest, ReadWriteAddValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, nullptr, 200,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -82,7 +81,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
 
              auto [r3, _gas3] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, nullptr, 300,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r3.has_value() ||
                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -145,7 +144,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
 TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -153,7 +152,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
              int128_t set_value = 200;
              auto [res, _gas] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, &set_value, 300,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -161,7 +160,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 
              auto [res2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
                  handler, key, nullptr, 100,
-                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res2.has_value() ||
                  res2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -236,7 +235,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, // First method: set_add on (0, 200)
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -244,7 +243,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                int128_t set_value = 0;
                auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
                    handler, key, &set_value, 200,
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!r.has_value() ||
                    r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -257,7 +257,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                auto key = make_storage_key("test");
                auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
                    handler, key, nullptr, -100,
-                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!r.has_value() ||
                    r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};

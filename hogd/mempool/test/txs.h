@@ -5,7 +5,7 @@
 #include <limits>
 #include <memory>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "built_contracts/fibonacci.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -63,7 +63,7 @@ generate_change_nonce_config(fib_client_t &fib_client, uint32_t required_weight)
 }
 
 inline Ed25519SecretKey
-create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
+create_key_pair(AddressAuthData &auth_data, size_t idx, Weight weight)
 {
   const auto [public_key, private_key] = ed25519_keygen();
   x23::Ptr<PublicKeyConfig> &pk_config = auth_data.public_keys[idx];
@@ -74,7 +74,7 @@ create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
   return private_key;
 }
 
-inline AccountAuthData
+inline AddressAuthData
 get_default_account()
 {
   static std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
@@ -87,7 +87,7 @@ get_default_account()
   CHECK_EQ(public_keys.size(), static_cast<size_t>(kMaxSigners));
   constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
 
-  return AccountAuthData{.public_keys = public_keys,
+  return AddressAuthData{.public_keys = public_keys,
                          .gas_permissions = {},
                          .nonce_config = kNonceConfig};
 }
@@ -111,14 +111,14 @@ make_signature(const SecretKey &sk, const Transaction &tx, uint8_t id)
 }
 
 inline void
-set_nonce_key(AccountAuthData &auth_data, size_t idx)
+set_nonce_key(AddressAuthData &auth_data, size_t idx)
 {
   CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
   auth_data.nonce_config.accepted_keys |= (1 << idx);
 }
 
 inline void
-add_gas_config(AccountAuthData &auth_data, GasAmount gas,
+add_gas_config(AddressAuthData &auth_data, GasAmount gas,
                const x23::Vec<size_t> &keys, Weight required_weight)
 {
   CHECK_LT(auth_data.gas_permissions.size(),

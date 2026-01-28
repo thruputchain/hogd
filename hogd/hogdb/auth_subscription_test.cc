@@ -7,8 +7,9 @@
 #include <string>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/perthread_arc.h"
@@ -27,7 +28,6 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -135,13 +135,16 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
 
   // Request auth data changes
   HogDBStatus<void> ret1 = invoke_tx.request_auth_data(
-      addr1, auth_data1, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      addr1, auth_data1,
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   ASSERT_TRUE(ret1);
   HogDBStatus<void> ret2 = invoke_tx.request_auth_data(
-      addr2, auth_data2, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      addr2, auth_data2,
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   ASSERT_TRUE(ret2);
   HogDBStatus<void> ret3 = invoke_tx.request_auth_data(
-      addr3, auth_data3, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      addr3, auth_data3,
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   ASSERT_TRUE(ret3);
 
   HogDBStatus<void> ret = invoke_tx.sync_balance_locks();
@@ -203,11 +206,11 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   grant_storage_token(addr, kStorageTokens);
 
   // Write auth data directly to the database
-  AccountAuthData initial_auth_data;
+  AddressAuthData initial_auth_data;
   initial_auth_data.public_keys[0] = make_test_pk_config(42);
   HogDBStatus<void> write_ret =
-      db_.write_address_account_auth_data(addr, initial_auth_data);
-  ASSERT_TRUE(write_ret) << "write_address_account_auth_data failed";
+      db_.write_address_auth_data(addr, initial_auth_data);
+  ASSERT_TRUE(write_ret) << "write_address_auth_data failed";
 
   BlockHeight height = 1;
   db_.load_trie(trie_);
@@ -221,9 +224,9 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   InvokeTX invoke_tx(block_tx);
 
   // Request deletion of the auth data
-  ItemKey auth_key = make_account_auth_data_item_key(addr);
+  ItemKey auth_key = make_address_auth_data_item_key(addr);
   HogDBStatus<void> delete_ret = invoke_tx.request_deletion(
-      auth_key, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      auth_key, std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   ASSERT_TRUE(delete_ret) << "request_deletion failed";
 
   HogDBStatus<void> ret = invoke_tx.sync_balance_locks();
@@ -303,7 +306,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
   // Request auth data change
   HogDBStatus<void> ret = invoke_tx.request_auth_data(
-      addr, auth_data, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      addr, auth_data,
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   ASSERT_TRUE(ret);
 
   HogDBStatus<void> sync_ret = invoke_tx.sync_balance_locks();
@@ -378,7 +382,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   // Request auth data change
   HogDBStatus<void> ret = invoke_tx.request_auth_data(
-      addr, auth_data, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      addr, auth_data,
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   ASSERT_TRUE(ret);
 
   HogDBStatus<void> sync_ret = invoke_tx.sync_balance_locks();

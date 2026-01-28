@@ -10,7 +10,8 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -35,7 +36,6 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -83,11 +83,11 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
 }
 
 namespace {
-template<StorageItemRPCFlags... Flags>
+template<StorageDeltaFlags... Flags>
 constexpr bool
-validate_flags(StorageItemRPCFlagSet flags)
+validate_flags(StorageDeltaFlagSet flags)
 {
-  constexpr StorageItemRPCFlagSet kAllowedFlags =
+  constexpr StorageDeltaFlagSet kAllowedFlags =
       (0 | ... | std::to_underlying(Flags));
   return (flags & kAllowedFlags) == flags;
 }
@@ -370,9 +370,9 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
-                          GasAmount gas_limit, Calldata calldata,
-                          InvokeFlagSet flags)
+SystemCallHandler::invoke(ContractAddress const &address,
+                          Runtime::MethodID method, GasAmount gas_limit,
+                          Calldata calldata, InvokeFlagSet flags)
 {
   auto runtime = resolve_runtime(address);
   if (!runtime) {
@@ -553,7 +553,6 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
 {
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
-  assert(data.size() <= kMaxLogMessageLen);
 
   x23::Buf buf;
   uint32_t num_topics = 0;
@@ -616,10 +615,12 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
 
 namespace {
 constexpr bool
-is_banned_redeploy_native_contract(uint32_t native_contract_id)
+is_banned_redeploy_native_contract(
+    HogexecPrecompiledNativeContracts native_contract_id)
 {
-  switch (static_cast<HogexecPrecompiledNativeContracts>(native_contract_id)) {
+  switch (native_contract_id) {
   case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
+  case HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim:
     return true;
   }
   panic("Unknown native contract deployed: {}", native_contract_id);
@@ -740,17 +741,18 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring,
-                                  StorageItemRPCFlagSet input_flags)
+                                  StorageDeltaFlagSet input_flags)
 {
   assert(!is_read_only());
 
-  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
+  assert(input_bytestring.size() <= kBytestringMaxLen);
 
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());
@@ -847,11 +849,11 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
                              int128_t add_value,
-                             StorageItemRPCFlagSet input_flags)
+                             StorageDeltaFlagSet input_flags)
 {
   assert(!is_read_only());
 
-  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -870,11 +872,12 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
-                                 StorageItemRPCFlagSet flags)
+                                 StorageDeltaFlagSet flags)
 {
   assert(!is_read_only());
 
-  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(flags)) {
+  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
+          flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1101,7 +1104,7 @@ AddressAndKey
 auth_data_addrkey(ContractAddress const &address)
 {
   return {.address = address,
-          .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthData)};
+          .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressAuthData)};
 }
 } // namespace
 
@@ -1120,8 +1123,8 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->change_public_key(key_index, std::move(new_key));
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    address_auth_data_item->change_public_key(key_index, std::move(new_key));
     return {};
   }
 
@@ -1131,7 +1134,7 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  AccountAuthDataItem new_item;
+  AddressAuthDataItem new_item;
   new_item.change_public_key(key_index, std::move(new_key));
   return item_view->set(new_item);
 }
@@ -1144,8 +1147,8 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->set_nonce_config(nonce_config);
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    address_auth_data_item->set_nonce_config(nonce_config);
     return {};
   }
 
@@ -1154,7 +1157,7 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
     return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
   assert(item_view->get<UnmodifiedItem>());
-  AccountAuthDataItem new_item;
+  AddressAuthDataItem new_item;
   new_item.set_nonce_config(nonce_config);
   return item_view->set(new_item);
 }
@@ -1168,8 +1171,8 @@ SystemCallHandler::set_address_gas_permission_configs(
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->set_gas_permission_configs(
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    address_auth_data_item->set_gas_permission_configs(
         std::move(gas_permission_configs));
     return {};
   }
@@ -1180,7 +1183,7 @@ SystemCallHandler::set_address_gas_permission_configs(
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  AccountAuthDataItem new_item;
+  AddressAuthDataItem new_item;
   new_item.set_gas_permission_configs(std::move(gas_permission_configs));
   return item_view->set(new_item);
 }

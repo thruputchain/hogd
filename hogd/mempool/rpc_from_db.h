@@ -1,8 +1,6 @@
 #pragma once
 
-#include <atomic>
 #include <memory>
-#include <shared_mutex>
 #include <utility>
 
 #include "db_sched.hh"
@@ -14,8 +12,8 @@
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
-#include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/format.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
@@ -44,18 +42,16 @@ public:
     co_return;
   }
 
-  // We mark [transfers] as a const reference because we copy it when passing it
-  // to [handle_transfer] below. If we change this in the future, then we may
-  // want to remove the const reference.
-  x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
+  x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
   {
-    scheduler_lock_.lock_shared();
+    auto cg = std::make_unique<x23::CoroGuard>();
+    co_await (*cg)(scheduler_lock_);
+
     if (scheduler_) {
       // See the comment above if you change this.
-      handle_transfer(transfers);
+      handle_transfer(transfers, std::move(cg));
     }
     else {
-      scheduler_lock_.unlock_shared();
       info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
            "expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
@@ -63,24 +59,8 @@ public:
     co_return;
   }
 
-  x23::Async<void> scheddb_changed_accounts(BlockHeight height,
-                                            ContractAddressBatch addresses)
-  {
-    scheduler_lock_.lock_shared();
-    if (scheduler_) {
-      // TODO(geoff): implement invalidation of cached auth checks
-      scheduler_lock_.unlock_shared();
-    }
-    else {
-      scheduler_lock_.unlock_shared();
-      info("[MempoolDbRpc::scheddb_changed_accounts] failed. This is ok and "
-           "expected if the mempool is shutting down, so only ignore this "
-           "issue in that case.");
-    }
-    co_return;
-  }
-
-  x23::Detached handle_transfer(HogsTransferred transfers)
+  x23::Detached handle_transfer(HogsTransferred transfers,
+                                std::unique_ptr<x23::CoroGuard> cg)
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
@@ -88,27 +68,28 @@ public:
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
-    scheduler_lock_.unlock_shared();
+    // @geoff to @jhumphri: Do we need the cg = nullptr here? The cg gets
+    // dropped automatically by going out of scope at the end of the function
+    // body
+    cg = nullptr; // cg.reset(); but CoroGuard also has a reset() method
   }
 
   x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
-    co_await default_coropoll().pool_.async([this, &scheduler]() {
-      scheduler_lock_.lock();
-      CHECK_PTR(scheduler.get());
-      scheduler_ = std::move(scheduler);
-      scheduler_lock_.unlock();
-    });
+    x23::CoroGuard cg;
+    co_await cg(scheduler_lock_);
+
+    CHECK_PTR(scheduler.get());
+    scheduler_ = std::move(scheduler);
   }
 
   x23::Async<void> reset_scheduler()
   {
-    co_await default_coropoll().pool_.async([this]() {
-      scheduler_lock_.lock();
-      CHECK_PTR(scheduler_.get());
-      scheduler_.reset();
-      scheduler_lock_.unlock();
-    });
+    x23::CoroGuard cg;
+    co_await cg(scheduler_lock_);
+
+    CHECK_PTR(scheduler_.get());
+    scheduler_.reset();
   }
 
   static x23::Async<x23::Vec<db_sched_client_t>> get_clients()
@@ -134,7 +115,7 @@ public:
   }
 
 private:
-  std::shared_mutex scheduler_lock_;
+  x23::CoroLock scheduler_lock_;
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);

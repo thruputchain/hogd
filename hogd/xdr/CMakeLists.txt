@@ -1,6 +1,6 @@
 add_xdr(
   protocol
-  ../../protocol/account.x
+  ../../protocol/address_auth.x
   ../../protocol/auth_card.x
   ../../protocol/auth_claim.x
   ../../protocol/auth_rpc.x
@@ -21,8 +21,11 @@ add_xdr(
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
   ../../protocol/hogexec_constants.x
+  ../../protocol/indexer.x
   ../../protocol/loadgen.x
+  ../../protocol/network.x
   ../../protocol/nomination.x
+  ../../protocol/parallel.x
   ../../protocol/port.x
   ../../protocol/precompiles.x
   ../../protocol/rpc_types.x
@@ -35,7 +38,6 @@ add_xdr(
   ../../protocol/sched_exec.x
   ../../protocol/standard_asset_events.x
   ../../protocol/storage_cost.x
-  ../../protocol/storage_delta_flags.x
   ../../protocol/storage_item.x
   ../../protocol/storage_lock.x
   ../../protocol/transaction.x
@@ -48,8 +50,3 @@ target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
 target_include_directories(protocol INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 add_dependencies(build_protocol generate_syscall_x)
 target_link_libraries(protocol INTERFACE crypto_interface)
-
-add_xdr_rs(
-	ffi_enum_rs 
-	${CMAKE_SOURCE_DIR}/hogd/rust/common/src
-	../../protocol/ffi_enums.x)

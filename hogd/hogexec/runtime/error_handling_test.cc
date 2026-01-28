@@ -5,7 +5,6 @@
 #include <new>
 #include <stdexcept>
 
-#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"

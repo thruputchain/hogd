@@ -21,6 +21,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/sync.h"
 #include "hogd/base/types.h"
+#include "x23/debug.h" // IWYU pragma: keep
 
 namespace hogd {
 
@@ -308,9 +309,9 @@ gettid()
     auto __val1 = expr1;                                                       \
     auto __val2 = expr2;                                                       \
     if (!(__val1 op __val2)) {                                                 \
-      panic("{}:{} (TID {}) CHECK FAILED: {} {} {} [{} {} {}]", __FILE__,      \
-            __LINE__, gettid(), CSTR(expr1), CSTR(op), CSTR(expr2),            \
-            format_arg(__val1), CSTR(invop), format_arg(__val2));              \
+      x23::panic("{}:{} (TID {}) CHECK FAILED: {} {} {} [{} {} {}]", __FILE__, \
+                 __LINE__, gettid(), CSTR(expr1), CSTR(op), CSTR(expr2),       \
+                 format_arg(__val1), CSTR(invop), format_arg(__val2));         \
     }                                                                          \
   } while (0)
 

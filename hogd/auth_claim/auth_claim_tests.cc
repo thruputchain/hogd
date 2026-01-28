@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
@@ -11,6 +11,7 @@
 #include "hogd/init.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -56,8 +57,7 @@ protected:
   {
     Signature sig(CryptographicScheme::Ed25519);
     assert(sk.scheme() == CryptographicScheme::Ed25519);
-    auto msg = sha256(tx);
-    sig.ed25519() = ed25519_sign(sk.ed25519(), msg);
+    sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
     return {.public_key_id = pk_id, .signature = sig};
   }
 
@@ -91,14 +91,14 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   auto [pk2, _] = make_key_pair();
 
-  AccountAuthData good_data =
-      AccountAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
+  AddressAuthData good_data =
+      AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
                           new PublicKeyConfig{.key = pk,
                                               .max_weight = Weight{1}})},
                       .nonce_config = kAnyKeyNonceConfig};
 
-  AccountAuthData missing_key =
-      AccountAuthData{.nonce_config = kAnyKeyNonceConfig};
+  AddressAuthData missing_key =
+      AddressAuthData{.nonce_config = kAnyKeyNonceConfig};
 
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data, {}).has_value());
   EXPECT_FALSE(
@@ -107,8 +107,8 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
       lightweight_validate_auth_claims(stx, missing_key, {}).error().code(),
       AuthVerifyErrorCode::kAuthDataMismatch);
 
-  AccountAuthData bad_data =
-      AccountAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
+  AddressAuthData bad_data =
+      AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
                           new PublicKeyConfig{.key = pk2,
                                               .max_weight = Weight{1}})},
                       .nonce_config = kAnyKeyNonceConfig};
@@ -139,7 +139,7 @@ TEST_F(AuthClaimTests, GasAllSponsored)
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
-  AccountAuthData aux_data = AccountAuthData{
+  AddressAuthData aux_data = AddressAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
       .gas_permissions = {GasPermissionConfig{.limit = 100,
@@ -148,7 +148,7 @@ TEST_F(AuthClaimTests, GasAllSponsored)
       .nonce_config = kAnyKeyNonceConfig,
   };
 
-  AccountAuthData self_data = AccountAuthData{
+  AddressAuthData self_data = AddressAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
       .gas_permissions = {GasPermissionConfig{.limit = 2,
@@ -185,7 +185,7 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
-  AccountAuthData aux_data = AccountAuthData{
+  AddressAuthData aux_data = AddressAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
       .gas_permissions = {GasPermissionConfig{.limit = 100,
@@ -194,7 +194,7 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
       .nonce_config = kAnyKeyNonceConfig,
   };
 
-  AccountAuthData self_data = AccountAuthData{
+  AddressAuthData self_data = AddressAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
       .gas_permissions = {GasPermissionConfig{.limit = 2,
@@ -230,8 +230,8 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
-  AccountAuthData good_data =
-      AccountAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
+  AddressAuthData good_data =
+      AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
                           new PublicKeyConfig{.key = pk,
                                               .max_weight = Weight{1}})},
                       .nonce_config = kAnyKeyNonceConfig};

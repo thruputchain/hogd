@@ -69,7 +69,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
 
   // Create a contract that will transfer tokens
   auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime &) -> InvokeStatus<void> {
@@ -155,7 +155,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
   // Create a contract that will transfer tokens
   auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime &) -> InvokeStatus<void> {
@@ -287,7 +287,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
   // Create a contract that orchestrates the transfers
   auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [kFirstTransferAmount, kSecondTransferAmount](
                SystemCallHandler &handler,

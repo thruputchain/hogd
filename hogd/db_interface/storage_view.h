@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <variant>
 
-#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -19,7 +18,6 @@
 #include "hogd/storage_item/storage_lock_util.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -178,7 +176,7 @@ public:
   std::optional<MeteredStorageLock>
   try_reserve_storage_delta(AddressAndKey const &addrkey,
                             StorageDelta const &delta, StorageLock const &lock,
-                            StorageItemRPCFlagSet flags);
+                            StorageDeltaFlagSet flags);
 
   void revert_storage_lock(AddressAndKey const &addrkey,
                            StorageLock const &lock);

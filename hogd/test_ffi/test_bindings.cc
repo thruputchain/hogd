@@ -9,13 +9,18 @@
 #include <format>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/auth_claim/status.h"
+#include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -198,14 +203,14 @@ register_new_contract(void *context, int32_t mock_contract_id,
 }
 
 OpenSyscallHandlerResult
-open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
-                     unsigned int signed_tx_len) noexcept
+open_syscall_handler(void *db, void *rc,
+                     FFISerializedSignedTransaction signed_tx) noexcept
 {
   constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
       kTestFFIErrorCodeInvalidPointer);
   ffi_trace(
       "FFI: open_syscall_handler(db={}, rc={}, signed_tx={}, signed_tx_len={})",
-      db, rc, static_cast<const void *>(signed_tx), signed_tx_len);
+      db, rc, static_cast<const void *>(signed_tx.data), signed_tx.len);
 
   if (!db) {
     return kNullptrError;
@@ -219,12 +224,12 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
 
   CHECK(runtime_context->get() != nullptr);
 
-  if (!signed_tx) {
+  if (!signed_tx.data) {
     return kNullptrError;
   }
   try {
     hogd::SignedTransaction stx;
-    x23::deserialize(&stx, x23::BufView{signed_tx, signed_tx_len});
+    x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -546,6 +551,153 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   return kTestFFIErrorCodeNone;
 }
 
+// Helper function to deserialize a SignedTransaction
+template<typename T>
+std::optional<SignedTransaction>
+deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
+                               T *error_out)
+{
+  if (!signed_tx.data) {
+    if (error_out) {
+      *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeInvalidPointer);
+    }
+    return std::nullopt;
+  }
+
+  try {
+    SignedTransaction stx;
+    x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
+    return stx;
+  } catch (x23::XdrBadInput const &e) {
+    log_error("error deserializing signed transaction: {}", e);
+    if (error_out) {
+      *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeDeserializeError);
+    }
+    return std::nullopt;
+  } catch (std::exception const &e) {
+    log_error("unexpected error deserializing signed transaction: {}", e);
+    if (error_out) {
+      *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeUnrecoverableError);
+    }
+    return std::nullopt;
+  }
+}
+
+VerifyAuthResult
+verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
+                                    FFISourceAuthData source_auth_data,
+                                    FFIAuxiliaryAuthData aux_auth_data) noexcept
+{
+  constexpr auto kNullptrError =
+      make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
+
+  ffi_trace("FFI: verify_signed_transaction_auth(signed_tx={}, "
+            "source_auth_data={}, aux_auth_data={}, count={})",
+            static_cast<const void *>(signed_tx.data),
+            static_cast<const void *>(source_auth_data.data),
+            static_cast<const void *>(aux_auth_data.auth_data),
+            aux_auth_data.count);
+
+  VerifyAuthResult error_result;
+  auto stx_opt = deserialize_signed_transaction(signed_tx, &error_result);
+  if (!stx_opt) {
+    return error_result;
+  }
+  const SignedTransaction &stx = *stx_opt;
+
+  try {
+    // Deserialize source auth data
+    if (!source_auth_data.data) {
+      return kNullptrError;
+    }
+
+    AddressAuthData source_data;
+    x23::deserialize(&source_data,
+                     x23::BufView{source_auth_data.data, source_auth_data.len});
+
+    // Deserialize auxiliary auth data
+    std::unordered_map<ContractAddress, const AddressAuthData *> aux_data_map;
+    std::vector<std::unique_ptr<AddressAuthData>> aux_data_storage;
+
+    if (aux_auth_data.count > 0) {
+      if (!aux_auth_data.auth_data) {
+        return kNullptrError;
+      }
+
+      for (uint32_t i = 0; i < aux_auth_data.count; i++) {
+        ContractAddress addr;
+        std::memcpy(addr.data(), aux_auth_data.auth_data[i].address,
+                    addr.size());
+
+        auto aux_data = std::make_unique<AddressAuthData>();
+        x23::deserialize(aux_data.get(),
+                         x23::BufView{aux_auth_data.auth_data[i].data,
+                                      aux_auth_data.auth_data[i].len});
+
+        aux_data_map[addr] = aux_data.get();
+        aux_data_storage.push_back(std::move(aux_data));
+      }
+    }
+
+    // Perform the appropriate level of verification
+    AuthVerifyStatus<void> result = verify_auth(stx, source_data, aux_data_map);
+
+    if (result.has_value()) {
+      return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
+    }
+    return {.auth_error_code = std::to_underlying(result.error().code()),
+            .ffi_error_code = kTestFFIErrorCodeNone};
+
+  } catch (x23::XdrBadInput const &e) {
+    log_error("error deserializing auth data: {}", e);
+    return make_ffi_result_type<VerifyAuthResult>(
+        kTestFFIErrorCodeDeserializeError);
+  } catch (std::exception const &e) {
+    log_error("error during verify_signed_transaction_auth: {}", e);
+    return make_ffi_result_type<VerifyAuthResult>(
+        kTestFFIErrorCodeUnrecoverableError);
+  }
+}
+
+VerifyAuthResultFromDBResult
+verify_signed_transaction_auth_from_db_impl(
+    void *db, FFISerializedSignedTransaction signed_tx) noexcept
+{
+  constexpr auto kNullptrError =
+      make_ffi_result_type<VerifyAuthResultFromDBResult>(
+          kTestFFIErrorCodeInvalidPointer);
+
+  ffi_trace("FFI: verify_signed_transaction_auth_from_db(db={}, signed_tx={}, "
+            "signed_tx_len={})",
+            db, static_cast<const void *>(signed_tx.data), signed_tx.len);
+
+  VerifyAuthResultFromDBResult error_result;
+  auto stx_opt = deserialize_signed_transaction(signed_tx, &error_result);
+  if (!stx_opt) {
+    return error_result;
+  }
+  const SignedTransaction &stx = *stx_opt;
+
+  // Well-formed check only needs the signed transaction
+  // For lightweight and full verification, we need a database
+  if (!db) {
+    return kNullptrError;
+  }
+
+  try {
+    auto *db_context = reinterpret_cast<DBContext *>(db);
+
+    auto err_code = db_context->run_auth_checks(stx);
+    return {.auth_error_code = std::to_underlying(err_code),
+            .ffi_error_code = kTestFFIErrorCodeNone};
+
+  } catch (std::exception const &e) {
+    log_error("error during verify_signed_transaction_auth_from_db: {}", e);
+    return make_ffi_result_type<VerifyAuthResultFromDBResult>(
+        kTestFFIErrorCodeUnrecoverableError);
+  }
+}
+
 } // namespace
 
 } // namespace hogd
@@ -608,10 +760,10 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
 }
 
 OpenSyscallHandlerResult
-open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
-                     unsigned int signed_tx_len)
+open_syscall_handler(void *db, void *rc,
+                     FFISerializedSignedTransaction signed_tx)
 {
-  return hogd::open_syscall_handler(db, rc, signed_tx, signed_tx_len);
+  return hogd::open_syscall_handler(db, rc, signed_tx);
 }
 
 TestFFIErrorCode
@@ -670,6 +822,22 @@ GetEventLogLenResult
 get_event_log_len(void *syscall_handler)
 {
   return hogd::get_event_log_len(syscall_handler);
+}
+
+VerifyAuthResult
+verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
+                               FFISourceAuthData source_auth_data,
+                               FFIAuxiliaryAuthData aux_auth_data)
+{
+  return hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
+                                                   aux_auth_data);
+}
+
+VerifyAuthResultFromDBResult
+verify_signed_transaction_auth_from_db(void *db,
+                                       FFISerializedSignedTransaction signed_tx)
+{
+  return hogd::verify_signed_transaction_auth_from_db_impl(db, signed_tx);
 }
 
 #ifdef __cplusplus

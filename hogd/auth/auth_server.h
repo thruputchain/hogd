@@ -1,14 +1,17 @@
 #pragma once
 
 #include <format>
+#include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_data_cache.h"
@@ -23,6 +26,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -33,14 +37,18 @@ public:
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client))
   {}
 
+  // The height supplied here should be the height returned by
+  // DB::get_dbtip().height. That height is the count of the number of blocks
+  // that have been committed.
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height, x23::span<SignedTransaction> txs,
+  verify_transactions(BlockHeight height,
+                      x23::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
 
   x23::Async<AuthStatus<
-      std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
+      std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
   // This mentod can be called in any order.  However, it is vital for cache
@@ -67,7 +75,7 @@ private:
   // populated with the auth data for the given address.
   x23::Async<AuthErrorCode>
   populate_auth_data(BlockHeight height, ContractAddress const &address,
-                     const AccountAuthData *&auth_data);
+                     const AddressAuthData *&auth_data);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
@@ -123,7 +131,7 @@ public:
   authmempool_verify_transactions(BlockHeight height,
                                   SignedTransactionBatch txs)
   {
-    x23::span<SignedTransaction> txs_span(txs.begin(), txs.end());
+    x23::span<const SignedTransaction> txs_span(txs.begin(), txs.end());
     return auth_server_.verify_transactions(height, txs_span);
   }
 

@@ -30,8 +30,9 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
-#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -116,7 +117,7 @@ make_key(size_t addr, size_t item)
 }
 
 constexpr std::optional<Uniquifier>
-maybe_uniquifier(BlockHeight height, ReplayNonce nonce, bool use_nonces)
+maybe_uniquifier(BlockHeight height, uint64_t nonce, bool use_nonces)
 {
   if (!use_nonces)
     return std::nullopt;
@@ -329,23 +330,22 @@ Benchmark::run()
     InvokeTX tx(block);
     if (p.uniquifier) {
       CHECK(p.uniquifier->block_expiry_height >= tip.height);
-      HogDBStatus<void> ret =
-          tx.request_consume_uniquifier(p.src.get_address(), *p.uniquifier,
-                                        std::to_underlying(
-                                            StorageItemRPCFlags::kStorageNone));
+      HogDBStatus<void> ret = tx.request_consume_uniquifier(
+          p.src.get_address(), *p.uniquifier,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
       if (!ret)
         fail(ret.error());
     }
     if (HogDBStatus<void> ret =
             tx.request_nnint128(p.src, -p.amount,
                                 std::to_underlying(
-                                    StorageItemRPCFlags::kStorageNone));
+                                    StorageDeltaFlags::kStorageDeltaFlagNone));
         !ret)
       fail(ret.error());
     if (HogDBStatus<void> ret =
             tx.request_nnint128(p.dst, p.amount,
                                 std::to_underlying(
-                                    StorageItemRPCFlags::kStorageNone));
+                                    StorageDeltaFlags::kStorageDeltaFlagNone));
         !ret)
       fail(ret.error());
     if (HogDBStatus<void> ret = tx.sync_balance_locks(); !ret)

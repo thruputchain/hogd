@@ -252,7 +252,17 @@ public:
     // it has no work associated with it, meaning it's not an Async
     // and you haven't turned it into a CoroCB.  Otherwise, you could
     // destroy the Awaitable while it's in use by another thread.
-    x23assert(!flags());
+#ifndef NDEBUG
+    if (auto fl = flags()) {
+      auto tr = trace(this, 4);
+      if (auto sz = tr.size())
+        // Trim newline as panic will add one
+        tr.resize(sz - 1);
+      panic("Premature destruction of a running Awaitable or Async"
+            " [flags = {:#x}]\n  Trace of destroyed Awaitable:\n{}",
+            fl, tr);
+    }
+#endif // !NDEBUG
   }
 
   //
@@ -391,7 +401,10 @@ private:
     std::exception_ptr exception_;
   };
 
-  unsigned flags() const { return flags_.load(std::memory_order_relaxed); }
+  unsigned flags() const noexcept
+  {
+    return flags_.load(std::memory_order_relaxed);
+  }
 
   std::coroutine_handle<> non_null_caller()
   {
@@ -543,7 +556,7 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto cb
+  void operator()(detail::is_callback_of<R> auto /*cb*/
                       SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
     // To defer destroying callee_, move Async into this coroutine

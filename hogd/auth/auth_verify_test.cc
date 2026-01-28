@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "auth_server_test_framework.h"
@@ -10,6 +10,7 @@
 #include "hogd/crypto/crypto.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -42,12 +43,13 @@ make_signature(SecretKey sk, Transaction const &tx, uint8_t id)
   DecoratedSignature signature;
   signature.public_key_id = id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
-  signature.signature.ed25519() = ed25519_sign(sk.ed25519(), sha256(tx));
+  signature.signature.ed25519() =
+      ed25519_sign(sk.ed25519(), x23::serialize(tx));
   return signature;
 }
 
 void
-add_pk_to_auth_data(AccountAuthData &auth_data, uint8_t id, PublicKey const &pk)
+add_pk_to_auth_data(AddressAuthData &auth_data, uint8_t id, PublicKey const &pk)
 {
   auth_data.public_keys[id] = x23::Ptr<PublicKeyConfig>(
       new PublicKeyConfig{.key = pk, .max_weight = 100});
@@ -64,7 +66,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 {
   ContractAddress address = make_test_address(8);
 
-  AccountAuthData auth_data{};
+  AddressAuthData auth_data{};
   auto [pk, sk] = make_key_pair();
   add_pk_to_auth_data(auth_data, 0, pk);
 
@@ -74,8 +76,9 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
   auth_data.gas_permissions.push_back(GasPermissionConfig{
       .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
 
+  mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
-  mock_db().increment_height();
+  mock_db().increment_height(); // height 2
 
   auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
@@ -93,7 +96,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(1, stx_span)();
+  auto result = auth_server().verify_transactions(2, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 }
@@ -103,8 +106,8 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   ContractAddress address1 = make_test_address(8);
   ContractAddress address2 = make_test_address(9);
 
-  AccountAuthData auth_data1{};
-  AccountAuthData auth_data2{};
+  AddressAuthData auth_data1{};
+  AddressAuthData auth_data2{};
 
   auto [pk1, sk1] = make_key_pair();
   auto [pk2, sk2] = make_key_pair();
@@ -129,12 +132,12 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   mock_db().set(address1, auth_data1);
   mock_db().set(address2, auth_data2);
-  mock_db().set(address3, AccountAuthData{});
-  mock_db().increment_height();
+  mock_db().set(address3, AddressAuthData{});
+  mock_db().increment_height(); // height 1
 
-  auth_server().register_auth_data_updates(1,
+  auth_server().register_auth_data_updates(0,
                                            mock_db().get_key_changes_at_height(
-                                               1))();
+                                               0))();
 
   Transaction tx1{};
   tx1.invocation.invoked_address = address1;

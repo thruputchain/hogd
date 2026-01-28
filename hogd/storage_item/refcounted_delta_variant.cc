@@ -11,7 +11,8 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -521,7 +522,7 @@ AuthDataArgs::to_item(
     std::shared_ptr<const StorageItemWrapper> const & /*unused*/,
     StorageCostModel const *cost_model) const
 {
-  AccountAuthData new_auth_data{};
+  AddressAuthData new_auth_data{};
   if (base_auth_data_) {
     new_auth_data = *base_auth_data_;
   }

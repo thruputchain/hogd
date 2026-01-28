@@ -2,7 +2,8 @@
 
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -49,7 +50,7 @@ protected:
 
   void SetUp() override
   {
-    base_data_ = AccountAuthData{.public_keys = {
+    base_data_ = AddressAuthData{.public_keys = {
                                      nullptr,
                                      nullptr,
                                      nullptr,
@@ -70,7 +71,7 @@ protected:
                                  }};
   }
 
-  AccountAuthData base_data_;
+  AddressAuthData base_data_;
   StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
       .base_data_item_cost = to_xdr(int128_t{1000}),

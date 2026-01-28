@@ -2,13 +2,12 @@
 
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/init.h"
-#include "types.hh"
 
 namespace hogd {
 
 TEST(RuntimeTest, MethodIDRoundTrip)
 {
-  auto check_round_trip = [](MethodID id) {
+  auto check_round_trip = [](Runtime::MethodID id) {
     auto name = Runtime::invoke_name(id);
     auto res = Runtime::method_id_from_name(name);
     ASSERT_EQ(res, id);

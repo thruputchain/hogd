@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -31,8 +30,8 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "precompiles.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -85,11 +84,12 @@ TEST_F(NativeContractTest, BasicInstantiate)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     auto contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler & /*unused*/, NativeRuntime & /*unused*/)
                  -> InvokeStatus<void> { return {}; }},
@@ -101,21 +101,22 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
     // Invokes another contract, returns the error code of the other contract
     auto contract_1 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
 
                if (calldata.size() !=
-                   sizeof(MethodID) + sizeof(ContractAddress)) {
+                   sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
-               MethodID invoked_id =
-                   *reinterpret_cast<const MethodID *>(calldata.data());
+               Runtime::MethodID invoked_id =
+                   *reinterpret_cast<const Runtime::MethodID *>(
+                       calldata.data());
                ContractAddress invoked_addr;
                std::memcpy(invoked_addr.data(),
-                           calldata.data() + sizeof(MethodID),
+                           calldata.data() + sizeof(Runtime::MethodID),
                            invoked_addr.size());
 
                auto invoke_res = handler.invoke(
@@ -263,7 +264,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   snapshot_server_->impl()->setup_create_contract(contract);
   snapshot_server_->impl()->setup_create_deployment(
@@ -318,7 +320,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         // does, in fact, throw errors if you get_bytestring from the snapshot
         auto [res, _gas] = syscall_BytestringSet_inner(
             handler, kBadKey, std::as_bytes(std::span(bstring)),
-            std::to_underlying(StorageItemRPCFlags::kStorageNone));
+            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -365,7 +367,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   snapshot_server_->impl()->setup_create_contract(contract);
   snapshot_server_->impl()->setup_create_deployment(
@@ -435,7 +438,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           // add ops shouldn't query db
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kBadKey, nullptr, 100,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -443,7 +446,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
               handler, kBadKey, nullptr, -200,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -465,7 +468,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           int128_t set_value = 100;
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               handler, kBadKey, &set_value, 200,
-              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -506,7 +509,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   snapshot_server_->impl()->setup_create_contract(contract);
   snapshot_server_->impl()->setup_create_deployment(

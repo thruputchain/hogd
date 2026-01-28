@@ -1,0 +1,305 @@
+name: Release test_ffi Library
+
+on:
+  push:
+    tags:
+      - 'test-ffi-v*'
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  build-linux-x86_64:
+    runs-on: hog1
+
+    steps:
+      - name: Clean up .gitconfig
+        run: |
+            echo "Cleaning up .gitconfig"
+            rm -f /home/hogci/.gitconfig
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/prepare_env
+
+      - name: Configure Build
+        run: |
+          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -x "-DARCH_FLAGS=-march=x86-64-v2" -n
+
+      - name: Build test_ffi Library
+        run: |
+          make -C build -j$(nproc) test_ffi
+
+      - name: Verify Library Built
+        run: |
+          ls -lh build/hogd/test_ffi/libtest_ffi.so
+          file build/hogd/test_ffi/libtest_ffi.so
+
+      - name: Package Library
+        run: |
+          mkdir -p release_artifacts
+          cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
+          cp hogd/test_ffi/test_bindings.h release_artifacts/
+          cd release_artifacts
+          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so test_bindings.h
+          sha256sum libtest_ffi-linux-x86_64.tar.gz > libtest_ffi-linux-x86_64.tar.gz.sha256
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libtest_ffi-linux-x86_64
+          path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
+
+  build-macos-arm64:
+    runs-on: namespace-profile-hogd-arm64-macos
+
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+            else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
+
+      - name: Setup Environment
+        run: ./scripts/macos-setup.sh
+
+      - name: Configure Build
+        run: |
+          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -x "-DARCH_FLAGS=-march=armv8.5-a" -n
+
+      - name: Build test_ffi Library
+        run: |
+          source ./scripts/macos-env.sh
+          make -C build -j$(sysctl -n hw.logicalcpu) test_ffi
+
+      - name: Verify Library Built
+        run: |
+          ls -lh build/hogd/test_ffi/libtest_ffi.dylib
+          file build/hogd/test_ffi/libtest_ffi.dylib
+
+      - name: Package Library
+        run: |
+          mkdir -p release_artifacts
+          cp build/hogd/test_ffi/libtest_ffi.dylib release_artifacts/
+          cp hogd/test_ffi/test_bindings.h release_artifacts/
+          cd release_artifacts
+          tar -czf libtest_ffi-macos-arm64.tar.gz libtest_ffi.dylib test_bindings.h
+          shasum -a 256 libtest_ffi-macos-arm64.tar.gz > libtest_ffi-macos-arm64.tar.gz.sha256
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libtest_ffi-macos-arm64
+          path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
+
+  create-release:
+    needs: [build-linux-x86_64, build-macos-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse version from header
+        id: parse_version
+        run: |
+          MAJOR=$(grep '#define TEST_FFI_VERSION_MAJOR' hogd/test_ffi/test_bindings.h | awk '{print $3}')
+          MINOR=$(grep '#define TEST_FFI_VERSION_MINOR' hogd/test_ffi/test_bindings.h | awk '{print $3}')
+          PATCH=$(grep '#define TEST_FFI_VERSION_PATCH' hogd/test_ffi/test_bindings.h | awk '{print $3}')
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "patch=$PATCH" >> $GITHUB_OUTPUT
+          echo "version=$MAJOR.$MINOR.$PATCH" >> $GITHUB_OUTPUT
+
+      - name: Verify tag matches version
+        run: |
+          EXPECTED_TAG="test-ffi-v${{ steps.parse_version.outputs.version }}"
+          if [ "${{ github.ref_name }}" != "$EXPECTED_TAG" ]; then
+            echo "Error: Tag name '${{ github.ref_name }}' does not match expected tag '$EXPECTED_TAG'"
+            echo "Please update version constants in hogd/test_ffi/test_bindings.h or use the correct tag"
+            exit 1
+          fi
+          echo "Tag matches version: $EXPECTED_TAG"
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: libtest_ffi-linux-x86_64
+          path: artifacts
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: libtest_ffi-macos-arm64
+          path: artifacts
+
+      - name: Generate release notes
+        id: generate_notes
+        run: |
+          NOTES=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            /repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name='${{ github.ref_name }}' \
+            --jq '.body')
+
+          # Save to multiline output
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Bindings for Rust SDK (${{ github.ref_name }})
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/libtest_ffi-linux-x86_64.tar.gz
+            artifacts/libtest_ffi-linux-x86_64.tar.gz.sha256
+            artifacts/libtest_ffi-macos-arm64.tar.gz
+            artifacts/libtest_ffi-macos-arm64.tar.gz.sha256
+          body: |
+            ## test_ffi Library Release ${{ github.ref_name }}
+
+            FFI library for testing hogd contracts.
+
+            ### Artifacts
+
+            **Linux x86_64:**
+            - `libtest_ffi-linux-x86_64.tar.gz` - Shared library (.so) and header file
+            - `libtest_ffi-linux-x86_64.tar.gz.sha256` - SHA256 checksum
+
+            **macOS ARM64:**
+            - `libtest_ffi-macos-arm64.tar.gz` - Dynamic library (.dylib) and header file
+            - `libtest_ffi-macos-arm64.tar.gz.sha256` - SHA256 checksum
+
+            ### Contents
+
+            - `libtest_ffi.so` (Linux) or `libtest_ffi.dylib` (macOS) - Shared library
+            - `test_bindings.h` - C header file
+
+            ### Usage
+
+            **Linux:**
+            ```bash
+            # Extract
+            tar -xzf libtest_ffi-linux-x86_64.tar.gz
+
+            # Verify checksum
+            sha256sum -c libtest_ffi-linux-x86_64.tar.gz.sha256
+            ```
+
+            **macOS:**
+            ```bash
+            # Extract
+            tar -xzf libtest_ffi-macos-arm64.tar.gz
+
+            # Verify checksum
+            shasum -a 256 -c libtest_ffi-macos-arm64.tar.gz.sha256
+            ```
+
+            ---
+
+            ${{ steps.generate_notes.outputs.notes }}

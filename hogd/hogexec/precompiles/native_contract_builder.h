@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
@@ -130,19 +131,20 @@ public:
                     "Return type mismatch");
     }
 
-    MethodID id = sdk_method_id(meta_t::template entrypoint<Name>());
+    Runtime::MethodID id = sdk_method_id(meta_t::template entrypoint<Name>());
 
     constexpr auto kFormat = meta_t::kSerializationFormat;
     add<kFormat>(id, std::forward<decltype(lambda)>(lambda));
   }
 
-  template<SerializationFormat Format> void add(MethodID id, auto lambda)
+  template<SerializationFormat Format>
+  void add(Runtime::MethodID id, auto lambda)
   {
     add<Format>(id, +lambda);
   }
 
   template<SerializationFormat Format, typename R, typename... Args>
-  void add(MethodID id, R (*lambda)(Args...))
+  void add(Runtime::MethodID id, R (*lambda)(Args...))
   {
     using fn_t = decltype(lambda);
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
@@ -239,7 +241,7 @@ public:
   }
 
 private:
-  std::unordered_map<MethodID, NativeContract::function_t> functions_;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> functions_;
   bool built_ = false;
 };
 

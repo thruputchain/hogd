@@ -5,6 +5,7 @@
 *.data
 *.dev
 *.json
+!.devcontainer/devcontainer.json
 *.log
 *.o
 *.out

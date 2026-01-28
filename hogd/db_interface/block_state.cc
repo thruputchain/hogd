@@ -11,7 +11,6 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh" // NOLINT(misc-include-cleaner)
 #include "types.hh"
@@ -45,7 +44,7 @@ bool
 BlockState::try_reserve_storage_delta(TransactionID txid,
                                       AddressAndKey const &addrkey,
                                       StorageDelta delta,
-                                      StorageItemRPCFlagSet flags)
+                                      StorageDeltaFlagSet flags)
 {
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
@@ -106,7 +105,7 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
 
   auto new_lock = storage_view_.try_reserve_storage_delta(
       cost_addrkey, new_storage_delta, storage_lock,
-      std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
 
   if (!new_lock) {
     // No need to manually revert the lock on addrkey acquired above;
@@ -155,7 +154,7 @@ BlockState::commit_transaction(TransactionID txid,
 
     auto r = storage_view_.try_reserve_storage_delta(
         cost_addrkey, cost_release_delta, StorageLock(StorageLockType::kNone),
-        std::to_underlying(StorageItemRPCFlags::kStorageNone));
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     assert(r.has_value());
 
     storage_view_.commit_storage_delta(cost_addrkey, cost_release_delta, *r);

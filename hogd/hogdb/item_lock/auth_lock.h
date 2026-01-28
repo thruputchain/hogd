@@ -4,7 +4,8 @@
 #include <optional>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
@@ -12,7 +13,6 @@
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "types.hh"
 #include "x23/testlock.h"
 #include "x23/vec.h"
 
@@ -31,7 +31,7 @@ class AuthLock {
 public:
   using change_type = PointerItem<AuthDataItem>;
 
-  AuthLock(AccountAuthData base_auth_data)
+  AuthLock(AddressAuthData base_auth_data)
     : base_auth_data_(std::move(base_auth_data))
   {}
 
@@ -45,12 +45,12 @@ public:
   HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
 
-  AccountAuthData build_result() const;
+  AddressAuthData build_result() const;
 
 private:
   size_t count_active_keys() const;
 
-  AccountAuthData base_auth_data_;
+  AddressAuthData base_auth_data_;
   x23::TestLock lock_;
   bool locked_{false};
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;

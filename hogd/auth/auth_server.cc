@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
@@ -26,7 +26,7 @@
 namespace hogd {
 
 x23::Async<AuthStatus<
-    std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
+    std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
   assert(height != kUninitializedHeight);
@@ -39,16 +39,16 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
       co_await current_height_futex_.wait(current_height);
       continue;
     }
-    if (current_height > height) {
+    if (current_height >= height) {
       co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
     }
-    if (current_height < height) {
+    if (current_height < height - 1) {
       co_await current_height_futex_.wait(current_height);
       continue;
     }
     break;
   }
-  CHECK(current_height == height);
+  CHECK(current_height == height - 1);
   CHECK(current_height != kUninitializedHeight);
   CHECK(current_height != kInitializing);
 
@@ -69,8 +69,8 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   }
 
   auto entry =
-      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
-          height, db_auth_data.value());
+      std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
+          current_height, db_auth_data.value());
 
   auth_data_cache_.put(address, entry);
 
@@ -124,13 +124,13 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   for (const auto &key_change : key_changes) {
     if (key_change.auth_data == nullptr) {
       auto entry = std::make_shared<
-          std::pair<BlockHeight, std::optional<AccountAuthData>>>(height,
+          std::pair<BlockHeight, std::optional<AddressAuthData>>>(height,
                                                                   std::nullopt);
       auth_data_cache_.put(key_change.address, entry);
       continue;
     }
     auto entry = std::make_shared<
-        std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+        std::pair<BlockHeight, std::optional<AddressAuthData>>>(
         height, *key_change.auth_data);
     auth_data_cache_.put(key_change.address, entry);
   }
@@ -154,7 +154,7 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard const &card)
 x23::Async<AuthErrorCode>
 AuthServer::populate_auth_data(BlockHeight height,
                                ContractAddress const &address,
-                               const AccountAuthData *&auth_data)
+                               const AddressAuthData *&auth_data)
 {
   auto entry = co_await lookup_auth_data(height, address);
   if (!entry.has_value()) {
@@ -173,7 +173,7 @@ AuthServer::populate_auth_data(BlockHeight height,
 
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
-                                x23::span<SignedTransaction> txs,
+                                x23::span<const SignedTransaction> txs,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
@@ -182,12 +182,12 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  static std::unordered_map<ContractAddress, AccountAuthData> auth_data;
+  static std::unordered_map<ContractAddress, AddressAuthData> auth_data;
   auth_data.clear();
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
-      const AccountAuthData *source_auth_data;
+      const AddressAuthData *source_auth_data;
       AuthErrorCode error =
           co_await populate_auth_data(height, tx.tx.invocation.invoked_address,
                                       source_auth_data);
@@ -203,7 +203,7 @@ AuthServer::verify_transactions(BlockHeight height,
         get_aux_addresses(tx.tx);
     for (const ContractAddress &contract : relevant_contracts) {
       if (!auth_data.contains(contract)) {
-        const AccountAuthData *source_auth_data;
+        const AddressAuthData *source_auth_data;
         AuthErrorCode error =
             co_await populate_auth_data(height, contract, source_auth_data);
         if (error != AuthErrorCode::kAuthSuccess) {
@@ -217,50 +217,50 @@ AuthServer::verify_transactions(BlockHeight height,
 
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), max_parallelism);
-  std::vector<std::unique_ptr<x23::Awaitable<void>>> awaitables;
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
-    [](ChunkRange chunk, auto cb, x23::span<SignedTransaction> txs,
-       std::unordered_map<ContractAddress, AccountAuthData> &auth_data,
-       AuthErrorCodeBatch &results) -> x23::Detached {
-      co_await default_coropoll().pool_.bg();
+    handles.push_back(
+        [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
+           std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
+           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
 
-      for (size_t i = chunk.start; i < chunk.end; i++) {
-        const SignedTransaction &tx = txs[i];
-        if (results[i] != AuthErrorCode::kAuthSuccess) {
-          continue;
-        }
+          for (size_t i = chunk.start; i < chunk.end; i++) {
+            const SignedTransaction &tx = txs[i];
+            if (results[i] != AuthErrorCode::kAuthSuccess) {
+              continue;
+            }
 
-        const ContractAddress &account = tx.tx.invocation.invoked_address;
-        CHECK(auth_data.contains(account));
-        AccountAuthData &source_auth_data = auth_data[account];
+            const ContractAddress &account = tx.tx.invocation.invoked_address;
+            CHECK(auth_data.contains(account));
+            AddressAuthData &source_auth_data = auth_data[account];
 
-        // Get the relevant contracts.
-        std::unordered_set<ContractAddress> relevant_contracts =
-            get_aux_addresses(tx.tx);
-        std::unordered_map<ContractAddress, const AccountAuthData *>
-            aux_auth_data;
-        for (const ContractAddress &contract : relevant_contracts) {
-          CHECK(auth_data.contains(contract));
-          aux_auth_data[contract] = &auth_data[contract];
-        }
+            // Get the relevant contracts.
+            std::unordered_set<ContractAddress> relevant_contracts =
+                get_aux_addresses(tx.tx);
+            std::unordered_map<ContractAddress, const AddressAuthData *>
+                aux_auth_data;
+            for (const ContractAddress &contract : relevant_contracts) {
+              CHECK(auth_data.contains(contract));
+              aux_auth_data[contract] = &auth_data[contract];
+            }
 
-        AuthVerifyStatus<void> verify_result =
-            verify_auth(tx, source_auth_data, aux_auth_data);
-        if (!verify_result.has_value()) {
-          results[i] = AuthErrorCode::kAuthFailed;
-          continue;
-        }
-        // [results] is initialized with all of its members as
-        // [AuthErrorCode::kAuthSuccess], so there is no need for us to write
-        // this result to [results] again.
-      }
-      cb();
-      co_return;
-    }(chunk, /*cb=*/x23::CoroCB(*awaitables.back()), txs, auth_data, results);
+            AuthVerifyStatus<void> verify_result =
+                verify_auth(tx, source_auth_data, aux_auth_data);
+            if (!verify_result.has_value()) {
+              results[i] = AuthErrorCode::kAuthFailed;
+              continue;
+            }
+            // [results] is initialized with all of its members as
+            // [AuthErrorCode::kAuthSuccess], so there is no need for us to
+            // write this result to [results] again.
+          }
+          co_return;
+        }(chunk, txs, auth_data, results));
   }
-  for (std::unique_ptr<x23::Awaitable<void>> &awaitable : awaitables) {
-    co_await *awaitable;
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
   }
   co_return results;
 }
@@ -279,10 +279,10 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     if (!source_addr.value()->second.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }
-    const AccountAuthData *source_auth_data =
+    const AddressAuthData *source_auth_data =
         &(source_addr.value()->second.value());
     auto relevant_contracts = get_aux_addresses(tx.tx);
-    std::unordered_map<ContractAddress, const AccountAuthData *> aux_auth_data;
+    std::unordered_map<ContractAddress, const AddressAuthData *> aux_auth_data;
     for (const auto &contract : relevant_contracts) {
       auto error = co_await populate_auth_data(height, contract,
                                                aux_auth_data[contract]);

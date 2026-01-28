@@ -1,10 +1,12 @@
-// -*-C++-*-
-
 #pragma once
+
+#include <algorithm>
+#include <cstddef>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
-#include <cstddef>
+#include "hogd/base/types.h"
 
 #include <x23/cpumap.h>
 #include <x23/debug.h>

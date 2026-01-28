@@ -8,7 +8,6 @@
 #include <string_view>
 #include <utility>
 
-#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"

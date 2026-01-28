@@ -8,7 +8,7 @@
 #include <variant>
 #include <vector>
 
-#include "account.hh"
+#include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -16,7 +16,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -109,7 +108,8 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
         StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
     delta.deployed_contract_hash() = deployment;
     db_proxy.add_delta(addrkey, delta,
-                       std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                       std::to_underlying(
+                           StorageDeltaFlags::kStorageDeltaFlagNone));
   }
 
   auto res = db_proxy.try_push_current_subtransaction();

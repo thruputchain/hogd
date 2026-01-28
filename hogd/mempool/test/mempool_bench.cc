@@ -78,7 +78,8 @@ submit_unvetted(benchmark::State &state)
     const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     state.ResumeTiming();
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(txs)())();
   }
 }
 BENCHMARK(submit_unvetted)->Unit(benchmark::kMillisecond);
@@ -95,7 +96,8 @@ submit_vetted(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
   }
 }
 BENCHMARK(submit_vetted)->Unit(benchmark::kMicrosecond);
@@ -109,7 +111,8 @@ nominate(benchmark::State &state)
     MempoolTestInfra server;
     const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     // Submit unvetted transactions so there's something to nominate
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(txs)())();
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     state.ResumeTiming();
 
@@ -130,7 +133,8 @@ validate(benchmark::State &state)
     MempoolTestInfra server;
     const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(txs)())();
 
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
@@ -140,21 +144,25 @@ validate(benchmark::State &state)
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination()().nomination;
+    Nomination nomination = res_nominate.nominated_block().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
 
     nomination.block_height++;
     nomination.prev_block_hash = nomination.block_hash;
-    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-        nomination.transaction_hashes,
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    {
+      SignedTransactionHashBatch tx_hashes;
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+          tx_hashes,
+          /*prev_block_hash=*/nomination.prev_block_hash);
+    }
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
     state.ResumeTiming();
 
     auto res_validate =
@@ -180,7 +188,8 @@ loadgen_submit_unvetted(benchmark::State &state)
         loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
     state.ResumeTiming();
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(txs)())();
   }
 }
 BENCHMARK(loadgen_submit_unvetted)->Unit(benchmark::kMillisecond);
@@ -200,7 +209,8 @@ loadgen_submit_vetted(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
   }
 }
 BENCHMARK(loadgen_submit_vetted)->Unit(benchmark::kMicrosecond);
@@ -219,7 +229,8 @@ loadgen_nominate(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
     state.ResumeTiming();
 
     auto res_nominate =
@@ -244,7 +255,8 @@ loadgen_validate(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -253,20 +265,24 @@ loadgen_validate(benchmark::State &state)
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination()().nomination;
+    Nomination nomination = res_nominate.nominated_block().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
 
     nomination.block_height++;
     nomination.prev_block_hash = nomination.block_hash;
-    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-        nomination.transaction_hashes,
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    {
+      SignedTransactionHashBatch tx_hashes;
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+          tx_hashes,
+          /*prev_block_hash=*/nomination.prev_block_hash);
+    }
 
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
     state.ResumeTiming();
 
     auto res_validate =
@@ -293,7 +309,8 @@ loadgen_nominate_throughput(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
@@ -306,12 +323,17 @@ loadgen_nominate_throughput(benchmark::State &state)
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
 
-      SchedulerNomination nomination =
-          server.coord_sched_rpc().get_nomination()();
+      const SchedulerNominatedBlock &nomination =
+          res_nominate.nominated_block();
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
-      txs_so_far += nomination.nomination.transaction_hashes.size();
+      {
+        SignedTransactionHashBatch tx_hashes;
+        CHECK(parallel_batch_to_t(nomination.nomination.transactions_hash,
+                                  tx_hashes)());
+        txs_so_far += tx_hashes.size();
+      }
     }
   }
 }
@@ -332,7 +354,8 @@ loadgen_validate_throughput(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -342,8 +365,7 @@ loadgen_validate_throughput(benchmark::State &state)
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination()().nomination;
+    Nomination nomination = res_nominate.nominated_block().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);
@@ -356,20 +378,26 @@ loadgen_validate_throughput(benchmark::State &state)
 
       nomination.block_height++;
       nomination.prev_block_hash = nomination.block_hash;
-      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-          nomination.transaction_hashes,
-          /*prev_block_hash=*/nomination.prev_block_hash);
+      {
+        SignedTransactionHashBatch tx_hashes;
+        CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+        nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+            tx_hashes,
+            /*prev_block_hash=*/nomination.prev_block_hash);
+      }
 
       ValidatorID validator_id{};
-      server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                              txs)();
+      server.mempool_coord_rpc().schedulercoord_submit_vetted(
+          validator_id, t_to_parallel_batch(txs)())();
 
       auto res_validate =
           server.mempool_coord_rpc().schedulercoord_validate(db_tip,
                                                              nomination)();
       CHECK_EQ(res_validate.outcome(),
                SchedulerValidationResult::SchedulerValidationOK);
-      txs_so_far += nomination.transaction_hashes.size();
+      SignedTransactionHashBatch tx_hashes;
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+      txs_so_far += tx_hashes.size();
     }
   }
 }

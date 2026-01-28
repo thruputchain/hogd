@@ -5,7 +5,7 @@
 #include <optional>
 #include <thread>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server_test_framework.h"
 #include "types.hh"
@@ -13,6 +13,39 @@
 
 namespace hogd {
 
+<<<<<<< HEAD
+=======
+namespace {
+
+constexpr ContractAddress
+make_test_address(uint8_t id)
+{
+  ContractAddress address{};
+  address[0] = id;
+  return address;
+}
+
+PublicKeyConfigOpt
+make_test_pk_config(uint8_t id)
+{
+  PublicKey key(CryptographicScheme::Ed25519);
+  key.ed25519().fill(id);
+  return x23::Ptr<PublicKeyConfig>(
+      new PublicKeyConfig{.key = key, .max_weight = 100});
+}
+
+AddressAuthData
+make_test_auth_data(uint8_t id)
+{
+  AddressAuthData auth_data{};
+  auth_data.public_keys[id] = make_test_pk_config(id);
+  auth_data.last_written_height = 0;
+  return auth_data;
+}
+
+} // namespace
+
+>>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
 class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
 private:
@@ -23,23 +56,24 @@ private:
 TEST_F(AuthServerTest, BasicLookup)
 {
   ContractAddress address = make_test_address(1);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
+  mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
-  mock_db().increment_height();
+  mock_db().increment_height(); // now at height 2
 
   BlockHeight height = mock_db().get_current_height();
-  ASSERT_EQ(height, 1);
+  ASSERT_EQ(height, 2);
 
-  auth_server().register_auth_data_updates(height,
+  auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
-                                               height))();
+                                               1))();
 
   auto result = auth_server().lookup_auth_data(height, address)();
 
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, height);
+  EXPECT_EQ(result.value()->first, 1);
   ASSERT_TRUE(result.value()->second.has_value());
 }
 
@@ -49,6 +83,7 @@ TEST_F(AuthServerTest, LookupNonExistent)
   ContractAddress address = make_test_address(2);
 
   mock_db().increment_height(); // height 1
+  mock_db().increment_height(); // height 2
   // initialize the auth server at height 1
   auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
@@ -59,15 +94,15 @@ TEST_F(AuthServerTest, LookupNonExistent)
 
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, mock_db().get_current_height());
+  EXPECT_EQ(result.value()->first, mock_db().get_current_height() - 1);
   EXPECT_FALSE(result.value()->second.has_value());
 }
 
 TEST_F(AuthServerTest, OutOfOrderUpdates)
 {
   ContractAddress address = make_test_address(3);
-  AccountAuthData auth_data = make_test_auth_data(1);
-  AccountAuthData auth_data_2 = make_test_auth_data(2);
+  AddressAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data_2 = make_test_auth_data(2);
 
   mock_db().increment_height(); // height 1
 
@@ -76,6 +111,7 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
 
   mock_db().set(address, auth_data_2);
   mock_db().increment_height(); // height 3
+  mock_db().increment_height(); // height 4
 
   // make sure the auth server starts initialized at height 1
   auth_server().register_auth_data_updates(1,
@@ -97,12 +133,12 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
 
   auto result =
       auth_server().lookup_auth_data(mock_db().get_current_height(), address)();
-  ASSERT_EQ(mock_db().get_current_height(), 3);
+  ASSERT_EQ(mock_db().get_current_height(), 4);
 
   ASSERT_TRUE(result.has_value());
 
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, mock_db().get_current_height());
+  EXPECT_EQ(result.value()->first, mock_db().get_current_height() - 1);
   ASSERT_TRUE(result.value()->second.has_value());
   EXPECT_EQ(result.value()->second.value(), auth_data_2);
 }
@@ -110,14 +146,16 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
 TEST_F(AuthServerTest, StaleBlockHeight)
 {
   ContractAddress address = make_test_address(4);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
-  mock_db().increment_height();
+  mock_db().increment_height(); // height 1
+  mock_db().increment_height(); // height 2
 
   auto key_changes = mock_db().get_key_changes_at_height(1);
+  ASSERT_EQ(key_changes.size(), 0);
   auth_server().register_auth_data_updates(1, key_changes)();
 
-  auto result = auth_server().lookup_auth_data(1, address)();
+  auto result = auth_server().lookup_auth_data(2, address)();
 
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
@@ -125,11 +163,13 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   ASSERT_FALSE(result.value()->second.has_value());
 
   mock_db().set(address, auth_data);
-  mock_db().increment_height(); // height 2
+  mock_db().increment_height(); // height 3
+
+  ASSERT_EQ(mock_db().get_key_changes_at_height(2).size(), 1);
 
   // it's ok to get cached data if the auth server hasn't gotten the next batch
   // of key changes yet
-  result = auth_server().lookup_auth_data(1, address)();
+  result = auth_server().lookup_auth_data(2, address)();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, 1);
@@ -145,14 +185,14 @@ TEST_F(AuthServerTest, StaleBlockHeight)
                                                2))();
 
   // now get the actual data
-  result = auth_server().lookup_auth_data(2, address)();
+  result = auth_server().lookup_auth_data(3, address)();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, 2);
   ASSERT_TRUE(result.value()->second.has_value());
   EXPECT_EQ(result.value()->second.value(), auth_data);
 
-  result = auth_server().lookup_auth_data(2, make_test_address(5))();
+  result = auth_server().lookup_auth_data(3, make_test_address(5))();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, 2);
@@ -162,13 +202,14 @@ TEST_F(AuthServerTest, StaleBlockHeight)
 TEST_F(AuthServerTest, QueriesDelayed)
 {
   ContractAddress address = make_test_address(6);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().increment_height(); // 1
   mock_db().increment_height(); // 2
   mock_db().increment_height(); // 3
   mock_db().increment_height(); // 4
   mock_db().increment_height(); // 5
+  mock_db().increment_height(); // 6
 
   std::atomic<bool> sequence = false;
 
@@ -205,13 +246,14 @@ TEST_F(AuthServerTest, QueriesDelayed)
 TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
 {
   ContractAddress address = make_test_address(6);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().increment_height(); // 1
   mock_db().increment_height(); // 2
   mock_db().increment_height(); // 3
   mock_db().increment_height(); // 4
   mock_db().increment_height(); // 5
+  mock_db().increment_height(); // 6
 
   // Unlike QueriesDelayed, start with an auth server that's properly
   // initialized, but just missing recent updates.
@@ -258,7 +300,7 @@ TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
 TEST_F(AuthServerTest, InitializeFromLateBlock)
 {
   ContractAddress address = make_test_address(7);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().set(address, auth_data);
 
@@ -269,14 +311,14 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
   mock_db().delete_address(address);
   mock_db().increment_height(); // height 4
 
-  auth_server().register_auth_data_updates(4,
+  auth_server().register_auth_data_updates(3,
                                            mock_db().get_key_changes_at_height(
-                                               4))();
+                                               3))();
 
   auto result = auth_server().lookup_auth_data(4, address)();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, 4);
+  EXPECT_EQ(result.value()->first, 3);
   ASSERT_FALSE(result.value()->second.has_value());
 
   // stale block updates don't break things
@@ -287,7 +329,7 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
   result = auth_server().lookup_auth_data(4, address)();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, 4);
+  EXPECT_EQ(result.value()->first, 3);
   ASSERT_FALSE(result.value()->second.has_value());
 }
 

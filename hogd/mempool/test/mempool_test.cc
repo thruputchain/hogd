@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "discovery.hh"
@@ -8,13 +8,19 @@
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+<<<<<<< HEAD
 #include "x23/x23/x23.h"
+=======
+#include "x23/vec.h"
+>>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
 
 namespace hogd {
 
@@ -33,17 +39,21 @@ TEST(Mempool, SubmitUnvetted)
 
   MempoolTestInfra server;
 
+<<<<<<< HEAD
   AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth_data.last_written_height = 0;
+=======
+  AddressAuthData auth_data = get_default_account();
+>>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
                  /*required_weight=*/1);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   KeyChangeBatch key_changes = {
       {.address = MempoolTestInfra::kAccountAddresses[0],
@@ -53,6 +63,7 @@ TEST(Mempool, SubmitUnvetted)
   Transaction &tx = txs[0].tx;
   tx.auth_claims.push_back(make_sign_claim(0));
 
+<<<<<<< HEAD
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
   DecoratedSignatureList decorated_signatures;
@@ -61,6 +72,10 @@ TEST(Mempool, SubmitUnvetted)
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted({txs[0]})();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+=======
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+>>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
 }
 
 TEST(Mempool, SubmitVetted)
@@ -71,8 +86,8 @@ TEST(Mempool, SubmitVetted)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 }
 
 TEST(Mempool, Nominate)
@@ -83,8 +98,8 @@ TEST(Mempool, Nominate)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -99,7 +114,9 @@ TEST(Mempool, NominateBatch)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -125,8 +142,8 @@ TEST(Mempool, NominateCommit)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
@@ -135,7 +152,7 @@ TEST(Mempool, NominateCommit)
             SchedulerNominationOutcome::SchedulerNominationOK);
 
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.block_id())();
+      res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
@@ -159,8 +176,8 @@ TEST(Mempool, Validate)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   // We nominate a block first and then reuse the returned [Nomination] struct
   // for the validation below. The [Nomination] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
@@ -173,19 +190,22 @@ TEST(Mempool, Validate)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
-  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
-      /*prev_block_hash=*/nomination.prev_block_hash);
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -200,7 +220,9 @@ TEST(Mempool, ValidateBatch)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
@@ -210,19 +232,24 @@ TEST(Mempool, ValidateBatch)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
-  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
-      /*prev_block_hash=*/nomination.prev_block_hash);
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+  }
 
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -251,7 +278,9 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
@@ -261,23 +290,36 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
-  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
-      /*prev_block_hash=*/nomination.prev_block_hash);
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
 
-  // Remove a transaction from the nomination.
-  nomination.transaction_hashes.pop_back();
-  nomination.transaction_nominations.pop_back();
+    // Remove a transaction from the nomination.
+    tx_hashes.pop_back();
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
+    EXPECT_TRUE(
+        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nondeterministic_data)());
+    tx_nondeterministic_data.pop_back();
 
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+    nomination.transactions_hash = t_to_parallel_batch(tx_hashes)();
+    nomination.transactions_nondeterministic_data =
+        t_to_parallel_batch(tx_nondeterministic_data)();
+  }
+
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -296,13 +338,14 @@ TEST(Mempool, ValidateBatchMissingTx)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
 
     SchedulerNominationResult res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerNominationOutcome::SchedulerNominationOK);
-    nomination = server.coord_sched_rpc().get_nomination()().nomination;
+    nomination = res_nominate.nominated_block().nomination;
   }
 
   {
@@ -317,7 +360,8 @@ TEST(Mempool, ValidateBatchMissingTx)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs)())();
 
     auto res_validate =
         server.mempool_coord_rpc().schedulercoord_validate(db_tip,
@@ -335,8 +379,8 @@ TEST(Mempool, ValidateCommit)
   MempoolTestInfra server;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   // We nominate a block first and then reuse the returned [Nomination] struct
   // for the validation below. The [Nomination] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
@@ -349,19 +393,22 @@ TEST(Mempool, ValidateCommit)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
-  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
-      /*prev_block_hash=*/nomination.prev_block_hash);
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -383,8 +430,8 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(db_tip.height, 1);
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   // We nominate a block first and then reuse the returned [Nomination] struct
   // for the validation below. The [Nomination] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
@@ -396,19 +443,22 @@ TEST(Mempool, GetTip)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
-  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
-      /*prev_block_hash=*/nomination.prev_block_hash);
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          {txs[0]})();
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -457,17 +507,21 @@ TEST(Mempool, AuthChanged)
                   /*num_hogs=*/5'000'000'000 *
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
+<<<<<<< HEAD
   AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth_data.last_written_height = 0;
+=======
+  AddressAuthData auth_data = get_default_account();
+>>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
                  /*required_weight=*/1);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   KeyChangeBatch key_changes = {
       {.address = MempoolTestInfra::kAccountAddresses[0],
@@ -499,7 +553,82 @@ TEST(Mempool, AuthChanged)
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted({auth_tx})();
   }
+<<<<<<< HEAD
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+=======
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
+
+  // Now change the [AddressAuthData].
+  auth_data.nonce_config.required_weight = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
+            MempoolCoordinatorRpc::kMaxBlockSize);
+
+  // Now check that the last tx is still nominated.
+  db_tip = {.height = res.scheduler_nomination().nomination.block_height,
+            .hash = res.scheduler_nomination().nomination.block_hash,
+            .id = res.scheduler_nomination().block_id};
+  res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(), 1);
+}
+#endif
+
+// TODO(geoff): Pending executor auth data, and/or checking the updated auth
+// data in the scheduler. NOLINTNEXTLINE
+#if 0
+TEST(Mempool, AuthInvalidated)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
+  // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
+  const SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
+
+  MempoolTestInfra server;
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
+                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
+                  /*num_hogs=*/5'000'000'000 *
+                      MempoolCoordinatorRpc::kMaxBlockSize * 2);
+
+  AddressAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/2);
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  SignedTransactionBatch signed_txs;
+  for (const SignedTransaction &stx : txs) {
+    auto make_sign_claim = [&](uint32_t idx) {
+      AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+      claim.invoked_address_signature_id() = idx;
+      return claim;
+    };
+    Transaction tx = stx.tx;
+    tx.auth_claims.push_back(make_sign_claim(0));
+    signed_txs.push_back(
+        hogd::Authentication::sign_claims(tx, {{0, private_key}},
+                                          /*auxiliary_private_keys=*/{}));
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
+
+  // Now change the [AddressAuthData].
+  auth_data.nonce_config.required_weight = 10;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+>>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =

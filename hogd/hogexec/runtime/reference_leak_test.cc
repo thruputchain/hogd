@@ -5,14 +5,14 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -121,7 +121,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   // First, reserve RCQ with consume to set the consumer_lock_
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_consume_delta(),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value()); // Should succeed
@@ -130,7 +130,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   // This should fail because consumer_lock_ is already true
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()) << "rcq_conflict: Second consume should fail";
@@ -140,7 +140,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
                               std::to_underlying(
-                                  StorageItemRPCFlags::kStorageNone));
+                                  StorageDeltaFlags::kStorageDeltaFlagNone));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
     ASSERT_FALSE(r_intermediate.value())
@@ -156,7 +156,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   // above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value())
@@ -169,7 +169,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 
 // Test Auth Data reference leak: when try_reserve_change_signer() fails,
 // reference should be released.
-// AuthData is only allowed for kStorageKeyTypeAccountAuthData.
+// AuthData is only allowed for kStorageKeyTypeAddressAuthData.
 // We check that the reference is released by committing the block
 // and making sure the item does not exist in the next block.
 TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
@@ -177,12 +177,12 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_account_auth_data_addrkey(contract_addr);
+  auto key = make_address_auth_data_addrkey(contract_addr);
 
   // First, create a successful auth data reservation to occupy key ID 0
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_auth_data_delta({0, 2}),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -190,7 +190,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   // Now try to reserve the same key ID again - this should fail
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_auth_data_delta({1, 2}), // Overlap in key ids
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value())
@@ -226,7 +226,7 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
   tx1.add_delta(key,
                 make_replay_cache_delta(
                     Uniquifier{.block_expiry_height = 100, .nonce = 100}),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -236,7 +236,7 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
   tx2.add_delta(key,
                 make_replay_cache_delta(Uniquifier{.block_expiry_height = 100,
                                                    .nonce = 100}), // Same nonce
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()) << "replay_conflict: Duplicate nonce should fail";
@@ -275,7 +275,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   // Set a small positive base value first
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_nnint_delta(5, 0), // Set to 5
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -285,7 +285,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   tx2.add_delta(
       key,
       make_nnint_delta(5, -10), // Try to subtract 10 from 5 (would go negative)
-      std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value())
@@ -296,7 +296,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
                               std::to_underlying(
-                                  StorageItemRPCFlags::kStorageNone));
+                                  StorageDeltaFlags::kStorageDeltaFlagNone));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
     ASSERT_FALSE(r_intermediate.value())
@@ -312,7 +312,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   // the failure above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value())
@@ -332,25 +332,25 @@ TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_account_auth_data_addrkey(contract_addr);
+  auto key = make_address_auth_data_addrkey(contract_addr);
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_auth_data_delta({2, 5, 7}),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_auth_data_delta({2, 7}),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
