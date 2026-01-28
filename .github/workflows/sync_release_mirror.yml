@@ -2,10 +2,7 @@ name: Sync groundhog-dev release mirror
 
 on:
   workflow_dispatch:
-
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-
+  
 jobs:
   sync:
     permissions:
@@ -14,9 +11,13 @@ jobs:
 
 
     steps:
+      - name: Clear .gitconfig
+        run: |
+          echo "Cleaning up .gitconfig"
+          rm -f /home/hogci/.gitconfig
       - name: Checkout code
         uses: actions/checkout@v4
-      #gh already supplies GITHUB_TOKEN, which has permissions to read artifacts
+        #gh already supplies GITHUB_TOKEN, which has permissions to read artifacts
       - name: Sync release mirror
         run: ./scripts/sync_release_mirror.sh
           
