@@ -89,6 +89,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   link_libraries(atomic) # needed for std::atomic<int128_t>
 endif()
 
+message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
+message(STATUS "Using CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_C_FLAGS_RELEASE "-O3")
 if (USE_NDEBUG)
@@ -100,6 +103,11 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 if (USE_NDEBUG)
   set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 endif()
+
+message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
+message(STATUS "Using CMAKE_C_FLAGS_RELEASE: ${CMAKE_C_FLAGS_RELEASE}")
+message(STATUS "Using CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
+message(STATUS "Using CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
