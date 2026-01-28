@@ -13,39 +13,6 @@
 
 namespace hogd {
 
-<<<<<<< HEAD
-=======
-namespace {
-
-constexpr ContractAddress
-make_test_address(uint8_t id)
-{
-  ContractAddress address{};
-  address[0] = id;
-  return address;
-}
-
-PublicKeyConfigOpt
-make_test_pk_config(uint8_t id)
-{
-  PublicKey key(CryptographicScheme::Ed25519);
-  key.ed25519().fill(id);
-  return x23::Ptr<PublicKeyConfig>(
-      new PublicKeyConfig{.key = key, .max_weight = 100});
-}
-
-AddressAuthData
-make_test_auth_data(uint8_t id)
-{
-  AddressAuthData auth_data{};
-  auth_data.public_keys[id] = make_test_pk_config(id);
-  auth_data.last_written_height = 0;
-  return auth_data;
-}
-
-} // namespace
-
->>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
 class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
 private:
