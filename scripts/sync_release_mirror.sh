@@ -14,7 +14,7 @@ set -e
 : "${GITHUB_TOKEN:?Error: GITHUB_TOKEN environment variable is not set.}"
 
 REPOSITORY="groundhogchain/hogd"
-MIRROR_PATH="/home/hog12/www/builds/test_ffi"
+MIRROR_PATH="/home/hog12/www/builds/test-ffi"
 # --- End of Configuration ---
 
 # --- Prerequisite Check ---
@@ -91,6 +91,11 @@ echo "$RELEASES_JSON" | jq -c '.[]' | while read -r release; do
     # 1. Get the official checksum from the .sha256 file on GitHub.
     # The `tr -d '\r'` handles potential CRLF line endings.
     REMOTE_CHECKSUM=$(curl -s -L -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/octet-stream" "$SHA_ASSET_URL" | awk '{print $1}' | tr -d '\r')
+
+    # Save the checksum file next to the binary (always overwrite).
+    CHECKSUM_FILE="$LOCAL_TAR_PATH.sha256"
+    echo "$REMOTE_CHECKSUM" > "$CHECKSUM_FILE"
+    echo "    Saved checksum to '$CHECKSUM_FILE'"
 
     NEEDS_DOWNLOAD=false
     # 2. Check if the .tar.gz file exists locally and if its checksum matches.
