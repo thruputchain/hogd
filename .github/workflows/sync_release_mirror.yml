@@ -2,7 +2,7 @@ name: Sync groundhog-dev release mirror
 
 on:
   workflow_dispatch:
-  
+
 jobs:
   sync:
     permissions:
@@ -17,8 +17,9 @@ jobs:
           rm -f /home/hogci/.gitconfig
       - name: Checkout code
         uses: actions/checkout@v4
-        #gh already supplies GITHUB_TOKEN, which has permissions to read artifacts
       - name: Sync release mirror
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/sync_release_mirror.sh
           
 
