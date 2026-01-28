@@ -21,6 +21,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/sync.h"
 #include "hogd/base/types.h"
+#include "x23/debug.h" // IWYU pragma: keep
 
 namespace hogd {
 
