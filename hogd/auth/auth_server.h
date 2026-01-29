@@ -106,12 +106,13 @@ public:
   x23::Async<void> authdb_forward_key_changes(BlockHeight height,
                                               KeyChangeBatch key_changes)
   {
-    return auth_server_.register_auth_data_updates(height, key_changes);
+    return auth_server_.register_auth_data_updates(height,
+                                                   std::move(key_changes));
   }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card)
   {
-    return auth_server_.subscribe_to_auth_data_changes(card);
+    return auth_server_.subscribe_to_auth_data_changes(std::move(card));
   }
 
 private:

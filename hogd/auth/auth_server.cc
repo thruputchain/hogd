@@ -146,6 +146,7 @@ AuthServer::register_auth_data_updates(BlockHeight height,
 }
 
 x23::Async<void>
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 {
   return dbauth_client_.subscribe_to_auth_data_changes(card);

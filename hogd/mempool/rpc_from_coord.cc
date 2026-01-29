@@ -1,7 +1,6 @@
 #include "hogd/mempool/rpc_from_coord.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
