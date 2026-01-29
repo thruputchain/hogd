@@ -137,11 +137,9 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
 
-  if (!key_changes.empty()) {
-    for (std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
-             &f : auth_data_changes_callbacks_) {
-      co_await f(height, key_changes);
-    }
+  for (std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)> &f :
+       auth_data_changes_callbacks_) {
+    co_await f(height, key_changes);
   }
 }
 

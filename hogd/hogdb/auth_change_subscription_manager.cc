@@ -44,9 +44,6 @@ AuthChangeSubscriptionManager::publish_auth_changes(
       combined_batch.append_range(batch);
     });
   }
-  if (combined_batch.empty()) {
-    co_return;
-  }
 
   x23::CoroGuard guard;
   co_await guard(lock_);
