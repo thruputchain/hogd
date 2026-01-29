@@ -63,7 +63,7 @@ TEST(Mempool, SubmitUnvetted)
   txs[0].signatures.push_back(decorated_signatures);
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]}))();
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
@@ -537,27 +537,30 @@ TEST(Mempool, AuthChanged)
     auth_tx.signatures.push_back(decorated_signatures);
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batcj({auth_tx}))();
+        t_to_parallel_batch(SignedTransactionBatch{auth_tx})())();
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(txs))();
+      t_to_parallel_batch(txs)())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
-  nomination = res_nominate.nominated_block().nomination;
-  EXPECT_EQ(nomination.transaction_hashes.size(),
-            MempoolCoordinatorRpc::kMaxBlockSize);
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    EXPECT_EQ(tx_hashes.size(), MempoolCoordinatorRpc::kMaxBlockSize);
+  }
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.block_id())();
+      res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   // Now check that the last tx is not nominated.
   db_tip = {.height = nomination.block_height,
             .hash = nomination.block_hash,
-            .id = res_nominate.block_id()};
+            .id = res_nominate.nominated_block().block_id};
   res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
@@ -569,7 +572,8 @@ TEST(Mempool, AuthChanged)
   }
 
   // Check that if we resubmit [txs], they are all discarded.
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(txs)())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 

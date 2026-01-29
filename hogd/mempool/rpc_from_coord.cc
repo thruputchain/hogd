@@ -77,11 +77,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await cg(commit_lock_);
 
   ElapsedTimer timer;
-  info("submit_unvetted, {} txs", batch.size());
+  info("submit_unvetted, {} txs", txs.size());
   auto auth_handle = auth_->verify_transactions(
-      /*height=*/scheduler_->current_block(), batch, /*max_parallelism=*/128);
+      /*height=*/scheduler_->current_block(), txs, /*max_parallelism=*/128);
 
-  co_await scheduler_->add_txs(batch);
+  co_await scheduler_->add_txs(txs);
   ElapsedTimer timer2;
   AuthErrorCodeBatch auth_ret = co_await auth_handle;
   info("auth took {}", timer.elapsed());
@@ -91,7 +91,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(sha256(batch[i]));
+      to_remove.push_back(sha256(txs[i]));
       to_remove_indices.push_back(i);
     }
   }
@@ -101,9 +101,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     // [validated_block] to true.
     co_await scheduler_->remove_from_scheduler(to_remove,
                                                /*validated_block=*/true);
-    remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
+    remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
 
+  // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch] if we do
+  // not remove any txs above. I am not sure this is the common case though.
   ParallelBatch response;
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
