@@ -5,7 +5,7 @@ on:
   schedule:
     - cron: "0 14 * * *" # Daily at 6am PST
   workflow_run:
-    workflows: [release_test_ffi]
+    workflows: ["Release test_ffi Library"]
     types: [completed]
 
 jobs:
