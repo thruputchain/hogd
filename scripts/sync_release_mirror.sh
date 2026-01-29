@@ -19,11 +19,10 @@ MIRROR_PATH="/home/hog12/www/builds/test-ffi"
 
 # --- Prerequisite Check ---
 # This script requires `jq` to parse JSON from the GitHub API.
-if ! command -v jq &> /dev/null;
-then
-    echo "Error: jq is not installed." >&2
-    echo "Please install jq to use this script. (e.g., 'brew install jq' or 'sudo apt-get install jq')" >&2
-    exit 1
+if ! command -v jq &>/dev/null; then
+  echo "Error: jq is not installed." >&2
+  echo "Please install jq to use this script. (e.g., 'brew install jq' or 'sudo apt-get install jq')" >&2
+  exit 1
 fi
 # --- End of Prerequisite Check ---
 
@@ -41,7 +40,7 @@ RELEASES_JSON=$(curl -s -L \
   "https://api.github.com/repos/$REPOSITORY/releases")
 
 # If the response is empty or contains an error, exit.
-if [ -z "$RELEASES_JSON" ] || echo "$RELEASES_JSON" | jq -e '.message' > /dev/null; then
+if [ -z "$RELEASES_JSON" ] || echo "$RELEASES_JSON" | jq -e '.message' >/dev/null; then
   echo "Error: Failed to fetch releases. Response from GitHub API:" >&2
   echo "$RELEASES_JSON" >&2
   exit 1
@@ -94,7 +93,7 @@ echo "$RELEASES_JSON" | jq -c '.[]' | while read -r release; do
 
     # Save the checksum file next to the binary (always overwrite).
     CHECKSUM_FILE="$LOCAL_TAR_PATH.sha256"
-    echo "$REMOTE_CHECKSUM" > "$CHECKSUM_FILE"
+    echo "$REMOTE_CHECKSUM" >"$CHECKSUM_FILE"
     echo "    Saved checksum to '$CHECKSUM_FILE'"
 
     NEEDS_DOWNLOAD=false
