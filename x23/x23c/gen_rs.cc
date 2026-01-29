@@ -237,7 +237,7 @@ struct GenRs {
   static constexpr string_view kRustBoxPtr = R"(#[rust(box_ptr)])";
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
   static constexpr string_view kSerdeArrays =
-      R"(#[serde(with = "serde_arrays")])";
+      R"(#[serde(with = "serde_arrays::hex")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
   static constexpr string_view kDocHidden = R"(#[doc(hidden)])";
