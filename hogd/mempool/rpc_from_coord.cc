@@ -70,7 +70,9 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
-<<<<<<< HEAD
+  SignedTransactionBatch txs;
+  CHECK(co_await parallel_batch_to_t(batch, txs));
+
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
@@ -102,30 +104,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
   }
 
-  co_await coord_client_->coordscheduler_notify_vetted(batch);
-  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
-       "= {}, auth_handle_duration = {}",
-       scheduler_->size(), timer.elapsed(), auth_handle_duration);
-=======
-  static std::atomic<int> counter = 0;
-  static std::atomic<int> outstanding = 0;
-  int c = counter++;
-
-  SignedTransactionBatch txs;
-  CHECK(co_await parallel_batch_to_t(batch, txs));
-  ElapsedTimer timer;
-  info("submit_unvetted, {} txs, counter is {}, num outstanding calls is {}",
-       txs.size(), c, ++outstanding);
-  // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
-  co_await scheduler_->add_txs(txs);
-  ElapsedTimer timer2;
   ParallelBatch response;
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
-  info("submit_unvetted finished, counter is {}, duration is {}, num "
-       "outstanding calls is {}, coordscheduler_notify_vetted took {}",
-       c, timer.elapsed(), --outstanding, timer2.elapsed());
->>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
+  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
+       "= {}, auth_handle_duration = {}",
+       scheduler_->size(), timer.elapsed(), auth_handle_duration);
   co_return;
 }
 
@@ -631,10 +615,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
-<<<<<<< HEAD
     info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
-=======
->>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
   }
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
@@ -848,12 +829,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
-<<<<<<< HEAD
   info("schedulercoord_commit_block!!!");
   x23::CoroGuard commit_cg;
   co_await commit_cg(commit_lock_);
 
-=======
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
   // NOLINTNEXTLINE(modernize-use-auto):
@@ -861,7 +840,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       std::chrono::duration_cast<std::chrono::milliseconds>(delta);
   int64_t delta_count = delta_raw.count();
   info("schedulercoord_commit_block, delta = {}", delta_count);
->>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {

@@ -60,10 +60,10 @@ make_test_pk_config(uint8_t id)
       new PublicKeyConfig{.key = key, .max_weight = 100});
 }
 
-inline AccountAuthData
+inline AddressAuthData
 make_test_auth_data(uint8_t id)
 {
-  AccountAuthData auth_data{};
+  AddressAuthData auth_data{};
   auth_data.public_keys[id] = make_test_pk_config(id);
   auth_data.last_written_height = 0;
   return auth_data;

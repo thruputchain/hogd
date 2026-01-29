@@ -687,12 +687,10 @@ Scheduler::remove_from_scheduler(
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
 
-<<<<<<< HEAD
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-=======
+
   // NOLINTNEXTLINE(modernize-loop-convert)
->>>>>>> 40d798835ef25a5e06cea70ea6083b75825c735b
   for (size_t i = 0; i < chunks.size(); i++) {
     handles.push_back([](const ChunkRange *chunk,
                          x23::span<const SignedTransactionHash> tx_hashes,
