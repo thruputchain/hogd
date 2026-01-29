@@ -79,7 +79,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
 x23::Async<void>
 AuthServer::register_auth_data_updates(BlockHeight height,
-                                       KeyChangeBatch const &key_changes)
+                                       KeyChangeBatch key_changes)
 {
   // TODO(geoff): this logic will break if there's a sharded db, and i.e.
   // multiple batches of updates from the same block height. Probably the
@@ -146,7 +146,7 @@ AuthServer::register_auth_data_updates(BlockHeight height,
 }
 
 x23::Async<void>
-AuthServer::subscribe_to_auth_data_changes(AuthCard const &card)
+AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 {
   return dbauth_client_.subscribe_to_auth_data_changes(card);
 }

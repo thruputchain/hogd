@@ -57,9 +57,8 @@ public:
   // initialization from an empty cache, if we get two blocks of updates
   // concurrently, we might process the second before the first.  In this case,
   // the first will be dropped.
-  x23::Async<void>
-  register_auth_data_updates(BlockHeight height,
-                             KeyChangeBatch const &key_changes);
+  x23::Async<void> register_auth_data_updates(BlockHeight height,
+                                              KeyChangeBatch key_changes);
   void add_auth_data_updates_callback(
       const std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
           &callback)
@@ -68,7 +67,7 @@ public:
     auth_data_changes_callbacks_.push_back(callback);
   }
 
-  x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
+  x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
 
 private:
   // If this returns AuthErrorCode::kAuthSuccess, then auth_data will be
@@ -105,12 +104,12 @@ public:
   explicit AuthDBRpc(AuthServer &auth_server) : auth_server_(auth_server) {}
 
   x23::Async<void> authdb_forward_key_changes(BlockHeight height,
-                                              KeyChangeBatch const &key_changes)
+                                              KeyChangeBatch key_changes)
   {
     return auth_server_.register_auth_data_updates(height, key_changes);
   }
 
-  x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card)
+  x23::Async<void> subscribe_to_auth_data_changes(AuthCard card)
   {
     return auth_server_.subscribe_to_auth_data_changes(card);
   }
