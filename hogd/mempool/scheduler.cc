@@ -678,9 +678,6 @@ Scheduler::remove_from_scheduler(
 
   ElapsedTimer timer;
 
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
-
   constexpr size_t kNumThreads = 120;
   const std::vector<ChunkRange> chunks =
       make_chunks(tx_hashes.size(), kNumThreads);
