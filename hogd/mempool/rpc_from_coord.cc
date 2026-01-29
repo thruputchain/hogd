@@ -81,6 +81,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto auth_handle = auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), txs, /*max_parallelism=*/128);
 
+  // TODO(jhumphri): How do we ensure that these txs are not visible to
+  // nominate() or validate() before they are verified?
   co_await scheduler_->add_txs(txs);
   ElapsedTimer timer2;
   AuthErrorCodeBatch auth_ret = co_await auth_handle;

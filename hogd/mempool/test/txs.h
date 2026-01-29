@@ -77,14 +77,11 @@ create_key_pair(AddressAuthData &auth_data, size_t idx, Weight weight)
 inline AddressAuthData
 get_default_account()
 {
-  static std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
-  if (public_keys.empty()) {
-    // Initialize [public_keys].
-    for (size_t i = 0; i < kMaxSigners; i++) {
-      public_keys[i] = nullptr;
-    }
+  std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
+  // Initialize [public_keys].
+  for (size_t i = 0; i < kMaxSigners; i++) {
+    public_keys[i] = nullptr;
   }
-  CHECK_EQ(public_keys.size(), static_cast<size_t>(kMaxSigners));
   constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
 
   return AddressAuthData{.public_keys = public_keys,
@@ -106,7 +103,8 @@ make_signature(const SecretKey &sk, const Transaction &tx, uint8_t id)
   DecoratedSignature signature;
   signature.public_key_id = id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
-  signature.signature.ed25519() = ed25519_sign(sk.ed25519(), sha256(tx));
+  signature.signature.ed25519() =
+      ed25519_sign(sk.ed25519(), x23::serialize(tx));
   return signature;
 }
 
