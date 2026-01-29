@@ -156,7 +156,7 @@ jobs:
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_ARCHITECTURE=armv8.5-a" -n
+          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_ARCHITECTURE=aarch64" -n
 
       - name: Build test_ffi Library
         run: |
