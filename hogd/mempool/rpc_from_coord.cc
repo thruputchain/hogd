@@ -954,6 +954,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
+// TODO(jhumphri): After a commit, I think I need to check that
+// [auth_data_changed] was called before any subsequent calls to nominate() or
+// validate().
 x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
