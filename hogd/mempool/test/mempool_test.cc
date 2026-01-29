@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
+#include <ranges>
 
 #include "address_auth.hh"
-#include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "db_sched.hh"
 #include "discovery.hh"
-#include "hogd/base/coropoll.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
