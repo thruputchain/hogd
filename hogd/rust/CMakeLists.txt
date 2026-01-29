@@ -23,7 +23,8 @@ else()
 endif()
 
 
-corrosion_add_target_rustflags(unified_lib "-C target-cpu=${BUILD_ARCHITECTURE}")
+corrosion_add_target_rustflags(unified_lib "-C target-cpu=${RUST_BUILD_CPU}")
+message(STATUS "Rust target CPU: ${RUST_BUILD_CPU}")
 
 # Build list of features to enable
 set(FEATURES_TO_ENABLE "")
