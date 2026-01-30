@@ -541,8 +541,8 @@ TEST(Mempool, AuthChanged)
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{auth_tx})())();
   }
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(txs)())();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      /*validator_id=*/{}, t_to_parallel_batch(txs)())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
@@ -573,9 +573,9 @@ TEST(Mempool, AuthChanged)
     EXPECT_TRUE(tx_hashes.empty());
   }
 
-  // Check that if we resubmit [txs], they are all discarded.
+  // Check that if we resubmit a tx in [txs], it is discarded.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(txs)())();
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
