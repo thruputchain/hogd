@@ -122,7 +122,7 @@ struct GenRs {
     if (get_opaque_array_size(d).has_value()) {
       // type is a byte array
       prtop("{}\n", feature_attr("serde", "serde(with = "
-            "\"serde_arrays::hex\")"));
+                                          "\"serde_arrays::hex\")"));
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -223,7 +223,7 @@ struct GenRs {
     return ret;
   }
 
-  string feature_attr(const std::string& feature, const std::string& attr)
+  string feature_attr(const std::string &feature, const std::string &attr)
   {
     if (rust_features.contains(feature)) {
       return std::format("#[{}]", attr);
@@ -231,7 +231,8 @@ struct GenRs {
     return std::format("#[cfg_attr(feature = \"{}\", {})]", feature, attr);
   }
 
-  string cfg(const std::string& feature) {
+  string cfg(const std::string &feature)
+  {
     if (rust_features.contains(feature)) {
       return "";
     }
@@ -523,16 +524,16 @@ GenRs::show_type(const StructBody &s, string const &tname)
       }
     }
 
-    prtop("{}\n",feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n",feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
-    prtop("{}\n",feature_attr("spec", "derive(XDR)"));
+    prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
+    prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
+    prtop("{}\n", feature_attr("spec", "derive(XDR)"));
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
     if (s.transparent) {
       prtop("#[repr(transparent)]\n");
-      prtop("{}\n",feature_attr("serde", "serde(transparent)"));
+      prtop("{}\n", feature_attr("serde", "serde(transparent)"));
     }
     else
       // We want this, at least optionally on some structs,
@@ -1092,14 +1093,17 @@ GenRs::type_name(const Declaration &d, bool generate,
 }
 
 string
-gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types, std::set<std::string> const &rust_features)
+gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
+       std::set<std::string> const &rust_features)
 {
   GenRs gs(recursive_types, rust_features);
-  std::string preamble = R"(// -*-Rust-*-
+  std::string preamble =
+      R"(// -*-Rust-*-
 // Generated Code: DO NOT CHECK IN
 
 // Generated from xdrc commit: )" +
-                         x23::git_commit_hash() + std::format(R"(
+      x23::git_commit_hash() +
+      std::format(R"(
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -1122,7 +1126,8 @@ use xdrs::*;
 {2}
 use xdrs::xdr_repr::*;
 
-)", gs.cfg("std"), gs.cfg("xdrs"), gs.cfg("spec"));
+)",
+                  gs.cfg("std"), gs.cfg("xdrs"), gs.cfg("spec"));
 
   gs.process(*defs);
 
@@ -1131,8 +1136,8 @@ use xdrs::xdr_repr::*;
 use ::serde::{{Serialize, Deserialize}};
 {0}
 use ::serde_arrays;
-)", gs.cfg("serde")
-);
+)",
+                          gs.cfg("serde"));
 
   return preamble + gs.top_ + R"(
 //
