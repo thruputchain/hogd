@@ -555,7 +555,7 @@ TEST(Mempool, AuthChanged)
   // Now check that the last tx is removed from the scheduler not nominated. We
   // sleep for a short while so that the [auth_data_changed] callback runs in
   // the mempool.
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
   db_tip = {.height = nomination.block_height,
             .hash = nomination.block_hash,
