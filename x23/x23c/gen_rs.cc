@@ -120,8 +120,8 @@ struct GenRs {
 
     if (get_opaque_array_size(d).has_value()) {
       // type is a byte array
-      prtop(
-          "#[cfg_attr(feature = \"serde\", serde(with = \"serde_arrays\"))]\n");
+      prtop("#[cfg_attr(feature = \"serde\", serde(with = "
+            "\"serde_arrays::hex\"))]\n");
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
