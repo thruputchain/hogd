@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 
+#include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
@@ -36,6 +37,13 @@ protected:
                              DeployedContractHash const &contract_hash)
   {
     deployment_map_[contract_address] = contract_hash;
+  }
+
+  int128_t mock_write_auth_data(ContractAddress const &contract_address,
+                                AddressAuthData const &auth_data)
+  {
+    auth_data_map_[contract_address] = auth_data;
+    return 100;
   }
 
   int128_t get_initial_balance()
@@ -95,6 +103,7 @@ protected:
   std::map<StorageKey, int128_t> storage_map_;
   std::map<SHA256Hash, std::shared_ptr<const Contract>> contract_map_;
   std::map<ContractAddress, DeployedContractHash> deployment_map_;
+  std::map<ContractAddress, AddressAuthData> auth_data_map_;
 };
 
 TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
@@ -113,13 +122,24 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
       [this](ContractAddress const &contract_address,
              DeployedContractHash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
+      },
+      [this](ContractAddress const &contract_address,
+             AddressAuthData const &auth_data) -> int128_t {
+        return mock_write_auth_data(contract_address, auth_data);
       });
 
   EXPECT_EQ(storage_map_.size(), 3);
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
+  EXPECT_EQ(auth_data_map_.size(), 1);
+  auto auth_it =
+      auth_data_map_.find(GenesisConfigurationLoader::kDeployContractAddress);
+  ASSERT_NE(auth_it, auth_data_map_.end());
+  EXPECT_EQ(auth_it->second.nonce_config.required_weight, 0);
+  EXPECT_EQ(auth_it->second.gas_permissions.size(), 1);
+  EXPECT_EQ(auth_it->second.gas_permissions[0].required_weight, 0);
   EXPECT_EQ(get_initial_balance(),
-            GenesisConfigurationLoader::initial_hog_token_supply() - 200);
+            GenesisConfigurationLoader::initial_hog_token_supply() - 300);
 }
 
 TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
@@ -169,13 +189,18 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
       [this](ContractAddress const &contract_address,
              DeployedContractHash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
+      },
+      [this](ContractAddress const &contract_address,
+             AddressAuthData const &auth_data) -> int128_t {
+        return mock_write_auth_data(contract_address, auth_data);
       });
 
   EXPECT_EQ(storage_map_.size(), 1);
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
+  EXPECT_EQ(auth_data_map_.size(), 1);
   EXPECT_EQ(get_initial_balance(),
-            GenesisConfigurationLoader::initial_hog_token_supply());
+            GenesisConfigurationLoader::initial_hog_token_supply() - 100);
 }
 
 TEST_F(GenesisBlockTest, MultipleEntries)
@@ -194,11 +219,16 @@ TEST_F(GenesisBlockTest, MultipleEntries)
       [this](ContractAddress const &contract_address,
              DeployedContractHash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
+      },
+      [this](ContractAddress const &contract_address,
+             AddressAuthData const &auth_data) -> int128_t {
+        return mock_write_auth_data(contract_address, auth_data);
       });
 
   EXPECT_EQ(storage_map_.size(), 3);
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
+  EXPECT_EQ(auth_data_map_.size(), 1);
 
   // Verify that different entries produce different keys
   auto keys = std::vector<StorageKey>();
@@ -208,7 +238,7 @@ TEST_F(GenesisBlockTest, MultipleEntries)
 
   EXPECT_NE(keys[0], keys[1]);
   EXPECT_EQ(get_initial_balance(),
-            GenesisConfigurationLoader::initial_hog_token_supply() - 200);
+            GenesisConfigurationLoader::initial_hog_token_supply() - 300);
 }
 
 } // namespace hogd
