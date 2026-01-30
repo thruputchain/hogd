@@ -954,6 +954,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 // TODO(jhumphri): After a commit, I think I need to check that
 // [auth_data_changed] was called before any subsequent calls to nominate() or
 // validate(). Also be sure to make sure this works with the genesis block.
+// I do not need to check this in add_txs--this is all kept in sync by the
+// [auth_data_changed] callback.
+//
+// Also [transfer_finished_] should not be a CoroSem, it should instead be set
+// to the last block height seen in the callback.
 x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
