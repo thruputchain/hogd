@@ -240,10 +240,9 @@ BlockManager::initialize_genesis_configuration(
         auto item =
             std::make_shared<const StorageItemWrapper>(auth_data, &cost_model_);
         base_database_->write_item(
-            AddressAndKey{
-                .address = addr,
-                .key = StorageKey(
-                    StorageKeyType::kStorageKeyTypeAddressAuthData)},
+            AddressAndKey{.address = addr,
+                          .key = StorageKey(
+                              StorageKeyType::kStorageKeyTypeAddressAuthData)},
             item);
         return item->storage_cost();
       });

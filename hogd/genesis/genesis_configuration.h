@@ -72,8 +72,7 @@ public:
                          DeployedContractHash const &contract_hash)> const
           &write_deployment,
       std::function<int128_t(ContractAddress const &,
-                             AddressAuthData const &)> const
-          &write_auth_data);
+                             AddressAuthData const &)> const &write_auth_data);
 
   // Calculate storage key for a genesis entry
   // Format: sha256("Initial Deployment" || hash || nonce || entrypoint ||
