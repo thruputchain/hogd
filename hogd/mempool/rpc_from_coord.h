@@ -314,6 +314,15 @@ private:
   x23::Async<void> auth_data_changed(BlockHeight height,
                                      const KeyChangeBatch &key_changes);
 
+  x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
+  {
+    BlockHeight current_height = auth_data_height_.load();
+    while (current_height != expected_height) {
+      co_await auth_data_height_.wait(current_height);
+    }
+    co_return;
+  }
+
   MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
@@ -338,6 +347,8 @@ private:
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
+
+  x23::CoroFutex<int64_t> auth_data_height_{-1};
 
   std::atomic<bool> ready_ = false;
 

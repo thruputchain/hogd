@@ -562,6 +562,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       std::chrono::duration_cast<std::chrono::milliseconds>(delta);
   int64_t delta_count = delta_raw.count();
   info("NOMINATE, delta = {}", delta_count);
+
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
@@ -580,6 +581,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // affects scheduling priorities for accounts, so we need to wait for this
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
+  co_await wait_for_auth_data(db_tip.height);
 
   nominated_block_cache_.db_tip = db_tip;
   nominated_block_cache_.block_id = generate_block_id();
@@ -718,6 +720,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                      cache.tx_hashes));
 
   co_await scheduler_->transfer_finished_.acquire();
+  co_await wait_for_auth_data(db_tip.height);
 
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
@@ -963,6 +966,8 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
+  CHECK_EQ(height, auth_data_height_.load() + 1);
+
   info("auth_data_changed, height = {}, key_changes.size() = {}", height,
        key_changes.size());
   x23::CoroGuard cg;
@@ -997,6 +1002,8 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   // [validated_block] to true.
   co_await scheduler_->remove_from_scheduler(to_remove,
                                              /*validated_block=*/true);
+  auth_data_height_.store(height);
+  auth_data_height_.broadcast(&default_threadpool());
 }
 
 } // namespace hogd
