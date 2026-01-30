@@ -316,8 +316,8 @@ private:
 
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
-    BlockHeight current_height = auth_data_height_.load();
-    while (current_height != expected_height) {
+    int64_t current_height = auth_data_height_.load();
+    while (current_height != static_cast<int64_t>(expected_height)) {
       co_await auth_data_height_.wait(current_height);
     }
     co_return;
