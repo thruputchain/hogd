@@ -215,7 +215,8 @@ void yyerror(YYLTYPE *loc, XdrCtx *, string, bool warn_only = false);
 
 std::string gen_hh(vector<Definition> *defs);
 std::string gen_rs(vector<Definition> *defs,
-                   std::set<std::string> const &recursive_types);
+                   std::set<std::string> const &recursive_types,
+                   std::set<std::string> const &rust_features);
 
 struct Join {
   string str_;
