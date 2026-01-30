@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_data.hh"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
