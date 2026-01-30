@@ -482,21 +482,14 @@ TEST(Mempool, AuthChanged)
   // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
   // txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
-  SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, /*num_txs=*/2);
   SignedTransaction auth_tx =
       generate_change_nonce_config(fib_client, /*required_weight=*/10);
-  // We set a lower [block_expiry_height] on [auth_tx] than in [txs] so that
-  // [auth_tx] gets ordered first by the scheduler.
-  auth_tx.tx.uniquifier.block_expiry_height = 100;
-  EXPECT_LT(auth_tx.tx.uniquifier.block_expiry_height,
-            txs[0].tx.uniquifier.block_expiry_height);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 *
-                      MempoolCoordinatorRpc::kMaxBlockSize * 2);
+                  /*num_hogs=*/5'000'000'000 * 10);
 
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
@@ -518,18 +511,13 @@ TEST(Mempool, AuthChanged)
 
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
-  WorkerPool &pool = WorkerPool::get_default_pool();
-  pool.for_each_parallel(
-      std::ranges::iota_view{0UL, txs.size()},
-      [&txs, &sk](size_t i) {
-        SignedTransaction &stx = txs[i];
-        stx.tx.auth_claims.push_back(make_sign_claim(0));
+  for (SignedTransaction &stx : txs) {
+    stx.tx.auth_claims.push_back(make_sign_claim(0));
 
-        DecoratedSignatureList decorated_signatures;
-        decorated_signatures.list.push_back(make_signature(sk, stx.tx, 0));
-        stx.signatures.push_back(decorated_signatures);
-      },
-      /*width=*/txs.size() / available_parallelism());
+    DecoratedSignatureList decorated_signatures;
+    decorated_signatures.list.push_back(make_signature(sk, stx.tx, 0));
+    stx.signatures.push_back(decorated_signatures);
+  }
   {
     // Handle [auth_tx].
     auth_tx.tx.auth_claims.push_back(make_sign_claim(0));
@@ -541,8 +529,8 @@ TEST(Mempool, AuthChanged)
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{auth_tx})())();
   }
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      /*validator_id=*/{}, t_to_parallel_batch(txs)())();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
@@ -553,13 +541,22 @@ TEST(Mempool, AuthChanged)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    EXPECT_EQ(tx_hashes.size(), MempoolCoordinatorRpc::kMaxBlockSize);
+    EXPECT_EQ(tx_hashes.size(), 2UL);
   }
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  // Now check that the last tx is not nominated.
+  // Now check that the last tx is removed from the scheduler not nominated. We
+  // sleep for a short while so that the [auth_data_changed] callback runs in
+  // the mempool.
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
   db_tip = {.height = nomination.block_height,
             .hash = nomination.block_hash,
             .id = res_nominate.nominated_block().block_id};
