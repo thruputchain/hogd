@@ -3,7 +3,6 @@ add_xdr(
   ../../protocol/address_auth.x
   ../../protocol/auth_card.x
   ../../protocol/auth_claim.x
-  ../../protocol/auth_data.x
   ../../protocol/auth_rpc.x
   ../../protocol/batch.x
   ../../protocol/block.x

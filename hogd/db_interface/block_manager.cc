@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "auth_data.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
