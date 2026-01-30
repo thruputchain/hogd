@@ -132,7 +132,8 @@ usage(bool error)
   --strict     fail if there are any warnings
   --version    print version and exit
   --rust       generate rust code
-  --recursive_type <typename>  generate (rust) code for a recursive type)",
+  --recursive_type <typename>  generate (rust) code for a recursive type),
+  --rust-feature <feature>   force the generated code to enable a given feature (instead of cfg(feature = "<feature>")))",
                progname.string());
   exit(error ? 2 : 0);
 }
@@ -153,6 +154,7 @@ main(int argc, char **argv)
 
   bool rust_module = false;
   std::set<std::string> recursive_types;
+  std::set<std::string> rust_features;
 
   int optind;
   for (optind = 1; optind < argc; ++optind) {
@@ -193,6 +195,14 @@ main(int argc, char **argv)
         exit(2);
       }
       recursive_types.insert(argv[optind]);
+    }
+    else if (opt == "--rust-feature") {
+      ++optind;
+      if (optind >= argc) {
+        std::println(stderr, "missing rust feature name");
+        exit(2);
+      }
+      rust_features.insert(argv[optind]);
     }
     else {
       std::println(stderr, "invalid option {}", opt);
@@ -239,7 +249,7 @@ main(int argc, char **argv)
   std::string res;
 
   if (rust_module) {
-    res = gen_rs(&ctx.defs, recursive_types);
+    res = gen_rs(&ctx.defs, recursive_types, rust_features);
   }
   else {
     res = gen_hh(&ctx.defs);
