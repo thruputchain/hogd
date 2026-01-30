@@ -77,16 +77,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   ElapsedTimer timer;
   info("submit_unvetted, {} txs", txs.size());
-  auto auth_handle = auth_->verify_transactions(
+  AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), txs, /*max_parallelism=*/128);
-
-  // TODO(jhumphri): How do we ensure that these txs are not visible to
-  // nominate() or validate() before they are verified?
-  co_await scheduler_->add_txs(txs);
-  ElapsedTimer timer2;
-  AuthErrorCodeBatch auth_ret = co_await auth_handle;
   info("auth took {}", timer.elapsed());
-  double auth_handle_duration = timer2.elapsed();
+
   x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -98,21 +92,26 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   }
   info("{} txs were invalid", to_remove.size());
   if (!to_remove.empty()) {
-    // The txs are on the runqueue and need to be removed, so we set
-    // [validated_block] to true.
-    co_await scheduler_->remove_from_scheduler(to_remove,
-                                               /*validated_block=*/true);
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
+  // Careful: it is tempting to overlap the overhead of
+  // [auth_->verify_transactions()] with that of [scheduler_->add_txs()] (and
+  // then after remove any unverified txs from the scheduler). But this would
+  // make the txs visible to nominate() and validate() before the txs have been
+  // verified.
+  auto add_txs_handle = scheduler_->add_txs(txs);
 
   // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch] if we do
   // not remove any txs above. I am not sure this is the common case though.
   ParallelBatch response;
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
+
+  co_await add_txs_handle;
+
   info("about to return from submit_unvetted, scheduler.size() = {}, duration "
-       "= {}, auth_handle_duration = {}",
-       scheduler_->size(), timer.elapsed(), auth_handle_duration);
+       "= {}",
+       scheduler_->size(), timer.elapsed());
   co_return;
 }
 
@@ -832,7 +831,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
-  info("schedulercoord_commit_block!!!");
   x23::CoroGuard commit_cg;
   co_await commit_cg(commit_lock_);
 
