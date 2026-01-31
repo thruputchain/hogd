@@ -36,245 +36,32 @@ pub fn to_invoke_result(error: HostFnErrorCode) -> Result<(), InvokeErrorCode> {
         _ => Err(InvokeErrorCode::kInvokeUnrecoverable),
     }
 }
-pub type TrampolineCall0Args =
-    unsafe extern "C" fn(host_call_context: *mut c_void) -> TrampolineResult;
+macro_rules! define_trampoline {
+    ($type_name:ident, $fn_name:ident, $($arg:ident),*) => {
+        pub type $type_name = unsafe extern "C" fn(
+            host_call_context: *mut c_void,
+            $($arg: u64),*
+        ) -> TrampolineResult;
 
-pub type TrampolineCall1Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall2Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall3Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall4Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall5Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall6Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall7Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-    arg7: u64,
-) -> TrampolineResult;
-
-pub type TrampolineCall8Args = unsafe extern "C" fn(
-    host_call_context: *mut c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-    arg7: u64,
-    arg8: u64,
-) -> TrampolineResult;
-
-pub fn c_call_0args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall0Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context)
-    }
+        pub fn $fn_name(
+            function_pointer: *mut ::std::os::raw::c_void,
+            host_call_context: *mut ::std::os::raw::c_void,
+            $($arg: u64),*
+        ) -> TrampolineResult {
+            unsafe {
+                let f = std::mem::transmute::<*mut c_void, $type_name>(function_pointer);
+                f(host_call_context, $($arg),*)
+            }
+        }
+    };
 }
 
-pub fn c_call_1args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall1Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context, arg1)
-    }
-}
-
-pub fn c_call_2args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall2Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context, arg1, arg2)
-    }
-}
-
-pub fn c_call_3args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall3Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context, arg1, arg2, arg3)
-    }
-}
-
-pub fn c_call_4args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall4Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context, arg1, arg2, arg3, arg4)
-    }
-}
-
-pub fn c_call_5args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall5Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context, arg1, arg2, arg3, arg4, arg5)
-    }
-}
-
-pub fn c_call_6args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall6Args,
-        >(function_pointer);
-        reinterpreted_ptr(host_call_context, arg1, arg2, arg3, arg4, arg5, arg6)
-    }
-}
-
-pub fn c_call_7args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-    arg7: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall7Args,
-        >(function_pointer);
-        reinterpreted_ptr(
-            host_call_context,
-            arg1,
-            arg2,
-            arg3,
-            arg4,
-            arg5,
-            arg6,
-            arg7,
-        )
-    }
-}
-
-pub fn c_call_8args(
-    function_pointer: *mut ::std::os::raw::c_void,
-    host_call_context: *mut ::std::os::raw::c_void,
-    arg1: u64,
-    arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
-    arg6: u64,
-    arg7: u64,
-    arg8: u64,
-) -> TrampolineResult {
-    unsafe {
-        let reinterpreted_ptr = std::mem::transmute::<
-            *mut c_void,
-            TrampolineCall8Args,
-        >(function_pointer);
-        reinterpreted_ptr(
-            host_call_context,
-            arg1,
-            arg2,
-            arg3,
-            arg4,
-            arg5,
-            arg6,
-            arg7,
-            arg8,
-        )
-    }
-}
+define_trampoline!(TrampolineCall0Args, c_call_0args,);
+define_trampoline!(TrampolineCall1Args, c_call_1args, arg1);
+define_trampoline!(TrampolineCall2Args, c_call_2args, arg1, arg2);
+define_trampoline!(TrampolineCall3Args, c_call_3args, arg1, arg2, arg3);
+define_trampoline!(TrampolineCall4Args, c_call_4args, arg1, arg2, arg3, arg4);
+define_trampoline!(TrampolineCall5Args, c_call_5args, arg1, arg2, arg3, arg4, arg5);
+define_trampoline!(TrampolineCall6Args, c_call_6args, arg1, arg2, arg3, arg4, arg5, arg6);
+define_trampoline!(TrampolineCall7Args, c_call_7args, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+define_trampoline!(TrampolineCall8Args, c_call_8args, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
