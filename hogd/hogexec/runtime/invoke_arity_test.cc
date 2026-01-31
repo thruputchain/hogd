@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include "contract.hh"
