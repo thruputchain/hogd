@@ -76,7 +76,7 @@ macro_rules! link_function_nargs {
             let x = BorrowBypass { fn_pointer };
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
-                    let res = unsafe {
+                    let res = {
                         common::$cfunc(
                             x.clone().fn_pointer,
                             *caller.data(),

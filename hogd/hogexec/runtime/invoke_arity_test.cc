@@ -5,15 +5,17 @@
 
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
 #include "syscall_error.hh"
 
@@ -21,93 +23,105 @@ namespace hogd {
 
 namespace {
 
-HostFnStatus<SyscallErrorCode>
-arity0(HostCallContext * /*unused*/)
+TrampolineResult
+expected(int32_t result)
 {
-  return SyscallErrorCode(100);
+  return to_trampoline_result({SyscallErrorCode(result)});
 }
 
-HostFnStatus<SyscallErrorCode>
-arity1(HostCallContext * /*unused*/, uint64_t arg0)
+TrampolineResult
+unexpected()
+{
+  return to_trampoline_result(HostFnError{HostFnErrorCode::kHostUnrecoverable});
+}
+
+TrampolineResult
+arity0(HostCallContext * /*unused*/) noexcept
+{
+  return expected(100);
+}
+
+TrampolineResult
+arity1(HostCallContext * /*unused*/, uint64_t arg0) noexcept
 {
   if (arg0 != 1) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(101);
+  return expected(101);
 }
 
-HostFnStatus<SyscallErrorCode>
-arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
+TrampolineResult
+arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1) noexcept
 {
   if (arg0 != 1 || arg1 != 2) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(102);
+  return expected(102);
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2)
+       uint64_t arg2) noexcept
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(103);
+  return expected(103);
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2, uint64_t arg3)
+       uint64_t arg2, uint64_t arg3) noexcept
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(104);
+  return expected(104);
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2, uint64_t arg3, uint64_t arg4)
+       uint64_t arg2, uint64_t arg3, uint64_t arg4) noexcept
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(105);
+  return expected(105);
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
+       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5) noexcept
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(106);
+  return expected(106);
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-       uint64_t arg6)
+       uint64_t arg6) noexcept
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6 || arg6 != 7) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(107);
+  return expected(107);
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-       uint64_t arg6, uint64_t arg7)
+       uint64_t arg6, uint64_t arg7) noexcept
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6 || arg6 != 7 || arg7 != 8) {
-    throw std::runtime_error("invalid arity check");
+    return unexpected();
   }
-  return SyscallErrorCode(108);
+  return expected(108);
 }
 
 } // namespace

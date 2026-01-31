@@ -2,8 +2,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <new>
-#include <stdexcept>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
@@ -11,7 +9,9 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
 #include "syscall_error.hh"
 
@@ -19,62 +19,52 @@ namespace hogd {
 
 namespace {
 
-HostFnStatus<SyscallErrorCode>
-throw_runtime_error(HostCallContext * /*unused*/)
+TrampolineResult
+throw_unrecoverable_host_error(HostCallContext * /*unused*/) noexcept
 {
-  throw std::runtime_error("bad fn\n");
+  return to_trampoline_result(HostFnError{HostFnErrorCode::kHostUnrecoverable});
 }
 
-HostFnStatus<SyscallErrorCode>
-throw_unrecoverable_host_error(HostCallContext * /*unused*/)
+TrampolineResult
+throw_validation_error(HostCallContext * /*unused*/) noexcept
 {
-  return HostFnError{HostFnErrorCode::kHostUnrecoverable};
+  return to_trampoline_result(
+      HostFnError{HostFnErrorCode::kHostValidationFailure});
 }
 
-HostFnStatus<SyscallErrorCode>
-throw_validation_error(HostCallContext * /*unused*/)
+TrampolineResult
+throw_abort_transaction(HostCallContext * /*unused*/) noexcept
 {
-  return HostFnError{HostFnErrorCode::kHostValidationFailure};
+  return to_trampoline_result(
+      HostFnError{HostFnErrorCode::kHostAbortTransaction});
 }
 
-HostFnStatus<SyscallErrorCode>
-throw_abort_transaction(HostCallContext * /*unused*/)
+TrampolineResult
+good_call(HostCallContext * /*unused*/) noexcept
 {
-  return HostFnError{HostFnErrorCode::kHostAbortTransaction};
+  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
 }
 
-HostFnStatus<SyscallErrorCode>
-throw_bad_alloc(HostCallContext * /*unused*/)
+TrampolineResult
+exit_call(HostCallContext * /*unused*/) noexcept
 {
-  throw std::bad_alloc();
+  return to_trampoline_result(HostFnError{HostFnErrorCode::kHostExit});
 }
 
-HostFnStatus<SyscallErrorCode>
-good_call(HostCallContext * /*unused*/)
+TrampolineResult
+return_syscall(HostCallContext * /*unused*/) noexcept
 {
-  return SyscallErrorCode::kSyscallErrorCodeNone;
-}
-
-HostFnStatus<SyscallErrorCode>
-exit_call(HostCallContext * /*unused*/)
-{
-  return HostFnError{HostFnErrorCode::kHostExit};
-}
-
-HostFnStatus<SyscallErrorCode>
-return_syscall(HostCallContext * /*unused*/)
-{
-  return HostFnError{HostFnErrorCode::kHostReturn};
+  return to_trampoline_result(HostFnError{HostFnErrorCode::kHostReturn});
 }
 
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
-HostFnStatus<SyscallErrorCode>
-consume_too_much_gas(HostCallContext *context)
+TrampolineResult
+consume_too_much_gas(HostCallContext *context) noexcept
 {
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
-  return HostFnError{HostFnErrorCode::kHostOutOfGas};
+  return to_trampoline_result(HostFnError{HostFnErrorCode::kHostOutOfGas});
 }
 
 namespace {
@@ -82,19 +72,21 @@ Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
-HostFnStatus<SyscallErrorCode>
-reentrance(HostCallContext * /*unused*/)
+TrampolineResult
+reentrance(HostCallContext * /*unused*/) noexcept
 {
   reentrance_hit = true;
   if (s_runtime == nullptr) {
-    return HostFnError{HostFnErrorCode::kHostUnrecoverable};
+    return to_trampoline_result(
+        HostFnError{HostFnErrorCode::kHostUnrecoverable});
   }
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
   if (!res.result_.has_value()) {
-    return HostFnError{HostFnErrorCode::kHostUnrecoverable};
+    return to_trampoline_result(
+        HostFnError{HostFnErrorCode::kHostUnrecoverable});
   }
-  return SyscallErrorCode::kSyscallErrorCodeNone;
+  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
 }
 
 } // namespace
@@ -130,23 +122,6 @@ TEST_P(WasmiErrorHandlingTest, UnlinkedFn)
                                                  get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
   EXPECT_TRUE(runtime.value() == nullptr);
-}
-
-// make sure we don't break if errors do get thrown
-TEST_P(WasmiErrorHandlingTest, RuntimeError)
-{
-  link_fn("test", "external_call", &throw_runtime_error);
-  make_syscall_handler(contract_);
-  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 get_syscall_handler(), true);
-  ASSERT_TRUE(runtime.has_value());
-  ASSERT_TRUE(runtime.value() != nullptr);
-
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
-
-  EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(),
-            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
 TEST_P(WasmiErrorHandlingTest, ExitHandling)
@@ -208,23 +183,6 @@ TEST_P(WasmiErrorHandlingTest, ValidationError)
 
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::kInvokeValidationFailure});
-}
-
-TEST_P(WasmiErrorHandlingTest, OtherWeirdError)
-{
-  link_fn("test", "external_call", &throw_bad_alloc);
-  make_syscall_handler(contract_);
-  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 get_syscall_handler(), true);
-
-  ASSERT_TRUE(runtime.has_value());
-  ASSERT_TRUE(runtime.value() != nullptr);
-
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
-
-  EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(),
-            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
 TEST_P(WasmiErrorHandlingTest, WasmError)
@@ -309,7 +267,7 @@ TEST_P(WasmiErrorHandlingTest, CheckReturn)
 
 TEST_P(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
-  link_fn("test", "external_call", &throw_bad_alloc);
+  link_fn("test", "external_call", &throw_unrecoverable_host_error);
   make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
                                                  get_syscall_handler(), true);

@@ -8,6 +8,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
 #include "syscall_error.hh"
 
@@ -17,12 +18,12 @@ namespace {
 
 SystemCallHandler *ctx_check = nullptr;
 
-HostFnStatus<SyscallErrorCode>
-foo(HostCallContext *ctx, uint64_t value)
+TrampolineResult
+foo(HostCallContext *ctx, uint64_t value) noexcept
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
-  return SyscallErrorCode(15);
+  return to_trampoline_result({SyscallErrorCode(15)});
 }
 
 } // namespace

@@ -1,8 +1,9 @@
 pub use hogexec_internal::ffi_enums::*;
 
-pub mod trampoline_bindings;
-pub use trampoline_bindings::*;
 pub mod contract_loader;
+
+mod trampoline_bindings;
+pub use trampoline_bindings::*;
 
 use core::slice;
 use core::str::Utf8Error;

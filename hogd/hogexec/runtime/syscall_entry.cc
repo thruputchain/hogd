@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 
@@ -70,10 +71,10 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
 
 } // namespace
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-              uint64_t arg6, uint64_t arg7)
+              uint64_t arg6, uint64_t arg7) noexcept
 {
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");
@@ -81,9 +82,9 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   auto [err, gas_consumed] = syscall_entry_inner(call_context, arg0, arg1, arg2,
                                                  arg3, arg4, arg5, arg6, arg7);
   if (!call_context->runtime->consume_gas(gas_consumed)) {
-    return {HostFnError{HostFnErrorCode::kHostOutOfGas}};
+    return to_trampoline_result({HostFnError{HostFnErrorCode::kHostOutOfGas}});
   }
-  return err;
+  return to_trampoline_result(err);
 }
 
 } // namespace hogd
