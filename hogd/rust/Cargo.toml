@@ -27,8 +27,10 @@ groundhog-xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git", f
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+strip = "symbols"
 
 [profile.dev]
 opt-level = 0
 debug = true
 panic = "abort"
+strip = "symbols"
