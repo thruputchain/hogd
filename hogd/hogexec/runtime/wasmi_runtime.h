@@ -10,7 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "syscall_error.hh"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 
 namespace hogd {
 
@@ -45,7 +45,7 @@ public:
   // function(HostCallContext* context, uint64_t arg0,...);
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
+               TrampolineResult (*f)(HostCallContext *, Args...) noexcept)
   {
     if (!RuntimeContext::validate_link_fn_params(module_name, fn_name,
                                                  reinterpret_cast<void *>(f)))
