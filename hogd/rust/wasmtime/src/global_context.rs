@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
+use common::{LinkEntry, SendPtr};
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker,
@@ -14,40 +15,6 @@ use wasmtime::{
 use crate::error::TrampolineError;
 use crate::instance_pre_cache::InstancePreCache;
 
-#[derive(Clone)]
-pub struct LinkEntry {
-    module: String,
-    function: String,
-    nargs: u8,
-    fn_pointer: *mut c_void,
-}
-
-impl LinkEntry {
-    pub fn new(
-        module: String,
-        function: String,
-        nargs: u8,
-        fn_pointer: *mut c_void,
-    ) -> Self {
-        Self {
-            module,
-            function,
-            nargs,
-            fn_pointer,
-        }
-    }
-}
-
-// Tells rust that it is safe to send this c_void pointer
-// across lambda boundaries
-#[derive(Clone)]
-struct BorrowBypass {
-    fn_pointer: *mut c_void,
-}
-
-unsafe impl Send for BorrowBypass {}
-unsafe impl Sync for BorrowBypass {}
-
 macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
@@ -56,12 +23,12 @@ macro_rules! link_function_nargs {
             import_name: &str,
             fn_name: &str,
         ) -> Result<(), wasmtime::Error> {
-            let x = BorrowBypass { fn_pointer };
+            let ptr = SendPtr::new(fn_pointer);
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
-                            x.clone().fn_pointer,
+                            ptr.as_ptr(),
                             *caller.data(),
                             $($arg),*
                         )
@@ -232,62 +199,62 @@ impl WasmtimeGlobalContext {
     }
 
     fn apply_link_entry(linker: &mut Linker<*mut c_void>, entry: &LinkEntry) {
-        match entry.nargs {
+        match entry.nargs() {
             0 => Self::link_function_0args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             1 => Self::link_function_1args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             2 => Self::link_function_2args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             3 => Self::link_function_3args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             4 => Self::link_function_4args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             5 => Self::link_function_5args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             6 => Self::link_function_6args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             7 => Self::link_function_7args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
             8 => Self::link_function_8args(
                 linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
             ),
-            _ => panic!("Unsupported number of arguments: {}", entry.nargs),
+            _ => panic!("Unsupported number of arguments: {}", entry.nargs()),
         }
         .unwrap();
     }

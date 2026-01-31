@@ -12,7 +12,7 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::SystemErrorCode;
+use common::{LinkEntry, SendPtr, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -56,29 +56,6 @@ use common::SystemErrorCode;
 // but not for eager compilation and validation (unclear why this choice was made).  If a module cache is used,
 // we must use CompilationMode::Eager.
 
-pub struct LinkEntry {
-    module: String,
-    function: String,
-    nargs: u8,
-    fn_pointer: *mut c_void,
-}
-
-impl LinkEntry {
-    pub fn new(
-        module: String,
-        function: String,
-        nargs: u8,
-        fn_pointer: *mut c_void,
-    ) -> Self {
-        Self {
-            module,
-            function,
-            nargs,
-            fn_pointer,
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct WasmiGlobalContext {
     entries: Vec<LinkEntry>,
@@ -103,16 +80,6 @@ pub struct WasmiContext {
     contract_get_fn: ContractGetFn,
 }
 
-// Tells rust that it is safe to send this c_void pointer
-// across lambda boundaries
-#[derive(Clone)]
-struct BorrowBypass {
-    fn_pointer: *mut c_void,
-}
-
-unsafe impl Send for BorrowBypass {}
-unsafe impl Sync for BorrowBypass {}
-
 macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
@@ -121,12 +88,12 @@ macro_rules! link_function_nargs {
             import_name: &str,
             fn_name: &str,
         ) -> Result<(), Error> {
-            let x = BorrowBypass { fn_pointer };
+            let ptr = SendPtr::new(fn_pointer);
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
-                            x.clone().fn_pointer,
+                            ptr.as_ptr(),
                             *caller.data(),
                             $($arg),*
                         )
@@ -215,63 +182,66 @@ impl WasmiContext {
 
         let entries = self.global_context.entries();
         for entry in entries {
-            match entry.nargs {
+            match entry.nargs() {
                 0 => Self::link_function_0args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 1 => Self::link_function_1args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 2 => Self::link_function_2args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 3 => Self::link_function_3args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 4 => Self::link_function_4args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 5 => Self::link_function_5args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 6 => Self::link_function_6args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 7 => Self::link_function_7args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 8 => Self::link_function_8args(
                     &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
                 ),
                 _ => {
-                    panic!("Unsupported number of arguments: {}", entry.nargs);
+                    panic!(
+                        "Unsupported number of arguments: {}",
+                        entry.nargs()
+                    );
                 }
             }
             .unwrap();

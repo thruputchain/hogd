@@ -18,7 +18,7 @@ pub struct TrampolineResult {
 
 impl Into<Result<i32, HostFnErrorCode>> for TrampolineResult {
     fn into(self) -> Result<i32, HostFnErrorCode> {
-        let panic : HostFnErrorCode = {
+        let panic: HostFnErrorCode = {
             match self.panic.try_into() {
                 Ok(panic) => panic,
                 Err(_) => return Err(HostFnErrorCode::kHostUnrecoverable),
