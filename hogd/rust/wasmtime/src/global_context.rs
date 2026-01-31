@@ -13,7 +13,6 @@ use wasmtime::{
 
 use crate::error::TrampolineError;
 use crate::instance_pre_cache::InstancePreCache;
-use common::TrampolineResult;
 
 #[derive(Clone)]
 pub struct LinkEntry {
@@ -49,22 +48,6 @@ struct BorrowBypass {
 unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
 
-fn wasmtime_handle_trampoline_error(
-    result: TrampolineResult,
-) -> Result<i32, wasmtime::Error> {
-    let error = result.panic.try_into();
-    if error.is_err() {
-        return Err(wasmtime::Error::new(TrampolineError {
-            error: common::HostFnErrorCode::kHostUnrecoverable,
-        }));
-    }
-    let error = error.unwrap();
-    match error {
-        common::HostFnErrorCode::kHostNoneOrRecoverable => Ok(result.result),
-        _ => Err(wasmtime::Error::new(TrampolineError { error })),
-    }
-}
-
 macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
@@ -76,14 +59,14 @@ macro_rules! link_function_nargs {
             let x = BorrowBypass { fn_pointer };
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
-                    let res = {
+                    let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
                             x.clone().fn_pointer,
                             *caller.data(),
                             $($arg),*
                         )
-                    };
-                    wasmtime_handle_trampoline_error(res)
+                    }.into();
+                    res.map_err(|error| wasmtime::Error::new(TrampolineError { error }))
                 })
                 .map_err(Into::into)
                 .map(|_| ())

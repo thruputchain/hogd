@@ -113,22 +113,6 @@ struct BorrowBypass {
 unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
 
-pub fn handle_trampoline_error(
-    result: common::TrampolineResult,
-) -> Result<i32, Error> {
-    let error = result.panic.try_into();
-    if error.is_err() {
-        return Err(Error::host(TrampolineError {
-            error: common::HostFnErrorCode::kHostUnrecoverable,
-        }));
-    }
-    let error = error.unwrap();
-    match error {
-        common::HostFnErrorCode::kHostNoneOrRecoverable => Ok(result.result),
-        _ => Err(Error::host(TrampolineError { error })),
-    }
-}
-
 macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
@@ -140,14 +124,14 @@ macro_rules! link_function_nargs {
             let x = BorrowBypass { fn_pointer };
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
-                    let res = {
+                    let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
                             x.clone().fn_pointer,
                             *caller.data(),
                             $($arg),*
                         )
-                    };
-                    handle_trampoline_error(res)
+                    }.into();
+                    res.map_err(|error| Error::host(TrampolineError { error }))
                 })
                 .map_err(Into::into)
                 .map(|_| ())
