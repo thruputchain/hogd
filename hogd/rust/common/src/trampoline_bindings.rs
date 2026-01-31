@@ -61,7 +61,45 @@ define_trampoline!(TrampolineCall1Args, c_call_1args, arg1);
 define_trampoline!(TrampolineCall2Args, c_call_2args, arg1, arg2);
 define_trampoline!(TrampolineCall3Args, c_call_3args, arg1, arg2, arg3);
 define_trampoline!(TrampolineCall4Args, c_call_4args, arg1, arg2, arg3, arg4);
-define_trampoline!(TrampolineCall5Args, c_call_5args, arg1, arg2, arg3, arg4, arg5);
-define_trampoline!(TrampolineCall6Args, c_call_6args, arg1, arg2, arg3, arg4, arg5, arg6);
-define_trampoline!(TrampolineCall7Args, c_call_7args, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
-define_trampoline!(TrampolineCall8Args, c_call_8args, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+define_trampoline!(
+    TrampolineCall5Args,
+    c_call_5args,
+    arg1,
+    arg2,
+    arg3,
+    arg4,
+    arg5
+);
+define_trampoline!(
+    TrampolineCall6Args,
+    c_call_6args,
+    arg1,
+    arg2,
+    arg3,
+    arg4,
+    arg5,
+    arg6
+);
+define_trampoline!(
+    TrampolineCall7Args,
+    c_call_7args,
+    arg1,
+    arg2,
+    arg3,
+    arg4,
+    arg5,
+    arg6,
+    arg7
+);
+define_trampoline!(
+    TrampolineCall8Args,
+    c_call_8args,
+    arg1,
+    arg2,
+    arg3,
+    arg4,
+    arg5,
+    arg6,
+    arg7,
+    arg8
+);
