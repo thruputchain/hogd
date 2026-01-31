@@ -75,10 +75,10 @@ jobs:
       - name: Package Library
         run: |
           cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
-          cp build/hogd/rust/libunitied_lib.so release_artifacts/
+          cp build/hogd/rust/libunified_lib.so release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so libunitied_lib.so test_bindings.h bindings.rs
+          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so libunified_lib.so test_bindings.h bindings.rs
           sha256sum libtest_ffi-linux-x86_64.tar.gz > libtest_ffi-linux-x86_64.tar.gz.sha256
 
       - name: Show ccache stats
@@ -200,10 +200,10 @@ jobs:
       - name: Package Library
         run: |
           cp build/hogd/test_ffi/libtest_ffi.dylib release_artifacts/
-          cp build/hogd/rust/libunitied_lib.dylib release_artifacts/
+          cp build/hogd/rust/libunified_lib.dylib release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-macos-arm64.tar.gz libtest_ffi.dylib libunitied_lib.dylib test_bindings.h bindings.rs
+          tar -czf libtest_ffi-macos-arm64.tar.gz libtest_ffi.dylib libunified_lib.dylib test_bindings.h bindings.rs
           shasum -a 256 libtest_ffi-macos-arm64.tar.gz > libtest_ffi-macos-arm64.tar.gz.sha256
 
       - name: Show ccache stats
@@ -307,7 +307,7 @@ jobs:
             ### Contents
 
             - `libtest_ffi.so` (Linux) or `libtest_ffi.dylib` (macOS) - Shared library
-            - `libunitied_lib.so` (Linux) or `libunitied_lib.dylib` (macOS) - Shared library
+            - `libunified_lib.so` (Linux) or `libunified_lib.dylib` (macOS) - Shared library
             - `test_bindings.h` - C header file
             - `bindings.rs` - Pre-generated Rust bindings (no bindgen required)
 
