@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: read
     # run if manually triggered or if the release_test_ffi workflow completed successfully
-    if: github.event_name != 'workflow_run' || github.event.workflow.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: hog1
 
     steps:
