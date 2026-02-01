@@ -566,11 +566,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
+  if (db_tip != last_committed_block_) {
+    last_ = std::chrono::steady_clock::now();
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
+  }
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
-    info("ret");
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -583,7 +587,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await scheduler_->transfer_finished_.acquire();
   co_await wait_for_auth_data(db_tip.height);
 
-  nominated_block_cache_.db_tip = db_tip;
   nominated_block_cache_.block_id = generate_block_id();
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
@@ -630,7 +633,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // adding complexity and overhead in the common case to for full recovery
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
-    info("ret");
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -654,6 +656,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // there.
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
+  nominated_block_cache_.db_tip = {
+      .height = nominated_block_cache_.nomination_result.nominated_block()
+                    .nomination.block_height,
+      .hash = nominated_block_cache_.nomination_result.nominated_block()
+                  .nomination.block_hash,
+      .id =
+          nominated_block_cache_.nomination_result.nominated_block().block_id};
   info("nominate() took {}", timer.elapsed());
   last_ = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
@@ -697,6 +706,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+  if (nomination.prev_block_hash != last_committed_block_.hash ||
+      nomination.block_height != last_committed_block_.height + 1) {
+    co_await decrement_num_validations_in_progress();
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
 
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
@@ -715,12 +730,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // executors.
   PendingBlock cache{};
   cache.block_id = generate_block_id();
-  cache.db_tip = db_tip;
+  cache.db_tip = {.height = nomination.block_height,
+                  .hash = nomination.block_hash,
+                  .id = cache.block_id};
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
 
   co_await scheduler_->transfer_finished_.acquire();
-  co_await wait_for_auth_data(db_tip.height);
+  co_await wait_for_auth_data(nomination.block_height - 1);
 
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
@@ -795,9 +812,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // Check [validated] and verify the block hash. It is safe to directly use
   // [cache.tx_hashes] here because we already checked above that all of these
   // hashes correspond to vetted txs.
-  if (!validated || get_block_hash(cache.tx_hashes,
-                                   /*prev_block_hash=*/cache.db_tip.hash) !=
-                        nomination.block_hash) {
+  if (!validated ||
+      get_block_hash(cache.tx_hashes,
+                     /*prev_block_hash=*/nomination.prev_block_hash) !=
+          nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
@@ -847,7 +865,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
-    info("schedulercoord_commit_block ret");
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerCommitOutcome::SchedulerCommitRace;
   }
@@ -859,7 +876,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       !validated_block_cache_.contains(block_id)) {
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
-    info("schedulercoord_commit_block ret");
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
@@ -949,7 +965,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   validated_block_cache_.clear();
 
   scheduler_->increment_current_block();
-  info("schedulercoord_commit_block ret");
   last_ = std::chrono::steady_clock::now();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
