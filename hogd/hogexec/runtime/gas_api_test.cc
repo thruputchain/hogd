@@ -9,7 +9,9 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
 #include "syscall_error.hh"
 
@@ -17,20 +19,20 @@ namespace hogd {
 
 namespace {
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 error(HostFnErrorCode const &code)
 {
-  return HostFnError{code};
+  return to_trampoline_result(HostFnError{code});
 }
 
-HostFnStatus<SyscallErrorCode>
+TrampolineResult
 success()
 {
-  return SyscallErrorCode::kSyscallErrorCodeNone;
+  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
 }
 
 auto
-consume_gas_call(HostCallContext *ctxp)
+consume_gas_call(HostCallContext *ctxp) noexcept
 {
   if (!ctxp->runtime->consume_gas(100)) {
     return error(HostFnErrorCode::kHostOutOfGas);
@@ -39,7 +41,7 @@ consume_gas_call(HostCallContext *ctxp)
 }
 
 auto
-consume_gas_call2(HostCallContext *ctxp)
+consume_gas_call2(HostCallContext *ctxp) noexcept
 {
   if (!ctxp->runtime->consume_gas(5000)) {
     return error(HostFnErrorCode::kHostOutOfGas);
