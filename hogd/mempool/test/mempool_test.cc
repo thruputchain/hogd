@@ -173,7 +173,6 @@ TEST(Mempool, Validate)
   // as the nondeterministic data, that I would prefer not to have to construct
   // myself in this test.
   DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  info("db_tip.height is {}", db_tip.height);
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -185,7 +184,6 @@ TEST(Mempool, Validate)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  info("nomination.block_height returned is {}", nomination.block_height);
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -429,7 +427,79 @@ TEST(Mempool, ValidateCommit)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
-// TODO(jhumphri): Test two validates in a row.
+TEST(Mempool, ValidateTwo)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  // We nominate a block first and then reuse the returned [Nomination] struct
+  // for the validation below. The [Nomination] struct contains some data, such
+  // as the nondeterministic data, that I would prefer not to have to construct
+  // myself in this test.
+  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.nominated_block().block_id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  // We reuse the [Nomination] struct and make some adjustments for the
+  // validation.
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  db_tip.height++;
+  db_tip.hash = nomination.block_hash;
+  db_tip.id++;
+
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_validate.db_tip().id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  // Now validate another block.
+  db_tip.height++;
+  db_tip.hash = nomination.block_hash;
+  db_tip.id++;
+
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        tx_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_validate.db_tip().id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
 
 TEST(Mempool, GetTip)
 {
