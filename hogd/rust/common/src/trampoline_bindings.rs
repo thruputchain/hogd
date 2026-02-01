@@ -16,6 +16,22 @@ pub struct TrampolineResult {
     pub panic: i32,
 }
 
+impl Into<Result<i32, HostFnErrorCode>> for TrampolineResult {
+    fn into(self) -> Result<i32, HostFnErrorCode> {
+        let panic: HostFnErrorCode = {
+            match self.panic.try_into() {
+                Ok(panic) => panic,
+                Err(_) => return Err(HostFnErrorCode::kHostUnrecoverable),
+            }
+        };
+
+        match panic {
+            HostFnErrorCode::kHostNoneOrRecoverable => Ok(self.result),
+            _ => Err(panic),
+        }
+    }
+}
+
 // if a TrampolineError gets thrown within a wasm invocation,
 // this error is caught at the root of the invocation and converted to an InvokeResult.
 
