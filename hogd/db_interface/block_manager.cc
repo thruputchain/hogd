@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
@@ -234,6 +235,17 @@ BlockManager::initialize_genesis_configuration(
                           .key = StorageKey(
                               StorageKeyType::kStorageKeyTypeAddressMetadata)},
             item);
+      },
+      [&](ContractAddress const &addr,
+          AddressAuthData const &auth_data) -> int128_t {
+        auto item =
+            std::make_shared<const StorageItemWrapper>(auth_data, &cost_model_);
+        base_database_->write_item(
+            AddressAndKey{.address = addr,
+                          .key = StorageKey(
+                              StorageKeyType::kStorageKeyTypeAddressAuthData)},
+            item);
+        return item->storage_cost();
       });
 
   return true;

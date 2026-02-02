@@ -39,6 +39,7 @@ coordinator_init(const std::string &mempool_address,
 {
   // Start the coordinator server.
   RpcServer<CoordinatorSchedRpc> sched;
+  sched->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(sched.start_server(kSchedulerServerPort), kSchedulerServerPort);
 
   // Register with the mempool.

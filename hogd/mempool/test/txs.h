@@ -38,28 +38,28 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
             .uniquifier = {.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = i},
-            .contracts_to_deploy = {}}};
+            .contracts_to_deploy = {},
+            .auth_claims = {},
+            .gas_claims = {}}};
     txs.push_back(tx);
   }
   return txs;
 }
 
-inline AddressAuthData
-get_default_account()
+inline SignedTransaction
+generate_change_nonce_config(fib_client_t &fib_client, uint32_t required_weight)
 {
-  static std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
-  if (public_keys.empty()) {
-    // Initialize [public_keys].
-    for (size_t i = 0; i < kMaxSigners; i++) {
-      public_keys[i] = nullptr;
-    }
-  }
-  CHECK_EQ(public_keys.size(), static_cast<size_t>(kMaxSigners));
-  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
-
-  return AddressAuthData{.public_keys = public_keys,
-                         .gas_permissions = {},
-                         .nonce_config = kNonceConfig};
+  constexpr char kProgramName[] = "change_nonce_config";
+  return {.tx = Transaction{
+              .invocation = fib_client.make_invocation<kProgramName>(
+                  // TODO(jhumphri): How to get this number automatically?
+                  /*gas_amount=*/5'000'000'000, required_weight),
+              .uniquifier = {.block_expiry_height =
+                                 std::numeric_limits<BlockHeight>::max(),
+                             .nonce = 0},
+              .contracts_to_deploy = {},
+              .auth_claims = {},
+              .gas_claims = {}}};
 }
 
 inline Ed25519SecretKey
@@ -72,6 +72,40 @@ create_key_pair(AddressAuthData &auth_data, size_t idx, Weight weight)
   pk_config->key.ed25519() = public_key;
   pk_config->max_weight = weight;
   return private_key;
+}
+
+inline AddressAuthData
+get_default_account()
+{
+  std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
+  // Initialize [public_keys].
+  for (size_t i = 0; i < kMaxSigners; i++) {
+    public_keys[i] = nullptr;
+  }
+  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
+
+  return AddressAuthData{.public_keys = public_keys,
+                         .gas_permissions = {},
+                         .nonce_config = kNonceConfig};
+}
+
+inline AuthClaim
+make_sign_claim(uint32_t idx)
+{
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+  claim.invoked_address_signature_id() = idx;
+  return claim;
+}
+
+inline DecoratedSignature
+make_signature(const SecretKey &sk, const Transaction &tx, uint8_t id)
+{
+  DecoratedSignature signature;
+  signature.public_key_id = id;
+  signature.signature = Signature(CryptographicScheme::Ed25519);
+  signature.signature.ed25519() =
+      ed25519_sign(sk.ed25519(), x23::serialize(tx));
+  return signature;
 }
 
 inline void

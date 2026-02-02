@@ -56,7 +56,8 @@ public:
                         uint32_t num_accounts)
   {
     // Initialize the experiment.
-    ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
+    ExperimentConfig config(
+        ExperimentType::kExperimentTypeERC20BasicAuthPayments);
     config.erc20_payments().num_addresses = num_accounts;
 
     LoadgenResult result = client_->generate_experiment(config)();

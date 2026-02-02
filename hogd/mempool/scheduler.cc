@@ -671,19 +671,21 @@ x23::Async<void>
 Scheduler::remove_from_scheduler(
     x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
 {
+  co_await default_coropoll().pool_.bg();
+
   static SynchronizedMap<ContractAddress, char> accounts;
   accounts.clear();
 
   ElapsedTimer timer;
-
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
 
   constexpr size_t kNumThreads = 120;
   const std::vector<ChunkRange> chunks =
       make_chunks(tx_hashes.size(), kNumThreads);
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
+
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -699,6 +701,10 @@ Scheduler::remove_from_scheduler(
       size_t num_removed_from_runqueue = 0;
       for (const SignedTransactionHash &tx_hash : hash_chunk) {
         if (validated_block) {
+          // We only need to remove txs from the runqueue when committing a
+          // validated block. Txs in a nominated block were already removed from
+          // the runqueue in [schedule()]. Thus, we can skip this for nominated
+          // blocks to save on overhead.
           auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
           CHECK_PTR(tx_value_ptr);
 
@@ -708,10 +714,6 @@ Scheduler::remove_from_scheduler(
                                  tx.tx.uniquifier.block_expiry_height,
                              .tx_hash = tx_hash};
           {
-            // We only need to remove txs from the runqueue when committing a
-            // validated block. Txs in a nominated block were already removed
-            // from the runqueue in [schedule()]. Thus, we can skip this for
-            // nominated block to save on overhead.
             auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
             // The tx may or may not be on the runqueue. If the tx is included
             // in a block we are *nominating*, then it has already been taken
@@ -719,9 +721,9 @@ Scheduler::remove_from_scheduler(
             // *validating*, then it is still on the runqueue.
             if (txs.erase(key)) {
               num_removed_from_runqueue++;
+              accounts.insert(account, 0);
             }
           }
-          accounts.insert(account, 0);
 
           // Careful! We remove the tx from [txs_] at the bottom here because
           // once we remove it, the references above become invalidated.

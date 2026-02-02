@@ -25,6 +25,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
@@ -97,8 +98,8 @@ public:
       // event_exec_server_.shut_down();
       //  event_sched_server_.shut_down();
 
+      db_auth_server_.reset();
       db_scheduler_server_.reset();
-
       db_executor_server_.reset();
       // [ctx_] holds an instance of [sched_db_client], so we need to destroy it
       // so that the [sched_db_client] is in turned destroyed and therefore does
@@ -140,6 +141,14 @@ public:
                              const AddressAuthData &auth_data)
   {
     CHECK(get_db().write_address_auth_data(account, auth_data).has_value());
+  }
+
+  x23::Async<void> register_auth_data_updates(BlockHeight height,
+                                              const KeyChangeBatch &key_changes)
+  {
+    CHECK_PTR(db_auth_server_->impl());
+    return mempool_coord_server_->impl()->auth()->register_auth_data_updates(
+        height, key_changes);
   }
 
   void set_dbtip(const DbTip &db_tip)
@@ -249,10 +258,12 @@ private:
     auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port())();
     std::string exec_address = address(kAddress, db_executor_server_->port());
     std::string sched_address = address(kAddress, db_scheduler_server_->port());
+    std::string auth_address = address(kAddress, db_auth_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
                                 .address_for_exec = exec_address.c_str(),
-                                .address_for_sched = sched_address.c_str()})();
+                                .address_for_sched = sched_address.c_str(),
+                                .address_for_auth = auth_address.c_str()})();
   }
 
   void register_event_with_mempool()
@@ -299,6 +310,8 @@ private:
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
   // The database server that the scheduler accesses.
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
+  // The database server that the authenticator accesses.
+  std::unique_ptr<HogDBAuthServer> db_auth_server_;
 
   // The event server that the mempool accesses.
   TestEventAggregator event_server_;

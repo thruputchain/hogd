@@ -17,13 +17,6 @@
 namespace hogd {
 
 namespace {
-constexpr ContractAddress
-make_test_address(uint8_t id)
-{
-  ContractAddress address{};
-  address[0] = id;
-  return address;
-}
 
 std::pair<PublicKey, SecretKey>
 make_key_pair()
@@ -179,7 +172,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(1, stx_vec)();
+  auto result = auth_server().verify_transactions(1, stx_span)();
 
   ASSERT_EQ(result.size(), 3);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);

@@ -25,8 +25,10 @@ namespace hogd {
 
 class Scheduler {
 public:
-  Scheduler(std::shared_ptr<db_sched_client_t> db_sched_client)
-    : db_sched_client_(std::move(db_sched_client))
+  Scheduler(BlockHeight current_block,
+            std::shared_ptr<db_sched_client_t> db_sched_client)
+    : current_block_(current_block),
+      db_sched_client_(std::move(db_sched_client))
   {}
 
   static x23::Async<void> shut_down() { co_return; }
@@ -51,11 +53,6 @@ public:
   void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
                 x23::XdrVec<SignedTransaction> &txs);
 
-  // Finds the txs specified in [hashes] and removes them from the runqueue.
-  // This is used when validating a block as the txs have supposedly been
-  // committed to a block already, so we do not want to schedule the txs. But
-  // the validator still needs to get the tx state because it needs to
-  // re-execute the txs to verify the block.
   SignedTransaction *find_tx(const SignedTransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_.find(tx_hash);
@@ -63,6 +60,19 @@ public:
       return &tx_value_ptr->tx;
     }
     return nullptr;
+  }
+
+  void get_txs_for_account(const ContractAddress &address,
+                           SignedTransactionHashBatch &tx_hashes,
+                           SignedTransactionBatch &txs)
+  {
+    auto [address_txs, lock] = account_to_tx_[address];
+    tx_hashes.reserve(address_txs.size());
+    txs.reserve(address_txs.size());
+    for (const auto &[tx_key, tx_value] : address_txs) {
+      tx_hashes.push_back(tx_key.tx_hash);
+      txs.push_back(tx_value->tx);
+    }
   }
 
   void reenqueue_txs(const auto &begin, const auto &end)
@@ -108,6 +118,7 @@ public:
   // between them.
   static void cycle_groups(HogAge &current_averages);
 
+  BlockHeight current_block() const { return current_block_; }
   void increment_current_block() { current_block_++; }
   void decrement_current_block() { current_block_--; }
 

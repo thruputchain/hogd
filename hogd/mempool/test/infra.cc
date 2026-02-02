@@ -6,6 +6,7 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/loadgen/loadgen_server.h"
@@ -42,6 +43,8 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
   (*db_scheduler_server_)->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   db_scheduler_server_->start_server(/*port=*/0);
+  db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
+  db_auth_server_->start_server(/*port=*/0);
 
   // Start the event RPC servers.
   event_sched_server_.start_server(/*port=*/0);
@@ -53,6 +56,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // the mempool. The real coordinator implementation is in the chuckd repo
   // and is written in go. So to ease test implementation, we use a fake
   // coordinator.
+  coordinator_sched_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   coordinator_sched_server_.start_server(/*port=*/0);
 
   // Now have all of the subsystems register themselves with the mempool.

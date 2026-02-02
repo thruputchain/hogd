@@ -2,6 +2,7 @@
 *.a
 *.core
 *.d
+*.data
 *.dev
 *.json
 !.devcontainer/devcontainer.json

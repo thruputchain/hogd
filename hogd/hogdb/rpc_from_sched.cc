@@ -326,6 +326,15 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
           error("failed to write genesis block deployment: {}", r.error());
           failure = true;
         }
+      },
+      [&](ContractAddress const &addr,
+          AddressAuthData const &auth_data) -> int128_t {
+        auto r = ctx_.get_db().write_address_auth_data(addr, auth_data);
+        if (!r.has_value()) {
+          error("failed to write genesis block auth data: {}", r.error());
+          failure = true;
+        }
+        return 0;
       });
 
   if (failure) {

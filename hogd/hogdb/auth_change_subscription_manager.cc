@@ -3,6 +3,7 @@
 #include <cassert>
 #include <exception>
 #include <optional>
+#include <sys/socket.h>
 #include <utility>
 #include <vector>
 
@@ -78,6 +79,20 @@ AuthChangeSubscriptionManager::publish_auth_changes(
   }
 }
 
+x23::Async<std::optional<AuthChangeSubscriptionManager::auth_db_client_t>>
+AuthChangeSubscriptionManager::create_client(const sockaddr_storage &address,
+                                             const AuthCard &card)
+{
+  try {
+    co_return co_await make_rpc_client<AuthDB1>(address, false);
+  } catch (const std::exception &e) {
+    error("AuthChangeSubscriptionManager: Failed to create RPC client for "
+          "{}: {}",
+          card.address_for_db, e.what());
+    co_return std::nullopt;
+  }
+}
+
 x23::Async<bool>
 AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
 {
@@ -97,20 +112,7 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
     co_return false;
   }
 
-  std::optional<auth_db_client_t> client =
-      co_await [&]() -> x23::Async<std::optional<auth_db_client_t>> {
-    try {
-      info("AuthChangeSubscriptionManager: Creating RPC client for {}",
-           card.address_for_db);
-      co_return co_await make_rpc_client<AuthDB1>(*addr, false);
-    } catch (const std::exception &e) {
-      error("AuthChangeSubscriptionManager: Failed to create RPC client for "
-            "{}: {}",
-            card.address_for_db, e.what());
-      co_return std::nullopt;
-    }
-  }();
-
+  std::optional<auth_db_client_t> client = co_await create_client(*addr, card);
   if (!client) {
     co_return false;
   }
