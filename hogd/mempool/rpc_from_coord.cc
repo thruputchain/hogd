@@ -486,7 +486,8 @@ MempoolCoordinatorRpc::process_tx_outcomes(PendingBlock &cache)
 }
 
 x23::Async<void>
-MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
+MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
+                                               PendingBlock &cache)
 {
   // Gracefully shut down executor work and send the nomination chunks
   // (including the final block hash) back to the coordinator.
@@ -499,11 +500,10 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
   {
     Nomination &nomination =
         cache.nomination_result.nominated_block().nomination;
-    nomination.block_height = cache.db_tip.height + 1;
-    nomination.block_hash =
-        get_block_hash(cache.tx_hashes,
-                       /*prev_block_hash=*/cache.db_tip.hash);
-    nomination.prev_block_hash = cache.db_tip.hash;
+    nomination.block_height = db_tip.height + 1;
+    nomination.block_hash = get_block_hash(cache.tx_hashes,
+                                           /*prev_block_hash=*/db_tip.hash);
+    nomination.prev_block_hash = db_tip.hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
     co_await t_to_parallel_batch(cache.result_tx_hashes,
@@ -649,7 +649,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_await scheduler_->add_txs(nominated_block_cache_.failed_txs);
   }
 
-  co_await finish_nominating_block(nominated_block_cache_);
+  co_await finish_nominating_block(db_tip, nominated_block_cache_);
 
   // We set [nominated_block_cache_.nomination_result.outcome()] to
   // [SchedulerNominationOutcome::SchedulerNominationOK] above. See the comments

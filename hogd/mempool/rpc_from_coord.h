@@ -296,7 +296,8 @@ private:
   x23::Async<bool> initialize_block(const PendingBlock &cache);
   x23::Async<void> schedule(PendingBlock &cache);
   static void process_tx_outcomes(PendingBlock &cache);
-  x23::Async<void> finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> finish_nominating_block(const DbTip &db_tip,
+                                           PendingBlock &cache);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
