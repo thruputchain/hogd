@@ -115,7 +115,12 @@ public:
   schedulercoord_commit_block(BlockID block_id);
 
   // Returns the db tip of the last committed block.
-  x23::Async<DbTip> schedcoord_get_tip() { co_return last_committed_block_; }
+  x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
+  {
+    SchedulerGetTipResult ret(SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ret.db_tip() = last_committed_block_;
+    co_return ret;
+  }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
