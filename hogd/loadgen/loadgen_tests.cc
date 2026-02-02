@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+#include <utility>
+
+#include "address_auth.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -33,11 +37,22 @@ TEST_P(LoadgenTests, EmptyGenesisConfiguration)
       GenesisConfigurationLoader::kDeployContractAddress));
   auto const *cost_model = get_default_cost_model();
   ASSERT_TRUE(bal.has_value());
-  // MockDB does not implement storage cost for balances,
-  // but in the mockdb test the cost for a balance is set as 0
+
+  AddressAuthData deployer_auth_data{};
+  deployer_auth_data.nonce_config.accepted_keys = 0;
+  deployer_auth_data.nonce_config.required_weight = 0;
+  deployer_auth_data.gas_permissions.push_back(
+      GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
+                          .accepted_keys = 0,
+                          .required_weight = 0});
+  deployer_auth_data.last_written_height = 0;
+  auto deployer_auth_item =
+      StorageItemWrapper(std::move(deployer_auth_data), cost_model);
+
   ASSERT_EQ(from_xdr(bal.value().nnint()),
             GenesisConfigurationLoader::initial_hog_token_supply() -
-                cost_model->get_balance_cost());
+                cost_model->get_balance_cost() -
+                deployer_auth_item.storage_cost(cost_model));
 }
 
 TEST_P(LoadgenTests, OneInitialConfig)

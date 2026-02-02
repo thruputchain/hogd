@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "address_auth.hh"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
@@ -77,7 +78,9 @@ GenesisConfigurationLoader::load_genesis_configuration(
         &write_contract,
     std::function<void(ContractAddress const &contract_address,
                        DeployedContractHash const &contract_hash)> const
-        &write_deployment)
+        &write_deployment,
+    std::function<int128_t(ContractAddress const &,
+                           AddressAuthData const &)> const &write_auth_data)
 {
   auto deploy_contract = make_native_contract(
       HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim);
@@ -91,6 +94,18 @@ GenesisConfigurationLoader::load_genesis_configuration(
   write_storage(allocation_key, initial_hog_token_supply());
 
   int128_t total_storage_costs = 0;
+
+  AddressAuthData deployer_auth_data{};
+  deployer_auth_data.nonce_config.accepted_keys = 0;
+  deployer_auth_data.nonce_config.required_weight = 0;
+  deployer_auth_data.gas_permissions.push_back(
+      GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
+                          .accepted_keys = 0,
+                          .required_weight = 0});
+  deployer_auth_data.last_written_height = 0;
+
+  total_storage_costs +=
+      write_auth_data(kDeployContractAddress, deployer_auth_data);
 
   // Process each initial configuration entry
   for (auto const &entry : genesis_configuration_.initial_config) {

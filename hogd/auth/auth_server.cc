@@ -79,7 +79,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
 x23::Async<void>
 AuthServer::register_auth_data_updates(BlockHeight height,
-                                       KeyChangeBatch const &key_changes)
+                                       KeyChangeBatch key_changes)
 {
   // TODO(geoff): this logic will break if there's a sharded db, and i.e.
   // multiple batches of updates from the same block height. Probably the
@@ -137,16 +137,15 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
 
-  if (!key_changes.empty()) {
-    for (std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
-             &f : auth_data_changes_callbacks_) {
-      co_await f(height, key_changes);
-    }
+  for (std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)> &f :
+       auth_data_changes_callbacks_) {
+    co_await f(height, key_changes);
   }
 }
 
 x23::Async<void>
-AuthServer::subscribe_to_auth_data_changes(AuthCard const &card)
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 {
   return dbauth_client_.subscribe_to_auth_data_changes(card);
 }

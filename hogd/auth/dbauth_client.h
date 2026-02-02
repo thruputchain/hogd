@@ -15,6 +15,16 @@ namespace hogd {
 
 using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(x23::HostPort{})());
 
+inline x23::Async<dbauth_client_t>
+make_dbauth_client(const std::string &address_for_auth)
+{
+  x23::HostPort hostport;
+  if (!hostport.parse(address_for_auth)) {
+    throw std::runtime_error("Failed to parse database shard address");
+  }
+  return make_rpc_client<DBAuth1>(hostport);
+}
+
 class DBAuthClient {
 public:
   DBAuthClient(dbauth_client_t &&client) : client_(std::move(client)) {}

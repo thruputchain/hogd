@@ -133,7 +133,7 @@ TEST(Scheduler, Single)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
   EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
-            age->average_ages[kHogAgeGroupToSchedule]);
+            age->average_ages[kHogAgeGroupToSchedule] + 1);
 }
 
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
@@ -216,7 +216,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 0);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 1);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }

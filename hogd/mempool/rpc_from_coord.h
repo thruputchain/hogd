@@ -13,6 +13,7 @@
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "hogd/auth/auth_server.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -65,14 +66,18 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
+  std::unique_ptr<AuthServer> &auth() { return auth_; }
 
   static x23::Async<coord_sched_client_t> get_client()
   {
     CoordCard card;
     CHECK(Registration::registration().coordinator_registered(&card));
 
-    return create_client<CoordScheduler1>(
-        server_address_to_sockaddr(card.address_for_sched));
+    auto ret = create_client<CoordScheduler1>(
+        server_address_to_sockaddr(card.address_for_sched),
+        /*retry=*/false,
+        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+    return ret;
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
@@ -117,8 +122,12 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
-    SchedulerGetTipResult ret(SchedulerGetTipOutcome::SchedulerGetTipOK);
-    ret.db_tip() = last_committed_block_;
+    SchedulerGetTipResult ret(
+        SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
+    if (received_genesis_block_.load(std::memory_order_acquire)) {
+      ret = SchedulerGetTipResult(SchedulerGetTipOutcome::SchedulerGetTipOK);
+      ret.db_tip() = last_committed_block_;
+    }
     co_return ret;
   }
 
@@ -135,9 +144,10 @@ public:
   {
     auto ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
         genesis_configuration);
-    last_committed_block_ = {.height = 1,
+    last_committed_block_ = {.height = 0,
                              .hash = sha256(genesis_configuration),
                              .id = generate_block_id()};
+    received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;
   }
 
@@ -235,6 +245,21 @@ private:
         std::make_shared<Scheduler>(/*current_block=*/1, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
+    x23::XdrVec<ShardCard> cards;
+    Registration::registration().shards_registered(&cards);
+    CHECK(!cards.empty());
+    info("HERE ADDR IS {}", cards[0].address_for_auth);
+    dbauth_client_t dbauth_client =
+        co_await make_dbauth_client(cards[0].address_for_auth.c_str());
+    auth_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+    auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_);
+    auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
+    // If we communicate with the auth server via RPC, be sure to remove the
+    // parameter reference in [auth_data_changed]!
+    auth_->add_auth_data_updates_callback(
+        std::bind_front(&MempoolCoordinatorRpc::auth_data_changed, this));
+    co_await auth_->subscribe_to_auth_data_changes(auth_rpc_->make_auth_card());
+
     ready_.store(true, std::memory_order_release);
   }
 
@@ -272,7 +297,8 @@ private:
   x23::Async<bool> initialize_block(const PendingBlock &cache);
   x23::Async<void> schedule(PendingBlock &cache);
   static void process_tx_outcomes(PendingBlock &cache);
-  x23::Async<void> finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> finish_nominating_block(const DbTip &db_tip,
+                                           PendingBlock &cache);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
@@ -297,6 +323,20 @@ private:
     num_validations_in_progress_--;
   }
 
+  x23::Async<void> auth_data_changed(BlockHeight height,
+                                     const KeyChangeBatch &key_changes);
+
+  x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
+  {
+    int64_t current_height;
+    while ((current_height = auth_data_height_.load()) !=
+           static_cast<int64_t>(expected_height)) {
+      CHECK_EQ(current_height + 1, expected_height);
+      co_await auth_data_height_.wait(current_height);
+    }
+    co_return;
+  }
+
   MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
@@ -304,22 +344,27 @@ private:
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
-  // TODO(jhumphri): Make the mempool work with multiple threads.
   std::shared_ptr<Scheduler> scheduler_;
+  std::unique_ptr<AuthServer> auth_;
+  std::unique_ptr<AuthRpcServers> auth_rpc_;
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
   // Protects [validated_block_cache_].
   x23::CoroLock validated_block_cache_lock_;
   size_t num_validations_in_progress_ = 0;
-  // Ensures that a commit does not occur while a block is being nominated or
-  // validated, and vice versa.
-  // This lock is acquired in shared mode when a block is being nominated or
-  // validated. This lock is acquired in exclusive mode when a block is being
-  // committed.
+  // Ensures that a commit does not occur while txs are being verified. Txs are
+  // verified against a certain block height, so if they race with a block
+  // commit, we could add txs to the scheduler that are no longer verified as of
+  // the last committed block.
+  x23::CoroLock commit_lock_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+
+  std::atomic<bool> received_genesis_block_ = false;
   DbTip last_committed_block_{};
+
+  x23::CoroFutex<int64_t> auth_data_height_{-1};
 
   std::atomic<bool> ready_ = false;
 

@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
@@ -69,7 +70,9 @@ public:
           &write_contract,
       std::function<void(ContractAddress const &contract_address,
                          DeployedContractHash const &contract_hash)> const
-          &write_deployment);
+          &write_deployment,
+      std::function<int128_t(ContractAddress const &,
+                             AddressAuthData const &)> const &write_auth_data);
 
   // Calculate storage key for a genesis entry
   // Format: sha256("Initial Deployment" || hash || nonce || entrypoint ||

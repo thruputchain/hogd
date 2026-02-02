@@ -53,11 +53,6 @@ public:
   void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
                 x23::XdrVec<SignedTransaction> &txs);
 
-  // Finds the txs specified in [hashes] and removes them from the runqueue.
-  // This is used when validating a block as the txs have supposedly been
-  // committed to a block already, so we do not want to schedule the txs. But
-  // the validator still needs to get the tx state because it needs to
-  // re-execute the txs to verify the block.
   SignedTransaction *find_tx(const SignedTransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_.find(tx_hash);
@@ -65,6 +60,19 @@ public:
       return &tx_value_ptr->tx;
     }
     return nullptr;
+  }
+
+  void get_txs_for_account(const ContractAddress &address,
+                           SignedTransactionHashBatch &tx_hashes,
+                           SignedTransactionBatch &txs)
+  {
+    auto [address_txs, lock] = account_to_tx_[address];
+    tx_hashes.reserve(address_txs.size());
+    txs.reserve(address_txs.size());
+    for (const auto &[tx_key, tx_value] : address_txs) {
+      tx_hashes.push_back(tx_key.tx_hash);
+      txs.push_back(tx_value->tx);
+    }
   }
 
   void reenqueue_txs(const auto &begin, const auto &end)
