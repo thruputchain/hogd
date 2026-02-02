@@ -1,6 +1,3 @@
-#include "hogd/base/types.h"
-#include "hogd/hogdb/item_lock/replay_cache_lock.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -9,10 +6,12 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"

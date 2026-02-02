@@ -6,6 +6,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/precompiles/precompile_initial_token_claim.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -22,6 +23,10 @@ make_hogexec_precompiles_context()
       std::to_underlying(
           HogexecPrecompiledNativeContracts::kNativeContractHogToken),
       make_native_token_contract());
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim),
+      make_native_initial_token_claim_contract());
   return std::make_unique<NativeContext>(std::move(contract_map));
 }
 

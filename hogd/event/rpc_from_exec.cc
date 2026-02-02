@@ -2,7 +2,6 @@
 
 #include "event.hh"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -12,14 +11,14 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
                                        TransactionID /*unused*/,
                                        TxEventLog event_log)
 {
-  auto *context = co_await ctx_.get_context(block_id);
+  auto context = co_await ctx_.get_context(block_id);
   if (!context) {
     co_return RPCError::kRPCBadBlockID;
   }
 
-  context->get().add_event(event_log);
+  co_await context->add_event(event_log);
 
-  if (context->release_reference()) [[unlikely]] {
+  if (context.release_reference()) [[unlikely]] {
     co_await ctx_.gc_context(block_id);
   }
 

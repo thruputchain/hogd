@@ -13,8 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "address_auth.hh"
-#include "built_contracts/contract_loader.h"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
@@ -39,7 +37,7 @@ make_native_contract(HogexecPrecompiledNativeContracts contract_id)
 {
   auto out = std::make_shared<Contract>();
   out->contract_type(ContractType::kNative);
-  out->native_contract_id() = std::to_underlying(contract_id);
+  out->native_contract_id() = contract_id;
   return out;
 }
 
@@ -81,7 +79,8 @@ GenesisConfigurationLoader::load_genesis_configuration(
                        DeployedContractHash const &contract_hash)> const
         &write_deployment)
 {
-  auto deploy_contract = load_contract("initial_token_claim.wasm");
+  auto deploy_contract = make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim);
   write_contract(deploy_contract);
   write_deployment(kDeployContractAddress,
                    make_deployed_contract_hash(deploy_contract));

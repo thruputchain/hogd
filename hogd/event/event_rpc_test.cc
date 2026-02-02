@@ -59,16 +59,16 @@ TEST_F(EventRpcTest, TestAbandonBlock)
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
 
   // the tx ctx should keep the block open, at least to keep the pointer alive
-  auto *tx_ctx = ctx.get_context(1)();
-  EXPECT_NE(tx_ctx, nullptr);
+  auto tx_ctx = ctx.get_context(1)();
+  EXPECT_TRUE(tx_ctx);
 
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
             RPCError::kRPCNone);
 
-  tx_ctx->get().add_event(TxEventLog{});
+  tx_ctx->add_event(TxEventLog{})();
 
-  ASSERT_TRUE(tx_ctx->release_reference());
+  ASSERT_TRUE(tx_ctx.release_reference());
   ctx.gc_context(1)();
 }
 

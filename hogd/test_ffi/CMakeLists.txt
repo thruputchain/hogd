@@ -29,7 +29,20 @@ target_link_libraries(
   auth
   runtime_test_util
 )
-add_dependencies(test_ffi all_wasm_contracts)
+
+# Set rpath so test_ffi can find the Rust cdylib in the same directory.
+# Windows doesn't need this - it searches the DLL's directory by default.
+if(APPLE)
+  set_target_properties(test_ffi PROPERTIES
+    BUILD_RPATH "@loader_path"
+    INSTALL_RPATH "@loader_path"
+  )
+elseif(UNIX)
+  set_target_properties(test_ffi PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+  )
+endif()
 
 add_executable(
   test_ffi_test

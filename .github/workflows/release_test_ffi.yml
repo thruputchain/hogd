@@ -10,9 +10,13 @@ env:
 
 jobs:
   build-linux-x86_64:
-    runs-on: namespace-profile-hogd-linux
+    runs-on: hog1
 
     steps:
+      - name: Clean up .gitconfig
+        run: |
+            echo "Cleaning up .gitconfig"
+            rm -f /home/hogci/.gitconfig
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
         with:
@@ -36,70 +40,20 @@ jobs:
             ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
-      - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+      - uses: actions/checkout@v4
         with:
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-
-      - name: Initialize Submodules
-        run: git submodule update --init --recursive
-
-      - name: Configure Environment
-        run: |
-          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
-          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
-          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
-          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
-          echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
-          chmod u+x ./scripts/conf.sh
-
-          # Configure ccache
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_NAMESPACE=test-ffi-release" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
-
-      - name: Cargo Fetch
-        run: ./scripts/fetch.sh
+          submodules: recursive
+      - uses: ./.github/actions/prepare_env
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -n
+          ./scripts/build.sh -d build \
+            -t Debug \
+            -c clang \
+            -x "-DENABLE_TEST_FFI=ON" \
+            -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
+            -x "-DRUST_BUILD_CPU=x86-64-v2" \
+            -n
 
       - name: Build test_ffi Library
         run: |
@@ -110,13 +64,21 @@ jobs:
           ls -lh build/hogd/test_ffi/libtest_ffi.so
           file build/hogd/test_ffi/libtest_ffi.so
 
+      - name: Generate Rust Bindings
+        run: |
+          cargo install bindgen-cli
+          mkdir -p release_artifacts
+          bindgen hogd/test_ffi/test_bindings.h -o release_artifacts/bindings.rs
+          echo "Generated bindings.rs:"
+          head -20 release_artifacts/bindings.rs
+
       - name: Package Library
         run: |
-          mkdir -p release_artifacts
           cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
+          cp build/hogd/rust/libunified_lib.so release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so test_bindings.h
+          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so libunified_lib.so test_bindings.h bindings.rs
           sha256sum libtest_ffi-linux-x86_64.tar.gz > libtest_ffi-linux-x86_64.tar.gz.sha256
 
       - name: Show ccache stats
@@ -208,7 +170,14 @@ jobs:
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Release -c clang -x "-DENABLE_TEST_FFI=ON" -n
+          ./scripts/build.sh \
+            -d build \
+            -t Debug \
+            -c clang \
+            -x "-DENABLE_TEST_FFI=ON" \
+            -x "-DBUILD_ARCHITECTURE=armv8.5-a" \
+            -x "-DRUST_BUILD_CPU=apple-m1" \
+            -n
 
       - name: Build test_ffi Library
         run: |
@@ -220,13 +189,21 @@ jobs:
           ls -lh build/hogd/test_ffi/libtest_ffi.dylib
           file build/hogd/test_ffi/libtest_ffi.dylib
 
+      - name: Generate Rust Bindings
+        run: |
+          cargo install bindgen-cli
+          mkdir -p release_artifacts
+          bindgen hogd/test_ffi/test_bindings.h -o release_artifacts/bindings.rs
+          echo "Generated bindings.rs:"
+          head -20 release_artifacts/bindings.rs
+
       - name: Package Library
         run: |
-          mkdir -p release_artifacts
           cp build/hogd/test_ffi/libtest_ffi.dylib release_artifacts/
+          cp build/hogd/rust/libunified_lib.dylib release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-macos-arm64.tar.gz libtest_ffi.dylib test_bindings.h
+          tar -czf libtest_ffi-macos-arm64.tar.gz libtest_ffi.dylib libunified_lib.dylib test_bindings.h bindings.rs
           shasum -a 256 libtest_ffi-macos-arm64.tar.gz > libtest_ffi-macos-arm64.tar.gz.sha256
 
       - name: Show ccache stats
@@ -330,7 +307,9 @@ jobs:
             ### Contents
 
             - `libtest_ffi.so` (Linux) or `libtest_ffi.dylib` (macOS) - Shared library
+            - `libunified_lib.so` (Linux) or `libunified_lib.dylib` (macOS) - Shared library
             - `test_bindings.h` - C header file
+            - `bindings.rs` - Pre-generated Rust bindings (no bindgen required)
 
             ### Usage
 

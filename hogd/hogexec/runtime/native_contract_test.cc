@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -31,6 +30,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "precompiles.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -84,7 +84,8 @@ TEST_F(NativeContractTest, BasicInstantiate)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     auto contract_0 = std::make_unique<NativeContract>(
@@ -263,7 +264,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   snapshot_server_->impl()->setup_create_contract(contract);
   snapshot_server_->impl()->setup_create_deployment(
@@ -365,7 +367,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   snapshot_server_->impl()->setup_create_contract(contract);
   snapshot_server_->impl()->setup_create_deployment(
@@ -506,7 +509,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
 
   snapshot_server_->impl()->setup_create_contract(contract);
   snapshot_server_->impl()->setup_create_deployment(

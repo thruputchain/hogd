@@ -10,6 +10,7 @@
 
 // generated x23 headers
 #include "address_auth.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 

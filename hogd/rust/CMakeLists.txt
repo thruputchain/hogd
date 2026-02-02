@@ -13,8 +13,13 @@ else()
     message(STATUS "sccache not found - Rust builds will not use caching")
 endif()
 
+set(CRATE_TYPE "staticlib")
+if (ENABLE_TEST_FFI)
+  set(CRATE_TYPE "cdylib")
+endif()
+
 # Import targets defined in the workspace manifest `Cargo.toml` file
-corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES staticlib LOCKED FROZEN)
+corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES ${CRATE_TYPE} LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
 if(SCCACHE_EXECUTABLE)
     corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true RUSTC_WRAPPER=${SCCACHE_EXECUTABLE})
@@ -23,7 +28,9 @@ else()
 endif()
 
 
-corrosion_add_target_rustflags(unified_lib "-C target-cpu=native")
+
+corrosion_add_target_rustflags(unified_lib "-C target-cpu=${RUST_BUILD_CPU}")
+message(STATUS "Rust target CPU: ${RUST_BUILD_CPU}")
 
 # Build list of features to enable
 set(FEATURES_TO_ENABLE "")
@@ -57,12 +64,6 @@ endif()
 #corrosion_set_env_vars(unified_lib RUSTFLAGS="-Zsanitizer=address")
 #corrosion_set_env_vars(unified_lib ASAN_OPTIONS=detect_stack_use_after_return=1:abort_on_error=1)
 #set_property(TARGET unified_lib PROPERTY CARGO_BUILD_FLAGS "+nightly -Zsanitizer=address")
-
-target_link_libraries(
-  unified_lib
-  INTERFACE
-  runtime_trampoline
-)
 
 # Add cargo tests to ctest
 add_test(

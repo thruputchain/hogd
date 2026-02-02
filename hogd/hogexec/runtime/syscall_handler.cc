@@ -615,10 +615,12 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
 
 namespace {
 constexpr bool
-is_banned_redeploy_native_contract(uint32_t native_contract_id)
+is_banned_redeploy_native_contract(
+    HogexecPrecompiledNativeContracts native_contract_id)
 {
-  switch (static_cast<HogexecPrecompiledNativeContracts>(native_contract_id)) {
+  switch (native_contract_id) {
   case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
+  case HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim:
     return true;
   }
   panic("Unknown native contract deployed: {}", native_contract_id);

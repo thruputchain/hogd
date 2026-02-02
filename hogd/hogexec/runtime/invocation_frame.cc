@@ -8,7 +8,7 @@
 #include <variant>
 #include <vector>
 
-#include "address_auth.hh"
+#include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"

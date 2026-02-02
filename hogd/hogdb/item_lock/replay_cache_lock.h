@@ -3,10 +3,12 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <span>
+#include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_set.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"

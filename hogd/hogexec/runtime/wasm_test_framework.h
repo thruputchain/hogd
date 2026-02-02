@@ -15,15 +15,14 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/runtime/wasmtime_runtime.h"
 #include "storage_cost.hh"
-#include "syscall_error.hh"
 #include "transaction.hh"
 #include "x23/sockio.h"
 
@@ -76,7 +75,7 @@ public:
   // Link a function to the global context
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
+               TrampolineResult (*f)(HostCallContext *, Args...) noexcept)
   {
     assert(!context_); // don't link functions after a context has been created
     if (std::holds_alternative<WasmiGlobalContext>(global_context_)) {

@@ -150,7 +150,7 @@ impl WasmtimeContext {
     }
 }
 
-// Rust FFI needs no_mangxle and extern "C"
+// Rust FFI needs no_mangle and extern "C"
 /// # Safety
 /// global_context must not be nullptr and must have been created by new_wasmtime_global_context.
 /// module_cache can be nullptr, in which case no module cache is used.

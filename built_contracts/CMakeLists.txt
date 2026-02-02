@@ -299,42 +299,44 @@ endfunction()
 
 # Build all WASMs in one cargo invocation
 add_wasm_builds(
-  fibonacci 
-  fibonacci_call 
-  cxs_roundtrip 
-  txs_roundtrip 
-  read_only_test 
+  fibonacci
+  fibonacci_call
+  cxs_roundtrip
+  txs_roundtrip
+  read_only_test
   manual_revert_test
-  manual_revert_caller 
+  manual_revert_caller
   simple_wallet
   simple_wallet_authclaim
-  initial_token_claim 
-  itc_erc20 
+  initial_token_claim
+  itc_erc20
   authclaim_test
   hash_bug
   htlc
   payment_channel
   return_fault_test
+  tuple_return
 )
 
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
 add_spec_and_types_generation(
-  SPEC_TARGETS 
-    fibonacci 
-    fibonacci_call 
-    cxs_roundtrip 
-    txs_roundtrip 
-    read_only_test 
-    manual_revert_test 
-    manual_revert_caller 
-    simple_wallet 
+  SPEC_TARGETS
+    fibonacci
+    fibonacci_call
+    cxs_roundtrip
+    txs_roundtrip
+    read_only_test
+    manual_revert_test
+    manual_revert_caller
+    simple_wallet
     simple_wallet_authclaim
-    initial_token_claim 
-    itc_erc20 
+    initial_token_claim
+    itc_erc20
     authclaim_test
     htlc
     payment_channel
     return_fault_test
+    tuple_return
   TYPES_TARGETS
     itc_erc20
     manual_revert_test
@@ -362,6 +364,7 @@ add_contract_header(authclaim_test)
 add_contract_header(htlc)
 add_contract_header(payment_channel "${CURRENT_RELATIVE_SOURCE_DIR}/payment_channel.hh")
 add_contract_header(return_fault_test)
+add_contract_header(tuple_return)
 
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
