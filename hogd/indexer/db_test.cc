@@ -240,14 +240,5 @@ TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
   ASSERT_TRUE(contract3_events.has_value());
   EXPECT_TRUE(contract3_events->empty());
 }
-} // namespace hogd
 
-int
-main(int argc, char *argv[])
-{
-  auto ret = hogd::hogd_init(argc, argv, false);
-  if (ret != 0)
-    return ret;
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
+} // namespace hogd
