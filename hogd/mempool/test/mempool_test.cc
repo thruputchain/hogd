@@ -508,7 +508,10 @@ TEST(Mempool, GetTip)
 
   MempoolTestInfra server;
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.height, 0);
 
   ValidatorID validator_id{};
@@ -549,14 +552,18 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 
-  db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.height, 1);
 
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_validate.db_tip().id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip, res_validate.db_tip());
 }
 
