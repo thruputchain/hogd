@@ -91,7 +91,10 @@ TEST(Mempool, Nominate)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
@@ -108,7 +111,10 @@ TEST(Mempool, NominateBatch)
                                                           t_to_parallel_batch(
                                                               txs)())();
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
@@ -119,7 +125,10 @@ TEST(Mempool, NominateEmpty)
 
   MempoolTestInfra server;
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
@@ -135,7 +144,10 @@ TEST(Mempool, NominateCommit)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res_nominate.outcome(),
@@ -172,7 +184,10 @@ TEST(Mempool, Validate)
   // for the validation below. The [Nomination] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
   // myself in this test.
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -217,7 +232,10 @@ TEST(Mempool, ValidateBatch)
                                                           t_to_parallel_batch(
                                                               txs)())();
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -278,7 +296,10 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
                                                           t_to_parallel_batch(
                                                               txs)())();
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -332,11 +353,11 @@ TEST(Mempool, ValidateBatchMissingTx)
 
   MempoolTestInfra server;
 
-  Nomination nomination;
-  DbTip db_tip;
-
   ValidatorID validator_id{};
-  db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                           t_to_parallel_batch(
                                                               txs)())();
@@ -348,7 +369,7 @@ TEST(Mempool, ValidateBatchMissingTx)
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
-  nomination = res_nominate.nominated_block().nomination;
+  Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -390,7 +411,10 @@ TEST(Mempool, ValidateCommit)
   // for the validation below. The [Nomination] struct contains some data,
   // such as the nondeterministic data, that I would prefer not to have to
   // construct myself in this test.
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -441,7 +465,10 @@ TEST(Mempool, ValidateTwo)
   // for the validation below. The [Nomination] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
   // myself in this test.
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -634,7 +661,10 @@ TEST(Mempool, AuthChanged)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
-  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
