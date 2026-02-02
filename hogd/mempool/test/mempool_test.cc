@@ -404,7 +404,7 @@ TEST(Mempool, GetTip)
 
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(get_tip, SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.height, 1);
 
@@ -444,7 +444,7 @@ TEST(Mempool, GetTip)
             SchedulerValidationResult::SchedulerValidationOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(get_tip, SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.height, 1);
 
@@ -453,7 +453,7 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(get_tip, SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip, res_validate.db_tip());
 }
