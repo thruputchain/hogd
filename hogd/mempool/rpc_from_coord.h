@@ -122,8 +122,12 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
-    SchedulerGetTipResult ret(SchedulerGetTipOutcome::SchedulerGetTipOK);
-    ret.db_tip() = last_committed_block_;
+    SchedulerGetTipResult ret(
+        SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
+    if (received_genesis_block_.load(std::memory_order_acquire)) {
+      ret = SchedulerGetTipResult(SchedulerGetTipOutcome::SchedulerGetTipOK);
+      ret.db_tip() = last_committed_block_;
+    }
     co_return ret;
   }
 
@@ -143,6 +147,7 @@ public:
     last_committed_block_ = {.height = 0,
                              .hash = sha256(genesis_configuration),
                              .id = generate_block_id()};
+    received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;
   }
 
@@ -353,6 +358,8 @@ private:
   x23::CoroLock commit_lock_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+
+  std::atomic<bool> received_genesis_block_ = false;
   DbTip last_committed_block_{};
 
   x23::CoroFutex<int64_t> auth_data_height_{-1};
