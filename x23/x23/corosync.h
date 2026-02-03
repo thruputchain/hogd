@@ -124,8 +124,10 @@ public:
   }
 
   // Release the lock and invoke the next coroutine waiting for the
-  // lock before returning.
-  void unlock(LockerState *ls)
+  // lock before returning.  If you are returning from the coroutine
+  // right after unlocking, you should call unlock_and_return, which
+  // should be more efficient and reduce stack space utilization.
+  void unlock_yield(LockerState *ls)
   {
     if (std::coroutine_handle<> h = next(ls))
       h();
@@ -144,7 +146,7 @@ public:
   {
     LockerState ls;
     co_await lock(&ls);
-    unlock(&ls);
+    unlock_yield(&ls);
     // Note: it's important that unlock resumes the next coroutine
     // before returning.  Hence, if there's a big chain of threads
     // each calling await_free() in a loop, then they will all return
@@ -214,8 +216,7 @@ private:
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
-  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  bool await_ready() noexcept { return false; }
+  static bool await_ready() noexcept { return false; }
   template<typename Promise>
   auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
   {
@@ -223,8 +224,7 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     p.return_void(); // Coroutine must return void
     return finish_suspend(moriturus);
   }
-  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  void await_resume() noexcept { std::unreachable(); }
+  static void await_resume() noexcept { std::unreachable(); }
 
 protected:
   // Returns NULL if there is no other coroutine to resume, otherwise
@@ -319,16 +319,16 @@ struct CoroGuard : CoroLock::LockerState {
     return lkp_->lock(this);
   }
 
-  void reset()
-  {
-    if (lkp_)
-      std::exchange(lkp_, nullptr)->unlock(this);
-  }
-
-  void reset_no_yield(ThreadPool *pool = ThreadPool::get_thread_pool())
+  void reset(ThreadPool *pool = ThreadPool::get_thread_pool())
   {
     if (lkp_)
       std::exchange(lkp_, nullptr)->unlock_no_yield(this, pool);
+  }
+
+  void reset_yield()
+  {
+    if (lkp_)
+      std::exchange(lkp_, nullptr)->unlock_yield(this);
   }
 
   // reset_and_return can only be called when the CoroGuard contains a
