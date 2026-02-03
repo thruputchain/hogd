@@ -55,7 +55,7 @@ EventBlockContext::add_event(TxEventLog const &event)
 
   x23::CoroGuard cg;
   co_await cg(event_log_lock_);
-  event_log_.push_back(e);
+  event_log_.push_back(event);
 }
 
 SHA256Hash
