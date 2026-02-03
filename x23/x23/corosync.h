@@ -346,7 +346,7 @@ struct CoroGuard : CoroLock::LockerState {
   {
     if (lkp_) {
       if constexpr (OnDestroy != nullptr)
-        OnDestroy(this);
+        (lkp_->*OnDestroy)(this);
       else
         panic("Destroying CoroGuard that holds lock");
     }
