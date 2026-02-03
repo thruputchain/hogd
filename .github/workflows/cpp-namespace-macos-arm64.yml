@@ -13,6 +13,7 @@ jobs:
   clang-debug:
     runs-on: namespace-profile-hogd-arm64-macos
     permissions:
+      contents: read
       actions: read
     steps:
       - name: Setup SSH Agent

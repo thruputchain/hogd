@@ -12,6 +12,7 @@ jobs:
   build-linux-x86_64:
     runs-on: hog1
     permissions:
+      contents: read
       actions: read
 
     steps:
@@ -98,6 +99,7 @@ jobs:
   build-macos-arm64:
     runs-on: namespace-profile-hogd-arm64-macos
     permissions:
+      contents: read
       actions: read
 
     steps:

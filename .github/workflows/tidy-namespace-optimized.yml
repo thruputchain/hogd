@@ -14,6 +14,7 @@ jobs:
   tidy:
     runs-on: namespace-profile-hogd-linux # Must have custom base image configured
     permissions:
+      contents: read
       actions: read
 
     steps:

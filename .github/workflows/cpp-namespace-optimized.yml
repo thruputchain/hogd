@@ -21,6 +21,9 @@ jobs:
   # Fast format check - gates all other jobs
   format:
     runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -79,6 +82,7 @@ jobs:
     needs: format
     runs-on: namespace-profile-hogd-linux
     permissions:
+      contents: read
       actions: read
     steps:
       - name: Setup SSH Agent
@@ -186,6 +190,7 @@ jobs:
     needs: format
     runs-on: namespace-profile-hogd-linux
     permissions:
+      contents: read
       actions: read
     steps:
       - name: Setup SSH Agent
@@ -293,6 +298,7 @@ jobs:
     needs: format
     runs-on: namespace-profile-hogd-linux
     permissions:
+      contents: read
       actions: read
     steps:
       - name: Setup SSH Agent
