@@ -51,4 +51,4 @@ jobs:
               if: always()
               run: |
                   echo "To download logs, run"
-                  echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+                  echo "gh run view ${{ github.run_id }} --log --job ${{ github.job }} --repo ${{ github.repository }}"

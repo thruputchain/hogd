@@ -95,7 +95,7 @@ jobs:
         if: always()
         run: |
           echo "To download logs, run"
-          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+          echo "gh run view ${{ github.run_id }} --log --job ${{ github.job }} --repo ${{ github.repository }}"
 
   build-macos-arm64:
     runs-on: namespace-profile-hogd-arm64-macos
@@ -226,7 +226,7 @@ jobs:
         if: always()
         run: |
           echo "To download logs, run"
-          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+          echo "gh run view ${{ github.run_id }} --log --job ${{ github.job }} --repo ${{ github.repository }}"
 
   create-release:
     needs: [build-linux-x86_64, build-macos-arm64]
@@ -351,4 +351,4 @@ jobs:
         if: always()
         run: |
           echo "To download logs, run"
-          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+          echo "gh run view ${{ github.run_id }} --log --job ${{ github.job }} --repo ${{ github.repository }}"
