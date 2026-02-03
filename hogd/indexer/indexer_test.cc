@@ -8,7 +8,6 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
