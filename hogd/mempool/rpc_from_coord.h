@@ -197,6 +197,8 @@ public:
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
+  BlockHeight auth_data_height() { return auth_data_height_.load(); }
+
   void dump_stats() { scheduler_->dump_runqueue(); }
 
   void shut_down() {}

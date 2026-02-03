@@ -968,7 +968,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
   scheduler_->increment_current_block();
   last_ = std::chrono::steady_clock::now();
-  scheduler_->increment_current_block();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
@@ -984,10 +983,11 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
-  CHECK_EQ(height, auth_data_height_.load() + 1);
-
   info("auth_data_changed, height = {}, key_changes.size() = {}", height,
        key_changes.size());
+
+  CHECK_EQ(height, auth_data_height_.load() + 1);
+
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
