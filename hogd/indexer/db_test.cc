@@ -9,7 +9,6 @@
 #include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
-#include "hogd/init.h"
 #include "types.hh"
 #include "x23/vec.h"
 

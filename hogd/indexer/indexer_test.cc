@@ -1,11 +1,10 @@
-#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <span>
-#include <vector>
+#include <memory>
+#include <utility>
 
-#include "event.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
@@ -13,8 +12,6 @@
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "indexer.hh"
-#include "types.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -29,16 +26,20 @@ protected:
   {
     // Create a temporary test directory for the database.
     std::filesystem::create_directories(tmp_dir_.directory());
-    IndexerStatus<IndexDB> db_status =
-        IndexDB::open_or_make_new(tmp_dir_.directory());
+    std::filesystem::path db_path =
+        std::filesystem::path(tmp_dir_.directory()) / "db";
+    IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
     if (!db_status) {
       panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
     }
-    IndexDB &db = db_status.value();
-    db_ = std::make_unique<IndexDB>(std::move(db));
+    {
+      IndexDB &db = db_status.value();
+      db_ = std::make_unique<IndexDB>(std::move(db));
+    }
+    CHECK(db_->is_open());
 
-    event_ = std::make_unique<IndexerEventRpc>(db);
-    block_explorer_ = std::make_unique<IndexerBlockExplorerRpc>(db);
+    event_ = std::make_unique<IndexerEventRpc>(*db_);
+    block_explorer_ = std::make_unique<IndexerBlockExplorerRpc>(*db_);
   }
 
   TmpDir tmp_dir_;
