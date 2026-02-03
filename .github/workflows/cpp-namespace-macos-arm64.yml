@@ -12,6 +12,9 @@ jobs:
   # Clang Debug build + tests
   clang-debug:
     runs-on: namespace-profile-hogd-arm64-macos
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -108,3 +111,5 @@ jobs:
       - name: Show ccache stats
         if: always()
         run: ccache -s
+
+      - uses: ./.github/actions/print-log-instructions

@@ -75,7 +75,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
           "advance_new_block: dbsched_commit_block failed");
     }
 
-    event_server_.close_block(current_block_id_);
+    event_server_.close_block(current_block_id_, current_block_id_);
   }
 
   auto res =

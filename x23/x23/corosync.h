@@ -342,7 +342,8 @@ struct CoroGuard : CoroLock::LockerState {
   CoroLock *lkp_{};
 
   CoroGuard() noexcept = default;
-  ~CoroGuard() {
+  ~CoroGuard()
+  {
     if (lkp_) {
       if constexpr (OnDestroy != nullptr)
         OnDestroy(this);

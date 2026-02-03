@@ -6,6 +6,9 @@ on:
 jobs:
     build:
         runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
 
         steps:
             - name: Clean up .gitconfig
@@ -44,3 +47,4 @@ jobs:
                   --key=git_branch --value=$BRANCH_NAME \
                   --key=git_commit --value=${{ github.sha }} \
                   ./scripts/schedules/metrics.toml
+            - uses: ./.github/actions/print-log-instructions
