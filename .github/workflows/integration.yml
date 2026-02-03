@@ -49,4 +49,6 @@ jobs:
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value=${{ github.head_ref || github.ref_name }} \
                     ./scripts/schedules/integration.toml
-            - uses: ./.github/actions/print-log-instructions
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions

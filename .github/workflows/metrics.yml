@@ -47,4 +47,6 @@ jobs:
                   --key=git_branch --value=$BRANCH_NAME \
                   --key=git_commit --value=${{ github.sha }} \
                   ./scripts/schedules/metrics.toml
-            - uses: ./.github/actions/print-log-instructions
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions
