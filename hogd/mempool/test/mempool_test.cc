@@ -606,14 +606,17 @@ TEST(Mempool, GenerateBlockId)
 
 TEST(Mempool, AuthChanged)
 {
+  info("AuthChanged");
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
   // txs.
   // TODO(jhumphri): Move all of the configuration below to
   // [MempoolTestInfra].
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, /*num_txs=*/2);
+  info("AuthChanged");
   SignedTransaction auth_tx =
       generate_change_nonce_config(fib_client, /*required_weight=*/10);
+  info("AuthChanged");
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -632,6 +635,7 @@ TEST(Mempool, AuthChanged)
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
+  info("AuthChanged");
   KeyChangeBatch key_changes = {
       {.address = MempoolTestInfra::kAccountAddresses[0],
        .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
@@ -647,6 +651,7 @@ TEST(Mempool, AuthChanged)
     decorated_signatures.list.push_back(make_signature(sk, stx.tx, 0));
     stx.signatures.push_back(decorated_signatures);
   }
+  info("AuthChanged");
   {
     // Handle [auth_tx].
     auth_tx.tx.auth_claims.push_back(make_sign_claim(0));
@@ -658,8 +663,10 @@ TEST(Mempool, AuthChanged)
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{auth_tx})())();
   }
+  info("AuthChanged");
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  info("AuthChanged");
 
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -675,15 +682,18 @@ TEST(Mempool, AuthChanged)
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), 2UL);
   }
+  info("AuthChanged");
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
+  info("AuthChanged");
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
+  info("AuthChanged");
   // Now check that the last tx is removed from the scheduler not nominated.
   // We sleep for a short while so that the [auth_data_changed] callback runs
   // in the mempool.
@@ -692,19 +702,23 @@ TEST(Mempool, AuthChanged)
   db_tip = {.height = nomination.block_height,
             .hash = nomination.block_hash,
             .id = res_nominate.nominated_block().block_id};
+  info("AuthChanged");
   res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
   nomination = res_nominate.nominated_block().nomination;
+  info("AuthChanged");
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     EXPECT_TRUE(tx_hashes.empty());
   }
+  info("AuthChanged");
 
   // Check that if we resubmit a tx in [txs], it is discarded.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  info("AuthChanged");
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
