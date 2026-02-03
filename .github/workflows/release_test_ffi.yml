@@ -11,6 +11,8 @@ env:
 jobs:
   build-linux-x86_64:
     runs-on: hog1
+    permissions:
+      actions: read
 
     steps:
       - name: Clean up .gitconfig
@@ -95,6 +97,8 @@ jobs:
 
   build-macos-arm64:
     runs-on: namespace-profile-hogd-arm64-macos
+    permissions:
+      actions: read
 
     steps:
       - name: Setup SSH Agent
@@ -225,6 +229,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout

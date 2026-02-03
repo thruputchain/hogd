@@ -13,6 +13,8 @@ on:
 jobs:
   tidy:
     runs-on: namespace-profile-hogd-linux # Must have custom base image configured
+    permissions:
+      actions: read
 
     steps:
       - name: Setup SSH Agent
