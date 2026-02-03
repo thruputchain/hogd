@@ -21,6 +21,9 @@ jobs:
   # Fast format check - gates all other jobs
   format:
     runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -72,10 +75,15 @@ jobs:
       - name: Format Check
         run: ./scripts/format.sh -c
 
+      - uses: ./.github/actions/print-log-instructions
+
   # GCC Debug build + tests
   gcc-debug:
     needs: format
     runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -175,10 +183,15 @@ jobs:
         if: always()
         run: ccache -s
 
+      - uses: ./.github/actions/print-log-instructions
+
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
     needs: format
     runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -278,10 +291,15 @@ jobs:
         if: always()
         run: ccache -s
 
+      - uses: ./.github/actions/print-log-instructions
+
   # GCC Release build (parallel with debug builds)
   gcc-release:
     needs: format
     runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -375,3 +393,5 @@ jobs:
       - name: Show ccache stats
         if: always()
         run: ccache -s
+
+      - uses: ./.github/actions/print-log-instructions

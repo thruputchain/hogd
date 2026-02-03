@@ -8,6 +8,9 @@ on:
 jobs:
     build:
         runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
 
         steps:
             - name: Clean up .gitconfig
@@ -43,3 +46,4 @@ jobs:
                   --key=github_repo --value=${{ github.repository }} \
                   --key=git_commit --value=${{ github.sha }} \
                   ./scripts/schedules/test_bindings.toml
+            - uses: ./.github/actions/print-log-instructions

@@ -11,6 +11,9 @@ env:
 jobs:
   build-linux-x86_64:
     runs-on: hog1
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Clean up .gitconfig
@@ -91,8 +94,13 @@ jobs:
           name: libtest_ffi-linux-x86_64
           path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
 
+      - uses: ./.github/actions/print-log-instructions
+
   build-macos-arm64:
     runs-on: namespace-profile-hogd-arm64-macos
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Setup SSH Agent
@@ -216,11 +224,14 @@ jobs:
           name: libtest_ffi-macos-arm64
           path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
 
+      - uses: ./.github/actions/print-log-instructions
+
   create-release:
     needs: [build-linux-x86_64, build-macos-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout
@@ -334,3 +345,5 @@ jobs:
             ---
 
             ${{ steps.generate_notes.outputs.notes }}
+
+      - uses: ./.github/actions/print-log-instructions
