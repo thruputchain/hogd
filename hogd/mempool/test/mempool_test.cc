@@ -6,6 +6,7 @@
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
