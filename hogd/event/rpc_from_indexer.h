@@ -14,11 +14,11 @@ class EventIndexerRpc {
 public:
   using rpc_service = EventIndexer1;
 
-  EventIndexerRpc(EventRPCContext &ctx) : ctx_(ctx) {}
+  EventIndexerRpc(EventRPCContext &ctx) {} // : ctx_(ctx) {}
 
   // TODO(jhumphri): Should the indexer instead register with the mempool, which
   // in turn will send the indexer's address to the event server?
-  x23::Async<void> event_indexer_intro(IndexerCard card)
+  static x23::Async<void> event_indexer_intro(IndexerCard card)
   {
     CHECK_EQ(strcmp(card.protocol.c_str(), version::kHogdProtocol()), 0);
     indexer_event_client_t client = co_await make_rpc_client<IndexerEvent1>(
@@ -27,7 +27,7 @@ public:
   }
 
 private:
-  EventRPCContext &ctx_;
+  // EventRPCContext &ctx_;
 };
 static_assert(is_EventIndexer1<EventIndexerRpc *, x23::MaybeAsync>);
 

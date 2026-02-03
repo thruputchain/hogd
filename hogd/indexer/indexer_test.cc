@@ -1,17 +1,21 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <utility>
 
+#include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "indexer.hh"
+#include "types.hh"
 
 namespace hogd {
 
