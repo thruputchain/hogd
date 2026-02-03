@@ -12,6 +12,7 @@
 #include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
+#include "indexer.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -46,11 +47,85 @@ protected:
   std::unique_ptr<IndexerBlockExplorerRpc> block_explorer_;
 };
 
-TEST_F(IndexerTest, CreateNew)
+namespace {
+
+TxEventLogBatch
+create_event_logs()
 {
-  auto db = IndexDB::make_new(tmp_dir_.directory());
-  ASSERT_TRUE(db.has_value());
-  EXPECT_TRUE(db->is_open());
+  // Create test events
+  SHA256Hash tx_hash0, tx_hash1;
+  std::ranges::fill(tx_hash0, 0x01);
+  std::ranges::fill(tx_hash1, 0x02);
+
+  ContractAddress contract_addr0, contract_addr1;
+  std::ranges::fill(contract_addr0, 0xAA);
+  std::ranges::fill(contract_addr1, 0xBB);
+
+  TxEventLog event_log0;
+  event_log0.proposed_tx_hash = tx_hash0;
+  TxEmittedEvent event0;
+  event0.contract_address = contract_addr0;
+  event0.num_topics = 0;
+  event0.serialized_event.resize(10);
+  std::ranges::fill(event0.serialized_event, 0x11);
+  event_log0.events.push_back(event0);
+
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx_hash1;
+  TxEmittedEvent event1;
+  event1.contract_address = contract_addr1;
+  event1.num_topics = 1;
+  event1.serialized_event.resize(20);
+  std::ranges::fill(event1.serialized_event, 0x22);
+  event_log1.events.push_back(event1);
+
+  return TxEventLogBatch{event_log0, event_log1};
+}
+
+} // namespace
+
+TEST_F(IndexerTest, FindTx)
+{
+  BlockHeight block_height = 100;
+  TxEventLogBatch events = create_event_logs();
+
+  // Consume events.
+  event_->indexer_event_process_events(block_height, events)();
+
+  // Look up the first tx.
+  TxInfoResult result0 =
+      block_explorer_->get_transaction_info(events[0].proposed_tx_hash)();
+  EXPECT_EQ(result0.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(result0.info().height, block_height);
+  EXPECT_EQ(result0.info().events.proposed_tx_hash, events[0].proposed_tx_hash);
+  EXPECT_EQ(result0.info().events.size(), 1);
+  EXPECT_EQ(result0.info().events[0].contract_address,
+            events[0].contract_address);
+
+  // Look up the second tx.
+  TxInfoResult result1 =
+      block_explorer_->get_transaction_info(events[1].proposed_tx_hash);
+  EXPECT_EQ(result1.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(result1.info().height, block_height);
+  EXPECT_EQ(result1.info().events.proposed_tx_hash, events[1].proposed_tx_hash);
+  EXPECT_EQ(result1.info().events.events.size(), 1);
+  EXPECT_EQ(result1.info().events.events[0].contract_address,
+            events[1].contract_address);
+}
+
+TEXT_F(IndexerTest, FindNonExistentTx)
+{
+  BlockHeight block_height = 100;
+  TxEventLogBatch events = create_event_logs();
+
+  // Consume events.
+  event_->indexer_event_process_events(block_height, events)();
+
+  // Look up a non-existent tx.
+  SHA256Hash tx_hash;
+  std::ranges::fill(tx_hash, 0x03);
+  TxInfoResult result = block_explorer_->get_transaction_info(tx_hash);
+  EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
 }
 
 } // namespace hogd
