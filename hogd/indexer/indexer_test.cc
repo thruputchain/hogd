@@ -98,22 +98,22 @@ TEST_F(IndexerTest, FindTx)
   EXPECT_EQ(result0.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(result0.info().height, block_height);
   EXPECT_EQ(result0.info().events.proposed_tx_hash, events[0].proposed_tx_hash);
-  EXPECT_EQ(result0.info().events.size(), 1);
-  EXPECT_EQ(result0.info().events[0].contract_address,
-            events[0].contract_address);
+  EXPECT_EQ(result0.info().events.events.size(), 1);
+  EXPECT_EQ(result0.info().events.events[0].contract_address,
+            events[0].events[0].contract_address);
 
   // Look up the second tx.
   TxInfoResult result1 =
-      block_explorer_->get_transaction_info(events[1].proposed_tx_hash);
+      block_explorer_->get_transaction_info(events[1].proposed_tx_hash)();
   EXPECT_EQ(result1.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(result1.info().height, block_height);
   EXPECT_EQ(result1.info().events.proposed_tx_hash, events[1].proposed_tx_hash);
   EXPECT_EQ(result1.info().events.events.size(), 1);
   EXPECT_EQ(result1.info().events.events[0].contract_address,
-            events[1].contract_address);
+            events[1].events[0].contract_address);
 }
 
-TEXT_F(IndexerTest, FindNonExistentTx)
+TEST_F(IndexerTest, FindNonExistentTx)
 {
   BlockHeight block_height = 100;
   TxEventLogBatch events = create_event_logs();
@@ -124,7 +124,7 @@ TEXT_F(IndexerTest, FindNonExistentTx)
   // Look up a non-existent tx.
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x03);
-  TxInfoResult result = block_explorer_->get_transaction_info(tx_hash);
+  TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
 }
 
