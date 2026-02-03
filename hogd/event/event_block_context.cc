@@ -71,7 +71,7 @@ EventBlockContext::add_event(TxEventLog const &event)
     // which in turn will persist until the next locker after that suspends
     // itself, and so on. So in other words, we will still accumulate coroutines
     // on the stack.
-    cg.reset_and_return();
+    co_await cg.reset_and_return();
   }(event, this);
 }
 
