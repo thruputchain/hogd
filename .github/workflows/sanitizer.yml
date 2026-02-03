@@ -44,8 +44,4 @@ jobs:
                   --key=git_commit --value=${{ github.sha }} \
                   --timeout-sec=1800 \
                   ./scripts/schedules/sanitizer.toml
-            - name: Print log download instructions
-              if: always()
-              run: |
-                  echo "To download logs, run"
-                  echo "gh run view --log --job ${{ github.job }} --repo ${{ github.repository }}"
+            - uses: ./.github/actions/print-log-instructions

@@ -91,11 +91,7 @@ jobs:
           name: libtest_ffi-linux-x86_64
           path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
 
-      - name: Print log download instructions
-        if: always()
-        run: |
-          echo "To download logs, run"
-          echo "gh run view --log --job ${{ github.job }} --repo ${{ github.repository }}"
+      - uses: ./.github/actions/print-log-instructions
 
   build-macos-arm64:
     runs-on: namespace-profile-hogd-arm64-macos
@@ -222,11 +218,7 @@ jobs:
           name: libtest_ffi-macos-arm64
           path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
 
-      - name: Print log download instructions
-        if: always()
-        run: |
-          echo "To download logs, run"
-          echo "gh run view --log --job ${{ github.job }} --repo ${{ github.repository }}"
+      - uses: ./.github/actions/print-log-instructions
 
   create-release:
     needs: [build-linux-x86_64, build-macos-arm64]
@@ -347,8 +339,4 @@ jobs:
 
             ${{ steps.generate_notes.outputs.notes }}
 
-      - name: Print log download instructions
-        if: always()
-        run: |
-          echo "To download logs, run"
-          echo "gh run view --log --job ${{ github.job }} --repo ${{ github.repository }}"
+      - uses: ./.github/actions/print-log-instructions
