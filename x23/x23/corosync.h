@@ -135,11 +135,14 @@ public:
 
   // Release the lock and schedule the next locker in a different
   // thread.
-  void unlock_no_yield(LockerState *ls,
-                       ThreadPool *pool = ThreadPool::get_thread_pool())
+  void unlock_no_yield(LockerState *ls, ThreadPool *pool)
   {
     if (CoroHandle h = next(ls))
       detail::resume_in_another_thread(h, pool);
+  }
+  void unlock_no_yield(LockerState *ls)
+  {
+    unlock_no_yield(ls, ThreadPool::get_thread_pool());
   }
 
   Async<void> await_free()
@@ -294,22 +297,59 @@ CoroLock::unlock_and_return(LockerState *ls, T t)
   return AwaitReleaseAndReturn<T>{*this, ls, std::move(t)};
 }
 
-// A CoroGuard is similar to a lock_guard for a CoroLock.  However,
-// the syntax is different because a CoroLock requires LockerState to
-// persist for the duration of the lock, so the CoroGuard holds the
-// LockerState.  To ensure the state lives until the lock is released,
-// the CoroGuard must be declared before the lock is acquired, as in:
+// A CoroGuard is similar to a lock_guard for a CoroLock, except that
+// by default you must release the lock before its destruction.  The
+// syntax is different from a lock_guard because a CoroLock requires
+// LockerState to persist for the duration of the lock, so the
+// CoroGuard holds the LockerState.  To ensure the state lives until
+// the lock is released, the CoroGuard must be declared before the
+// lock is acquired, as in:
 //
 //   CoroLock lk;
 //   ...
 //
 //     CoroGuard g;
 //     co_await g(lk);
+//
+// It is an error to destroy a CoroGuard that holds a lock because
+// there are multiple ways to release a lock, and the CoroGuard
+// doesn't know which you want:
+//
+//   reset_yield() - releases the lock and immediately wakes any
+//     waiting coroutines, which is more efficient but could overflow
+//     the stack if you have a huge number of waiters.
+//
+//   reset_no_yield() - releases the lock and schedules any waiting
+//     coroutines in another thread, returning immediately.  This
+//     protects against stack overflows and certain deadlocks, but is
+//     less efficient.
+//
+//   co_await release_and_return() or
+//   co_await release_and_return(T t) - releases the lock and destroys
+//     the invoking coroutine, as if you had called co_return or
+//     co_return t.  If releasing the lock is the last thing you do in
+//     a coroutine, this gives the best of both worlds--efficient
+//     resumption of the next coroutine without any danger of blowing
+//     out the stack.
+//
+// If you don't want to release the lock explicitly, CoroGuardYield
+// and CoroGuardNoYield are versions of CoroGuard that perform a
+// reset_yield or reset_no_yield on destruction.  However, there's no
+// way to perform perform release_and_return() in a destructor since
+// it must be co_awaited.
+template<void (CoroLock::*OnDestroy)(CoroLock::LockerState *) = nullptr>
 struct CoroGuard : CoroLock::LockerState {
   CoroLock *lkp_{};
 
   CoroGuard() noexcept = default;
-  ~CoroGuard() { reset(); }
+  ~CoroGuard() {
+    if (lkp_) {
+      if constexpr (OnDestroy != nullptr)
+        OnDestroy(this);
+      else
+        panic("Destroying CoroGuard that holds lock");
+    }
+  }
 
   // Must be co_awaited and must be called on lvalue CoroGuard
   [[nodiscard]] auto operator()(std::derived_from<CoroLock> auto &lk) &
@@ -319,7 +359,7 @@ struct CoroGuard : CoroLock::LockerState {
     return lkp_->lock(this);
   }
 
-  void reset(ThreadPool *pool = ThreadPool::get_thread_pool())
+  void reset_no_yield(ThreadPool *pool = ThreadPool::get_thread_pool())
   {
     if (lkp_)
       std::exchange(lkp_, nullptr)->unlock_no_yield(this, pool);
@@ -352,6 +392,8 @@ struct CoroGuard : CoroLock::LockerState {
         ->unlock_and_return(this, std::forward<decltype(t)>(t));
   }
 };
+using CoroGuardYield = CoroGuard<&CoroLock::unlock_yield>;
+using CoroGuardNoYield = CoroGuard<&CoroLock::unlock_no_yield>;
 
 // A CoroSharedLock is derived from a lock that provides a busy() test
 // (e.g., CoroLock, TestLock, or SharedLock) but also provides a
