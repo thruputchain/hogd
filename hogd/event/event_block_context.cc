@@ -53,9 +53,26 @@ EventBlockContext::add_event(TxEventLog const &event)
   co_await write_event(std::span(*serialize_buf));
   CHECK(trie_->insert_or_update(key, value));
 
-  x23::CoroGuard cg;
-  co_await cg(event_log_lock_);
-  event_log_.push_back(event);
+  [](TxEventLog e, EventBlockContext *event_block_context) -> x23::Detached {
+    x23::CoroGuard cg;
+    co_await cg(event_block_context->event_log_lock_);
+    event_block_context->event_log_.push_back(e);
+
+    // The default [cg] unlock path yields to the next locker *without*
+    // destroying the current coroutine frame. If there are many lockers, which
+    // there will be when many txs are processed per second, all of the
+    // coroutines accumulate on the stack and cause a stack overflow. We can use
+    // [cg.unlock_no_yield()] to destroy the current coroutine frame before
+    // switching to the next locker.
+    //
+    // Important: make sure that [cg.reset_and_return()] is at the end of the
+    // coroutine. Do not put a [co_return] or anything else after it. Otherwise,
+    // this coroutine frame will persist until the next locker suspends itself,
+    // which in turn will persist until the next locker after that suspends
+    // itself, and so on. So in other words, we will still accumulate coroutines
+    // on the stack.
+    cg.reset_and_return();
+  }(event, this);
 }
 
 SHA256Hash
