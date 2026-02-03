@@ -151,4 +151,6 @@ jobs:
         if: always()
         run: ccache -s
 
-      - uses: ./.github/actions/print-log-instructions
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
