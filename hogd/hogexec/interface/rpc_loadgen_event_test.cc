@@ -118,7 +118,9 @@ protected:
     auto client_finish_res = client_.executorsched_finish_block(block_id);
     ASSERT_EQ(client_finish_res, ExecResult::ExecResultOK);
 
-    auto event_close_res = event_client_.eventsched_close_block(block_id);
+    // We use [block_id] as the height as well.
+    auto event_close_res =
+        event_client_.eventsched_close_block(block_id, block_id);
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);

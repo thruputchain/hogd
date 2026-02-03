@@ -52,6 +52,12 @@ EventBlockContext::add_event(TxEventLog const &event)
 
   co_await write_event(std::span(*serialize_buf));
   CHECK(trie_->insert_or_update(key, value));
+
+  [](TxEventLog e, EventBlockContext *event_block_context) -> x23::Detached {
+    x23::CoroGuard cg;
+    co_await cg(event_block_context->event_log_lock_);
+    event_block_context->event_log_.push_back(e);
+  }(event, this);
 }
 
 SHA256Hash

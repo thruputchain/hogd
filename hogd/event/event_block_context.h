@@ -17,11 +17,13 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
+#include "indexer.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -30,6 +32,9 @@
 #include "x23/threadpool.h"
 
 namespace hogd {
+
+using indexer_event_client_t =
+    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 class EventBlockContext {
 public:
@@ -73,6 +78,25 @@ public:
 
   x23::Async<void> await_abandon();
 
+  x23::Async<void>
+  send_events_to_indexers(BlockHeight block_height,
+                          std::vector<indexer_event_client_t> &indexers)
+  {
+    std::vector<x23::Async<void>> handles;
+    handles.reserve(indexers.size());
+
+    x23::CoroGuard cg;
+    co_await cg(event_log_lock_);
+    for (indexer_event_client_t &indexer : indexers) {
+      handles.push_back(
+          indexer.indexer_event_process_events(block_height, event_log_));
+    }
+    for (x23::Async<void> &handle : handles) {
+      co_await handle;
+    }
+    co_return;
+  }
+
 private:
   x23::Async<void> write_event(std::span<const uint8_t> data);
 
@@ -107,6 +131,9 @@ private:
   std::unique_ptr<MerkleTriePrefix> trie_;
   std::string work_directory_;
   BlockID block_id_;
+
+  x23::CoroLock event_log_lock_;
+  TxEventLogBatch event_log_;
 
   struct EventContext {
     std::vector<uint8_t> buf;

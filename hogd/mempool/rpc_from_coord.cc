@@ -162,9 +162,11 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id)
+MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
+                                              BlockHeight block_height)
 {
-  co_return co_await event_sched_client_->eventsched_close_block(block_id);
+  co_return co_await event_sched_client_->eventsched_close_block(block_id,
+                                                                 block_height);
 }
 
 x23::Async<DbBlockResult>
@@ -533,7 +535,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
   x23::Async<EventBlockResult> close_block_handle =
-      eventsched_close_block(cache.block_id);
+      eventsched_close_block(cache.block_id, scheduler_->current_block());
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id);
 
@@ -981,10 +983,11 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
-  CHECK_EQ(height, auth_data_height_.load() + 1);
-
   info("auth_data_changed, height = {}, key_changes.size() = {}", height,
        key_changes.size());
+
+  CHECK_EQ(height, auth_data_height_.load() + 1);
+
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 

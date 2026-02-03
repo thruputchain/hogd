@@ -197,6 +197,8 @@ public:
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
+  BlockHeight auth_data_height() { return auth_data_height_.load(); }
+
   void dump_stats() { scheduler_->dump_runqueue(); }
 
   void shut_down() {}
@@ -270,7 +272,8 @@ private:
   x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
-  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id);
+  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
+                                                      BlockHeight block_height);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);

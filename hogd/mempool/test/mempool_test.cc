@@ -6,6 +6,7 @@
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
@@ -685,10 +686,10 @@ TEST(Mempool, AuthChanged)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   // Now check that the last tx is removed from the scheduler not nominated.
-  // We sleep for a short while so that the [auth_data_changed] callback runs
-  // in the mempool.
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  while (server.mempool_coord_rpc().auth_data_height() != 1) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK_EQ(server.mempool_coord_rpc().auth_data_height(), 1);
   db_tip = {.height = nomination.block_height,
             .hash = nomination.block_hash,
             .id = res_nominate.nominated_block().block_id};

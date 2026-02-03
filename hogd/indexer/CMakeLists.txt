@@ -11,6 +11,7 @@ target_link_libraries(indexer PUBLIC
 
 # Tests
 add_executable(indexer_test
+    indexer_test.cc
     db_test.cc
     key_format_test.cc
 )

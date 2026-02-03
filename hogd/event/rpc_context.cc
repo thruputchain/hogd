@@ -38,7 +38,7 @@ EventRPCContext::open_block(BlockID block_id)
 }
 
 x23::Async<EventStatus<SHA256Hash>>
-EventRPCContext::close_block(BlockID block_id)
+EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 {
   x23::CoroGuard g;
   co_await g(lock_);
@@ -61,16 +61,21 @@ EventRPCContext::close_block(BlockID block_id)
     co_return;
   }(context.get());
 
+  auto indexers_handle =
+      context.get().send_events_to_indexers(block_height, indexers_);
+
   auto out_hash = context.get().get_root_hash();
   auto ts2 = x23::fastclock::now();
   co_await file_wait;
   auto ts3 = x23::fastclock::now();
+  co_await indexers_handle;
+  auto ts4 = x23::fastclock::now();
   co_await context.get().finish_file(out_hash);
   gc_context_internal(it, g);
-  auto ts4 = x23::fastclock::now();
-  info("time to get hash: {} ns, time to finish file: {} ns, time to gc "
-       "context + rename: {} ns",
-       ts2 - ts, ts3 - ts2, ts4 - ts3);
+  auto ts5 = x23::fastclock::now();
+  info("time to get hash: {} ns, time to finish file: {} ns, time to send "
+       "events to indexers: {} ns, time to gc context + rename: {} ns",
+       ts2 - ts, ts3 - ts2, ts4 - ts3, ts5 - ts4);
   co_return out_hash;
 }
 

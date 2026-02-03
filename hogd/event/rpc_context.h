@@ -8,9 +8,11 @@
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
+#include "indexer.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -36,7 +38,8 @@ public:
   // Closes a block.
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
-  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id);
+  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
+                                                  BlockHeight block_height);
 
   // Abandons a block.
   // Returns an error if the block is not open.
@@ -47,6 +50,14 @@ public:
   // that called get_context(), if the block is abandoned while an outstanding
   // rpc from the executor is in flight.
   x23::Async<void> gc_context(BlockID block_id);
+
+  // Adds an indexer, which the event server will send events to.
+  x23::Async<void> add_indexer(indexer_event_client_t &&indexer)
+  {
+    x23::CoroGuard cg;
+    co_await cg(lock_);
+    indexers_.push_back(std::move(indexer));
+  }
 
 private:
   x23::Async<PerThreadARC<EventBlockContext> *>
@@ -74,6 +85,7 @@ private:
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
+  std::vector<indexer_event_client_t> indexers_;
 
   PerThread<ContextCache> cache_;
   std::string work_directory_;

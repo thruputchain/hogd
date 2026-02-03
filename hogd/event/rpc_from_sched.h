@@ -4,6 +4,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/event/rpc_context.h"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -17,7 +18,8 @@ public:
   static void eventsched_null() {}
 
   x23::Async<RPCError> eventsched_open_block(BlockID block_id);
-  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id);
+  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
+                                                      BlockHeight block_height);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
 
 private:

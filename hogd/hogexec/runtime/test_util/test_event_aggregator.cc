@@ -23,7 +23,7 @@ TestEventAggregator::open_block(BlockID block_id)
 }
 
 EventBlockResult
-TestEventAggregator::close_block(BlockID block_id)
+TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
 {
   std::scoped_lock lock(mtx_);
   if (!block_refcounts_.contains(block_id)) {
@@ -40,7 +40,7 @@ TestEventAggregator::close_block(BlockID block_id)
   SHA256Hash root_hash{}; // TODO(geoff): Implement
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = root_hash;
-  info("Closed block {}", block_id);
+  info("Closed block {}, height = {}", block_id, block_height);
   return result;
 }
 
