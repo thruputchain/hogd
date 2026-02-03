@@ -62,7 +62,7 @@ EventBlockContext::add_event(TxEventLog const &event)
     // destroying the current coroutine frame. If there are many lockers, which
     // there will be when many txs are processed per second, all of the
     // coroutines accumulate on the stack and cause a stack overflow. We can use
-    // [cg.unlock_no_yield()] to destroy the current coroutine frame before
+    // [cg.reset_and_return()] to destroy the current coroutine frame before
     // switching to the next locker.
     //
     // Important: make sure that [cg.reset_and_return()] is at the end of the
