@@ -147,3 +147,9 @@ jobs:
       - name: Show ccache stats
         if: always()
         run: ccache -s
+
+      - name: Print log download instructions
+        if: always()
+        run: |
+          echo "To download logs, run"
+          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"

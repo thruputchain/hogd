@@ -72,6 +72,12 @@ jobs:
       - name: Format Check
         run: ./scripts/format.sh -c
 
+      - name: Print log download instructions
+        if: always()
+        run: |
+          echo "To download logs, run"
+          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+
   # GCC Debug build + tests
   gcc-debug:
     needs: format
@@ -174,6 +180,12 @@ jobs:
       - name: Show ccache stats
         if: always()
         run: ccache -s
+
+      - name: Print log download instructions
+        if: always()
+        run: |
+          echo "To download logs, run"
+          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
@@ -278,6 +290,12 @@ jobs:
         if: always()
         run: ccache -s
 
+      - name: Print log download instructions
+        if: always()
+        run: |
+          echo "To download logs, run"
+          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
+
   # GCC Release build (parallel with debug builds)
   gcc-release:
     needs: format
@@ -375,3 +393,9 @@ jobs:
       - name: Show ccache stats
         if: always()
         run: ccache -s
+
+      - name: Print log download instructions
+        if: always()
+        run: |
+          echo "To download logs, run"
+          echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"

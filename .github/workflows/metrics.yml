@@ -44,3 +44,8 @@ jobs:
                   --key=git_branch --value=$BRANCH_NAME \
                   --key=git_commit --value=${{ github.sha }} \
                   ./scripts/schedules/metrics.toml
+            - name: Print log download instructions
+              if: always()
+              run: |
+                  echo "To download logs, run"
+                  echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"

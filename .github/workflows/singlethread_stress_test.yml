@@ -43,3 +43,8 @@ jobs:
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
                     ./scripts/schedules/singlethread_stress_test.toml
+            - name: Print log download instructions
+              if: always()
+              run: |
+                  echo "To download logs, run"
+                  echo "gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
