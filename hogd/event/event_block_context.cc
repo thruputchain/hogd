@@ -14,7 +14,6 @@
 #include <version>
 
 #include "event.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
