@@ -3,6 +3,7 @@
 #pragma once
 
 #include <bit>
+#include <cstdlib>
 #include <string>
 
 #include "hogd/base/compiler.h"
@@ -20,6 +21,11 @@ namespace hogd {
 inline int
 get_hostname(std::string &hostname)
 {
+  if (auto *hostname_raw = getenv("HOSTNAME"); hostname_raw != nullptr) {
+    hostname = hostname_raw;
+    return 0;
+  }
+
   char hostname_raw[HOST_NAME_MAX + 1];
   int ret = gethostname(hostname_raw, sizeof(hostname_raw));
   if (!ret) {
