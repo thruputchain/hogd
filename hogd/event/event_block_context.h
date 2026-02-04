@@ -4,7 +4,9 @@
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -86,7 +88,10 @@ public:
       std::unique_lock ul = event_log_.lock_threads();
       event_log_.for_each(ul, [&full_event_log](
                                   TxEventLogBatch &per_thread_event_log) {
-        full_event_log.append_range(per_thread_event_log);
+        full_event_log.append(
+          std::make_move_iterator(per_thread_event_log.begin()),
+          std::make_move_iterator(per_thread_event_log.end())
+        );
         per_thread_event_log.clear();
       });
     }
