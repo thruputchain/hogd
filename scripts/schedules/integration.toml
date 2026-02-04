@@ -241,8 +241,8 @@ trap cleanup EXIT INT TERM
 ./release/hogd/hogexec/hogexec hog9:8072 -n 1024
 server_pid=$!
 
-# Wait for hogexec (port 8090).
-./scripts/wait-port localhost 8090
+# Wait for hogexec (port 8040).
+./scripts/wait-port localhost 8040
 
 hog_signal exec_is_up/{{ .hog_host_key }}
 
@@ -296,9 +296,9 @@ trap cleanup EXIT INT TERM
 ./release/hogd/event/event_exec hog9:8073 ./event
 server_pid=$!
 
-# Wait for event (ports 8091-8092).
+# Wait for event (ports 8090-8091).
+./scripts/wait-port localhost 8090
 ./scripts/wait-port localhost 8091
-./scripts/wait-port localhost 8092
 
 hog_signal event_is_up
 

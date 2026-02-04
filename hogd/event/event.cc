@@ -55,6 +55,8 @@ event_init(const std::string &mempool_address,
 
   CHECK_EQ(exec_server.start_server(kEventExecutorServerPort),
            uint16_t{kEventExecutorServerPort});
+  CHECK_EQ(indexer_server.start_server(kEventIndexerServerPort),
+           uint16_t{kEventIndexerServerPort});
   CHECK_EQ(mempool_server.start_server(kEventMempoolServerPort),
            uint16_t{kEventMempoolServerPort});
 
