@@ -94,7 +94,6 @@ public:
     std::vector<x23::Async<void>> handles;
     handles.reserve(indexers.size());
 
-    x23::CoroGuard cg;
     for (indexer_event_client_t &indexer : indexers) {
       handles.push_back(
           indexer.indexer_event_process_events(block_height, full_event_log));
@@ -102,8 +101,6 @@ public:
     for (x23::Async<void> &handle : handles) {
       co_await handle;
     }
-    co_await cg.reset_and_return();
-    panic("unreachable");
   }
 
 private:
