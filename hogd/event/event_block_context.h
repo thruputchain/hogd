@@ -89,9 +89,8 @@ public:
       event_log_.for_each(ul, [&full_event_log](
                                   TxEventLogBatch &per_thread_event_log) {
         full_event_log.append(
-          std::make_move_iterator(per_thread_event_log.begin()),
-          std::make_move_iterator(per_thread_event_log.end())
-        );
+            std::make_move_iterator(per_thread_event_log.begin()),
+            std::make_move_iterator(per_thread_event_log.end()));
         per_thread_event_log.clear();
       });
     }
