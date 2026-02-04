@@ -112,7 +112,7 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
   co_await get_threadpool().bg();
 
   {
-    x23::CoroGuard g;
+    x23::CoroGuardNoYield g;
     co_await g(lock_);
 
     if (state_ == BlockState::kAbandoned) {
@@ -139,7 +139,6 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
       all_writes_done_.store(true);
       all_writes_done_.broadcast();
     }
-    g.reset_no_yield();
   }
   // buf clear is out of the critical section holding the lock
   buf.clear();
@@ -162,7 +161,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
       // By the time this coroutine returns, pending_write_count_ will have been
       // incremented or the state_ has already been set as kAbandoned or
       // kFinishing and we do not spawn a new detached coroutine
-      x23::CoroGuard g;
+      x23::CoroGuardNoYield g;
       co_await g(lock_);
       if (state_ != BlockState::kActive) {
         x23assert(state_ == BlockState::kAbandoned ||
@@ -173,7 +172,6 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
       buf = std::move(buffers_->buf);
       buffers_->buf.clear();
       pending_write_count_++;
-      g.reset_no_yield();
     }
 
     flush_buffer_async(std::move(buf));
@@ -186,7 +184,7 @@ EventBlockContext::await_pending_writes_done()
   bool looped = false;
   while (true) {
     {
-      x23::CoroGuard g;
+      x23::CoroGuardNoYield g;
       co_await g(lock_);
       x23assert(looped || state_ == BlockState::kActive ||
                 state_ == BlockState::kAbandoned);
@@ -196,8 +194,6 @@ EventBlockContext::await_pending_writes_done()
         co_await g.reset_and_return();
         panic("unreachable");
       }
-      g.reset_no_yield();
-      cpu_relax();
     }
     co_await all_writes_done_.wait(false);
   }
@@ -256,10 +252,9 @@ x23::Async<void>
 EventBlockContext::await_abandon()
 {
   {
-    x23::CoroGuard g;
+    x23::CoroGuardNoYield g;
     co_await g(lock_);
     state_ = BlockState::kAbandoned;
-    g.reset_no_yield();
   }
   co_await await_pending_writes_done();
   co_return;

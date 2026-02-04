@@ -121,7 +121,7 @@ ExecutorStateManager::remove_block(BlockID block_id)
   ExecResult result = ExecResult::ExecResultOK;
   bool do_gc = false;
   {
-    x23::CoroGuard g;
+    x23::CoroGuardNoYield g;
     co_await g(active_blocks_lock_);
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
@@ -157,7 +157,6 @@ ExecutorStateManager::remove_block(BlockID block_id)
         }
       }
     }
-    g.reset_no_yield();
   }
   if (do_gc) {
     co_await gc_executor_context(block_id);

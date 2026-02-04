@@ -623,13 +623,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // This is the first call to [schedule()]. We do it up here rather than with
     // the other calls in the loop below because we want to overlap the first
     // call with the block initialization work.
-    x23::CoroGuard cg;
+    x23::CoroGuardNoYield cg;
     co_await cg(scheduler_->global_lock_);
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
     info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
-    cg.reset_no_yield();
   }
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
@@ -846,7 +845,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   result.db_tip() = cache.db_tip;
 
   {
-    x23::CoroGuard cg;
+    x23::CoroGuardNoYield cg;
     co_await cg(validated_block_cache_lock_);
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[cache.block_id] = std::move(cache);
@@ -856,7 +855,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     // [decrement_num_validations_in_progress()].
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
-    cg.reset_no_yield();
   }
   co_return result;
 }
@@ -874,18 +872,17 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       std::chrono::duration_cast<std::chrono::milliseconds>(delta);
   int64_t delta_count = delta_raw.count();
   info("schedulercoord_commit_block, delta = {}", delta_count);
-  x23::CoroGuard validate_cg;
+  x23::CoroGuardNoYield validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
     last_ = std::chrono::steady_clock::now();
 
     // unlock held locks before returning
-    validate_cg.reset_no_yield();
     co_await commit_cg.reset_and_return(
         SchedulerCommitOutcome::SchedulerCommitRace);
     panic("unreachable");
   }
-  x23::CoroGuard nominate_cg;
+  x23::CoroGuardNoYield nominate_cg;
   co_await nominate_cg(nominated_block_cache_lock_);
 
   if ((!nominated_block_cache_.block_id ||
@@ -896,8 +893,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     last_ = std::chrono::steady_clock::now();
 
     // unlock held locks before returning
-    nominate_cg.reset_no_yield();
-    validate_cg.reset_no_yield();
     co_await commit_cg.reset_and_return(
         SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
     panic("unreachable");
@@ -991,8 +986,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   last_ = std::chrono::steady_clock::now();
 
   // unlock held locks before returning
-  nominate_cg.reset_no_yield();
-  validate_cg.reset_no_yield();
   co_await commit_cg.reset_and_return(
       SchedulerCommitOutcome::SchedulerCommitOK);
   panic("unreachable");
