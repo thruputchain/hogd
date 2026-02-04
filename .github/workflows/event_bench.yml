@@ -44,4 +44,6 @@ jobs:
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
                     ./scripts/schedules/event_bench.toml
-            - uses: ./.github/actions/print-log-instructions
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions

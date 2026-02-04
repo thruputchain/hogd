@@ -93,7 +93,7 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
   co_await get_threadpool().bg();
 
   {
-    x23::CoroGuard g;
+    x23::CoroGuardNoYield g;
     co_await g(lock_);
 
     if (state_ == BlockState::kAbandoned) {
@@ -102,7 +102,8 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
         all_writes_done_.store(true);
         all_writes_done_.broadcast();
       }
-      co_return;
+      co_await g.reset_and_return();
+      panic("unreachable");
     }
 
     if (state_ == BlockState::kFinished) {
@@ -141,12 +142,13 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
       // By the time this coroutine returns, pending_write_count_ will have been
       // incremented or the state_ has already been set as kAbandoned or
       // kFinishing and we do not spawn a new detached coroutine
-      x23::CoroGuard g;
+      x23::CoroGuardNoYield g;
       co_await g(lock_);
       if (state_ != BlockState::kActive) {
         x23assert(state_ == BlockState::kAbandoned ||
                   state_ == BlockState::kFinishing);
-        co_return;
+        co_await g.reset_and_return();
+        panic("unreachable");
       }
       buf = std::move(buffers_->buf);
       buffers_->buf.clear();
@@ -163,14 +165,15 @@ EventBlockContext::await_pending_writes_done()
   bool looped = false;
   while (true) {
     {
-      x23::CoroGuard g;
+      x23::CoroGuardNoYield g;
       co_await g(lock_);
       x23assert(looped || state_ == BlockState::kActive ||
                 state_ == BlockState::kAbandoned);
       state_ = BlockState::kFinishing;
       looped = true;
       if (pending_write_count_ == 0) {
-        co_return;
+        co_await g.reset_and_return();
+        panic("unreachable");
       }
     }
     co_await all_writes_done_.wait(false);
@@ -209,6 +212,8 @@ EventBlockContext::finish_file_write()
   sync_file(g);
   auto ts4 = x23::fastclock::now();
   info("time to sync {} ns,", ts4 - ts3);
+  co_await g.reset_and_return();
+  panic("unreachable");
 }
 
 x23::Async<void>
@@ -220,13 +225,15 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   rename_file(g, hash);
   auto ts5 = x23::fastclock::now();
   info("time to rename file: {} ns", ts5 - ts4);
+  co_await g.reset_and_return();
+  panic("unreachable");
 }
 
 x23::Async<void>
 EventBlockContext::await_abandon()
 {
   {
-    x23::CoroGuard g;
+    x23::CoroGuardNoYield g;
     co_await g(lock_);
     state_ = BlockState::kAbandoned;
   }

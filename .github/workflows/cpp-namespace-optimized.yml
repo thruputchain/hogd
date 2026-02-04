@@ -75,7 +75,9 @@ jobs:
       - name: Format Check
         run: ./scripts/format.sh -c
 
-      - uses: ./.github/actions/print-log-instructions
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
 
   # GCC Debug build + tests
   gcc-debug:
@@ -183,7 +185,9 @@ jobs:
         if: always()
         run: ccache -s
 
-      - uses: ./.github/actions/print-log-instructions
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
@@ -291,7 +295,9 @@ jobs:
         if: always()
         run: ccache -s
 
-      - uses: ./.github/actions/print-log-instructions
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
 
   # GCC Release build (parallel with debug builds)
   gcc-release:
@@ -394,4 +400,6 @@ jobs:
         if: always()
         run: ccache -s
 
-      - uses: ./.github/actions/print-log-instructions
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions

@@ -31,18 +31,22 @@ ExecutorStateManager::get_executor_context_slow(BlockID block_id)
     ctx = &it->second.context;
   }
   if (!ctx) {
-    co_return nullptr;
+    co_await g.reset_and_return(nullptr);
+    panic("unreachable");
   }
 
-  if (!ctx->try_acquire_reference()) [[unlikely]]
-    co_return nullptr;
+  if (!ctx->try_acquire_reference()) [[unlikely]] {
+    co_await g.reset_and_return(nullptr);
+    panic("unreachable");
+  }
 
   // cache in threadlocal so we avoid contention on the active_blocks_ map
   {
     std::scoped_lock g(context_cache_->lock_);
     context_cache_->contexts_.emplace(block_id, ctx);
   }
-  co_return ctx;
+  co_await g.reset_and_return(ctx);
+  panic("unreachable");
 }
 
 x23::Async<ExecResult>
@@ -54,17 +58,20 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   if (auto it = active_blocks_.find(new_block_id); it != active_blocks_.end()) {
     // Increase the refcount on an existing block
     if (it->second.context.get().mode() != mode) {
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
     }
     if (it->second.open_block_count == 0) {
       error("Tried to reopen block {} that is closing", new_block_id);
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
     }
     assert(it->second.open_block_count > 0);
     it->second.open_block_count++;
     trace("Increased ref count on existing block {} in mode {}", new_block_id,
           mode);
-    co_return ExecResult::ExecResultOK;
+    co_await g.reset_and_return(ExecResult::ExecResultOK);
+    panic("unreachable");
   }
 
   // Create a new block
@@ -91,7 +98,8 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
                             worker_pool_));
   assert(inserted);
   trace("Opened new block {} in mode {}", new_block_id, mode);
-  co_return ExecResult::ExecResultOK;
+  co_await g.reset_and_return(ExecResult::ExecResultOK);
+  panic("unreachable");
 }
 
 x23::Async<ExecResult>
@@ -113,12 +121,13 @@ ExecutorStateManager::remove_block(BlockID block_id)
   ExecResult result = ExecResult::ExecResultOK;
   bool do_gc = false;
   {
-    x23::CoroGuard g;
+    x23::CoroGuardNoYield g;
     co_await g(active_blocks_lock_);
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
     }
     it->second.open_block_count--;
     if (it->second.open_block_count == 0) {
@@ -176,6 +185,10 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
       it->second.context.get().extract_snapshot_cache());
 
   active_blocks_.erase(it);
+
+  // release g before returning
+  co_await g.reset_and_return();
+  panic("unreachable");
 }
 
 } // namespace hogd
