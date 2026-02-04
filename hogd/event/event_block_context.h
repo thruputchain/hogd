@@ -70,7 +70,7 @@ public:
 
   ~EventBlockContext();
 
-  x23::Async<void> add_event(TxEventLog const &event);
+  x23::Async<void> add_event(TxEventLog event);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);

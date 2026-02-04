@@ -1,5 +1,7 @@
 #include "hogd/event/rpc_from_exec.h"
 
+#include <utility>
+
 #include "event.hh"
 #include "rpc_types.hh"
 #include "x23/async.h"
@@ -16,7 +18,7 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
     co_return RPCError::kRPCBadBlockID;
   }
 
-  co_await context->add_event(event_log);
+  co_await context->add_event(std::move(event_log));
 
   if (context.release_reference()) [[unlikely]] {
     co_await ctx_.gc_context(block_id);
