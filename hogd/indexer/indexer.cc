@@ -58,9 +58,6 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
   const IndexerCard card{.protocol = version::kHogdProtocol(),
                          .address_for_event = indexer_server_addr.c_str()};
   client.event_indexer_intro(card)();
-  while (!event->impl()->event_server_connected()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
 
   // Create the RPC server that the block explorers talk to.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db);
@@ -89,12 +86,12 @@ main(int argc, char *argv[])
   hogd::info("starting indexer!");
 
   if (argc != 3) {
-    std::println("usage: db_path event_server_ip:port]");
+    std::println("usage: <event_server:port> <db_path>]");
     return EXIT_FAILURE;
   }
 
-  const std::string path = argv[1];
-  const std::string event_server_addr = argv[2];
+  const std::string event_server_addr = argv[1];
+  const std::string path = argv[2];
   return hogd::indexer_init(path, event_server_addr);
 };
 

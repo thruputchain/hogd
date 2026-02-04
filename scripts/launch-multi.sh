@@ -38,7 +38,7 @@ INDEXER_BINARY=${HOGD_BUILD_DIR}/hogd/indexer/indexer_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
 
-procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "hogdb")
+procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "indexer_exec" "hogdb")
 
 binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$INDEXER_BINARY" "$HOGDB_BINARY")
 all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "$indexer_server" "${hogdb_servers[@]}")
@@ -215,7 +215,7 @@ remote_launch "$event_server" "$EVENT_BINARY" \
 # Start indexer.
 echo "Start indexer..."
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  "$event_server":8093 "$logdir/indexer"
+  "$event_server":8092 "$logdir/indexer"
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -258,9 +258,9 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --scp-control-addr 127.0.0.1:4400 \
   --scp-is-validator true
 
-# Wait for hogexec (port 8090).
+# Wait for hogexec (port 8040).
 for s in "${hogexec_servers[@]}"; do
-  wait_port "$s" 8090
+  wait_port "$s" 8040
 done
 
 # Wait for event (ports 8090-8092).
@@ -272,10 +272,11 @@ wait_port "$event_server" 8092
 wait_port "$indexer_server" 8060
 wait_port "$indexer_server" 8061
 
-# Wait for hogdb (ports 8080-8081).
+# Wait for hogdb (ports 8080-8082).
 for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8080
   wait_port "$s" 8081
+  wait_port "$s" 8082
 done
 
 # Wait for chuckd (port 7888).
@@ -314,6 +315,9 @@ else
 
   ssh "${COMMON_SSH_OPTS[@]}" "$event_server" \
     "tail -n +1 -f $logdir/event_exec.log" | sed "s/^/[${event_server}\/event] /" &
+
+  ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" \
+    "tail -n +1 -f $logdir/indexer_exec.log" | sed "s/^/[${indexer_server}\/indexer] /" &
 
   for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \

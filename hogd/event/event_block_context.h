@@ -82,14 +82,23 @@ public:
   send_events_to_indexers(BlockHeight block_height,
                           std::vector<indexer_event_client_t> &indexers)
   {
+    TxEventLogBatch full_event_log;
+    {
+      std::unique_lock ul = event_log_.lock_threads();
+      event_log_.for_each(ul, [&full_event_log](
+                                  TxEventLogBatch &per_thread_event_log) {
+        full_event_log.append_range(per_thread_event_log);
+        per_thread_event_log.clear();
+      });
+    }
+
     std::vector<x23::Async<void>> handles;
     handles.reserve(indexers.size());
 
     x23::CoroGuard cg;
-    co_await cg(event_log_lock_);
     for (indexer_event_client_t &indexer : indexers) {
       handles.push_back(
-          indexer.indexer_event_process_events(block_height, event_log_));
+          indexer.indexer_event_process_events(block_height, full_event_log));
     }
     for (x23::Async<void> &handle : handles) {
       co_await handle;
@@ -132,8 +141,7 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  x23::CoroLock event_log_lock_;
-  TxEventLogBatch event_log_;
+  PerThread<TxEventLogBatch> event_log_;
 
   struct EventContext {
     std::vector<uint8_t> buf;
