@@ -112,7 +112,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   info("about to return from submit_unvetted, scheduler.size() = {}, duration "
        "= {}",
        scheduler_->size(), timer.elapsed());
-  co_return;
+  co_await cg.reset_and_return();
+  panic("unreachable");
 }
 
 x23::Async<void>
@@ -469,7 +470,8 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
     cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
   }
 
-  co_return;
+  co_await cg.reset_and_return();
+  panic("unreachable");
 }
 
 void
@@ -570,16 +572,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   if (db_tip != last_committed_block_) {
     last_ = std::chrono::steady_clock::now();
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_await cg.reset_and_return(SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError));
+    panic("unreachable");
   }
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
     last_ = std::chrono::steady_clock::now();
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_await cg.reset_and_return(SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError));
+    panic("unreachable");
   }
 
   // Wait for hogdb to notify us of all HOG transfers that occurred in the
@@ -625,6 +629,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
     info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
+    cg.reset_no_yield();
   }
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
@@ -636,8 +641,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
     last_ = std::chrono::steady_clock::now();
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_await cg.reset_and_return(SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError));
+    panic("unreachable");
   }
 
   // Schedule the block and send the txs to the executors.
@@ -667,7 +673,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   info("nominate() took {}", timer.elapsed());
   last_ = std::chrono::steady_clock::now();
-  co_return nominated_block_cache_.nomination_result;
+
+  // return result and unlock cg
+  co_await cg.reset_and_return(nominated_block_cache_.nomination_result);
+  panic("unreachable");
 }
 
 x23::Async<bool>
@@ -847,6 +856,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     // [decrement_num_validations_in_progress()].
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
+    cg.reset_no_yield();
   }
   co_return result;
 }
@@ -868,7 +878,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
     last_ = std::chrono::steady_clock::now();
-    co_return SchedulerCommitOutcome::SchedulerCommitRace;
+
+    // unlock held locks before returning
+    validate_cg.reset_no_yield();
+    co_await commit_cg.reset_and_return(
+        SchedulerCommitOutcome::SchedulerCommitRace);
+    panic("unreachable");
   }
   x23::CoroGuard nominate_cg;
   co_await nominate_cg(nominated_block_cache_lock_);
@@ -879,7 +894,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     last_ = std::chrono::steady_clock::now();
-    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
+
+    // unlock held locks before returning
+    nominate_cg.reset_no_yield();
+    validate_cg.reset_no_yield();
+    co_await commit_cg.reset_and_return(
+        SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+    panic("unreachable");
   }
 
   x23::Vec<x23::Async<void>> handles;
@@ -968,7 +989,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
   scheduler_->increment_current_block();
   last_ = std::chrono::steady_clock::now();
-  co_return SchedulerCommitOutcome::SchedulerCommitOK;
+
+  // unlock held locks before returning
+  nominate_cg.reset_no_yield();
+  validate_cg.reset_no_yield();
+  co_await commit_cg.reset_and_return(
+      SchedulerCommitOutcome::SchedulerCommitOK);
+  panic("unreachable");
 }
 
 // TODO(jhumphri): After a commit, I think I need to check that
@@ -1022,6 +1049,9 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                              /*validated_block=*/true);
   auth_data_height_.store(height);
   auth_data_height_.broadcast(&default_threadpool());
+
+  co_await cg.reset_and_return();
+  panic("unreachable");
 }
 
 } // namespace hogd

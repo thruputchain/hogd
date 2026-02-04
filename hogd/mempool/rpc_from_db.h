@@ -56,6 +56,10 @@ public:
            "expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
     }
+    if (cg) {
+      co_await cg->reset_and_return();
+      panic("unreachable");
+    }
     co_return;
   }
 
@@ -68,10 +72,9 @@ public:
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
-    // @geoff to @jhumphri: Do we need the cg = nullptr here? The cg gets
-    // dropped automatically by going out of scope at the end of the function
-    // body
-    cg = nullptr; // cg.reset(); but CoroGuard also has a reset() method
+
+    co_await cg->reset_and_return();
+    panic("unreachable");
   }
 
   x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
@@ -81,6 +84,8 @@ public:
 
     CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
+    co_await cg.reset_and_return();
+    panic("unreachable");
   }
 
   x23::Async<void> reset_scheduler()
@@ -90,6 +95,8 @@ public:
 
     CHECK_PTR(scheduler_.get());
     scheduler_.reset();
+    co_await cg.reset_and_return();
+    panic("unreachable");
   }
 
   static x23::Async<x23::Vec<db_sched_client_t>> get_clients()

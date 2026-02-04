@@ -219,7 +219,8 @@ private:
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
-  static bool await_ready() noexcept { return false; }
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  bool await_ready() noexcept { return false; }
   template<typename Promise>
   auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
   {
@@ -227,7 +228,8 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     p.return_void(); // Coroutine must return void
     return finish_suspend(moriturus);
   }
-  static void await_resume() noexcept { std::unreachable(); }
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  [[noreturn]] void await_resume() noexcept { std::unreachable(); }
 
 protected:
   // Returns NULL if there is no other coroutine to resume, otherwise
@@ -337,12 +339,12 @@ CoroLock::unlock_and_return(LockerState *ls, T t)
 // reset_yield or reset_no_yield on destruction.  However, there's no
 // way to perform perform release_and_return() in a destructor since
 // it must be co_awaited.
-template<void (CoroLock::*OnDestroy)(CoroLock::LockerState *) = nullptr>
-struct CoroGuard : CoroLock::LockerState {
+template<void (CoroLock::*OnDestroy)(CoroLock::LockerState *)>
+struct CoroGuardImpl : CoroLock::LockerState {
   CoroLock *lkp_{};
 
-  CoroGuard() noexcept = default;
-  ~CoroGuard()
+  CoroGuardImpl() noexcept = default;
+  ~CoroGuardImpl()
   {
     if (lkp_) {
       if constexpr (OnDestroy != nullptr)
@@ -393,8 +395,9 @@ struct CoroGuard : CoroLock::LockerState {
         ->unlock_and_return(this, std::forward<decltype(t)>(t));
   }
 };
-using CoroGuardYield = CoroGuard<&CoroLock::unlock_yield>;
-using CoroGuardNoYield = CoroGuard<&CoroLock::unlock_no_yield>;
+using CoroGuard = CoroGuardImpl<nullptr>;
+using CoroGuardYield = CoroGuardImpl<&CoroLock::unlock_yield>;
+using CoroGuardNoYield = CoroGuardImpl<&CoroLock::unlock_no_yield>;
 
 // A CoroSharedLock is derived from a lock that provides a busy() test
 // (e.g., CoroLock, TestLock, or SharedLock) but also provides a
