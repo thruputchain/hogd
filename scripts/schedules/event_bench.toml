@@ -30,6 +30,7 @@ echo 'run bench server'
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 [jobs.host]
 bench_1 = "hog11"
@@ -76,6 +77,7 @@ echo 'shut down bench server'
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 [jobs.host]
 metrics_1 = "hog10"

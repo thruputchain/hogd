@@ -35,7 +35,7 @@ constexpr static size_t kBufferThreshold = 500_KiB;
 // TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
 
 x23::Async<void>
-EventBlockContext::add_event(TxEventLog const &event)
+EventBlockContext::add_event(TxEventLog event)
 {
   static PerThread<x23::Buf> serialize_buf;
   serialize_buf->resize_uninitialized(0);
@@ -55,7 +55,7 @@ EventBlockContext::add_event(TxEventLog const &event)
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
-  event_log_->push_back(event);
+  event_log_->emplace_back(std::move(event));
 }
 
 SHA256Hash
