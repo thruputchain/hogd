@@ -40,6 +40,7 @@ target_link_libraries(
 # Additional libraries that are not included by default (i.e., in hogd library)
 add_subdirectory(ramdb)
 add_subdirectory(indexer)
+add_subdirectory(block_explorer)
 # add_subdirectory(rpc)
 
 # Finally, build the hogdb, hogexec, and mempool executables
