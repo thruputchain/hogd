@@ -2,6 +2,7 @@
 
 #include "hogd/base/rpc_server.h"
 #include "hogd/event/rpc_context.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "rpc_types.hh"
@@ -22,7 +23,8 @@ public:
   {
     CHECK_EQ(strcmp(card.protocol.c_str(), version::kHogdProtocol()), 0);
     indexer_event_client_t client = co_await make_rpc_client<IndexerEvent1>(
-        server_address_to_sockaddr(card.address_for_event), /*retry=*/false);
+        server_address_to_sockaddr(card.address_for_event), /*retry=*/false,
+        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
     co_await ctx_.add_indexer(std::move(client));
     co_return;
   }
