@@ -1,17 +1,16 @@
 #include <cstdlib>
 #include <format>
-#include <future>
+#include <getopt.h>
 #include <optional>
 #include <print>
 #include <string>
-#include <unistd.h>
 
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/types.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/block_explorer/shared.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
@@ -43,8 +42,7 @@ block_explorer_init(const std::string &indexer_server_addr,
                                              /*retry=*/true,
                                              LoadgenRpc::kRpcMaxMessageSize)();
   const IndexerBlockExplorerIntroOutcome intro_result =
-      client.indexer_block_explorer_intro(
-          /*protocol=*/version::kHogdProtocol())();
+      client.indexer_block_explorer_intro(version::kHogdProtocol())();
   if (intro_result != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
     info("block explorer failed to connect to indexer (error: {})",
          intro_result);
@@ -52,6 +50,7 @@ block_explorer_init(const std::string &indexer_server_addr,
   }
 
   SHA256Hash tx_hash = HexArray(*tx_hash_raw).to_sha256();
+  info("parsed tx_hash is {}", HexArray(*tx_hash_raw).str());
   TxInfoResult tx_info_res = client.get_transaction_info(tx_hash)();
   if (tx_info_res.outcome() == TxInfoOutcome::TxInfoFound) {
     const TxInfo &tx_info = tx_info_res.info();
