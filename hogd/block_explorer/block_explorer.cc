@@ -56,10 +56,11 @@ block_explorer_init(const std::string &indexer_server_addr,
   if (tx_info_res.outcome() == TxInfoOutcome::TxInfoFound) {
     const TxInfo &tx_info = tx_info_res.info();
     info("tx info:");
+    info("hash = {}", *tx_hash_raw);
     info("block_height = {}", tx_info.height);
   }
   else {
-    info("could not find tx.");
+    info("could not find tx (hash = {}).", *tx_hash_raw);
   }
 
   return 0;
