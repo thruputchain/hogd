@@ -26,6 +26,7 @@ export MEMPOOL_EXECUTOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolExecutor
 export MEMPOOL_DB_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolDbServerPort)
 export MEMPOOL_EVENT_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolEventServerPort)
 export MEMPOOL_COORDINATOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolCoordinatorServerPort)
+export EVENT_INDEXER_PORT=$(./$BUILD_DIR/hogd/utils/get_port kEventIndexerServerPort)
 
 echo 'make sure bench servers are running'
 ./scripts/wait-port.sh hog4 $CI_CONTROL_PORT
@@ -55,6 +56,7 @@ kill_stale_processes() {
   ssh -n hog6 "killall hogexec" || true
   ssh -n hog8 "killall hogexec" || true
   ssh -n hog9 "killall event_exec" || true
+  ssh -n hog9 "killall indexer_exec" || true
   ssh -n hog11 "killall hogdb" || true
   ssh -n hog4 "killall chuckd" || true
   ssh -n hog4 "killall chuckd.dev" || true
@@ -90,6 +92,9 @@ echo 'check hogexec is running'
 
 echo 'launch event'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
+
+echo 'launch indexer'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/indexer/indexer_exec hog9:$EVENT_INDEXER_PORT $WORK_DIR/
 
 echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
