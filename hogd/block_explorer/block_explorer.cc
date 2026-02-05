@@ -26,7 +26,13 @@ block_explorer_init(const std::string &indexer_server_addr)
                                                  indexer_server_addr),
                                              /*retry=*/true,
                                              LoadgenRpc::kRpcMaxMessageSize)();
-  // client.event_indexer_intro(card)();
+  const IndexerBlockExplorerIntroOutcome intro_result =
+      client.event_indexer_intro(card)();
+  if (intro_result != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
+    info("block explorer failed to connect to indexer (error: {})",
+         intro_result);
+    return 1;
+  }
 
   return 0;
 }
