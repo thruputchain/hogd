@@ -56,7 +56,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   // released. With proper memory ordering in hogexec, all event RPCs should
   // already be complete, so this should succeed immediately. However, this
   // provides additional safety against any timing races.
-  context.initiate_shutdown();
+  //context.initiate_shutdown();
 
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
     auto *pool = x23::ThreadPool::get_thread_pool();
