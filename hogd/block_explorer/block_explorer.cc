@@ -1,8 +1,10 @@
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <optional>
 #include <print>
 #include <string>
+#include <unistd.h>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -17,9 +19,21 @@ namespace hogd {
 
 namespace {
 
-int
-block_explorer_init(const std::string &indexer_server_addr)
+void
+print_usage()
 {
+  std::println("usage: <indexer_server:port> [-t <tx_hash>]");
+}
+
+int
+block_explorer_init(const std::string &indexer_server_addr,
+                    const std::optional<std::string> &tx_hash)
+{
+  if (!tx_hash) {
+    print_usage();
+    return EXIT_FAILURE;
+  }
+
   // Register with the indexer server.
   indexer_block_explorer_client_t client =
       make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
@@ -31,7 +45,17 @@ block_explorer_init(const std::string &indexer_server_addr)
   if (intro_result != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
     info("block explorer failed to connect to indexer (error: {})",
          intro_result);
-    return 1;
+    return EXIT_FAILURE;
+  }
+
+  TxInfoResult tx_info_res = client.get_transaction_info(*tx_hash);
+  if (tx_info_res.outcome() == TxInfoOutcome::TxInfoFound) {
+    const TxInfo &tx_info = tx_info_res.info();
+    info("tx info:");
+    info("block_height = {}", tx_info.height);
+  }
+  else {
+    info("could not find tx.");
   }
 
   return 0;
@@ -51,13 +75,25 @@ main(int argc, char *argv[])
   }
   hogd::info("starting indexer!");
 
-  if (argc != 3) {
-    std::println("usage: <indexer_server:port>]");
+  std::optional<std::string> tx_hash;
+  int opt = 0;
+  while ((opt = getopt(argc, argv, "t:")) != -1) {
+    switch (opt) {
+    case 't':
+      tx_hash = optarg;
+      break;
+    default:
+      hogd::print_usage();
+      return EXIT_FAILURE;
+    }
+  }
+  if (optind >= argc) {
+    hogd::print_usage();
     return EXIT_FAILURE;
   }
 
-  const std::string indexer_server_addr = argv[1];
-  return hogd::block_explorer_init(indexer_server_addr);
+  const std::string indexer_server_addr = argv[optind];
+  return hogd::block_explorer_init(indexer_server_addr, tx_hash);
 };
 
 // NOLINTEND(bugprone-exception-escape)
