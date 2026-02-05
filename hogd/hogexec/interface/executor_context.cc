@@ -142,7 +142,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   }
 
   if (exec_res == ExecResult::ExecResultOK) {
-    pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
+    // Use release ordering to ensure the event RPC spawn is visible to
+    // other threads before they see the incremented counter.
+    pending_event_calls_.fetch_add(1, std::memory_order_release);
     // The release of the PerThreaadARC for this happens after the above
     // fetch_add; hence, when finish_block() is called, the above change is
     // visible.
@@ -182,7 +184,9 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   auto exec_res = syscall_handler.try_commit_transaction();
 
   if (exec_res == ExecResult::ExecResultOK) {
-    pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
+    // Use release ordering to ensure the event RPC spawn is visible to
+    // other threads before they see the incremented counter.
+    pending_event_calls_.fetch_add(1, std::memory_order_release);
     syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
@@ -200,14 +204,19 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
     event_error_ = err.error().code();
     error("event error: {}", std::to_underlying(event_error_.value()));
   }
-  pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
+  // Use release ordering to ensure all event RPC operations (including
+  // server-side add_event/write_event) are visible before the decrement.
+  pending_event_calls_.fetch_sub(1, std::memory_order_release);
 }
 
 x23::Async<std::optional<SystemErrorCode>>
 ExecutorContext::await_event_return()
 {
   int wait_count = 0;
-  while (pending_event_calls_.load(std::memory_order_relaxed) > 0) {
+  // Use acquire ordering to ensure we see all operations that happened
+  // before the release-store in log_event_return, including all server-side
+  // event operations.
+  while (pending_event_calls_.load(std::memory_order_acquire) > 0) {
     cpu_relax();
     wait_count++;
     if ((wait_count & 0xFF) == 0U) [[unlikely]] {
