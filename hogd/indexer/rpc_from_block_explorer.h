@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hogd/indexer/db.h"
+#include "hogd/version.h"
 #include "indexer.hh"
 #include "x23/async.h"
 
@@ -11,6 +12,15 @@ public:
   using rpc_service = IndexerBlockExplorer1;
 
   IndexerBlockExplorerRpc(IndexDB &db) : db_(db) {}
+
+  static x23::Async<IndexerBlockExplorerIntroOutcome>
+  indexer_block_explorer_intro(Protocol protocol)
+  {
+    if (strcmp(protocol.c_str(), version::kHogdProtocol()) != 0) {
+      co_return IndexerBlockExplorerIntroOutcome::IntroMismatchedProtocol;
+    }
+    co_return IndexerBlockExplorerIntroOutcome::IntroSuccess;
+  }
 
   x23::Async<TxInfoResult>
   get_transaction_info(const SignedTransactionHash &tx_hash)
