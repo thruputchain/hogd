@@ -51,7 +51,7 @@ main(int argc, char *argv[])
   }
   hogd::info("starting indexer!");
 
-  if (argc != 3) {
+  if (argc != 2) {
     std::println("usage: <indexer_server:port>]");
     return EXIT_FAILURE;
   }
