@@ -80,6 +80,7 @@ public:
 
   x23::Async<void> await_abandon();
 
+  /*
   x23::Async<void>
   send_events_to_indexers(BlockHeight block_height,
                           std::vector<indexer_event_client_t> &indexers)
@@ -145,7 +146,7 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  PerThread<TxEventLogBatch> event_log_;
+ // PerThread<TxEventLogBatch> event_log_;
 
   struct EventContext {
     std::vector<uint8_t> buf;

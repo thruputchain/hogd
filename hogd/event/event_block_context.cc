@@ -55,7 +55,7 @@ EventBlockContext::add_event(TxEventLog event)
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
-  event_log_->emplace_back(std::move(event));
+ // event_log_->emplace_back(std::move(event));
 }
 
 SHA256Hash
