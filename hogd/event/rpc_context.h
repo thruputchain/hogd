@@ -57,6 +57,7 @@ public:
     x23::CoroGuard cg;
     co_await cg(lock_);
     indexers_.push_back(std::move(indexer));
+    co_await cg.reset_and_return();
   }
 
 private:

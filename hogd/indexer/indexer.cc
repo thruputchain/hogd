@@ -15,6 +15,7 @@
 #include "hogd/indexer/shared.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 
@@ -45,6 +46,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
 
   // Create the RPC server that the event server talks to.
   RpcServer<IndexerEventRpc> event(db);
+  event->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(event.start_server(kIndexerEventServerPort),
            uint16_t{kIndexerEventServerPort});
 
@@ -59,6 +61,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr)
 
   // Create the RPC server that the block explorers talk to.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db);
+  block_explorer->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(block_explorer.start_server(kIndexerBlockExplorerServerPort),
            uint16_t{kIndexerBlockExplorerServerPort});
 
