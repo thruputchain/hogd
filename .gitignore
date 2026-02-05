@@ -2,7 +2,6 @@
 *.a
 *.core
 *.d
-*.data
 *.dev
 *.json
 !.devcontainer/devcontainer.json
@@ -26,6 +25,8 @@ Testing/**
 bcheck/**
 build/**
 metrics_history
+perf.data
+perf.data.old
 remote-exec.env
 scp/
 
