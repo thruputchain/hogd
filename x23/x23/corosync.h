@@ -124,10 +124,8 @@ public:
   }
 
   // Release the lock and invoke the next coroutine waiting for the
-  // lock before returning.  If you are returning from the coroutine
-  // right after unlocking, you should call unlock_and_return, which
-  // should be more efficient and reduce stack space utilization.
-  void unlock_yield(LockerState *ls)
+  // lock before returning.
+  void unlock(LockerState *ls)
   {
     if (std::coroutine_handle<> h = next(ls))
       h();
@@ -135,21 +133,18 @@ public:
 
   // Release the lock and schedule the next locker in a different
   // thread.
-  void unlock_no_yield(LockerState *ls, ThreadPool *pool)
+  void unlock_no_yield(LockerState *ls,
+                       ThreadPool *pool = ThreadPool::get_thread_pool())
   {
     if (CoroHandle h = next(ls))
       detail::resume_in_another_thread(h, pool);
-  }
-  void unlock_no_yield(LockerState *ls)
-  {
-    unlock_no_yield(ls, ThreadPool::get_thread_pool());
   }
 
   Async<void> await_free()
   {
     LockerState ls;
     co_await lock(&ls);
-    unlock_yield(&ls);
+    unlock(&ls);
     // Note: it's important that unlock resumes the next coroutine
     // before returning.  Hence, if there's a big chain of threads
     // each calling await_free() in a loop, then they will all return
@@ -229,7 +224,7 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     return finish_suspend(moriturus);
   }
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  [[noreturn]] void await_resume() noexcept { std::unreachable(); }
+  void await_resume() noexcept { std::unreachable(); }
 
 protected:
   // Returns NULL if there is no other coroutine to resume, otherwise
@@ -299,60 +294,22 @@ CoroLock::unlock_and_return(LockerState *ls, T t)
   return AwaitReleaseAndReturn<T>{*this, ls, std::move(t)};
 }
 
-// A CoroGuard is similar to a lock_guard for a CoroLock, except that
-// by default you must release the lock before its destruction.  The
-// syntax is different from a lock_guard because a CoroLock requires
-// LockerState to persist for the duration of the lock, so the
-// CoroGuard holds the LockerState.  To ensure the state lives until
-// the lock is released, the CoroGuard must be declared before the
-// lock is acquired, as in:
+// A CoroGuard is similar to a lock_guard for a CoroLock.  However,
+// the syntax is different because a CoroLock requires LockerState to
+// persist for the duration of the lock, so the CoroGuard holds the
+// LockerState.  To ensure the state lives until the lock is released,
+// the CoroGuard must be declared before the lock is acquired, as in:
 //
 //   CoroLock lk;
 //   ...
 //
 //     CoroGuard g;
 //     co_await g(lk);
-//
-// It is an error to destroy a CoroGuard that holds a lock because
-// there are multiple ways to release a lock, and the CoroGuard
-// doesn't know which you want:
-//
-//   reset_yield() - releases the lock and immediately wakes any
-//     waiting coroutines, which is more efficient but could overflow
-//     the stack if you have a huge number of waiters.
-//
-//   reset_no_yield() - releases the lock and schedules any waiting
-//     coroutines in another thread, returning immediately.  This
-//     protects against stack overflows and certain deadlocks, but is
-//     less efficient.
-//
-//   co_await release_and_return() or
-//   co_await release_and_return(T t) - releases the lock and destroys
-//     the invoking coroutine, as if you had called co_return or
-//     co_return t.  If releasing the lock is the last thing you do in
-//     a coroutine, this gives the best of both worlds--efficient
-//     resumption of the next coroutine without any danger of blowing
-//     out the stack.
-//
-// If you don't want to release the lock explicitly, CoroGuardYield
-// and CoroGuardNoYield are versions of CoroGuard that perform a
-// reset_yield or reset_no_yield on destruction.  However, there's no
-// way to perform perform release_and_return() in a destructor since
-// it must be co_awaited.
-template<void (CoroLock::*OnDestroy)(CoroLock::LockerState *)>
-struct CoroGuardImpl : CoroLock::LockerState {
+struct CoroGuard : CoroLock::LockerState {
   CoroLock *lkp_{};
 
-  CoroGuardImpl() noexcept = default;
-  ~CoroGuardImpl()
-  {
-    if (lkp_) {
-      if constexpr (OnDestroy != nullptr)
-        (lkp_->*OnDestroy)(this);
-      else
-        panic("Destroying CoroGuard that holds lock");
-    }
-  }
+  CoroGuard() noexcept = default;
+  ~CoroGuard() { reset(); }
 
   // Must be co_awaited and must be called on lvalue CoroGuard
   [[nodiscard]] auto operator()(std::derived_from<CoroLock> auto &lk) &
@@ -362,16 +319,16 @@ struct CoroGuardImpl : CoroLock::LockerState {
     return lkp_->lock(this);
   }
 
+  void reset()
+  {
+    if (lkp_)
+      std::exchange(lkp_, nullptr)->unlock(this);
+  }
+
   void reset_no_yield(ThreadPool *pool = ThreadPool::get_thread_pool())
   {
     if (lkp_)
       std::exchange(lkp_, nullptr)->unlock_no_yield(this, pool);
-  }
-
-  void reset_yield()
-  {
-    if (lkp_)
-      std::exchange(lkp_, nullptr)->unlock_yield(this);
   }
 
   // reset_and_return can only be called when the CoroGuard contains a
@@ -395,9 +352,6 @@ struct CoroGuardImpl : CoroLock::LockerState {
         ->unlock_and_return(this, std::forward<decltype(t)>(t));
   }
 };
-using CoroGuard = CoroGuardImpl<nullptr>;
-using CoroGuardYield = CoroGuardImpl<&CoroLock::unlock_yield>;
-using CoroGuardNoYield = CoroGuardImpl<&CoroLock::unlock_no_yield>;
 
 // A CoroSharedLock is derived from a lock that provides a busy() test
 // (e.g., CoroLock, TestLock, or SharedLock) but also provides a

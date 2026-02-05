@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <type_traits>
 #include <vector>
 
 #include "event.hh"
@@ -18,6 +19,7 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/allocator.h"
@@ -29,7 +31,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
-#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -105,6 +106,8 @@ public:
     for (x23::Async<void> &handle : handles) {
       co_await handle;
     }
+    handles.clear();
+    co_return;
   }
 
 private:

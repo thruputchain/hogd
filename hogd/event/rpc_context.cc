@@ -31,12 +31,10 @@ EventRPCContext::open_block(BlockID block_id)
                                     std::forward_as_tuple(block_id),
                                     std::forward_as_tuple(work_directory_,
                                                           block_id));
-  EventStatus<void> status = EventStatus<void>{};
   if (!inserted) {
-    status = EventError{EventErrorCode::kExists};
+    co_return EventError{EventErrorCode::kExists};
   }
-  co_await g.reset_and_return(status);
-  panic("unreachable");
+  co_return EventStatus<void>();
 }
 
 x23::Async<EventStatus<SHA256Hash>>
@@ -47,8 +45,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
-    co_await g.reset_and_return(EventError{EventErrorCode::kBadBlockID});
-    panic("unreachable");
+    co_return EventError{EventErrorCode::kBadBlockID};
   }
 
   auto &context = it->second;
@@ -79,8 +76,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   info("time to get hash: {} ns, time to finish file: {} ns, time to send "
        "events to indexers: {} ns, time to gc context + rename: {} ns",
        ts2 - ts, ts3 - ts2, ts4 - ts3, ts5 - ts4);
-  co_await g.reset_and_return(out_hash);
-  panic("unreachable");
+  co_return out_hash;
 }
 
 x23::Async<EventStatus<void>>
@@ -91,8 +87,7 @@ EventRPCContext::abandon_block(BlockID block_id)
 
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
-    co_await g.reset_and_return(EventError{EventErrorCode::kBadBlockID});
-    panic("unreachable");
+    co_return EventError{EventErrorCode::kBadBlockID};
   }
   auto &context = it->second;
 
@@ -101,8 +96,7 @@ EventRPCContext::abandon_block(BlockID block_id)
   if (context.initiate_shutdown()) {
     gc_context_internal(it, g);
   }
-  co_await g.reset_and_return(EventStatus<void>{});
-  panic("unreachable");
+  co_return EventStatus<void>();
 }
 
 x23::Async<void>
@@ -114,9 +108,6 @@ EventRPCContext::gc_context(BlockID block_id)
   auto it = event_block_contexts_.find(block_id);
   assert(it != event_block_contexts_.end());
   gc_context_internal(it, g);
-
-  co_await g.reset_and_return();
-  panic("unreachable");
 }
 
 void
@@ -171,13 +162,11 @@ EventRPCContext::get_context_slow(BlockID block_id)
 
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
-    co_await g.reset_and_return(nullptr);
-    panic("unreachable");
+    co_return nullptr;
   }
 
   if (!it->second.try_acquire_reference()) {
-    co_await g.reset_and_return(nullptr);
-    panic("unreachable");
+    co_return nullptr;
   }
 
   // put the context in the threadlocal cache so we do not pay this cost next
@@ -186,8 +175,7 @@ EventRPCContext::get_context_slow(BlockID block_id)
     std::scoped_lock g(cache_->mtx_);
     cache_->contexts_.emplace(block_id, &it->second);
   }
-  co_await g.reset_and_return(&it->second);
-  panic("unreachable");
+  co_return &it->second;
 }
 
 } // namespace hogd

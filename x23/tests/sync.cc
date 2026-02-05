@@ -104,17 +104,17 @@ TEST(CoroLock, MutualExclusion)
     CoroLock lock;
     [](std::atomic_bool &ready, int &n, CoroLock &lock) -> Detached {
       co_await pool.bg();
-      CoroGuardNoYield g1;
+      CoroGuard g1;
       co_await g1(lock);
       ready = true;
       ready.notify_all();
       usleep(50'000);
       n = 1;
-      g1.reset_no_yield();
+      g1.reset();
     }(ready, n, lock);
     while (!ready)
       ready.wait(false);
-    CoroGuardNoYield g2;
+    CoroGuard g2;
     co_await g2(lock);
     EXPECT_EQ(n, 1);
     co_return;
@@ -125,14 +125,14 @@ TEST(CoroLock, ManyLockers)
 {
   [] -> Async<void> {
     CoroLock lock;
-    CoroGuardNoYield g;
+    CoroGuard g;
     co_await g(lock);
     std::atomic_int lastid = -1;
 
     for (int i = 0; i < 64; ++i)
       [](CoroLock &lock, std::atomic_int &lastid, int myid) -> Detached {
         co_await pool.bg();
-        CoroGuardNoYield g;
+        CoroGuard g;
         co_await g(lock);
         EXPECT_GE(lastid, 0);
         EXPECT_NE(lastid, myid);
@@ -143,7 +143,7 @@ TEST(CoroLock, ManyLockers)
 
     usleep(50'000);
     lastid = 0x1'0000;
-    g.reset_no_yield();
+    g.reset();
     co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
@@ -156,13 +156,13 @@ TEST(CoroSharedLock, MutualExclusion)
     CoroSharedLock<> lock(pool);
     [](std::atomic_bool &ready, int &n, CoroSharedLock<> &lock) -> Detached {
       co_await pool.bg();
-      CoroGuardNoYield g1;
+      CoroGuard g1;
       co_await g1(lock);
       ready = true;
       ready.notify_all();
       usleep(50'000);
       n = 1;
-      g1.reset_no_yield();
+      g1.reset();
     }(ready, n, lock);
     while (!ready)
       ready.wait(false);
@@ -181,7 +181,7 @@ TEST(CoroSharedLock, ManyReaders)
     CoroSharedLock lock(pool);
     [](auto &ready, auto &nthreads, CoroSharedLock<> &lock) -> Detached {
       co_await pool.bg();
-      CoroGuardNoYield g;
+      CoroGuard g;
       co_await g(lock);
       ready = true;
       usleep(50'000);
