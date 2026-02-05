@@ -21,9 +21,11 @@ int
 block_explorer_init(const std::string &indexer_server_addr)
 {
   // Register with the indexer server.
-  // event_indexer_client_t client = make_rpc_client<EventIndexer1>(
-  //     server_address_to_sockaddr(event_server_addr), /*retry=*/true,
-  //     LoadgenRpc::kRpcMaxMessageSize)();
+  indexer_block_explorer_client_t client =
+      make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
+                                                 indexer_server_addr),
+                                             /*retry=*/true,
+                                             LoadgenRpc::kRpcMaxMessageSize)();
   // client.event_indexer_intro(card)();
 
   return 0;
