@@ -13,7 +13,7 @@ public:
 
   IndexerBlockExplorerRpc(IndexDB &db) : db_(db) {}
 
-  x23::Async<IndexerBlockExplorerIntroOutcome>
+  static x23::Async<IndexerBlockExplorerIntroOutcome>
   indexer_block_explorer_intro(Protocol protocol)
   {
     if (strcmp(protocol.c_str(), version::kHogdProtocol()) != 0) {
