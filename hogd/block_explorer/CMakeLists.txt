@@ -1,7 +1,7 @@
 add_library(block_explorer_lib STATIC
 )
 
-target_link_libraries(indexer PUBLIC
+target_link_libraries(block_explorer_lib PUBLIC
     hogd
 )
 
