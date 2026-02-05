@@ -1,9 +1,9 @@
-add_library(block_explorer_lib STATIC
-)
-
-target_link_libraries(block_explorer_lib PUBLIC
-    hogd
-)
+# add_library(block_explorer_lib STATIC
+# )
+#
+# target_link_libraries(block_explorer_lib PUBLIC
+#     hogd
+# )
 
 add_executable(
   block_explorer
@@ -11,5 +11,6 @@ add_executable(
 )
 target_link_libraries(
   block_explorer
-  block_explorer_lib
+  hogd
+  # block_explorer_lib
 )
