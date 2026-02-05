@@ -77,8 +77,6 @@ AuthChangeSubscriptionManager::publish_auth_changes(
       continue;
     }
   }
-  co_await guard.reset_and_return();
-  panic("unreachable");
 }
 
 x23::Async<std::optional<AuthChangeSubscriptionManager::auth_db_client_t>>
@@ -126,8 +124,7 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   [[maybe_unused]] auto [_, inserted] =
       auth_db_clients_.emplace(card, std::move(*client));
   assert(inserted);
-  co_await guard.reset_and_return(true);
-  panic("unreachable");
+  co_return true;
 }
 
 } // namespace hogd

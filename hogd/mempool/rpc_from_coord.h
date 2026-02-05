@@ -3,13 +3,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <functional>
 #include <memory>
-#include <string>
 #include <unordered_map>
 #include <utility>
 
-#include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
@@ -17,13 +14,11 @@
 #include "exec_result.hh"
 #include "genesis.hh"
 #include "hogd/auth/auth_server.h"
-#include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -34,7 +29,6 @@
 #include "parallel.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
-#include "sched_db.hh"
 #include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -322,9 +316,6 @@ private:
     x23::CoroGuard cg;
     co_await cg(validated_block_cache_lock_);
     num_validations_in_progress_++;
-
-    co_await cg.reset_and_return();
-    panic("unreachable");
   }
   x23::Async<void> decrement_num_validations_in_progress()
   {
@@ -332,9 +323,6 @@ private:
     co_await cg(validated_block_cache_lock_);
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
-
-    co_await cg.reset_and_return();
-    panic("unreachable");
   }
 
   x23::Async<void> auth_data_changed(BlockHeight height,

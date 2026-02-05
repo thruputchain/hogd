@@ -91,8 +91,8 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   if (!accounts_vec.empty()) {
     co_await read_average_hog_ages(accounts_vec);
   }
-  co_await cg.reset_and_return(accounts);
-  panic("unreachable");
+  cg.reset();
+  co_return accounts;
 }
 
 x23::Async<std::unordered_set<ContractAddress>>
@@ -122,8 +122,8 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
   if (!accounts_vec.empty()) {
     co_await read_average_hog_ages(accounts_vec);
   }
-  co_await cg.reset_and_return(accounts);
-  panic("unreachable");
+  cg.reset();
+  co_return accounts;
 }
 
 Scheduler::AccountKey
@@ -233,8 +233,6 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   for (const ContractAddress &account : accounts) {
     ready_accounts_.insert(get_account_key(account));
   }
-  co_await cg.reset_and_return();
-  panic("unreachable");
 }
 
 void
@@ -466,8 +464,6 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
-  co_await cg.reset_and_return();
-  panic("unreachable");
 }
 
 bool
@@ -763,9 +759,6 @@ Scheduler::remove_from_scheduler(
   double c = timer.elapsed();
 
   info("remove_from_scheduler a {}, b-a {}, c-b {}", a, b - a, c - b);
-
-  co_await cg.reset_and_return();
-  panic("unreachable");
 }
 
 } // namespace hogd
