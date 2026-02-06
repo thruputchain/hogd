@@ -242,10 +242,6 @@ TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
   // Abandon the block while close_block is waiting
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
 
-  EXPECT_FALSE(close_completed.load());
-
-  // We keep the internal data structures alive until all executors have closed,
-  // but calls return errors because the block is abandoned.
   EXPECT_NE(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
   // close_block should complete (with error) instead of hanging

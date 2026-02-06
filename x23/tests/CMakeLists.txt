@@ -78,7 +78,9 @@ if(BUILD_FUZZERS)
   target_link_libraries(fuzz_deserialize x23 xdrtest)
   use_x23(fuzz_deserialize)
   target_compile_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
-  target_link_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
+  # libclang_rt.fuzzer is built against libstdc++, but this project uses
+  # libc++. Suppress automatic stdlib linking and explicitly link both.
+  target_link_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address -nostdlib++ -lc++ -lstdc++)
 endif()
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})
