@@ -103,7 +103,9 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   co_await indexers_handle;
   auto ts4 = x23::fastclock::now();
   co_await context.get().finish_file(out_hash);
-  gc_context_internal(it, g);
+  if (it->second.initiate_shutdown()) {
+    gc_context_internal(it, g);
+  }
   auto ts5 = x23::fastclock::now();
   info("time to get hash: {} ns, time to finish file: {} ns, time to send "
        "events to indexers: {} ns, time to gc context + rename: {} ns",
