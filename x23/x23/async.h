@@ -297,15 +297,21 @@ public:
     do_exception(std::current_exception());
   }
   struct TailCoro {
-    std::coroutine_handle<> caller_;
+    Awaitable *self_;
     bool await_ready() const noexcept { return false; }
-    auto await_suspend(std::coroutine_handle<> /*unused*/) const noexcept
+    // Publish kReturning here in await_suspend, not in
+    // final_suspend.  The compiler writes the suspend-point index to
+    // the coroutine frame between final_suspend() returning and
+    // await_suspend() being called.  Publishing kReturning earlier
+    // lets the caller destroy the frame while that write is
+    // in-flight.
+    auto await_suspend(std::coroutine_handle<>) const noexcept
     {
-      return caller_;
+      return self_->non_null_caller();
     }
     void await_resume() const noexcept { std::unreachable(); }
   };
-  TailCoro final_suspend() noexcept { return {non_null_caller()}; }
+  TailCoro final_suspend() noexcept { return {this}; }
 
   //
   // Functions for use on the caller/awaiter/"future" side
