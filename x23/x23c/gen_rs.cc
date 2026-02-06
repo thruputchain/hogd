@@ -1120,7 +1120,6 @@ gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
 #![allow(non_upper_case_globals)]
 #![allow(unused_imports)]
 #![allow(dead_code)]
-#![allow(unexpected_cfgs)]
 #![allow(unused_variables)]
 #![allow(clippy::unnecessary_cast)]
 
@@ -1145,7 +1144,7 @@ use core::ops::{{Deref, DerefMut}};
 {1}
 )",
                   gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
-                  gs.cfg("serde_arrays", "use ::serde_arrays;"));
+                  gs.cfg("serde", "use ::serde_arrays;"));
 
   return preamble + gs.top_ + R"(
 //
