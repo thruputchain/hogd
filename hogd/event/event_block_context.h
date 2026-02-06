@@ -77,12 +77,20 @@ public:
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
   x23::Async<void> await_abandon();
+  x23::Async<bool> is_abandoned()
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    co_return state_ == BlockState::kAbandoned;
+  }
 
   // Executor handle tracking - count of executors with open handles to this
   // block
   void executor_open_block();
   void executor_close_block();
-  x23::Async<void> await_all_executors_closed();
+  // Waits for all executors to close.
+  // Returns true if all executors closed normally, false if block was abandoned
+  x23::Async<bool> await_all_executors_closed();
 
   x23::Async<void>
   send_events_to_indexers(BlockHeight block_height,

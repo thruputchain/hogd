@@ -174,7 +174,9 @@ EventBlockContext::await_pending_writes_done()
       co_await g(lock_);
       x23assert(looped || state_ == BlockState::kActive ||
                 state_ == BlockState::kAbandoned);
-      state_ = BlockState::kFinishing;
+      if (state_ == BlockState::kActive) {
+        state_ = BlockState::kFinishing;
+      }
       looped = true;
       if (pending_write_count_ == 0) {
         co_return;
@@ -238,6 +240,12 @@ EventBlockContext::await_abandon()
     x23::CoroGuard g;
     co_await g(lock_);
     state_ = BlockState::kAbandoned;
+    all_executors_closed_.store(true);
+    auto *pool = x23::ThreadPool::get_thread_pool();
+    if (!pool) {
+      pool = &default_threadpool();
+    }
+    all_executors_closed_.broadcast(pool);
   }
   co_await await_pending_writes_done();
   co_return;
@@ -261,7 +269,10 @@ EventBlockContext::executor_open_block()
 void
 EventBlockContext::executor_close_block()
 {
-  if (open_executor_handles_.fetch_sub(1, std::memory_order_release) == 1) {
+  uint32_t prev =
+      open_executor_handles_.fetch_sub(1, std::memory_order_release);
+  x23assert(prev > 0); // Prevent underflow - detects mismatched open/close
+  if (prev == 1) {
     all_executors_closed_.store(true);
     auto *pool = x23::ThreadPool::get_thread_pool();
     if (!pool) {
@@ -271,12 +282,18 @@ EventBlockContext::executor_close_block()
   }
 }
 
-x23::Async<void>
+x23::Async<bool>
 EventBlockContext::await_all_executors_closed()
 {
   while (open_executor_handles_.load(std::memory_order_acquire) > 0) {
     co_await all_executors_closed_.wait(false);
+    x23::CoroGuard g;
+    co_await g(lock_);
+    if (state_ == BlockState::kAbandoned) {
+      co_return false;
+    }
   }
+  co_return true; // All executors closed normally
 }
 
 x23::Async<void>

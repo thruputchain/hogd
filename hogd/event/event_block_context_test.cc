@@ -363,6 +363,46 @@ TEST_F(EventBlockContextTest, AwaitWithNoExecutors)
   finish_file(context);
 }
 
+// Note: We have an assertion in executor_close_block() that prevents underflow
+// (calling close without a matching open), but it's not practical to test with
+// EXPECT_DEATH due to destructor assertions conflicting with the death test
+// framework.
+
+// Test multiple concurrent awaits (validates futex broadcast)
+TEST_F(EventBlockContextTest, MultipleConcurrentAwaits)
+{
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+
+  std::atomic<int> completed_awaits = 0;
+
+  // Spawn 3 concurrent awaiters
+  auto awaiter = [&context, &completed_awaits](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    co_await context.await_all_executors_closed();
+    completed_awaits.fetch_add(1, std::memory_order_release);
+  };
+
+  auto async1 = awaiter();
+  auto async2 = awaiter();
+  auto async3 = awaiter();
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+  EXPECT_EQ(completed_awaits.load(), 0);
+
+  // Close executor - all 3 awaits should complete
+  context.executor_close_block();
+
+  async1();
+  async2();
+  async3();
+
+  EXPECT_EQ(completed_awaits.load(), 3);
+
+  finish_file(context);
+}
+
 } // namespace hogd
 
 int

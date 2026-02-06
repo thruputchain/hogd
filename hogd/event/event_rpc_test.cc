@@ -216,4 +216,41 @@ TEST_F(EventRpcTest, TestAbandonBlockThenCloseBlock)
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCBadBlockID);
 }
 
+// Test abandoning a block while close_block is waiting for executors
+TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  // Start close_block in background (will wait for executor)
+  std::atomic<bool> close_completed = false;
+  auto async = [&](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    auto result = co_await mempool_rpc.eventsched_close_block(1, 1);
+    // Should get an error because block was abandoned
+    EXPECT_NE(result.error(), RPCError::kRPCNone);
+    close_completed.store(true);
+  }();
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // Abandon the block while close_block is waiting
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+
+  EXPECT_FALSE(close_completed.load());
+
+  // We keep the internal data structures alive until all executors have closed,
+  // but calls return errors because the block is abandoned.
+  EXPECT_NE(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  // close_block should complete (with error) instead of hanging
+  async();
+  EXPECT_TRUE(close_completed.load());
+}
+
 } // namespace hogd

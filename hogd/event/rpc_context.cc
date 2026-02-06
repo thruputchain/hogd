@@ -54,9 +54,14 @@ EventRPCContext::wait_for_executors_closed(BlockID block_id)
     x23assert(context->try_acquire_reference());
   }
 
-  co_await context->get().await_all_executors_closed();
-  [[maybe_unused]] bool released = context->release_reference();
-  x23assert(!released);
+  bool success = co_await context->get().await_all_executors_closed();
+  bool released = context->release_reference();
+  if (released) {
+    co_await gc_context(block_id);
+  }
+  if (!success) {
+    co_return EventError{EventErrorCode::kBadBlockID};
+  }
   co_return EventStatus<void>{};
 }
 
@@ -76,7 +81,6 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return EventError{EventErrorCode::kBadBlockID};
   }
   auto &context = it->second;
-
   auto ts = x23::fastclock::now();
 
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
@@ -118,7 +122,6 @@ EventRPCContext::abandon_block(BlockID block_id)
     co_return EventError{EventErrorCode::kBadBlockID};
   }
   auto &context = it->second;
-
   co_await context.get().await_abandon();
 
   if (context.initiate_shutdown()) {
