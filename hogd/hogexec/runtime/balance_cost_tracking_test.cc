@@ -46,18 +46,15 @@ protected:
                      token_contract);
   }
 
-  static std::tuple<uint64_t, uint64_t>
-  make_amount(uint128_t amount)
+  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
 
-  static std::tuple<int64_t, uint64_t>
-  make_difference(int128_t amount)
+  static std::tuple<int64_t, uint64_t> make_difference(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
-
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
