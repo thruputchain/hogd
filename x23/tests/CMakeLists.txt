@@ -72,4 +72,13 @@ use_x23(bench)
 target_link_libraries(bench x23 benchmark::benchmark xdrtest)
 endif()
 
+option(BUILD_FUZZERS "Build fuzz targets" OFF)
+if(BUILD_FUZZERS)
+  add_executable(fuzz_deserialize EXCLUDE_FROM_ALL fuzz_deserialize.cc)
+  target_link_libraries(fuzz_deserialize x23 xdrtest)
+  use_x23(fuzz_deserialize)
+  target_compile_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
+  target_link_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
+endif()
+
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})

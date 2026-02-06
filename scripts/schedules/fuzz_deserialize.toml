@@ -1,0 +1,45 @@
+name = "fuzz_deserialize_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+echo 'build clang fuzzer'
+./scripts/build.sh -d build/fuzz -c clang -f "-fsanitize=address" -t Release -x "-DBUILD_FUZZERS=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run fuzz_deserialize for 20 minutes'
+mkdir -p ${HOG_DUMP_DIR}/core_dumps
+./build/fuzz/x23/tests/fuzz_deserialize \
+    -max_total_time=1200 \
+    -max_len=4096 \
+    -artifact_prefix=${HOG_DUMP_DIR}/core_dumps/fuzz_crash_
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+
+[jobs.host]
+fuzz_1 = "?"

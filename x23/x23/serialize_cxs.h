@@ -483,6 +483,7 @@ struct CxsSerializer<X> {
     if (size > X::max_size()) [[unlikely]]
       throw CxsBadInput("length {} exceeds maximum deserializing {}", size,
                         xdr_type_name<X>());
+    check_size(data, size);
     value.resize_uninitialized(size);
     if (size > 0) {
       std::memcpy(value.data(), data.data(), size);
