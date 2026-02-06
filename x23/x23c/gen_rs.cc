@@ -27,6 +27,7 @@ using std::string_literals::operator""s;
 struct GenRs {
   std::set<std::string> const &recursive_types;
   std::set<std::string> const &rust_features;
+  std::set<std::string> const &rust_no_features;
 
   string top_;
   string bottom_;
@@ -228,15 +229,21 @@ struct GenRs {
     if (rust_features.contains(feature)) {
       return std::format("#[{}]", attr);
     }
+    if (rust_no_features.contains(feature)) {
+      return "";
+    }
     return std::format("#[cfg_attr(feature = \"{}\", {})]", feature, attr);
   }
 
-  string cfg(const std::string &feature)
+  string cfg(const std::string &feature, const std::string &value)
   {
     if (rust_features.contains(feature)) {
+      return value;
+    }
+    if (rust_no_features.contains(feature)) {
       return "";
     }
-    return std::format("#[cfg(feature = \"{}\")]", feature);
+    return std::format("#[cfg(feature = \"{}\")]\n{}", feature, value);
   }
 
   static optional<string> substring_removed(std::string_view str,
@@ -678,16 +685,18 @@ impl {0} {{
             }
         }
         */
-        prtop("{}\n", cfg("xdrs"));
-        prtop("impl<'r> ReadXDR<'r> for &'r {} {{\n", outer_id);
-        prtop("    fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> "
-              "xdrs::ReadResult<Self> {{\n");
-        prtop("        let arr: &[u8; {}] = xdrs::read_xdr(r)?;\n",
-              *array_size);
-        prtop("        let val = Self::from(arr);\n");
-        prtop("        Ok(val)\n");
-        prtop("    }}\n");
-        prtop("}}\n");
+
+        auto xdrs_read = std::format(R"(
+impl<'r> ReadXDR<'r> for &'r {1} {{
+  fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{
+      let arr: &[u8; {0}] = xdrs::read_xdr(r)?;
+      let val = Self::from(arr);
+      Ok(val)
+  }}
+}}
+)",
+                                     *array_size, outer_id);
+        prtop("{}\n", cfg("xdrs", xdrs_read));
       }
     }
   }
@@ -1094,9 +1103,10 @@ GenRs::type_name(const Declaration &d, bool generate,
 
 string
 gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
-       std::set<std::string> const &rust_features)
+       std::set<std::string> const &rust_features,
+       std::set<std::string> const &rust_no_features)
 {
-  GenRs gs(recursive_types, rust_features);
+  GenRs gs(recursive_types, rust_features, rust_no_features);
   std::string preamble =
       R"(// -*-Rust-*-
 // Generated Code: DO NOT CHECK IN
@@ -1119,25 +1129,23 @@ use core::option::Option;
 use core::ops::{{Deref, DerefMut}};
 
 {0}
-use std::io::{{Read, Write}};
-
 {1}
-use xdrs::*;
 {2}
-use xdrs::xdr_repr::*;
 
 )",
-                  gs.cfg("std"), gs.cfg("xdrs"), gs.cfg("spec"));
+                  gs.cfg("std", "use std::io::{Read, Write};"),
+                  gs.cfg("xdrs", "use xdrs::*;"),
+                  gs.cfg("spec", "use xdrs::xdr_repr::*;"));
 
   gs.process(*defs);
 
-  preamble += std::format(R"(
+  preamble +=
+      std::format(R"(
 {0}
-use ::serde::{{Serialize, Deserialize}};
-{0}
-use ::serde_arrays;
+{1}
 )",
-                          gs.cfg("serde"));
+                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
+                  gs.cfg("serde_arrays", "use ::serde_arrays;"));
 
   return preamble + gs.top_ + R"(
 //
