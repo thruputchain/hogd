@@ -84,36 +84,9 @@ public:
   void executor_close_block();
   x23::Async<void> await_all_executors_closed();
 
-  /*
   x23::Async<void>
   send_events_to_indexers(BlockHeight block_height,
-                          std::vector<indexer_event_client_t> &indexers)
-  {
-    TxEventLogBatch full_event_log;
-    {
-      std::unique_lock ul = event_log_.lock_threads();
-      event_log_.for_each(ul, [&full_event_log](
-                                  TxEventLogBatch &per_thread_event_log) {
-        full_event_log.append(
-            std::make_move_iterator(per_thread_event_log.begin()),
-            std::make_move_iterator(per_thread_event_log.end()));
-        per_thread_event_log.clear();
-      });
-    }
-
-    std::vector<x23::Async<void>> handles;
-    handles.reserve(indexers.size());
-
-    for (indexer_event_client_t &indexer : indexers) {
-      handles.push_back(
-          indexer.indexer_event_process_events(block_height, full_event_log));
-    }
-    for (x23::Async<void> &handle : handles) {
-      co_await handle;
-    }
-    handles.clear();
-    co_return;
-  }*/
+                          std::vector<indexer_event_client_t> &indexers);
 
 private:
   x23::Async<void> write_event(std::span<const uint8_t> data);
@@ -150,7 +123,7 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  // PerThread<TxEventLogBatch> event_log_;
+  PerThread<TxEventLogBatch> event_log_;
 
   struct EventContext {
     std::vector<uint8_t> buf;

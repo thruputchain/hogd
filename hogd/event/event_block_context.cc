@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <type_traits>
 #include <unistd.h>
@@ -20,6 +22,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "indexer.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -58,7 +61,7 @@ EventBlockContext::add_event(TxEventLog event)
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
-  // event_log_->emplace_back(std::move(event));
+  event_log_->emplace_back(std::move(event));
   co_return;
 }
 
@@ -274,6 +277,36 @@ EventBlockContext::await_all_executors_closed()
   while (open_executor_handles_.load(std::memory_order_acquire) > 0) {
     co_await all_executors_closed_.wait(false);
   }
+}
+
+x23::Async<void>
+EventBlockContext::send_events_to_indexers(
+    BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
+{
+  TxEventLogBatch full_event_log;
+  {
+    std::unique_lock ul = event_log_.lock_threads();
+    event_log_.for_each(ul, [&full_event_log](
+                                TxEventLogBatch &per_thread_event_log) {
+      full_event_log.append(
+          std::make_move_iterator(per_thread_event_log.begin()),
+          std::make_move_iterator(per_thread_event_log.end()));
+      per_thread_event_log.clear();
+    });
+  }
+
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(indexers.size());
+
+  for (indexer_event_client_t &indexer : indexers) {
+    handles.push_back(
+        indexer.indexer_event_process_events(block_height, full_event_log));
+  }
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
+  }
+  handles.clear();
+  co_return;
 }
 
 } // namespace hogd
