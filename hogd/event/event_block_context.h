@@ -115,7 +115,7 @@ public:
     }
     handles.clear();
     co_return;
-  }
+  }*/
 
 private:
   x23::Async<void> write_event(std::span<const uint8_t> data);

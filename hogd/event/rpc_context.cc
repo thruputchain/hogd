@@ -43,7 +43,7 @@ EventRPCContext::wait_for_executors_closed(BlockID block_id)
 {
   PerThreadARC<EventBlockContext> *context = nullptr;
   {
-    x23::CoroGuardNoYield g;
+    x23::CoroGuard g;
     co_await g(lock_);
     auto it = event_block_contexts_.find(block_id);
     if (it == event_block_contexts_.end()) {
