@@ -16,10 +16,10 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh
 
 echo 'build clang fuzzer'
-./scripts/build.sh -d build/ -c clang -f "-fsanitize=address" -t Release -x "-DBUILD_FUZZERS=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/ -c clang -f "-fsanitize=address" -t Release -x "-DBUILD_FUZZERS=ON" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo 'build fuzz_deserialize target'
-cmake --build build/ --target fuzz_deserialize
+make -j $(nproc) -C build/ fuzz_deserialize
 
 echo 'run fuzz_deserialize for 20 minutes'
 mkdir -p ${HOG_DUMP_DIR}/core_dumps
