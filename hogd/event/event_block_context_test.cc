@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 
 #include "event.hh"
@@ -11,11 +14,11 @@
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/crypto/crypto.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep#include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -244,6 +247,120 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
 
   // Verify the context can be destroyed without issues
   // (destructor asserts state is not kActive and pending_writes is 0)
+}
+
+// Test multiple executors opening and closing handles
+TEST_F(EventBlockContextTest, MultipleExecutors)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Three executors open handles
+  context.executor_open_block();
+  context.executor_open_block();
+  context.executor_open_block();
+
+  // Add some events
+  context.add_event(
+      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test1"))),
+                 .events = {TxEmittedEvent{
+                     .contract_address = {"address1"},
+                     .serialized_event = {1, 2, 3},
+                 }}})();
+
+  // First executor closes
+  context.executor_close_block();
+
+  // Add more events
+  context.add_event(
+      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test2"))),
+                 .events = {TxEmittedEvent{
+                     .contract_address = {"address2"},
+                     .serialized_event = {4, 5, 6},
+                 }}})();
+
+  // Second executor closes
+  context.executor_close_block();
+
+  // Third executor closes - should trigger all_executors_closed
+  context.executor_close_block();
+
+  // Verify await completes immediately since all are closed
+  context.await_all_executors_closed()();
+
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+  EXPECT_EQ(event_logs.size(), 2);
+}
+
+// Test that await_all_executors_closed waits for all executors
+TEST_F(EventBlockContextTest, AwaitWaitsForAllExecutors)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Open 2 executors
+  context.executor_open_block();
+  context.executor_open_block();
+
+  // Spawn a task that waits for all executors
+  std::atomic<bool> await_completed = false;
+  auto async = [&context, &await_completed](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    co_await context.await_all_executors_closed();
+    await_completed.store(true, std::memory_order_release);
+  }();
+
+  // Give the await task time to start waiting
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // Await should not have completed yet
+  EXPECT_FALSE(await_completed.load(std::memory_order_acquire));
+
+  // Close first executor
+  context.executor_close_block();
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // Still should not be complete
+  EXPECT_FALSE(await_completed.load(std::memory_order_acquire));
+
+  // Close second executor - now await should complete
+  context.executor_close_block();
+  async();
+
+  EXPECT_TRUE(await_completed.load(std::memory_order_acquire));
+
+  finish_file(context);
+}
+
+// Test await when already all closed
+TEST_F(EventBlockContextTest, AwaitWhenAlreadyClosed)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  context.executor_open_block();
+  context.executor_close_block();
+
+  // Await should complete immediately
+  context.await_all_executors_closed()();
+
+  // Multiple awaits should all work
+  context.await_all_executors_closed()();
+  context.await_all_executors_closed()();
+
+  finish_file(context);
+}
+
+// Test await when no executors ever opened
+TEST_F(EventBlockContextTest, AwaitWithNoExecutors)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Await should complete immediately when counter is 0
+  context.await_all_executors_closed()();
+
+  finish_file(context);
 }
 
 } // namespace hogd
