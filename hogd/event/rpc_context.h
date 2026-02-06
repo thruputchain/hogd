@@ -66,6 +66,8 @@ private:
   void gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it,
       x23::CoroGuard const & /*unused*/);
+  
+  x23::Async<EventStatus<void>> wait_for_executors_closed(BlockID block_id);
 
   struct ContextCache {
     ContextCache() = default;

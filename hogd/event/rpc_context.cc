@@ -15,6 +15,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/threadpool.h"
 
@@ -37,9 +38,36 @@ EventRPCContext::open_block(BlockID block_id)
   co_return EventStatus<void>();
 }
 
+x23::Async<EventStatus<void>>
+EventRPCContext::wait_for_executors_closed(BlockID block_id)
+{
+  PerThreadARC<EventBlockContext> *context = nullptr;
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    auto it = event_block_contexts_.find(block_id);
+    if (it == event_block_contexts_.end()) {
+      co_await g.reset_and_return(EventError{EventErrorCode::kBadBlockID});
+      panic("unreachable");
+    }
+    context = &it->second;
+    x23assert(context->try_acquire_reference());
+  }
+
+  co_await context->get().await_all_executors_closed();
+  [[maybe_unused]] bool released = context->release_reference();
+  x23assert(!released);
+  co_return EventStatus<void>{};
+}
+
 x23::Async<EventStatus<SHA256Hash>>
 EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 {
+  auto status = co_await wait_for_executors_closed(block_id);
+  if (!status.has_value()) {
+    co_return status.error();
+  }
+
   x23::CoroGuard g;
   co_await g(lock_);
 
@@ -47,20 +75,9 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   if (it == event_block_contexts_.end()) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
-
-  auto &context = it->second;
-
-  // Wait for all executors to close their handles to this block
-  co_await context.get().await_all_executors_closed();
+  auto& context = it->second;
 
   auto ts = x23::fastclock::now();
-
-  // Defense in depth: Initiate shutdown on the context to prevent new event
-  // RPC references from being acquired and ensure all existing references are
-  // released. With proper memory ordering in hogexec, all event RPCs should
-  // already be complete, so this should succeed immediately. However, this
-  // provides additional safety against any timing races.
-  //context.initiate_shutdown();
 
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
     auto *pool = x23::ThreadPool::get_thread_pool();
