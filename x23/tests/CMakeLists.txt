@@ -27,18 +27,20 @@ add_x23_test(heap)
 add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
-add_x23_test(rpcstress)
+add_executable(test_rpcstress ${EXCLUDE_TOKEN} rpcstress.cc)
+target_link_libraries(test_rpcstress x23 xdrtest)
+use_x23(test_rpcstress)
+list(APPEND TEST_EXECUTABLES test_rpcstress)
+foreach(scenario bare fanout teardown writebuf shutdown)
+  add_test(NAME rpcstress_${scenario}
+    COMMAND test_rpcstress -s ${scenario} -d 5 -t 8)
+  set_tests_properties(rpcstress_${scenario} PROPERTIES
+    TIMEOUT 60 RESOURCE_LOCK rpcstress)
+endforeach()
+
 add_x23_test(rpcthroughput)
 add_x23_test(srpcthroughput latency.h)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
-
-# flaky tests: prefer timeout failure over stuck CI
-#set_tests_properties(event PROPERTIES TIMEOUT 10)
-#set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
-#set_tests_properties(corowake PROPERTIES TIMEOUT 90)
-
-# example of disabling a test entirely
-#set_tests_properties(rpcthroughput PROPERTIES DISABLED TRUE)
 
 if(GOOGLETEST_PATH)
 include_directories(${GOOGLETEST_PATH}/googletest/include)
