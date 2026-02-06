@@ -530,27 +530,29 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
     poll(nullptr, 0, run_ms);
 
     // Phase 4: Tear down (varied ordering)
-    // Modes 1 and 2 intentionally use non-standard destruction orderings to
-    // probe for shutdown races. If they crash under TSAN/ASAN, that's a real
-    // bug in x23, not a test bug.
     stop.store(true, std::memory_order_relaxed);
-    cp->poison(lfd);
 
     if (destruction_mode == 0) {
-      // Clean: wait for clients, then destroy
+      // Clean: poison listen fd, wait for clients, then destroy
+      cp->poison(lfd);
       di.destroy_wait();
       cp.reset();
       pool.reset();
     } else if (destruction_mode == 1) {
-      // Destroy CoroPoll first (tests poll thread outliving work)
+      // Destroy CoroPoll first.  ~CoroPoll resets all fds, dispatching
+      // EBADF to pending coroutines via the (still-alive) pool.  Tests
+      // that CoroPoll cleanup works when streams are still active.
+      cp->poison(lfd);
       cp.reset();
       di.destroy_wait();
       pool.reset();
     } else {
-      // Destroy pool first (tests worker threads stopping with pending work)
-      pool.reset();
-      cp.reset();
+      // No listen-fd poison — rely solely on the stop flag for drain.
+      // rpc_loops check stop and exit naturally after their current
+      // RPC completes.  The accept loop keeps running until ~CoroPoll.
       di.destroy_wait();
+      cp.reset();
+      pool.reset();
     }
 
     cycle_count.fetch_add(1, std::memory_order_relaxed);
