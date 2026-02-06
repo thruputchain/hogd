@@ -75,10 +75,12 @@ endif()
 option(BUILD_FUZZERS "Build fuzz targets" OFF)
 if(BUILD_FUZZERS)
   add_executable(fuzz_deserialize EXCLUDE_FROM_ALL fuzz_deserialize.cc)
-  target_link_libraries(fuzz_deserialize x23 xdrtest stdc++)
+  target_link_libraries(fuzz_deserialize x23 xdrtest)
   use_x23(fuzz_deserialize)
   target_compile_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
-  target_link_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
+  # libclang_rt.fuzzer is built against libstdc++, but this project uses
+  # libc++. Link libstdc++ after the fuzzer runtime to resolve its symbols.
+  target_link_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address -Wl,--as-needed -lstdc++)
 endif()
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})
