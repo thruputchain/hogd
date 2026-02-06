@@ -5,14 +5,13 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
-#include "indexer.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -66,7 +65,7 @@ private:
   void gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it,
       x23::CoroGuard const & /*unused*/);
-  
+
   x23::Async<EventStatus<void>> wait_for_executors_closed(BlockID block_id);
 
   struct ContextCache {

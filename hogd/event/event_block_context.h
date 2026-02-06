@@ -5,14 +5,11 @@
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
-#include <iterator>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
-#include <type_traits>
 #include <vector>
 
 #include "event.hh"
@@ -20,7 +17,6 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
-#include "hogd/base/rpc_client.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/allocator.h"
@@ -32,6 +28,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -81,7 +78,8 @@ public:
 
   x23::Async<void> await_abandon();
 
-  // Executor handle tracking - count of executors with open handles to this block
+  // Executor handle tracking - count of executors with open handles to this
+  // block
   void executor_open_block();
   void executor_close_block();
   x23::Async<void> await_all_executors_closed();
@@ -152,7 +150,7 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
- // PerThread<TxEventLogBatch> event_log_;
+  // PerThread<TxEventLogBatch> event_log_;
 
   struct EventContext {
     std::vector<uint8_t> buf;

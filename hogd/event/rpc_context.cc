@@ -75,7 +75,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   if (it == event_block_contexts_.end()) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
-  auto& context = it->second;
+  auto &context = it->second;
 
   auto ts = x23::fastclock::now();
 
@@ -89,14 +89,14 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return;
   }(context.get());
 
- // auto indexers_handle =
-   //   context.get().send_events_to_indexers(block_height, indexers_);
+  // auto indexers_handle =
+  //   context.get().send_events_to_indexers(block_height, indexers_);
 
   auto out_hash = context.get().get_root_hash();
   auto ts2 = x23::fastclock::now();
   co_await file_wait;
   auto ts3 = x23::fastclock::now();
-  //co_await indexers_handle;
+  // co_await indexers_handle;
   auto ts4 = x23::fastclock::now();
   co_await context.get().finish_file(out_hash);
   gc_context_internal(it, g);

@@ -58,7 +58,7 @@ EventBlockContext::add_event(TxEventLog event)
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
- // event_log_->emplace_back(std::move(event));
+  // event_log_->emplace_back(std::move(event));
   co_return;
 }
 
@@ -260,7 +260,7 @@ EventBlockContext::executor_close_block()
 {
   if (open_executor_handles_.fetch_sub(1, std::memory_order_release) == 1) {
     all_executors_closed_.store(true);
-    auto* pool = x23::ThreadPool::get_thread_pool();
+    auto *pool = x23::ThreadPool::get_thread_pool();
     if (!pool) {
       pool = &default_threadpool();
     }

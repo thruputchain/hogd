@@ -99,7 +99,8 @@ TEST_F(EventBlockContextTest, BasicTest)
             ContractAddress{"test_address"});
 }
 
-TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor) {
+TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor)
+{
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
   context.executor_close_block();
@@ -111,7 +112,8 @@ TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor) {
       EventBlockContext::final_events_filename(temp_dir_, hash));
 }
 
-TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor) {
+TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor)
+{
   EventBlockContext context(temp_dir_, 1);
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -120,7 +122,6 @@ TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor) {
   auto event_logs = parse_event_logs(
       EventBlockContext::final_events_filename(temp_dir_, hash));
 }
-
 
 // What happens if there's a conflict on a filename
 TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
