@@ -2,6 +2,7 @@
 
 #include "tests/xdrtest.hh"
 #include <x23/serialize.h>
+#include <x23/serialize_cxs.h>
 #include <x23/vec.h>
 
 namespace x23 {
@@ -23,6 +24,17 @@ TEST(Deserialize, Vector)
   };
 
   EXPECT_THROW(deserialize(&vec, BufView(buf)), x23::XdrBadInput);
+}
+
+// CXS BoundedStr deserialization must reject input where the decoded
+// length exceeds the remaining span size (heap-buffer-overflow found
+// by fuzz_deserialize).
+TEST(Deserialize, CxsStrTooShort)
+{
+  uint8_t input[] = {0x0a}; // CXS-encodes length 10, but only 0 bytes follow
+  std::span<const uint8_t> sp(input, sizeof(input));
+  x23::Str val;
+  EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::CxsBadInput);
 }
 
 } // namespace x23
