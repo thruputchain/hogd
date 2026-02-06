@@ -248,7 +248,7 @@ dump_rusage(int fd)
   };
 }
 
-#ifndef X23_NDEBUG
+#ifndef NDEBUG
 std::atomic_bool panicking_flag{false};
 
 namespace detail {
@@ -280,6 +280,6 @@ do_panic(std::string_view fmt, std::format_args args,
   std::abort();
 }
 } // namespace detail
-#endif // X23_NDEBUG
+#endif // NDEBUG
 
 } // namespace x23

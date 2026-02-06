@@ -137,11 +137,11 @@ struct NullDebugFd {
   }
 };
 
-#ifdef X23_NDEBUG
+#ifdef NDEBUG
 inline NullDebugFd debug;
-#else  // !X23_NDEBUG
+#else  // !NDEBUG
 inline DebugFd<"X23SERVER_TRACE"> debug;
-#endif // !X23_NDEBUG
+#endif // !NDEBUG
 
 // Dump the CPU time used between when this function is called and the
 // result is destroyed.  Usage:
@@ -163,7 +163,7 @@ std::string cmdline();
 
 std::string stacktrace(unsigned indent = 2, std::string ret = {});
 
-#ifdef X23_NDEBUG
+#ifdef NDEBUG
 
 template<typename... Args>
 [[noreturn]] inline void
@@ -180,7 +180,7 @@ panicking()
 
 #define x23assert(cond)
 
-#else // !X23_NDEBUG
+#else // !NDEBUG
 
 namespace detail {
 [[noreturn]] void do_panic(std::string_view fmt, std::format_args args,
@@ -211,6 +211,6 @@ panicking() noexcept
   return panicking_flag.load(std::memory_order_relaxed);
 }
 
-#endif // !X23_NDEBUG
+#endif // !NDEBUG
 
 } // namespace x23
