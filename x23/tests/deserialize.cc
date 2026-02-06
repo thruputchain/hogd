@@ -2,13 +2,12 @@
 
 #include <span>
 
-#include <x23/utility.h>
 #include <x23/serialize.h>
 #include <x23/serialize_cxs.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 #include "tests/xdrtest.hh"
-
 
 namespace x23 {
 
