@@ -18,22 +18,21 @@ members = [
     "integration_test_contracts/htlc",
     "integration_test_contracts/payment_channel",
     "integration_test_contracts/return_fault_test",
-    "integration_test_contracts/tuple_return",
+    "integration_test_contracts/tuple_return"
 ]
 resolver = "2"
 
-# TODO(geoff): remove the rev once the sdk_rs PR is merged
 [workspace.dependencies]
-sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
+# groundhog dependencies
+sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+xdrs = { registry = "groundhog", version = "0.4" }
+groundhog-xdr = { registry = "groundhog", version = "0.1.3" }
+groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+groundhog-erc1271-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 serde = { version = "1.0.217", default-features = false }
-xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git" }
-xdr_common = { git = "ssh://git@github.com/groundhogchain/xdr_common.git" }
-groundhog-xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git" }
-groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
-groundhog-erc1271-if = {  git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
-erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
-erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
-bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 
 [profile.dev]
 opt-level = "z"

@@ -5,6 +5,7 @@
 #include <future>
 #include <limits>
 #include <random>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -12,7 +13,6 @@
 #include "built_contracts/simple_wallet.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -30,6 +30,12 @@ SHA256Hash
 make_nonce(uint64_t value)
 {
   return sha256(value);
+}
+
+std::tuple<uint64_t, uint64_t>
+make_amount(uint128_t amount)
+{
+  return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
 } // namespace
 
@@ -101,10 +107,12 @@ ERC20ExperimentState::generate_experiment()
   for (size_t i = 1; i <= config_.num_addresses; ++i) {
 
     // has to match the deserialized objects in simple_wallet::do_action
-    Calldata internal_calldata = x23::serialize(
-        erc20_address_, erc20_meta::entrypoint<"mint">(), GasAmount{1'000'000},
-        erc20_meta::make_calldata<"mint">(wallets_[i].address,
-                                          to_xdr(uint128_t{1'000'000'000})));
+    Calldata internal_calldata =
+        x23::serialize(erc20_address_, erc20_meta::entrypoint<"mint">(),
+                       GasAmount{1'000'000},
+                       erc20_meta::make_calldata<"mint">(wallets_[i].address,
+                                                         make_amount(uint128_t{
+                                                             1'000'000'000})));
 
     auto calldata = wallet_meta::make_calldata<"do_action">(
         ed25519_sign(wallets_[0].secret_key, internal_calldata),
@@ -201,7 +209,8 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                erc20_meta::entrypoint<"transfer">(),
                                GasAmount{1'000'000},
                                erc20_meta::make_calldata<"transfer">(
-                                   wallets_[receiver].address, to_xdr(amount)));
+                                   wallets_[receiver].address,
+                                   make_amount(amount)));
 
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,

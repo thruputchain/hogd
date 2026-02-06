@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -141,9 +142,13 @@ make_native_initial_token_claim_contract()
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
+        std::tuple<uint64_t, uint64_t> allocation_tuple =
+            std::make_tuple(*allocation >> 64,
+                            *allocation & 0xffffffffffffffffULL);
+
         auto [transfer_result, gas_used] =
             native_token_client.invoke_opt<"transfer">(handler, receiver_addr,
-                                                       to_xdr(*allocation));
+                                                       allocation_tuple);
 
         if (!transfer_result.has_value() ||
             !transfer_result.value().has_value() ||

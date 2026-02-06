@@ -5,6 +5,7 @@
 #include <future>
 #include <limits>
 #include <random>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,11 @@ SHA256Hash
 make_nonce(uint64_t value)
 {
   return sha256(value);
+}
+std::tuple<uint64_t, uint64_t>
+make_amount(uint128_t amount)
+{
+  return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
 } // namespace
 
@@ -127,10 +133,12 @@ ERC20BasicAuthExperimentState::generate_experiment()
   for (size_t i = 1; i <= config_.num_addresses; ++i) {
 
     // has to match the deserialized objects in simple_wallet::do_action
-    Calldata internal_calldata = x23::serialize(
-        erc20_address_, erc20_meta::entrypoint<"mint">(), GasAmount{1'000'000},
-        erc20_meta::make_calldata<"mint">(wallets_[i].address,
-                                          to_xdr(uint128_t{1'000'000'000})));
+    Calldata internal_calldata =
+        x23::serialize(erc20_address_, erc20_meta::entrypoint<"mint">(),
+                       GasAmount{1'000'000},
+                       erc20_meta::make_calldata<"mint">(wallets_[i].address,
+                                                         make_amount(uint128_t{
+                                                             1'000'000'000})));
 
     auto calldata = wallet_meta::make_calldata<"do_action">(internal_calldata);
 
@@ -232,7 +240,8 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
                                erc20_meta::entrypoint<"transfer">(),
                                GasAmount{1'000'000},
                                erc20_meta::make_calldata<"transfer">(
-                                   wallets_[receiver].address, to_xdr(amount)));
+                                   wallets_[receiver].address,
+                                   make_amount(amount)));
 
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -44,6 +45,19 @@ protected:
     write_deployment(GenesisConfigurationLoader::kPresetNativeTokenAddress,
                      token_contract);
   }
+
+  static std::tuple<uint64_t, uint64_t>
+  make_amount(uint128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
+
+  static std::tuple<int64_t, uint64_t>
+  make_difference(int128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
+
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -78,7 +92,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
 
              auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
                  handler, kReceiverAddr,
-                 to_xdr(static_cast<uint128_t>(kTransferAmount)));
+                 make_amount(static_cast<uint128_t>(kTransferAmount)));
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().has_value() ||
@@ -164,7 +178,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
              auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
                  handler, kReceiverAddr,
-                 to_xdr(static_cast<uint128_t>(kFirstTransferAmount)));
+                 make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().value().is_ok()) {
@@ -181,7 +195,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
              auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
                  handler, kReceiverAddr,
-                 to_xdr(static_cast<uint128_t>(kSecondTransferAmount)));
+                 make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().value().is_ok()) {
@@ -300,7 +314,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
              // should fail because insufficient to cover balance cost
              auto calldata1 = erc20_meta::make_calldata<"transfer">(
                  kReceiverAddr,
-                 to_xdr(static_cast<uint128_t>(kFirstTransferAmount)));
+                 make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
              auto [r1, _g1] = handler.invoke(
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
@@ -334,7 +348,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
              // should succeed
              auto calldata2 = erc20_meta::make_calldata<"transfer">(
                  kReceiverAddr,
-                 to_xdr(static_cast<uint128_t>(kSecondTransferAmount)));
+                 make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
              auto [r3, _g3] = handler.invoke(
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),

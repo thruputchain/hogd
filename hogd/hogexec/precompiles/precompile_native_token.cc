@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -69,8 +70,8 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
 
 // For now, the typedefs exported by a contract aren't added to the generated
 // spec, unfortunately
-using amount_t = uint128_xdr;
-using difference_t = int128_xdr;
+using amount_t = std::tuple<uint64_t, uint64_t>;
+using difference_t = std::tuple<int64_t, uint64_t>;
 
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
 
@@ -87,7 +88,8 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
 
   // For now, amount_t is a uint, so we do not need to check for negative
   // amounts here. adding the assertion in case that changes
-  static_assert(std::is_same_v<amount_t, uint128_xdr>);
+  uint128_t amount_unsigned_int =
+      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
   auto owner = handler.get_msg_sender();
   if (!owner.has_value()) {
@@ -95,13 +97,13 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // can't negate bigger values
-  if (from_xdr(amount) > kMaxInt128) {
+  if (amount_unsigned_int > kMaxInt128) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
-  int128_t amount_int = from_xdr(amount);
+  int128_t amount_signed_int = amount_unsigned_int;
 
   // subtract amount from owner's balance
-  auto r1 = handler.modify_native_token_balance(*owner, -amount_int);
+  auto r1 = handler.modify_native_token_balance(*owner, -amount_signed_int);
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
   }
@@ -110,7 +112,7 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // add amount to receiver's balance
-  auto r2 = handler.modify_native_token_balance(receiver, amount_int);
+  auto r2 = handler.modify_native_token_balance(receiver, amount_signed_int);
   if (!r2.has_value()) {
     return r2.error().to_invoke_error();
   }
@@ -121,7 +123,7 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   auto event_buf = make_event_from_xdr_struct(TransferEvent{
       .from_address = *owner,
       .to_address = receiver,
-      .amount = to_xdr(amount_int),
+      .amount = to_xdr(amount_signed_int),
   });
 
   auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
@@ -144,9 +146,8 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
     return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
   }
 
-  // For now, amount_t is a uint, so we do not need to check for negative
-  // amounts here. adding the assertion in case that changes
-  static_assert(std::is_same_v<amount_t, uint128_xdr>);
+  uint128_t amount_unsigned_int =
+      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
   // get spender
   auto spender = handler.get_msg_sender();
@@ -155,13 +156,13 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // can't negate bigger values
-  if (from_xdr(amount) > kMaxInt128) {
+  if (amount_unsigned_int > kMaxInt128) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
-  int128_t amount_int = from_xdr(amount);
+  int128_t amount_signed_int = amount_unsigned_int;
 
   // subtract amount from owner's balance
-  auto r1 = handler.modify_native_token_balance(owner, -amount_int);
+  auto r1 = handler.modify_native_token_balance(owner, -amount_signed_int);
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
   }
@@ -170,7 +171,7 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // add amount to receiver's balance
-  auto r2 = handler.modify_native_token_balance(receiver, amount_int);
+  auto r2 = handler.modify_native_token_balance(receiver, amount_signed_int);
   if (!r2.has_value()) {
     return r2.error().to_invoke_error();
   }
@@ -179,7 +180,8 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // subtract amount from spender's allowance
-  auto allow_res = adjust_allowance(handler, owner, *spender, -amount_int);
+  auto allow_res =
+      adjust_allowance(handler, owner, *spender, -amount_signed_int);
   if (!allow_res.has_value()) {
     return allow_res.error().to_invoke_error();
   }
@@ -190,7 +192,7 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   auto event_buf = make_event_from_xdr_struct(TransferEvent{
       .from_address = owner,
       .to_address = receiver,
-      .amount = to_xdr(amount_int),
+      .amount = to_xdr(amount_signed_int),
   });
 
   auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
@@ -217,7 +219,10 @@ adjust_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
 
-  auto r = adjust_allowance(handler, *owner, spender, from_xdr(amount));
+  int128_t amount_signed_int =
+      int128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+
+  auto r = adjust_allowance(handler, *owner, spender, amount_signed_int);
   if (!r.has_value()) {
     return r.error().to_invoke_error();
   }
@@ -228,7 +233,7 @@ adjust_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   auto event_buf = make_event_from_xdr_struct(ApprovalEvent{
       .owner_address = *owner,
       .spender_address = spender,
-      .amount = to_xdr(from_xdr(amount)),
+      .amount = to_xdr(amount_signed_int),
   });
 
   auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
@@ -270,7 +275,8 @@ get_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
   uint128_t utotal = std::max<int128_t>(total, 0);
-  return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(to_xdr(utotal))};
+  return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+      std::make_tuple(utotal >> 64, utotal & 0xffffffffffffffffULL))};
 }
 
 } // namespace
@@ -315,8 +321,8 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return {
-            Result<amount_t, itc_erc20::ERC20Error>::make_ok(to_xdr(ubalance))};
+        return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
 
   // get_balance
@@ -342,8 +348,8 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return {
-            Result<amount_t, itc_erc20::ERC20Error>::make_ok(to_xdr(ubalance))};
+        return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
 
   // mint
@@ -363,8 +369,11 @@ make_native_token_contract()
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
+        uint128_t total_supply =
+            uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
         return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
-            to_xdr(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility}))};
+            std::make_tuple(total_supply >> 64,
+                            total_supply & 0xffffffffffffffffULL))};
       });
 
   assert(builder.check_methods<itc_erc20::ERC20>());
