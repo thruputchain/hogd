@@ -1,19 +1,20 @@
 #include <cstdlib>
 #include <format>
-#include <future>
 #include <optional>
 #include <print>
 #include <string>
-#include <unistd.h>
+#include <unistd.h> // NOLINT(misc-include-cleaner)
 
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/types.h"
+#include "hogd/base/rpc_server.h"
+#include "hogd/block_explorer/shared.h"
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -27,9 +28,9 @@ print_usage()
 
 int
 block_explorer_init(const std::string &indexer_server_addr,
-                    const std::optional<std::string> &tx_hash)
+                    const std::optional<std::string> &tx_hash_raw)
 {
-  if (!tx_hash) {
+  if (!tx_hash_raw) {
     print_usage();
     return EXIT_FAILURE;
   }
@@ -41,21 +42,24 @@ block_explorer_init(const std::string &indexer_server_addr,
                                              /*retry=*/true,
                                              LoadgenRpc::kRpcMaxMessageSize)();
   const IndexerBlockExplorerIntroOutcome intro_result =
-      client.event_indexer_intro(card)();
+      client.indexer_block_explorer_intro(version::kHogdProtocol())();
   if (intro_result != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
     info("block explorer failed to connect to indexer (error: {})",
          intro_result);
     return EXIT_FAILURE;
   }
 
-  TxInfoResult tx_info_res = client.get_transaction_info(*tx_hash);
+  SHA256Hash tx_hash = HexArray(*tx_hash_raw).to_sha256();
+  info("parsed tx_hash is {}", HexArray(*tx_hash_raw).str());
+  TxInfoResult tx_info_res = client.get_transaction_info(tx_hash)();
   if (tx_info_res.outcome() == TxInfoOutcome::TxInfoFound) {
     const TxInfo &tx_info = tx_info_res.info();
     info("tx info:");
+    info("hash = {}", *tx_hash_raw);
     info("block_height = {}", tx_info.height);
   }
   else {
-    info("could not find tx.");
+    info("could not find tx (hash = {}).", *tx_hash_raw);
   }
 
   return 0;
@@ -77,6 +81,7 @@ main(int argc, char *argv[])
 
   std::optional<std::string> tx_hash;
   int opt = 0;
+  // NOLINTBEGIN(misc-include-cleaner)
   while ((opt = getopt(argc, argv, "t:")) != -1) {
     switch (opt) {
     case 't':
@@ -93,6 +98,7 @@ main(int argc, char *argv[])
   }
 
   const std::string indexer_server_addr = argv[optind];
+  // NOLINTEND(misc-include-cleaner)
   return hogd::block_explorer_init(indexer_server_addr, tx_hash);
 };
 
