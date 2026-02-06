@@ -67,3 +67,7 @@ BUILD_DIR=$1
 ## artifact sizes
 ./metrics_history/scripts/make_metric_file.sh artifact-sizes $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/artifact_sizes.sh $BUILD_DIR >metrics_history/metrics/artifact-sizes/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+## x23 metrics
+./metrics_history/scripts/make_metric_file.sh x23-metrics $GIT_branch $GIT_commit $GIT_commit_time
+${BUILD_DIR:-.}/x23/test/bench >metrics_history/metrics/x23-metrics/$GIT_branch/${GIT_commit_time}_$GIT_commit
