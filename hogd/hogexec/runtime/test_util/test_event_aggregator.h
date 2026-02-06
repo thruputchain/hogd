@@ -77,12 +77,12 @@ struct TestEventAggregatorExecRpc {
 
   static void eventexecutor_null() {}
 
-  x23::Async<RPCError> eventexecutor_open_block(BlockID /*block_id*/)
+  static x23::Async<RPCError> eventexecutor_open_block(BlockID /*block_id*/)
   {
     co_return RPCError::kRPCNone;
   }
 
-  x23::Async<RPCError> eventexecutor_close_block(BlockID /*block_id*/)
+  static x23::Async<RPCError> eventexecutor_close_block(BlockID /*block_id*/)
   {
     co_return RPCError::kRPCNone;
   }
