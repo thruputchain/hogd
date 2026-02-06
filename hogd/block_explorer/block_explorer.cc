@@ -1,20 +1,20 @@
 #include <cstdlib>
 #include <format>
-#include <getopt.h>
 #include <optional>
 #include <print>
 #include <string>
+#include <unistd.h>
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/block_explorer/shared.h"
 #include "hogd/container/merkle/hex_array.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "types.hh"
 
 namespace hogd {
 
