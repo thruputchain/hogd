@@ -92,6 +92,7 @@ parse_int_opt(std::integral auto &value, const char *s = optarg) noexcept
 // ============================================================
 
 int stress_fanout(unsigned threads, unsigned seconds, bool verbose);
+int stress_bare(unsigned threads, unsigned seconds, bool verbose);
 int stress_teardown(unsigned threads, unsigned seconds, bool verbose);
 int stress_writebuf(unsigned threads, unsigned seconds, bool verbose);
 int stress_shutdown(unsigned threads, unsigned seconds, bool verbose);
@@ -213,6 +214,57 @@ rpc_loop(RefPtr<DestroyInhibit> di, auto client, std::atomic<uint64_t> &count,
 // ============================================================
 // Stress test scenarios
 // ============================================================
+
+// Bare coroutine + threadpool test — no RPC layer at all.
+// If this crashes, the bug is in coroutine/threadpool machinery.
+int
+stress_bare(unsigned threads, unsigned seconds, bool verbose)
+{
+  ThreadPool pool(threads);
+  std::atomic<uint64_t> count{0};
+  std::atomic<bool> stop{false};
+
+  // Spawn worker coroutines that fan out and gather repeatedly
+  DestroyInhibit di;
+  unsigned ncoros = threads * 4;
+  for (unsigned i = 0; i < ncoros; i++) {
+    [](ThreadPool &pool, RefPtr<DestroyInhibit> di,
+       std::atomic<uint64_t> &count, std::atomic<bool> &stop) -> Detached {
+      size_t K = std::max(size_t(2), pool.nthreads_);
+      while (!stop.load(std::memory_order_relaxed)) {
+        std::vector<Async<void>> handles;
+        handles.reserve(K);
+        for (size_t j = 0; j < K; j++)
+          handles.push_back(
+            [](ThreadPool &p) -> Async<void> {
+              co_await p.bg();
+              co_return;
+            }(pool));
+        for (auto &h : handles)
+          co_await h;
+        count.fetch_add(1, std::memory_order_relaxed);
+      }
+    }(pool, di, count, stop);
+  }
+
+  auto start = steady_clock::now();
+  auto deadline = start + std::chrono::seconds(seconds);
+  while (steady_clock::now() < deadline) {
+    poll(nullptr, 0, verbose ? 5000 : 1000);
+    if (verbose)
+      std::println("  bare: {} cycles ({:.1f}s)",
+                   formatL(count.load()),
+                   duration<double>(steady_clock::now() - start).count());
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  di.destroy_wait();
+
+  auto elapsed = duration<double>(steady_clock::now() - start);
+  std::println("bare:      {} cycles | 0 errors | {:.2f}s",
+               formatL(count.load()), elapsed.count());
+  return 0;
+}
 
 int
 stress_fanout(unsigned threads, unsigned seconds, bool verbose)
@@ -615,6 +667,7 @@ main(int argc, char **argv)
     int (*fn)(unsigned, unsigned, bool);
   };
   Scenario scenarios[] = {
+    {"bare", stress_bare},
     {"fanout", stress_fanout},
     {"teardown", stress_teardown},
     {"writebuf", stress_writebuf},
