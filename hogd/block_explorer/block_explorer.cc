@@ -3,7 +3,7 @@
 #include <optional>
 #include <print>
 #include <string>
-#include <unistd.h>
+#include <unistd.h> // NOLINT(misc-include-cleaner)
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
@@ -81,6 +81,7 @@ main(int argc, char *argv[])
 
   std::optional<std::string> tx_hash;
   int opt = 0;
+  // NOLINTBEGIN(misc-include-cleaner)
   while ((opt = getopt(argc, argv, "t:")) != -1) {
     switch (opt) {
     case 't':
@@ -97,6 +98,7 @@ main(int argc, char *argv[])
   }
 
   const std::string indexer_server_addr = argv[optind];
+  // NOLINTEND(misc-include-cleaner)
   return hogd::block_explorer_init(indexer_server_addr, tx_hash);
 };
 
