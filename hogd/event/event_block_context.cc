@@ -15,6 +15,7 @@
 #include <version>
 
 #include "event.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
@@ -53,6 +54,7 @@ EventBlockContext::add_event(TxEventLog event)
 
   co_await write_event(std::span(*serialize_buf));
   CHECK(trie_->insert_or_update(key, value));
+  x23assert(open_executor_handles_.load(std::memory_order_acquire) > 0);
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
@@ -182,6 +184,8 @@ EventBlockContext::await_pending_writes_done()
 x23::Async<void>
 EventBlockContext::finish_file_write()
 {
+  x23assert(open_executor_handles_.load(std::memory_order_acquire) == 0);
+
   auto ts = x23::fastclock::now();
   size_t total_bytes = 0;
 
@@ -256,7 +260,11 @@ EventBlockContext::executor_close_block()
 {
   if (open_executor_handles_.fetch_sub(1, std::memory_order_release) == 1) {
     all_executors_closed_.store(true);
-    all_executors_closed_.broadcast();
+    auto* pool = x23::ThreadPool::get_thread_pool();
+    if (!pool) {
+      pool = &default_threadpool();
+    }
+    all_executors_closed_.broadcast(pool);
   }
 }
 

@@ -33,14 +33,19 @@ TEST_F(EventRpcTest, BasicUsage)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
+  EXPECT_NE(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
             RPCError::kRPCNone);
+
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 
   EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
             RPCError::kRPCNone);
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{})(),
             RPCError::kRPCNone);
+
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
   auto result = mempool_rpc.eventsched_close_block(1, 1)();
   EXPECT_EQ(result.error(), RPCError::kRPCNone);
@@ -58,18 +63,8 @@ TEST_F(EventRpcTest, TestAbandonBlock)
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
 
-  // the tx ctx should keep the block open, at least to keep the pointer alive
-  auto tx_ctx = ctx.get_context(1)();
-  EXPECT_TRUE(tx_ctx);
-
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
-            RPCError::kRPCNone);
-
-  tx_ctx->add_event(TxEventLog{})();
-
-  ASSERT_TRUE(tx_ctx.release_reference());
-  ctx.gc_context(1)();
+  EXPECT_NE(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestEmptyBlock)
@@ -99,14 +94,17 @@ TEST_F(EventRpcTest, TestFromRPC)
                          ->client<EventExecutor1>();
   auto mempool_client = x23::SRpcMulticlient<x23::RpcLogger>::make(mempool_addr)
                             ->client<EventSched1>();
+  EXPECT_NE(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
 
   EXPECT_NE(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
 
   EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
 
   EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
   EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
             RPCError::kRPCNone);
 }

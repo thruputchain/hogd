@@ -72,15 +72,17 @@ finish_file(EventBlockContext &context)
 
 } // namespace
 
-TEST_F(EventBlockContextTest, Test)
+TEST_F(EventBlockContextTest, BasicTest)
 {
   EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
   context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}})();
+  context.executor_close_block();
 
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -97,16 +99,41 @@ TEST_F(EventBlockContextTest, Test)
             ContractAddress{"test_address"});
 }
 
+TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor) {
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+  context.executor_close_block();
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir_, hash)));
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+}
+
+TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor) {
+  EventBlockContext context(temp_dir_, 1);
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir_, hash)));
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+}
+
+
 // What happens if there's a conflict on a filename
 TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 {
   EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
   context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}})();
+  context.executor_close_block();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -118,12 +145,14 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
             sha256(std::as_bytes(std::span("test"))));
 
   EventBlockContext context2(temp_dir_, 2);
+  context2.executor_open_block();
   context2.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}})();
+  context2.executor_close_block();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_EQ(hash, hash2);
@@ -143,12 +172,14 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 {
   EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
   context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}})();
+  context.executor_close_block();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -160,12 +191,14 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
             sha256(std::as_bytes(std::span("test"))));
 
   EventBlockContext context2(temp_dir_, 2);
+  context2.executor_open_block();
   context2.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
                  }}})();
+  context2.executor_close_block();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_NE(hash, hash2);
@@ -186,6 +219,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 TEST_F(EventBlockContextTest, AbandonThenAddEvent)
 {
   EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
 
   // Add an initial event to potentially trigger async buffer flushing
   context.add_event(
@@ -194,7 +228,6 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}})();
-
   // Abandon the block - this should wait for any pending writes to complete
   context.await_abandon()();
 
