@@ -144,7 +144,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   if (exec_res == ExecResult::ExecResultOK) {
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
-    //pending_event_calls_.fetch_add(1, std::memory_order_release);
+    pending_event_calls_.fetch_add(1, std::memory_order_release);
     // The release of the PerThreaadARC for this happens after the above
     // fetch_add; hence, when finish_block() is called, the above change is
     // visible.
@@ -158,15 +158,11 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     //
     // Hence, when we go to await_event_return(), we know that this event call
     // will be awaited before this ExecutorContext is destroyed.
-    auto async_res = syscall_handler.emit_events()();
-    if (!async_res.has_value()) {
-      panic("failed to emit events");
-    }
-    /*(
+    syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return;
-        });*/
+        });
   }
 
   return out;
@@ -190,16 +186,12 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   if (exec_res == ExecResult::ExecResultOK) {
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
-    //pending_event_calls_.fetch_add(1, std::memory_order_release);
-    auto async_res = syscall_handler.emit_events()();
-    if (!async_res.has_value()) {
-      panic("failed to emit events");
-    }
-    /*(
+    pending_event_calls_.fetch_add(1, std::memory_order_release);
+    syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return void();
-        });*/
+        });
   }
   return exec_res;
 }

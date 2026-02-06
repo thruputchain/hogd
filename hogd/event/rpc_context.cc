@@ -49,6 +49,10 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   }
 
   auto &context = it->second;
+
+  // Wait for all executors to close their handles to this block
+  co_await context.get().await_all_executors_closed();
+
   auto ts = x23::fastclock::now();
 
   // Defense in depth: Initiate shutdown on the context to prevent new event

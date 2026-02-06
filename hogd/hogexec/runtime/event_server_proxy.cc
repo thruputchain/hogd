@@ -33,6 +33,48 @@ PerTransactionEventServerProxy::PerTransactionEventServerProxy(
 {}
 
 x23::Async<SystemStatus<void>>
+EventServerProxy::open_block(BlockID block_id)
+{
+  auto r = co_await client_.eventexecutor_open_block(block_id);
+  if (r != RPCError::kRPCNone) {
+    error("open_block failed: {}", r);
+  }
+  switch (r) {
+  case RPCError::kRPCNone:
+    co_return SystemStatus<void>{};
+  case RPCError::kRPCBadBlockID:
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kSystemAbortTransaction}};
+  default:
+    error("Unrecoverable: Received unhandled error type from event server: {}",
+          r);
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kSystemUnrecoverable}};
+  }
+}
+
+x23::Async<SystemStatus<void>>
+EventServerProxy::close_block(BlockID block_id)
+{
+  auto r = co_await client_.eventexecutor_close_block(block_id);
+  if (r != RPCError::kRPCNone) {
+    error("close_block failed: {}", r);
+  }
+  switch (r) {
+  case RPCError::kRPCNone:
+    co_return SystemStatus<void>{};
+  case RPCError::kRPCBadBlockID:
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kSystemAbortTransaction}};
+  default:
+    error("Unrecoverable: Received unhandled error type from event server: {}",
+          r);
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kSystemUnrecoverable}};
+  }
+}
+
+x23::Async<SystemStatus<void>>
 EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
                              TxEventLog const &tx_event_log)
 {

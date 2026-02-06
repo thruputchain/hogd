@@ -1,5 +1,6 @@
 #include "hogd/event/event_block_context.h"
 
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
@@ -241,6 +242,30 @@ EventBlockContext::~EventBlockContext()
   assert(pending_write_count_ == 0);
 
   trie_.reset();
+}
+
+void
+EventBlockContext::executor_open_block()
+{
+  open_executor_handles_.fetch_add(1, std::memory_order_relaxed);
+  x23assert(all_executors_closed_.load() == false);
+}
+
+void
+EventBlockContext::executor_close_block()
+{
+  if (open_executor_handles_.fetch_sub(1, std::memory_order_release) == 1) {
+    all_executors_closed_.store(true);
+    all_executors_closed_.broadcast();
+  }
+}
+
+x23::Async<void>
+EventBlockContext::await_all_executors_closed()
+{
+  while (open_executor_handles_.load(std::memory_order_acquire) > 0) {
+    co_await all_executors_closed_.wait(false);
+  }
 }
 
 } // namespace hogd

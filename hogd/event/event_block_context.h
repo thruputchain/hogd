@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
@@ -79,6 +80,11 @@ public:
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
   x23::Async<void> await_abandon();
+
+  // Executor handle tracking - count of executors with open handles to this block
+  void executor_open_block();
+  void executor_close_block();
+  x23::Async<void> await_all_executors_closed();
 
   /*
   x23::Async<void>
@@ -173,6 +179,10 @@ private:
   uint32_t pending_write_count_ = 0;
 
   x23::CoroFutex<bool> all_writes_done_ = false;
+
+  // Executor handle tracking - count of executors with open handles
+  std::atomic<uint32_t> open_executor_handles_ = 0;
+  x23::CoroFutex<bool> all_executors_closed_ = false;
 
   x23::UniqueFd events_file_;
 };

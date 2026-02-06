@@ -276,7 +276,6 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
                 x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
                 std::atomic<size_t> &n_total_coros)
 {
-
   auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
                  BlockValidationQueue *queue, BlockID block_number,
                  std::atomic<size_t> &n_total_coros) -> x23::Detached {
