@@ -104,17 +104,22 @@ int stress_shutdown(unsigned threads, unsigned seconds, bool verbose);
 // Simple PRNG for per-coroutine randomness (xorshift64)
 struct Rng {
   uint64_t s_;
-  Rng() : s_(std::hash<std::thread::id>{}(std::this_thread::get_id()) ^
-             uint64_t(steady_clock::now().time_since_epoch().count())) {
-    if (!s_) s_ = 1;
+  Rng()
+    : s_(std::hash<std::thread::id>{}(std::this_thread::get_id()) ^
+         uint64_t(steady_clock::now().time_since_epoch().count()))
+  {
+    if (!s_)
+      s_ = 1;
   }
-  uint64_t next() {
+  uint64_t next()
+  {
     s_ ^= s_ << 13;
     s_ ^= s_ >> 7;
     s_ ^= s_ << 17;
     return s_;
   }
-  unsigned range(unsigned lo, unsigned hi) {
+  unsigned range(unsigned lo, unsigned hi)
+  {
     return lo + next() % (hi - lo + 1);
   }
 };
@@ -135,11 +140,13 @@ struct FanoutServer {
   std::atomic<uint64_t> &fanout_cycles_;
 
   FanoutServer(ThreadPool &pool, std::atomic<uint64_t> &cycles)
-    : pool_(pool), fanout_cycles_(cycles) {}
+    : pool_(pool), fanout_cycles_(cycles)
+  {}
 
   void null() {}
 
-  Async<Data> echo(Data arg) {
+  Async<Data> echo(Data arg)
+  {
     // Fan out to K coroutines, mimicking process_transfers pattern
     size_t K = std::max(size_t(2), pool_.nthreads_);
     std::vector<Async<void>> handles;
@@ -149,22 +156,23 @@ struct FanoutServer {
 
     for (size_t i = 0; i < K; i++) {
       unsigned mode = rng.range(0, 2);
-      handles.push_back(
-        [](ThreadPool &pool, unsigned mode) -> Async<void> {
-          if (mode == 0) {
-            // Immediate return — tests await_ready fast path
-            co_return;
-          } else if (mode == 1) {
-            // Yield then return — tests suspend/resume path
-            co_await pool.bg();
-            co_return;
-          } else {
-            // Yield twice — more scheduling pressure
-            co_await pool.bg();
-            co_await pool.bg();
-            co_return;
-          }
-        }(pool_, mode));
+      handles.push_back([](ThreadPool &pool, unsigned mode) -> Async<void> {
+        if (mode == 0) {
+          // Immediate return — tests await_ready fast path
+          co_return;
+        }
+        else if (mode == 1) {
+          // Yield then return — tests suspend/resume path
+          co_await pool.bg();
+          co_return;
+        }
+        else {
+          // Yield twice — more scheduling pressure
+          co_await pool.bg();
+          co_await pool.bg();
+          co_return;
+        }
+      }(pool_, mode));
     }
 
     for (auto &h : handles)
@@ -186,7 +194,8 @@ struct SlowEchoServer {
 
   void null() {}
 
-  Async<Data> echo(Data arg) {
+  Async<Data> echo(Data arg)
+  {
     thread_local Rng rng;
     // 50% chance of yielding (simulates handler mid-work when teardown hits)
     if (rng.range(0, 1))
@@ -235,11 +244,10 @@ stress_bare(unsigned threads, unsigned seconds, bool verbose)
         std::vector<Async<void>> handles;
         handles.reserve(K);
         for (size_t j = 0; j < K; j++)
-          handles.push_back(
-            [](ThreadPool &p) -> Async<void> {
-              co_await p.bg();
-              co_return;
-            }(pool));
+          handles.push_back([](ThreadPool &p) -> Async<void> {
+            co_await p.bg();
+            co_return;
+          }(pool));
         for (auto &h : handles)
           co_await h;
         count.fetch_add(1, std::memory_order_relaxed);
@@ -252,8 +260,7 @@ stress_bare(unsigned threads, unsigned seconds, bool verbose)
   while (steady_clock::now() < deadline) {
     poll(nullptr, 0, verbose ? 5000 : 1000);
     if (verbose)
-      std::println("  bare: {} cycles ({:.1f}s)",
-                   formatL(count.load()),
+      std::println("  bare: {} cycles ({:.1f}s)", formatL(count.load()),
                    duration<double>(steady_clock::now() - start).count());
   }
 
@@ -277,9 +284,8 @@ stress_fanout(unsigned threads, unsigned seconds, bool verbose)
 
   // Start server
   auto server = std::make_unique<FanoutServer>(pool, fanout_cycles);
-  auto [port, lfd] = tcp_rpc_server(cp, 0, [&](auto conf) {
-    conf->server(server.get());
-  });
+  auto [port, lfd] =
+      tcp_rpc_server(cp, 0, [&](auto conf) { conf->server(server.get()); });
 
   sockaddr_in sin{};
   sin.sin_family = AF_INET;
@@ -299,8 +305,10 @@ stress_fanout(unsigned threads, unsigned seconds, bool verbose)
        unsigned coros_per_conn, std::atomic<uint64_t> &count,
        std::atomic<bool> &stop, Data payload) -> Detached {
       UniqueFd fd{socket(addr.ss_family, SOCK_STREAM, 0)};
-      if (!fd) co_return;
-      if (auto res = co_await cp.connect(fd, &addr); !res) co_return;
+      if (!fd)
+        co_return;
+      if (auto res = co_await cp.connect(fd, &addr); !res)
+        co_return;
       auto c = make_rpc_stream(cp, fd.release())->client(blank_rpc_v1{});
       for (unsigned j = 0; j < coros_per_conn; j++)
         rpc_loop(di, c, count, stop, payload);
@@ -343,9 +351,8 @@ stress_teardown(unsigned threads, unsigned seconds, bool verbose)
 
   // Start server with slow echo (random delays)
   auto server = std::make_unique<SlowEchoServer>(pool);
-  auto [port, lfd] = tcp_rpc_server(cp, 0, [&](auto conf) {
-    conf->server(server.get());
-  });
+  auto [port, lfd] =
+      tcp_rpc_server(cp, 0, [&](auto conf) { conf->server(server.get()); });
 
   sockaddr_in sin{};
   sin.sin_family = AF_INET;
@@ -364,8 +371,10 @@ stress_teardown(unsigned threads, unsigned seconds, bool verbose)
        std::atomic<uint64_t> &count, std::atomic<bool> &stop,
        Data payload) -> Detached {
       UniqueFd fd{socket(addr.ss_family, SOCK_STREAM, 0)};
-      if (!fd) co_return;
-      if (auto res = co_await cp.connect(fd, &addr); !res) co_return;
+      if (!fd)
+        co_return;
+      if (auto res = co_await cp.connect(fd, &addr); !res)
+        co_return;
       auto c = make_rpc_stream(cp, fd.release())->client(blank_rpc_v1{});
       rpc_loop(di, c, count, stop, payload);
       rpc_loop(di, c, count, stop, payload);
@@ -381,10 +390,12 @@ stress_teardown(unsigned threads, unsigned seconds, bool verbose)
       thread_local Rng rng;
       while (!stop.load(std::memory_order_relaxed)) {
         UniqueFd fd{socket(addr.ss_family, SOCK_STREAM, 0)};
-        if (!fd) continue;
+        if (!fd)
+          continue;
         // RST on close to avoid TIME_WAIT exhausting ephemeral ports
         enable_abortive_close(fd);
-        if (auto res = co_await cp.connect(fd, &addr); !res) continue;
+        if (auto res = co_await cp.connect(fd, &addr); !res)
+          continue;
 
         connect_count.fetch_add(1, std::memory_order_relaxed);
         auto c = make_rpc_stream(cp, fd.release())->client(blank_rpc_v1{});
@@ -395,7 +406,8 @@ stress_teardown(unsigned threads, unsigned seconds, bool verbose)
             co_await c.echo(payload);
             rpc_count.fetch_add(1, std::memory_order_relaxed);
           }
-        } catch (const std::exception &) {}
+        } catch (const std::exception &) {
+        }
         // Client goes out of scope — abrupt close
       }
     }(cp, addr, di, rpc_count, connect_count, stop, payload);
@@ -438,9 +450,8 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
 
   // Start simple echo server
   auto server = std::make_unique<EchoServer>();
-  auto [port, lfd] = tcp_rpc_server(cp, 0, [&](auto conf) {
-    conf->server(server.get());
-  });
+  auto [port, lfd] =
+      tcp_rpc_server(cp, 0, [&](auto conf) { conf->server(server.get()); });
 
   sockaddr_in sin{};
   sin.sin_family = AF_INET;
@@ -455,8 +466,10 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
 
   [&]() -> Detached {
     UniqueFd fd{socket(addr.ss_family, SOCK_STREAM, 0)};
-    if (!fd) co_return;
-    if (auto res = co_await cp.connect(fd, &addr); !res) co_return;
+    if (!fd)
+      co_return;
+    if (auto res = co_await cp.connect(fd, &addr); !res)
+      co_return;
     auto c = make_rpc_stream(cp, fd.release())->client(blank_rpc_v1{});
 
     Data tiny(4, uint8_t{0x11});
@@ -464,22 +477,25 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
     Data large(256 * 1024, uint8_t{0x33});
 
     for (unsigned i = 0; i < ncoros; i++) {
-      [](RefPtr<DestroyInhibit> di, auto c,
-         std::atomic<uint64_t> &rpc_count,
-         std::atomic<uint64_t> &bytes_transferred,
-         std::atomic<bool> &stop, std::atomic<bool> &spike,
-         Data tiny, Data medium, Data large) -> Detached {
+      [](RefPtr<DestroyInhibit> di, auto c, std::atomic<uint64_t> &rpc_count,
+         std::atomic<uint64_t> &bytes_transferred, std::atomic<bool> &stop,
+         std::atomic<bool> &spike, Data tiny, Data medium,
+         Data large) -> Detached {
         thread_local Rng rng;
         try {
           while (!stop.load(std::memory_order_relaxed)) {
             Data *payload;
             if (spike.load(std::memory_order_relaxed)) {
               payload = &large;
-            } else {
+            }
+            else {
               unsigned pick = rng.range(0, 9);
-              if (pick < 5) payload = &tiny;       // 50% tiny
-              else if (pick < 8) payload = &medium; // 30% medium
-              else payload = &large;                 // 20% large
+              if (pick < 5)
+                payload = &tiny; // 50% tiny
+              else if (pick < 8)
+                payload = &medium; // 30% medium
+              else
+                payload = &large; // 20% large
             }
             auto result = co_await c.echo(*payload);
             if (result.size() != payload->size()) {
@@ -491,9 +507,9 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
             bytes_transferred.fetch_add(payload->size(),
                                         std::memory_order_relaxed);
           }
-        } catch (const std::exception &) {}
-      }(di, c, rpc_count, bytes_transferred, stop, spike,
-        tiny, medium, large);
+        } catch (const std::exception &) {
+        }
+      }(di, c, rpc_count, bytes_transferred, stop, spike, tiny, medium, large);
     }
   }();
 
@@ -525,8 +541,9 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
 
   auto elapsed = duration<double>(steady_clock::now() - start);
   double gb = bytes_transferred.load() / 1e9;
-  std::println("writebuf:  {} RPCs | {:.1f} GB transferred | 0 errors | {:.2f}s",
-               formatL(rpc_count.load()), gb, elapsed.count());
+  std::println(
+      "writebuf:  {} RPCs | {:.1f} GB transferred | 0 errors | {:.2f}s",
+      formatL(rpc_count.load()), gb, elapsed.count());
   return 0;
 }
 
@@ -550,9 +567,8 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
     std::atomic<uint64_t> rpc_count{0};
 
     auto server = std::make_unique<EchoServer>();
-    auto [port, lfd] = tcp_rpc_server(*cp, 0, [&](auto conf) {
-      conf->server(server.get());
-    });
+    auto [port, lfd] =
+        tcp_rpc_server(*cp, 0, [&](auto conf) { conf->server(server.get()); });
 
     sockaddr_in sin{};
     sin.sin_family = AF_INET;
@@ -571,8 +587,10 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
          std::atomic<uint64_t> &count, std::atomic<bool> &stop,
          Data payload) -> Detached {
         UniqueFd fd{socket(addr.ss_family, SOCK_STREAM, 0)};
-        if (!fd) co_return;
-        if (auto res = co_await cp.connect(fd, &addr); !res) co_return;
+        if (!fd)
+          co_return;
+        if (auto res = co_await cp.connect(fd, &addr); !res)
+          co_return;
         auto c = make_rpc_stream(cp, fd.release())->client(blank_rpc_v1{});
         rpc_loop(di, c, count, stop, payload);
       }(/*cp=*/*cp, addr, di, rpc_count, stop, payload);
@@ -590,7 +608,8 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
       di.destroy_wait();
       cp.reset();
       pool.reset();
-    } else if (destruction_mode == 1) {
+    }
+    else if (destruction_mode == 1) {
       // Destroy CoroPoll first.  ~CoroPoll resets all fds, dispatching
       // EBADF to pending coroutines via the (still-alive) pool.  Tests
       // that CoroPoll cleanup works when streams are still active.
@@ -598,7 +617,8 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
       cp.reset();
       di.destroy_wait();
       pool.reset();
-    } else {
+    }
+    else {
       // No listen-fd poison — rely solely on the stop flag for drain.
       // rpc_loops check stop and exit naturally after their current
       // RPC completes.  The accept loop keeps running until ~CoroPoll.
@@ -647,12 +667,22 @@ main(int argc, char **argv)
   int opt;
   while ((opt = getopt(argc, argv, "t:d:s:vh")) != -1)
     switch (opt) {
-    case 't': parse_int_opt(opt_threads); break;
-    case 'd': parse_int_opt(opt_seconds); break;
-    case 's': opt_scenario = optarg; break;
-    case 'v': opt_verbose = true; break;
-    case 'h': usage(0);
-    default: usage(2);
+    case 't':
+      parse_int_opt(opt_threads);
+      break;
+    case 'd':
+      parse_int_opt(opt_seconds);
+      break;
+    case 's':
+      opt_scenario = optarg;
+      break;
+    case 'v':
+      opt_verbose = true;
+      break;
+    case 'h':
+      usage(0);
+    default:
+      usage(2);
     }
 
   if (!opt_threads)
@@ -667,18 +697,17 @@ main(int argc, char **argv)
     int (*fn)(unsigned, unsigned, bool);
   };
   Scenario scenarios[] = {
-    {"bare", stress_bare},
-    {"fanout", stress_fanout},
-    {"teardown", stress_teardown},
-    {"writebuf", stress_writebuf},
-    {"shutdown", stress_shutdown},
+      {"bare", stress_bare},         {"fanout", stress_fanout},
+      {"teardown", stress_teardown}, {"writebuf", stress_writebuf},
+      {"shutdown", stress_shutdown},
   };
 
   int ret = 0;
   for (auto &[name, fn] : scenarios) {
     if (opt_scenario && strcmp(opt_scenario, name) != 0)
       continue;
-    std::println("=== {} ({} threads, {}s) ===", name, opt_threads, opt_seconds);
+    std::println("=== {} ({} threads, {}s) ===", name, opt_threads,
+                 opt_seconds);
     ret |= fn(opt_threads, opt_seconds, opt_verbose);
   }
   return ret;
