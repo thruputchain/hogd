@@ -267,7 +267,7 @@ do_panic(std::string_view fmt, std::format_args args,
   if (auto cmd = cmdline(); !cmd.empty())
     uformat_to(&msg, "  Command line:\n    {}\n", cmd);
   if (auto st = stacktrace(4); !st.empty()) {
-    msg += "  Strack trace:\n";
+    msg += "  Stack trace:\n";
     msg += st;
   }
   write(2, msg.data(), msg.size());
