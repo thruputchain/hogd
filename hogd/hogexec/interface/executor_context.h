@@ -19,7 +19,6 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -87,7 +86,6 @@ private:
   DispatchPool &worker_pool_;
 
   std::mutex event_accumulate_mutex_;
-  std::condition_variable event_accumulate_cv_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;
   std::atomic<uint32_t> pending_event_calls_ = 0;
 };

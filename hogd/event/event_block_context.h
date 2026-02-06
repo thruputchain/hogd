@@ -1,17 +1,15 @@
 #pragma once
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
-#include <iterator>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
-#include <type_traits>
 #include <vector>
 
 #include "event.hh"
@@ -19,7 +17,6 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
-#include "hogd/base/rpc_client.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/allocator.h"
@@ -31,6 +28,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -79,36 +77,24 @@ public:
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
   x23::Async<void> await_abandon();
+  x23::Async<bool> is_abandoned()
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    co_return state_ == BlockState::kAbandoned;
+  }
+
+  // Executor handle tracking - count of executors with open handles to this
+  // block
+  void executor_open_block();
+  void executor_close_block();
+  // Waits for all executors to close.
+  // Returns true if all executors closed normally, false if block was abandoned
+  x23::Async<bool> await_all_executors_closed();
 
   x23::Async<void>
   send_events_to_indexers(BlockHeight block_height,
-                          std::vector<indexer_event_client_t> &indexers)
-  {
-    TxEventLogBatch full_event_log;
-    {
-      std::unique_lock ul = event_log_.lock_threads();
-      event_log_.for_each(ul, [&full_event_log](
-                                  TxEventLogBatch &per_thread_event_log) {
-        full_event_log.append(
-            std::make_move_iterator(per_thread_event_log.begin()),
-            std::make_move_iterator(per_thread_event_log.end()));
-        per_thread_event_log.clear();
-      });
-    }
-
-    std::vector<x23::Async<void>> handles;
-    handles.reserve(indexers.size());
-
-    for (indexer_event_client_t &indexer : indexers) {
-      handles.push_back(
-          indexer.indexer_event_process_events(block_height, full_event_log));
-    }
-    for (x23::Async<void> &handle : handles) {
-      co_await handle;
-    }
-    handles.clear();
-    co_return;
-  }
+                          std::vector<indexer_event_client_t> &indexers);
 
 private:
   x23::Async<void> write_event(std::span<const uint8_t> data);
@@ -172,6 +158,10 @@ private:
   uint32_t pending_write_count_ = 0;
 
   x23::CoroFutex<bool> all_writes_done_ = false;
+
+  // Executor handle tracking - count of executors with open handles
+  std::atomic<uint32_t> open_executor_handles_ = 0;
+  x23::CoroFutex<bool> all_executors_closed_ = false;
 
   x23::UniqueFd events_file_;
 };

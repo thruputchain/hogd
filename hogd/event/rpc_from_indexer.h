@@ -1,13 +1,16 @@
 #pragma once
 
+#include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/event/event_block_context.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
-#include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
+#include <cstring>
+#include <utility>
 
 namespace hogd {
 
