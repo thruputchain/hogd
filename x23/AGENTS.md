@@ -66,7 +66,7 @@ Generated headers define structs, enums, unions, and RPC program interfaces with
 ### Coroutine types (`x23/async.h`)
 - **`Async<T>`** — awaitable coroutine return type. The primary async primitive.
 - **`MaybeAsync<T>`** — returns `T` synchronously or `Async<T>`, avoiding coroutine frame allocation for fast paths.
-- **`Detached`** — fire-and-forget coroutine. Lambda captures don't live in the coroutine frame, so unnamed lambda coroutines with captures need `(this auto)` to copy the closure into the frame (the [most vexing capture](https://www.scs.stanford.edu/~dm/blog/vexing-capture.html)).
+- **`Detached`** — fire-and-forget coroutine. Lambda captures don't live in the coroutine frame, so unnamed lambda coroutines with captures need `(this auto)` to copy the closure into the frame (the "most vexing capture").
 - **`Awaitable<T>`** / **`CoroCB<T>`** — callback-driven future/promise pair.
 
 ### Threading (`x23/threadpool.h`, `x23/event.h`)
