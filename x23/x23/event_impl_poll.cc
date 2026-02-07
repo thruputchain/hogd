@@ -207,11 +207,12 @@ CoroPollImpl::clear(BorrowedFd fd, bool)
 void
 CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
 {
+  auto ptr = state_.take();
   if (stop_requested()) {
+    ptr.reset();
     pool_.make_callback(cb, EBADF);
     return;
   }
-  auto ptr = state_.take();
   auto &f = (*ptr)[fd.get()];
   x23assert(!f.callbacks[write]);
   if (f.poisoned) {
