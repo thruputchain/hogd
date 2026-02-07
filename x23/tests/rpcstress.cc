@@ -464,7 +464,7 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
   DestroyInhibit di;
   unsigned ncoros = threads * 2;
 
-  [&]() -> Detached {
+  [&](this auto) -> Detached {
     UniqueFd fd{socket(addr.ss_family, SOCK_STREAM, 0)};
     if (!fd)
       co_return;
