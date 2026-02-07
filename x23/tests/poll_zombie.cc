@@ -42,7 +42,7 @@ main() // NOLINT(bugprone-exception-escape)
     // This coroutine suspends at read_wait (fd is not readable).
     // When ~CoroPoll fires reset(), the coroutine resumes and
     // calls poison() -- re-inserting a zombie entry into state_.
-    [token, &cp, fd=fds[0]](this auto) -> x23::Detached {
+    [token, &cp, fd = fds[0]](this auto) -> x23::Detached {
       co_await cp.read_wait(token);
       cp.poison(fd);
     }();
