@@ -4,36 +4,81 @@
 #include <cassert>
 #include <cstring>
 #include <regex> // NOLINT(misc-include-cleaner)
+#include <string>
 #include <string_view>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "x23/debug.h"
 
 namespace hogd {
+
+namespace {
+struct SemverComponents {
+  std::string major;
+  std::string minor;
+  std::string patch;
+  std::string prerelease; // empty if no prerelease
+};
+
+SemverComponents parse_semver(std::string_view identifier_version) {
+  // Semver format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+  // We parse major, minor, patch, and prerelease (ignoring build metadata)
+  std::regex semver_regex(R"((\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?)");
+  std::string version_str(identifier_version);
+  std::smatch matches;
+  
+  auto ok = std::regex_match(version_str, matches, semver_regex);
+  x23assert(ok);
+  x23assert(matches.size() >= 4);
+  
+  SemverComponents components;
+  components.major = matches[1].str();
+  components.minor = matches[2].str();
+  components.patch = matches[3].str();
+  
+  // Prerelease (without the leading '-')
+  if (matches[4].matched && matches[4].length() > 1) {
+    components.prerelease = matches[4].str().substr(1); // skip the '-'
+  }
+  
+  return components;
+}
+
+std::string major_version(SemverComponents const &components) {
+  if (components.major != "0") {
+    return components.major;
+  }
+  if (components.minor != "0") {
+    return "0." +components.minor;
+  }
+  if (components.patch != "0") {
+    return "0.0." + components.patch;
+  }
+  return "0.0.0" + components.prerelease;
+}
+}
 
 ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
-                          uint16_t method_id)
+                          std::string_view method_name)
 {
-  assert(std::regex_match(identifier_version.begin(), identifier_version.end(),
-                          std::regex(R"(\d+\.\d+\.\d+)")));
-  ContractInterfaceIDPreimage preimage{.name = {identifier_name.begin(),
-                                                identifier_name.end()},
-                                       .vers = {identifier_version.begin(),
-                                                identifier_version.end()}};
+  auto semver_components = parse_semver(identifier_version);
 
-  auto h = sha256(preimage);
+  std::string method_name_preimage = 
+  std::string(identifier_name)+ 
+  major_version(semver_components) 
+   + std::string(method_name);
 
-  uint16_t method_id_byteswapped = std::byteswap(method_id);
+  auto h = sha256(method_name_preimage);
 
   ContractEntrypointID out{};
   auto *out_ptr = reinterpret_cast<uint8_t *>(&out);
-  std::memcpy(out_ptr, h.data(), 6);
-  std::memcpy(out_ptr + 6, &method_id_byteswapped, 2);
-  static_assert(sizeof(out) == 6 + 2);
+  std::memcpy(out_ptr, h.data(), 8);
+  static_assert(sizeof(out) == 8);
   return out;
 }
 

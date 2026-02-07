@@ -11,10 +11,15 @@ namespace hogd {
 
 TEST(ContractTraitTest, MethodIDDerivation)
 {
-  auto id = sdk_method_id("hogd", "0.1.0", 0x1234);
-  auto id2 = sdk_method_id("hogd", "0.1.0", 0xABCD);
-  ASSERT_EQ(id & 0xFFFF'FFFF'FFFF'0000, id2 & 0xFFFF'FFFF'FFFF'0000);
-  ASSERT_NE(id & 0x0000'0000'0000'FFFF, id2 & 0x0000'0000'0000'FFFF);
+  auto id = sdk_method_id("hogd", "0.1.0", "abc");
+  auto id2 = sdk_method_id("hogd", "0.1.12", "abc");
+  ASSERT_EQ(id, id2);
+
+  auto id3 = sdk_method_id("hogd", "0.1.0", "def");
+  ASSERT_NE(id, id3);
+
+  auto id4 = sdk_method_id("hogd", "0.1.0-alpha", "abc");
+  ASSERT_EQ(id, id4);
 }
 
 TEST(ContractTraitTest, EntrypointFromMethodID)
