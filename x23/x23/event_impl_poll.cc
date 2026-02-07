@@ -195,17 +195,7 @@ CoroPollImpl::reset(BorrowedFd fd)
     // segment) while poll is still waiting for an event.  Waking the
     // poll thread ensures closed file descriptors also close sockets.
     wake();
-    // Lock must be held here while we call pool_.go(),
-    // as otherwise there is the possibility that during shutdown,
-    // the poll thread might wake, notice (in time_to_stop())
-    // that a stop has been requested, there are no file descriptors in state_
-    // (as we just removed them), and there is no work on the threadpool.
-    // Then the CoroPoll dtor finishes, and then this work() enqueues and
-    // accesses freed memory.
-    //
-    // See test_poll_zombie.cc for an example.
-    // Releasing the lock and then sleeping for a bit before calling
-    // pool_.go() makes it easy to reproduce a crash in test_poll_zombie
+    ptr.reset();
     pool_.go(std::move(work));
   }
 }

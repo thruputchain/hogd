@@ -9,7 +9,6 @@
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
-#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/event.h>
 #include <x23/sockio.h>
