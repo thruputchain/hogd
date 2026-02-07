@@ -6,7 +6,6 @@
 #include <memory>
 #include <span>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 #include "built_contracts/itc_erc20.h"
