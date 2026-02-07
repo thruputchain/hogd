@@ -149,9 +149,31 @@ CoroPollImpl::report_badfd(FdState &f)
 void
 CoroPollImpl::poison(BorrowedFd fd)
 {
+  auto s = state_.take();
+  // The shutdown deadlock triggers under the following sequence:
+  // 1. ~CoroPoll() runs, which then calls reset() on all file descriptors
+  // 2. reset() removes the file descriptor from state_
+  // 3. poison() is called, which, without the if (stop_requested())) check,
+  //    would add back the fd state to state_
+  // 4. ~CoroPoll() then waits for time_to_stop() to return true (which only
+  // happens
+  //    if state_ is empty)
+  //
+  // The check prevents this case, as the entry for fd is only added to state_
+  // (via operator[]) if we are not shutting down.
+  //
+  // We need to check stop_requested() while the state_ lock is held
+  // (instead of before acquiring the lock)
+  // or else there is a rare, probably just theoretical race condition.
+  // In that case, we could have a situation where one thread calls poison(),
+  // then before it can acquire the state_ lock, another thread calls
+  // ~CoroPoll() and reset().  When the first thread makes progress it would add
+  // the fd state back to state_ again, causing a deadlock. Note that
+  // request_stop() also acquires the state_ lock, so once we acquire state_ we
+  // can be sure we will not race with another thread on this stop_requested()
+  // check.
   if (stop_requested())
     return;
-  auto s = state_.take();
   auto &f = (*s)[fd.get()];
   f.poisoned = true;
   auto work = report_badfd(f);
