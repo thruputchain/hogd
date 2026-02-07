@@ -25,37 +25,27 @@ main() // NOLINT(bugprone-exception-escape)
   });
   alarm(5);
 
+  int fds[2];
+  if (pipe(fds))
+    x23::Errno{}.raise("socketpair");
+  x23::set_nonblock(fds[0]);
+
   x23::ThreadPool pool(2);
   {
     x23::CoroPoll cp(pool);
 
-    int fds[2];
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == -1)
-      x23::Errno{}.raise("socketpair");
-    x23::UniqueFd rfd(fds[0]);
+    auto token = cp.read_clear(fds[0]);
+    char c;
+    int n = read(fds[0], &c, 1);
+    x23assert(n == -1 && errno == EAGAIN);
 
-    // Shrink buffers so we can fill them quickly
-    int bufsz = 4096;
-    setsockopt(fds[0], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz));
-    setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz));
-    x23::set_nonblock(fds[1]);
-
-    // Fill the socket send buffer
-    char junk[8192];
-    memset(junk, 'x', sizeof(junk));
-    while (::write(fds[1], junk, sizeof(junk)) > 0)
-      ;
-
-    // This coroutine suspends at write_wait (fd is not writable).
+    // This coroutine suspends at read_wait (fd is not readable).
     // When ~CoroPoll fires reset(), the coroutine resumes and
     // calls poison() -- re-inserting a zombie entry into state_.
-    [](x23::CoroPoll &cp, int fd) -> x23::Detached {
-      co_await cp.write_wait(cp.write_clear(fd));
+    [token, &cp, fd=fds[0]](this auto) -> x23::Detached {
+      co_await cp.read_wait(token);
       cp.poison(fd);
-    }(cp, fds[1]);
-
-    // Let the coroutine reach write_wait and suspend
-    usleep(100'000);
+    }();
 
     std::println(stderr, "Destroying CoroPoll (will hang if bug present)...");
     // ~CoroPoll runs here:

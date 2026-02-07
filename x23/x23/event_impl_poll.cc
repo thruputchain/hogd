@@ -149,12 +149,12 @@ CoroPollImpl::report_badfd(FdState &f)
 void
 CoroPollImpl::poison(BorrowedFd fd)
 {
-  auto s = state_.take();
-  auto it = s->find(fd.get());
-  if (it == s->end())
+  if (stop_requested())
     return;
-  it->second.poisoned = true;
-  auto work = report_badfd(it->second);
+  auto s = state_.take();
+  auto &f = (*s)[fd.get()];
+  f.poisoned = true;
+  auto work = report_badfd(f);
   s.reset();
   pool_.go(std::move(work));
 }
@@ -213,11 +213,11 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
   ThreadPool::Job h{};
   {
     auto ptr = state_.take();
-    auto it = ptr->find(fd.get());
-    if (it != ptr->end() && it->second.callbacks[write])
-      h = {std::exchange(it->second.callbacks[write], {})
+    auto &f = (*ptr)[fd.get()];
+    if (f.callbacks[write])
+      h = {std::exchange(f.callbacks[write], {})
                ->set_result_without_resuming(err),
-           it->second.callbacks[write].cpuhint};
+           f.callbacks[write].cpuhint};
   }
   if (h)
     pool_.go(h);
