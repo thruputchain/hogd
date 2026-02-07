@@ -3,19 +3,20 @@
 #include <cstdio>
 #include <cstring>
 #include <print>
+#include <sys/signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
+#include <x23/err.h>
 #include <x23/event.h>
 #include <x23/sockio.h>
 #include <x23/threadpool.h>
 
-using namespace x23;
 
 int
-main()
+main() // NOLINT(bugprone-exception-escape)
 {
   signal(SIGALRM, [](int) {
     const char msg[] = "BUG CONFIRMED: ~CoroPoll() hung "
@@ -25,20 +26,20 @@ main()
   });
   alarm(5);
 
-  ThreadPool pool(2);
+  x23::ThreadPool pool(2);
   {
-    CoroPoll cp(pool);
+    x23::CoroPoll cp(pool);
 
     int fds[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == -1)
-      Errno{}.raise("socketpair");
-    UniqueFd rfd(fds[0]);
+      x23::Errno{}.raise("socketpair");
+    x23::UniqueFd rfd(fds[0]);
 
     // Shrink buffers so we can fill them quickly
     int bufsz = 4096;
     setsockopt(fds[0], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz));
     setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz));
-    set_nonblock(fds[1]);
+    x23::set_nonblock(fds[1]);
 
     // Fill the socket send buffer
     char junk[8192];
@@ -49,7 +50,7 @@ main()
     // This coroutine suspends at write_wait (fd is not writable).
     // When ~CoroPoll fires reset(), the coroutine resumes and
     // calls poison() -- re-inserting a zombie entry into state_.
-    [](CoroPoll &cp, int fd) -> Detached {
+    [](x23::CoroPoll &cp, int fd) -> x23::Detached {
       co_await cp.write_wait(cp.write_clear(fd));
       cp.poison(fd);
     }(cp, fds[1]);
