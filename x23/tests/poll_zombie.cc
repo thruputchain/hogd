@@ -14,7 +14,6 @@
 #include <x23/sockio.h>
 #include <x23/threadpool.h>
 
-
 int
 main() // NOLINT(bugprone-exception-escape)
 {
