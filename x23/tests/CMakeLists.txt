@@ -44,8 +44,8 @@ set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
 list(APPEND TEST_EXECUTABLES test_canary)
-add_test(NAME canary COMMAND test_canary -d 5 -t 8)
-set_tests_properties(canary PROPERTIES TIMEOUT 60)
+# Not registered as a ctest -- long-running soak test for coroutine frame
+# integrity.  Deterministic coverage is in the detached gtest instead.
 
 add_executable(test_rpc_dispatch_race ${EXCLUDE_TOKEN} rpc_dispatch_race.cc)
 target_link_libraries(test_rpc_dispatch_race x23 xdrtest)
@@ -86,6 +86,7 @@ add_x23_gtest(multiclient)
 add_x23_gtest(nmvec)
 add_x23_gtest(shutdown)
 add_x23_gtest(sync)
+add_x23_gtest(detached)
 add_x23_gtest(uiobuf)
 add_x23_gtest(xdr)
 
