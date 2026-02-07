@@ -49,30 +49,30 @@ RefPtr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto it = s->find(fd.get());
-  if (it == s->end() || it->second.poisoned)
+  auto &f = (*s)[fd.get()];
+  if (f.poisoned)
     return nullptr;
-  return it->second.reader();
+  return f.reader();
 }
 
 RefPtr<WriteBuffer>
 CoroPollImpl::get_writer(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto it = s->find(fd.get());
-  if (it == s->end() || it->second.poisoned)
+  auto &f = (*s)[fd.get()];
+  if (f.poisoned)
     return nullptr;
-  return it->second.writer();
+  return f.writer();
 }
 
 std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
 CoroPollImpl::get_rw(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto it = s->find(fd.get());
-  if (it == s->end() || it->second.poisoned)
+  auto &f = (*s)[fd.get()];
+  if (f.poisoned)
     return {nullptr, nullptr};
-  return {it->second.reader(), it->second.writer()};
+  return {f.reader(), f.writer()};
 }
 
 void
