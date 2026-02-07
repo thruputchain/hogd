@@ -41,6 +41,27 @@ endforeach()
 add_x23_test(poll_zombie)
 set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
 
+add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
+target_link_libraries(test_canary x23)
+list(APPEND TEST_EXECUTABLES test_canary)
+add_test(NAME canary COMMAND test_canary -d 5 -t 8)
+set_tests_properties(canary PROPERTIES TIMEOUT 60)
+
+add_executable(test_rpc_dispatch_race ${EXCLUDE_TOKEN} rpc_dispatch_race.cc)
+target_link_libraries(test_rpc_dispatch_race x23 xdrtest)
+use_x23(test_rpc_dispatch_race)
+list(APPEND TEST_EXECUTABLES test_rpc_dispatch_race)
+add_test(NAME rpc_dispatch_race COMMAND test_rpc_dispatch_race -d 5 -t 8)
+set_tests_properties(rpc_dispatch_race PROPERTIES TIMEOUT 60)
+
+add_executable(test_shutdown_race ${EXCLUDE_TOKEN} shutdown_race.cc)
+target_link_libraries(test_shutdown_race x23 xdrtest)
+use_x23(test_shutdown_race)
+list(APPEND TEST_EXECUTABLES test_shutdown_race)
+# Not registered as a ctest -- this test deliberately uses an aggressive
+# shutdown path (no poison, no fail) that triggers a known destruction
+# ordering race.  Build-only; run manually with MALLOC_PERTURB_=85.
+
 add_x23_test(rpcthroughput)
 add_x23_test(srpcthroughput latency.h)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
