@@ -11,6 +11,7 @@
 
 #include <x23/serialize.h>
 #include <x23/serialize_cxs.h>
+#include <x23/vec.h>
 
 #include "tests/xdrtest.hh"
 
@@ -129,6 +130,151 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
   try_cxs<ContractAddress>(data, size);
   try_cxs<GenericArraySize>(data, size);
+
+  // optional types
+  try_xdr<int_opt>(data, size);
+  try_xdr<int_opt_vec>(data, size);
+  try_xdr<int_opt_opt>(data, size);
+
+  try_cxs<int_opt>(data, size);
+  try_cxs<int_opt_vec>(data, size);
+  try_cxs<int_opt_opt>(data, size);
+
+  // --- Previously untested types from xdrtest.x ---
+
+  // Float primitive
+  try_xdr<float>(data, size);
+  try_cxs<float>(data, size);
+
+  // Float in struct
+  try_xdr<float_struct>(data, size);
+  try_cxs<float_struct>(data, size);
+
+  // Union without default void case (no fallback arm)
+  try_xdr<sunion_no_void>(data, size);
+  try_cxs<sunion_no_void>(data, size);
+
+  // Union with int discriminant and struct arms
+  try_xdr<u_4_12>(data, size);
+  try_cxs<u_4_12>(data, size);
+
+  // Vector of primitives
+  try_xdr<intvec>(data, size);
+  try_cxs<intvec>(data, size);
+
+  // Struct with only int64_t fields
+  try_xdr<NonnegativeInt64SetAddArgs>(data, size);
+  try_cxs<NonnegativeInt64SetAddArgs>(data, size);
+
+  // Empty struct
+  try_xdr<VoidCheck>(data, size);
+  try_cxs<VoidCheck>(data, size);
+
+  // Struct with void fields interspersed with data
+  try_xdr<VoidCheckStrange>(data, size);
+  try_cxs<VoidCheckStrange>(data, size);
+
+  // Simple single-field structs (int64_t, uint64_t)
+  try_xdr<MultilineComment>(data, size);
+  try_xdr<StellarValue>(data, size);
+  try_xdr<MultilineCommentPost>(data, size);
+
+  try_cxs<MultilineComment>(data, size);
+  try_cxs<StellarValue>(data, size);
+  try_cxs<MultilineCommentPost>(data, size);
+
+  // Struct with fixed opaque array + variable opaque vector
+  try_xdr<TxEmittedEvent>(data, size);
+  try_cxs<TxEmittedEvent>(data, size);
+
+  // Union directly (not just via StorageDeltaVec)
+  try_xdr<StorageDelta>(data, size);
+  try_cxs<StorageDelta>(data, size);
+
+  // --- New types for comprehensive coverage ---
+
+  // Bounded typed vector (max-size validation on non-opaque)
+  try_xdr<bounded_intvec>(data, size);
+  try_cxs<bounded_intvec>(data, size);
+
+  // Fixed-size array of structs
+  try_xdr<array_of_structs>(data, size);
+  try_cxs<array_of_structs>(data, size);
+
+  // Fixed-size array of primitives
+  try_xdr<array_of_prims>(data, size);
+  try_cxs<array_of_prims>(data, size);
+
+  // Vectors of unions
+  try_xdr<coloru_vec>(data, size);
+  try_xdr<storage_delta_vec2>(data, size);
+
+  try_cxs<coloru_vec>(data, size);
+  try_cxs<storage_delta_vec2>(data, size);
+
+  // Struct containing a union field
+  try_xdr<struct_with_union>(data, size);
+  try_cxs<struct_with_union>(data, size);
+
+  // Struct with multiple variable-length fields
+  try_xdr<multi_vec_struct>(data, size);
+  try_cxs<multi_vec_struct>(data, size);
+
+  // Optional struct
+  try_xdr<opt_struct>(data, size);
+  try_cxs<opt_struct>(data, size);
+
+  // Optional union
+  try_xdr<opt_union>(data, size);
+  try_cxs<opt_union>(data, size);
+
+  // Optional string
+  try_xdr<opt_string_ptr>(data, size);
+  try_cxs<opt_string_ptr>(data, size);
+
+  // Vector of vectors (nested dynamic)
+  try_xdr<vec_of_vecs>(data, size);
+  try_cxs<vec_of_vecs>(data, size);
+
+  // Vector of optional structs
+  try_xdr<opt_fix4_vec>(data, size);
+  try_cxs<opt_fix4_vec>(data, size);
+
+  // Union with many arms
+  try_xdr<many_arm_union>(data, size);
+  try_cxs<many_arm_union>(data, size);
+
+  // Union where all arms are void
+  try_xdr<all_void_union>(data, size);
+  try_cxs<all_void_union>(data, size);
+
+  // Deeply nested structs (3 levels)
+  try_xdr<inner_struct>(data, size);
+  try_xdr<middle_struct>(data, size);
+  try_xdr<outer_struct>(data, size);
+
+  try_cxs<inner_struct>(data, size);
+  try_cxs<middle_struct>(data, size);
+  try_cxs<outer_struct>(data, size);
+
+  // Union with complex struct arms containing vectors
+  try_xdr<complex_arm_union>(data, size);
+  try_cxs<complex_arm_union>(data, size);
+
+  // Enum vector (standalone enum deserialization)
+  try_xdr<gappy_enum_vec>(data, size);
+  try_cxs<gappy_enum_vec>(data, size);
+
+  // Non-aligned opaque arrays (padding validation)
+  try_xdr<opaque_1>(data, size);
+  try_xdr<opaque_5>(data, size);
+  try_xdr<opaque_7>(data, size);
+  try_xdr<opaque_33>(data, size);
+
+  try_cxs<opaque_1>(data, size);
+  try_cxs<opaque_5>(data, size);
+  try_cxs<opaque_7>(data, size);
+  try_cxs<opaque_33>(data, size);
 
   return 0;
 }

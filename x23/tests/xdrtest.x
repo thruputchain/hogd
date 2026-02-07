@@ -210,3 +210,138 @@ union NonEnumTag switch (NotEnum d)
 case 0:
   void;
 };
+
+typedef int *int_opt;
+typedef int_opt int_opt_vec<>;
+typedef int_opt *int_opt_opt;
+
+// --- Additional fuzz testing types ---
+
+// Float primitive coverage
+struct float_struct {
+  float f;
+};
+
+// Bounded typed vector (tests max-size validation on non-opaque vectors)
+typedef int bounded_intvec<8>;
+
+// Fixed-size array of structs (kArray with struct elements)
+struct array_of_structs {
+  fix_4 items[4];
+};
+
+// Fixed-size array of primitives
+struct array_of_prims {
+  int nums[3];
+  double vals[2];
+};
+
+// Vector of unions
+typedef coloru coloru_vec<>;
+typedef StorageDelta storage_delta_vec2<>;
+
+// Struct containing a union field directly
+struct struct_with_union {
+  int id;
+  coloru cu;
+  string label<>;
+};
+
+// Struct with multiple variable-length fields
+struct multi_vec_struct {
+  string name<>;
+  opaque payload<>;
+  int values<>;
+  fix_12 items<>;
+};
+
+// Optional (pointer to) struct
+typedef fix_12 *opt_struct;
+
+// Optional (pointer to) union
+typedef coloru *opt_union;
+
+// Optional (pointer to) string
+typedef string opt_string<>;
+typedef opt_string *opt_string_ptr;
+
+// Vector of vectors (nested dynamic types)
+typedef intvec vec_of_vecs<>;
+
+// Vector of optionals of structs
+typedef fix_4 *opt_fix4;
+typedef opt_fix4 opt_fix4_vec<>;
+
+// Enum with gaps in values (non-contiguous)
+enum gappy_enum { GAPPY_A = 0, GAPPY_B = 5, GAPPY_C = 100, GAPPY_D = 255 };
+
+// Union with many arms (exercises larger discriminant switching)
+union many_arm_union switch (int tag)
+{
+case 0:
+  void;
+case 1:
+  bool b;
+case 2:
+  int i;
+case 3:
+  unsigned int u;
+case 4:
+  hyper h;
+case 5:
+  unsigned hyper uh;
+case 6:
+  double d;
+case 7:
+  string s<>;
+case 8:
+  fix_12 f12;
+case 9:
+  opaque data<>;
+};
+
+// Union where all arms are void
+union all_void_union switch (int tag)
+{
+case 0:
+  void;
+case 1:
+  void;
+case 2:
+  void;
+};
+
+// Deeply nested struct (3 levels of nesting)
+struct inner_struct {
+  int x;
+  double y;
+};
+
+struct middle_struct {
+  inner_struct inner;
+  string tag<>;
+};
+
+struct outer_struct {
+  middle_struct mid;
+  int count;
+  middle_struct extras<>;
+};
+
+// Union with struct arms that contain vectors (complex nesting)
+union complex_arm_union switch (bool which)
+{
+case FALSE:
+  multi_vec_struct mvs;
+case TRUE:
+  TxEventLog log;
+};
+
+// Enum used as a standalone typedef (tests enum deserialization directly)
+typedef gappy_enum gappy_enum_vec<>;
+
+// Non-aligned opaque arrays (test padding validation for various sizes)
+typedef opaque opaque_5[5];
+typedef opaque opaque_7[7];
+typedef opaque opaque_1[1];
+typedef opaque opaque_33[33];
