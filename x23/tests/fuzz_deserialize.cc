@@ -31,6 +31,22 @@ try_xdr(const uint8_t *data, size_t size)
   }
 }
 
+// Strict XDR deserialization: rejects trailing data and non-4-aligned input.
+// Exercises different error paths than deserialize_from.
+template<typename T>
+void
+try_xdr_strict(const uint8_t *data, size_t size)
+{
+  T val{};
+  try {
+    x23::Buf buf(data, data + size);
+    x23::BufViewEnd view(buf);
+    x23::deserialize(&val, view);
+  } catch (const x23::XdrException &) {
+    // Expected for invalid input
+  }
+}
+
 template<typename T>
 void
 try_cxs(const uint8_t *data, size_t size)
@@ -275,6 +291,48 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   try_cxs<opaque_5>(data, size);
   try_cxs<opaque_7>(data, size);
   try_cxs<opaque_33>(data, size);
+
+  // Bounded string (max-size rejection for string type)
+  try_xdr<bounded_string>(data, size);
+  try_cxs<bounded_string>(data, size);
+
+  // Union with default arm carrying data (not void)
+  try_xdr<default_data_union>(data, size);
+  try_cxs<default_data_union>(data, size);
+
+  // Union with bool discriminant, both arms with data
+  try_xdr<bool_both_arms>(data, size);
+  try_cxs<bool_both_arms>(data, size);
+
+  // Struct mixing fixed-opaque arrays of various alignments
+  try_xdr<mixed_opaque_struct>(data, size);
+  try_cxs<mixed_opaque_struct>(data, size);
+
+  // Single-element bounded vector (max_size == 1)
+  try_xdr<single_vec>(data, size);
+  try_cxs<single_vec>(data, size);
+
+  // Very small bounded opaque
+  try_xdr<tiny_opaque>(data, size);
+  try_cxs<tiny_opaque>(data, size);
+
+  // --- Strict XDR deserialization (rejects trailing data, non-4-aligned) ---
+  // Test a representative subset of types through the strict path.
+  try_xdr_strict<int32_t>(data, size);
+  try_xdr_strict<bool>(data, size);
+  try_xdr_strict<fix_12>(data, size);
+  try_xdr_strict<sunion>(data, size);
+  try_xdr_strict<uunion>(data, size);
+  try_xdr_strict<x23::Str>(data, size);
+  try_xdr_strict<Data>(data, size);
+  try_xdr_strict<ContractAddress>(data, size);
+  try_xdr_strict<GenericArraySize>(data, size);
+  try_xdr_strict<StorageDelta>(data, size);
+  try_xdr_strict<TxEventLog>(data, size);
+  try_xdr_strict<test_recursive>(data, size);
+  try_xdr_strict<default_data_union>(data, size);
+  try_xdr_strict<many_arm_union>(data, size);
+  try_xdr_strict<outer_struct>(data, size);
 
   return 0;
 }

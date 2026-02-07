@@ -345,3 +345,43 @@ typedef opaque opaque_5[5];
 typedef opaque opaque_7[7];
 typedef opaque opaque_1[1];
 typedef opaque opaque_33[33];
+
+// Bounded string (tests max-size rejection for string type, not just opaque)
+typedef string bounded_string<16>;
+
+// Union with default arm carrying data (not void)
+// RFC4506: "default: default-declaration" can have any type.
+union default_data_union switch (int tag)
+{
+case 0:
+  int zero_val;
+case 1:
+  double one_val;
+default:
+  string fallback<>;
+};
+
+// Union with bool discriminant where both arms have data
+union bool_both_arms switch (bool b)
+{
+case FALSE:
+  int false_val;
+case TRUE:
+  double true_val;
+};
+
+// Struct mixing fixed-opaque of various alignments
+// (exercises first_unsafe_field optimization with mixed field sizes)
+struct mixed_opaque_struct {
+  opaque a[3];
+  int x;
+  opaque b[7];
+  double y;
+  opaque c[1];
+};
+
+// Single-element bounded vector (boundary: max_size == 1)
+typedef fix_12 single_vec<1>;
+
+// Very small bounded opaque (length prefix + 1 byte max + padding)
+typedef opaque tiny_opaque<1>;
