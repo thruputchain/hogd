@@ -23,43 +23,48 @@ struct SemverComponents {
   std::string prerelease; // empty if no prerelease
 };
 
-SemverComponents parse_semver(std::string_view identifier_version) {
+SemverComponents
+parse_semver(std::string_view identifier_version)
+{
   // Semver format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
   // We parse major, minor, patch, and prerelease (ignoring build metadata)
-  std::regex semver_regex(R"((\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?)");
+  std::regex semver_regex(
+      R"((\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?)");
   std::string version_str(identifier_version);
   std::smatch matches;
-  
+
   auto ok = std::regex_match(version_str, matches, semver_regex);
   x23assert(ok);
   x23assert(matches.size() >= 4);
-  
+
   SemverComponents components;
   components.major = matches[1].str();
   components.minor = matches[2].str();
   components.patch = matches[3].str();
-  
+
   // Prerelease (without the leading '-')
   if (matches[4].matched && matches[4].length() > 1) {
     components.prerelease = matches[4].str().substr(1); // skip the '-'
   }
-  
+
   return components;
 }
 
-std::string major_version(SemverComponents const &components) {
+std::string
+major_version(SemverComponents const &components)
+{
   if (components.major != "0") {
     return components.major;
   }
   if (components.minor != "0") {
-    return "0." +components.minor;
+    return "0." + components.minor;
   }
   if (components.patch != "0") {
     return "0.0." + components.patch;
   }
   return "0.0.0" + components.prerelease;
 }
-}
+} // namespace
 
 ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
@@ -68,10 +73,9 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
 {
   auto semver_components = parse_semver(identifier_version);
 
-  std::string method_name_preimage = 
-  std::string(identifier_name)+ 
-  major_version(semver_components) 
-   + std::string(method_name);
+  std::string method_name_preimage = std::string(identifier_name) +
+                                     major_version(semver_components) +
+                                     std::string(method_name);
 
   auto h = sha256(method_name_preimage);
 

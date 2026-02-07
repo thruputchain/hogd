@@ -231,7 +231,8 @@ public:
     for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
       ContractEntrypointID entrypoint =
           sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                    ContractTrait::kVersion, ContractTrait::kExportNames[i]);
+                                    ContractTrait::kVersion,
+                                    ContractTrait::kExportNames[i]);
 
       if (!functions_.contains(sdk_method_id(entrypoint))) {
         return false;

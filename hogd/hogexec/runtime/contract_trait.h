@@ -175,11 +175,10 @@ public:
   {
     auto entrypoint =
         sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                  ContractTrait::kVersion,
-                                  Name.get());
+                                  ContractTrait::kVersion, Name.get());
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
       x23assert(ContractTrait::kEntrypoints[kLookupIndex<Name>] ==
-             sdk_method_id(entrypoint));
+                sdk_method_id(entrypoint));
     }
     return entrypoint;
   }
