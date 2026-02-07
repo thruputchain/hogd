@@ -788,7 +788,16 @@ make_async(source_location sloc = source_location::current())
 }
 
 // A function that returns Detached is a detached coroutine that
-// cannot be awaited.  The coroutine destroys itself upon co_return;
+// cannot be awaited.  The coroutine destroys itself upon co_return.
+//
+// initial_suspend returns suspend_always so that the ramp function
+// completes (and its parameter copies are destroyed) before the
+// coroutine body starts.  The body is started by ~Detached(), which
+// runs at the end of the full expression that created the coroutine.
+// Without this, the coroutine body starts inside the ramp function,
+// and if it suspends (co_await), another thread can resume and
+// destroy the coroutine frame while the ramp function is still
+// cleaning up parameter copies that alias the frame.
 struct Detached {
   // NOLINTBEGIN(readability-convert-member-functions-to-static)
   struct promise_type : PromiseBase {
@@ -796,8 +805,11 @@ struct Detached {
     promise_type(Args &&...args) : PromiseBase(extract_location(args...))
     {}
     promise_type(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
-    Detached get_return_object() const noexcept { return {}; }
-    std::suspend_never initial_suspend() const noexcept { return {}; }
+    Detached get_return_object() noexcept
+    {
+      return Detached{std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+    std::suspend_always initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}
     void unhandled_exception() const noexcept
     {
@@ -807,13 +819,17 @@ struct Detached {
   };
   // NOLINTEND(readability-convert-member-functions-to-static)
 
-  Detached(Detached &&) noexcept = delete;
+  ~Detached()
+  {
+    if (handle_)
+      handle_.resume();
+  }
+  Detached(Detached &&o) noexcept : handle_(std::exchange(o.handle_, {})) {}
 
 private:
-  // Make constructor private to flag an error in case a function
-  // returns Detached without using coroutine operations (i.e.,
-  // co_await or co_return) to avoid weird surprises.
-  Detached() noexcept = default;
+  std::coroutine_handle<promise_type> handle_;
+  explicit Detached(std::coroutine_handle<promise_type> h) noexcept : handle_(h)
+  {}
 };
 
 // Apply a function to the result of co_awaiting an awaitable.  If the
