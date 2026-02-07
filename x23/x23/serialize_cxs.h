@@ -157,7 +157,11 @@ load_cxs_uint(std::span<const uint8_t> &data)
     return first_byte;
   }
 
-  x23assert((first_byte & 0b0011'1111) == 63);
+  uint8_t lowbits = first_byte & 0b0011'1111;
+  if (lowbits != 63) {
+    throw CxsBadInput("Non canonical Cxs representation");
+  }
+
   uint8_t header = first_byte >> 6;
 
   constexpr std::array<T (*)(std::span<const uint8_t> &), 4> kCxsLoadUInt = {
@@ -315,7 +319,9 @@ load_cxs_int(std::span<const uint8_t> &data)
     int8_t signed_byte = first_byte;
     return -(((~signed_byte) & 0b0001'1111));
   }
-  x23assert((first_byte & 0b0011'1111) == 63);
+  if ((first_byte & 0b0011'1111) != 63) {
+    throw CxsBadInput("Non canonical Cxs representation");
+  }
   uint8_t header = first_byte >> 6;
 
   constexpr std::array<T (*)(std::span<const uint8_t> &), 4> kCxsLoadInt = {

@@ -41,4 +41,44 @@ TEST(Deserialize, CxsStrTooShort)
   EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::CxsBadInput);
 }
 
+// CXS reserved header bytes: any byte > 62 where the bottom 6 bits
+// are not all 1s (i.e., not one of {63, 127, 191, 255}) is a reserved
+// encoding per the CXS spec.  load_cxs_uint and load_cxs_int guard
+// this with x23assert but no throw, so in NDEBUG builds these are
+// silently accepted.  These tests verify the deserializer rejects them.
+TEST(Deserialize, CxsReservedUintHeader)
+{
+  // Byte 64 = 0b01000000: s=1, v=0 — reserved (v should be 63)
+  // Followed by enough bytes that the code won't fail on size checks.
+  uint8_t input[] = {64, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  std::span<const uint8_t> sp(input, sizeof(input));
+  uint32_t val = 0;
+  EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::XdrException);
+}
+
+TEST(Deserialize, CxsReservedIntHeader)
+{
+  // Byte 100 = 0b01100100: s=1, v=36 — reserved (v should be 63)
+  uint8_t input[] = {100, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  std::span<const uint8_t> sp(input, sizeof(input));
+  int32_t val = 0;
+  EXPECT_THROW(x23::deserialize_cxs(&val, sp), x23::XdrException);
+}
+
+TEST(Deserialize, CxsReservedHeaderVariousBytes)
+{
+  // All of these have bottom 6 bits != 63 and value > 62, so they are
+  // reserved.  Each should be rejected.
+  for (uint8_t byte : {64, 65, 100, 126, 128, 190, 192, 200, 254}) {
+    uint8_t input[] = {byte, 0, 0, 0, 0, 0, 0, 0, 0};
+    std::span<const uint8_t> sp(input, sizeof(input));
+    uint64_t uval = 0;
+    EXPECT_THROW(x23::deserialize_cxs(&uval, sp), x23::XdrException)
+        << "byte " << int(byte) << " should be rejected for uint";
+    int64_t ival = 0;
+    EXPECT_THROW(x23::deserialize_cxs(&ival, sp), x23::XdrException)
+        << "byte " << int(byte) << " should be rejected for int";
+  }
+}
+
 } // namespace x23
