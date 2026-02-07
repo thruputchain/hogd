@@ -38,6 +38,9 @@ foreach(scenario bare fanout teardown writebuf shutdown)
     TIMEOUT 60 RESOURCE_LOCK rpcstress)
 endforeach()
 
+add_x23_test(poll_zombie)
+set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
+
 add_x23_test(rpcthroughput)
 add_x23_test(srpcthroughput latency.h)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)

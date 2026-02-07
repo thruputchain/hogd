@@ -49,30 +49,30 @@ RefPtr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto &f = (*s)[fd.get()];
-  if (f.poisoned)
+  auto it = s->find(fd.get());
+  if (it == s->end() || it->second.poisoned)
     return nullptr;
-  return f.reader();
+  return it->second.reader();
 }
 
 RefPtr<WriteBuffer>
 CoroPollImpl::get_writer(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto &f = (*s)[fd.get()];
-  if (f.poisoned)
+  auto it = s->find(fd.get());
+  if (it == s->end() || it->second.poisoned)
     return nullptr;
-  return f.writer();
+  return it->second.writer();
 }
 
 std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
 CoroPollImpl::get_rw(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto &f = (*s)[fd.get()];
-  if (f.poisoned)
+  auto it = s->find(fd.get());
+  if (it == s->end() || it->second.poisoned)
     return {nullptr, nullptr};
-  return {f.reader(), f.writer()};
+  return {it->second.reader(), it->second.writer()};
 }
 
 void
@@ -150,9 +150,11 @@ void
 CoroPollImpl::poison(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto &f = (*s)[fd.get()];
-  f.poisoned = true;
-  auto work = report_badfd(f);
+  auto it = s->find(fd.get());
+  if (it == s->end())
+    return;
+  it->second.poisoned = true;
+  auto work = report_badfd(it->second);
   s.reset();
   pool_.go(std::move(work));
 }
@@ -211,11 +213,11 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
   ThreadPool::Job h{};
   {
     auto ptr = state_.take();
-    auto &f = (*ptr)[fd.get()];
-    if (f.callbacks[write])
-      h = {std::exchange(f.callbacks[write], {})
+    auto it = ptr->find(fd.get());
+    if (it != ptr->end() && it->second.callbacks[write])
+      h = {std::exchange(it->second.callbacks[write], {})
                ->set_result_without_resuming(err),
-           f.callbacks[write].cpuhint};
+           it->second.callbacks[write].cpuhint};
   }
   if (h)
     pool_.go(h);
