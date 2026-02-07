@@ -162,14 +162,14 @@ def map_type_from_typespec(typespec):
         return f"std::array<uint8_t, {max_len}>"
     elif t == "fixed array":
         max_len = typespec["len"]
-        elem_type = map_type_from_typespec(typespec["elt_ty"])
+        elem_type = map_type_from_typespec(typespec["element_type"])
         return f"std::array<{elem_type}, {max_len}>"
     elif t == "variable array":
         max_len = typespec["max"]
-        elem_type = map_type_from_typespec(typespec["elt_ty"])
+        elem_type = map_type_from_typespec(typespec["element_type"])
         return f"x23::Vec<{elem_type}, {max_len}>"
     elif t == "optional":
-        elem_type = map_type_from_typespec(typespec["opt_ty"])
+        elem_type = map_type_from_typespec(typespec["element_type"])
         return f"x23::Ptr<{elem_type}>"
     elif t == "void":
         return "void"
@@ -179,15 +179,15 @@ def map_type_from_typespec(typespec):
         if is_tuple_struct(fields):
             # Special case: single-element struct is used as wrapper for array dimensions or optionals
             # For nested arrays like [[u8; 4]; 5], xdrs wraps each dimension in a single-element struct with "unnamed_0"
-            # For optional arrays like [Option<u64>; 2], xdrs wraps optionals in struct with "unnamed_optional"
-            if len(fields) == 1 and fields[0]["name"] in ("unnamed_0", "unnamed_optional"):
-                field_typespec = fields[0]["field_type"]
+            # For optional arrays like [Option<u64>; 2], xdrs wraps optionals in struct with "unnamed_0"
+            if len(fields) == 1 and fields[0]["name"] in ("unnamed_0"):
+                field_typespec = fields[0]["element_type"]
                 return map_type_from_typespec(field_typespec)
 
             # Multi-element tuple OR single-element tuple at top level: Map to std::tuple<...>
             field_types = []
             for field in fields:
-                field_typespec = field["field_type"]
+                field_typespec = field["element_type"]
                 field_types.append(map_type_from_typespec(field_typespec))
             return f"std::tuple<{', '.join(field_types)}>"
         else:

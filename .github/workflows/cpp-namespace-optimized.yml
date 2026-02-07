@@ -16,6 +16,8 @@ on:
 # Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
   # Fast format check - gates all other jobs

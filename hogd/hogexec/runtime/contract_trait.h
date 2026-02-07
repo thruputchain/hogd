@@ -29,6 +29,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/debug.h"
 #include "x23/format.h"
 
 namespace hogd {
@@ -38,18 +39,18 @@ namespace hogd {
 ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
-                          uint16_t method_id);
+                          std::string_view method_name);
 Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 // Get the method ID for a given method,
 // at which contracts using the SDK will expect to find it.
 inline Runtime::MethodID
 sdk_method_id(std::string_view identifier_name,
-              std::string_view identifier_version, uint16_t method_id)
+              std::string_view identifier_version, std::string_view method_name)
 {
   return sdk_method_id(sdk_entrypoint_derivation(identifier_name,
                                                  identifier_version,
-                                                 method_id));
+                                                 method_name));
 }
 ContractEntrypointID entrypoint_from_method_id(Runtime::MethodID method_id);
 
@@ -172,14 +173,12 @@ public:
 
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
-
     auto entrypoint =
         sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                  ContractTrait::kVersion,
-                                  kExportIndex<kLookupIndex<Name>>);
+                                  ContractTrait::kVersion, Name.get());
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
-      assert(ContractTrait::kEntrypoints[kLookupIndex<Name>] ==
-             sdk_method_id(entrypoint));
+      x23assert(ContractTrait::kEntrypoints[kLookupIndex<Name>] ==
+                sdk_method_id(entrypoint));
     }
     return entrypoint;
   }

@@ -238,15 +238,7 @@ function(add_spec_and_types_generation)
   add_custom_command(
     OUTPUT ${stamp_file}
     # First, build all spec/types binaries in one cargo invocation
-    COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
-        cargo build
-        --features spec
-        --locked
-        --release
-        --frozen
-        --offline
-        --target-dir ${CMAKE_CURRENT_BINARY_DIR}/spec_build
-        ${all_bins}
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm_spec.sh ${CMAKE_CURRENT_BINARY_DIR}/spec_build ${all_bins}
     # Then run each binary to generate its output
     ${gen_commands}
     COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
