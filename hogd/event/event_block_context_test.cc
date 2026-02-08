@@ -80,12 +80,12 @@ TEST_F(EventBlockContextTest, BasicTest)
 {
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
-  context.add_event(
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
   context.executor_close_block();
 
   finish_file(context);
@@ -132,12 +132,12 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 {
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
-  context.add_event(
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
   context.executor_close_block();
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -151,12 +151,12 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 
   EventBlockContext context2(temp_dir_, 2);
   context2.executor_open_block();
-  context2.add_event(
+  EXPECT_TRUE(context2.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
   context2.executor_close_block();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
@@ -178,12 +178,12 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 {
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
-  context.add_event(
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
   context.executor_close_block();
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -197,12 +197,12 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 
   EventBlockContext context2(temp_dir_, 2);
   context2.executor_open_block();
-  context2.add_event(
+  EXPECT_TRUE(context2.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
   context2.executor_close_block();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
@@ -227,24 +227,25 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
   context.executor_open_block();
 
   // Add an initial event to potentially trigger async buffer flushing
-  context.add_event(
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event1"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
   // Abandon the block - this should wait for any pending writes to complete
   context.await_abandon()();
 
   // Try to add an event after abandoning - this shouldn't crash
   // The event won't be written to the file (since state is kAbandoned),
-  // but it should still update the trie and not panic
-  context.add_event(
+  // but it should still update the trie and not panic.
+  // open_executor_handles_ is still > 0 (abandon doesn't decrement it).
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event2"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address2"},
                      .serialized_event = {4, 5, 6},
-                 }}})();
+                 }}})());
 
   // Verify the context can be destroyed without issues
   // (destructor asserts state is not kActive and pending_writes is 0)
@@ -261,23 +262,23 @@ TEST_F(EventBlockContextTest, MultipleExecutors)
   context.executor_open_block();
 
   // Add some events
-  context.add_event(
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test1"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"address1"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
 
   // First executor closes
   context.executor_close_block();
 
-  // Add more events
-  context.add_event(
+  // Add more events (2 executors still open)
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test2"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"address2"},
                      .serialized_event = {4, 5, 6},
-                 }}})();
+                 }}})());
 
   // Second executor closes
   context.executor_close_block();
