@@ -167,7 +167,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 x23::Async<void>
 EventBlockContext::await_pending_writes_done()
 {
-  bool looped = false;
+  [[maybe_unused]] bool looped = false;
   while (true) {
     {
       x23::CoroGuard g;
