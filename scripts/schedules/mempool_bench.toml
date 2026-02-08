@@ -95,7 +95,7 @@ export WORK_DIR=ci_work_dir/
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
 echo 'run mempool benchmarks'
-(./scripts/ci/mempool_bench.sh) || true
+./scripts/ci/mempool_bench.sh
 mempool_bench_exit=$?
 
 echo 'shut down bench servers'
