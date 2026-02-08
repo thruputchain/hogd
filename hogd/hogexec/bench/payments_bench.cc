@@ -105,15 +105,18 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
     std::atomic<bool> events_done = false;
 
     for (int i = 0; i < num_exec_threads; i++) {
-      int offset = i * ntx_per_thread;
-      int cur_count = std::min(ntx_per_thread, num_txs_per_rep - (offset));
+      uint32_t offset = static_cast<uint32_t>(i) * ntx_per_thread;
+      if (offset >= num_txs_per_rep) {
+        break;
+      }
+      uint32_t cur_count = std::min(ntx_per_thread, num_txs_per_rep - offset);
 
       futures.emplace_back(exec_pool.submit([&bs, work_txs, offset, cur_count,
                                              &pending_events,
                                              &events_done]() -> void {
         auto runtime_context = make_hogexec_context();
 
-        for (int j = 0; j < cur_count; j++) {
+        for (uint32_t j = 0; j < cur_count; j++) {
 
           auto const &tx = work_txs[offset + j];
 
@@ -140,9 +143,6 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
                 }
                 co_return;
               });
-          if (auto r = handler.emit_events()(); !r.has_value()) {
-            throw std::runtime_error("failed to emit events");
-          }
         }
       }));
     }

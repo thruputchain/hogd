@@ -39,9 +39,13 @@ constexpr static size_t kBufferThreshold = 500_KiB;
 
 // TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
 
-x23::Async<void>
+x23::Async<bool>
 EventBlockContext::add_event(TxEventLog event)
 {
+  if (open_executor_handles_.load(std::memory_order_acquire) == 0) {
+    co_return false;
+  }
+
   static PerThread<x23::Buf> serialize_buf;
   serialize_buf->resize_uninitialized(0);
   x23::serialize_to(&*serialize_buf, event);
@@ -57,12 +61,11 @@ EventBlockContext::add_event(TxEventLog event)
 
   co_await write_event(std::span(*serialize_buf));
   CHECK(trie_->insert_or_update(key, value));
-  x23assert(open_executor_handles_.load(std::memory_order_acquire) > 0);
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
   event_log_->emplace_back(std::move(event));
-  co_return;
+  co_return true;
 }
 
 SHA256Hash

@@ -71,7 +71,10 @@ public:
 
   ~EventBlockContext();
 
-  x23::Async<void> add_event(TxEventLog event);
+  // Returns false if no executor handle is open (i.e. executor_open_block()
+  // was not called). Events must only be emitted while an executor handle is
+  // held.
+  x23::Async<bool> add_event(TxEventLog event);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
