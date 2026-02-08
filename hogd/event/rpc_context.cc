@@ -51,7 +51,8 @@ EventRPCContext::wait_for_executors_closed(BlockID block_id)
       panic("unreachable");
     }
     context = &it->second;
-    x23assert(context->try_acquire_reference());
+    [[maybe_unused]] auto res = context->try_acquire_reference();
+    x23assert(res);
   }
 
   bool success = co_await context->get().await_all_executors_closed();
