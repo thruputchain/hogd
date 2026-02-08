@@ -37,7 +37,8 @@ usage(char *argv[])
   std::println("  kAuthDbServerPort: {}", hogd::kAuthDbServerPort);
   std::println("  kAuthMempoolServerPort: {}", hogd::kAuthMempoolServerPort);
   // indexer
-  std::println("  kIndexerBlockExplorerServerPort: {}", hogd::kIndexerBlockExplorerServerPort);
+  std::println("  kIndexerBlockExplorerServerPort: {}",
+               hogd::kIndexerBlockExplorerServerPort);
   std::println("  kIndexerEventServerPort: {}", hogd::kIndexerEventServerPort);
   // ci control
   std::println("  kCIControlServerPort: {}", hogd::kCIControlServerPort);
