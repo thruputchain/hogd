@@ -87,9 +87,6 @@ echo 'configure'
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
-echo 'clone metrics history'
-./scripts/clone_metrics_history.sh
-
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
@@ -100,9 +97,6 @@ export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
-
-echo 'commit metrics'
-(./scripts/commit_metrics.sh) || true
 
 echo 'shut down bench servers'
 ./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
