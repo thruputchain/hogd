@@ -104,6 +104,15 @@ CoroPoll::~CoroPoll()
   if (pollthread_.joinable())
     pollthread_.join();
   destroy_wait();
+  // It could be that some coroutines were woken up by the reset
+  // calls, which cause read_wait/write_wait to return EBADF.  If
+  // those coroutines then try to poison or reset the file descriptor
+  // they were waiting on, the methods will immediately return without
+  // doing anything since stop_requested() is true.  But, if we've
+  // destroyed the CoroPoll, it's still UB to call a method on a
+  // destroyed object, and a UAF to check stop_requested().  So we
+  // drain the thread pool a second time here.
+  pool_.drain();
 }
 
 void
