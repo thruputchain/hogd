@@ -57,8 +57,6 @@ public:
     current_region_idx_ = 0;
     current_region_offset_.store(allocated_regions_[0],
                                  std::memory_order_relaxed);
-    info("reset_all_regions, allocated_regions_.size() = {}",
-         allocated_regions_.size());
   }
 
 private:
@@ -93,9 +91,6 @@ private:
             // the bump allocator will have extra memory regions already mmap'd.
             // Thus, we reuse these extra memory regions before allocating more
             // with [mmap()].
-            info("instead of alloc, we increment current_region_idx_ from {} "
-                 "to {}",
-                 current_region_idx_, current_region_idx_ + 1);
             current_region_idx_++;
             current_region_offset_.store(
                 allocated_regions_[current_region_idx_],
@@ -129,7 +124,6 @@ private:
 
   void alloc_new_region()
   {
-    info("alloc_new_region");
     CHECK(rw_lock_.is_writer_locked_relaxed());
 
     void *addr =

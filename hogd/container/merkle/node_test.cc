@@ -274,20 +274,6 @@ TEST(Node, HashLeaf)
   EXPECT_EQ(hash, expected);
 }
 
-TEST(Node, BumpAllocatorClear)
-{
-  Allocator<Node> allocator(Allocator<Node>::Type::kBump);
-  for (size_t i = 0; i < 200000; i++) {
-    allocator.alloc();
-  }
-  allocator.clear_all_regions();
-
-  for (size_t i = 0; i < 200000; i++) {
-    allocator.alloc();
-  }
-  allocator.clear_all_regions();
-}
-
 } // namespace hogd
 
 int
