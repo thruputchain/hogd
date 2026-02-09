@@ -164,7 +164,8 @@ protected:
   // Insert values into the rcq.
   testing::AssertionResult insert(std::vector<uint8_t> const &values)
   {
-    SCOPED_TRACE(std::format("insert: values {}", values));
+    SCOPED_TRACE(
+        std::format("insert: values {}", testing::PrintToString(values)));
     return invoke_contract(0, values);
   }
 
@@ -175,7 +176,8 @@ protected:
       return testing::AssertionFailure() << "Too many values to consume";
     }
 
-    SCOPED_TRACE(std::format("consume: expected_values {}", expected_values));
+    SCOPED_TRACE(std::format("consume: expected_values {}",
+                             testing::PrintToString(expected_values)));
     auto r = invoke_contract(1, {static_cast<uint8_t>(expected_values.size())});
     if (!r) {
       return r;
@@ -202,8 +204,9 @@ protected:
     calldata.insert(calldata.end(), values.begin(), values.end());
 
     SCOPED_TRACE(std::format(
-        "insert_and_consume: values {} consume_count {} expected {}", values,
-        expected_consumed.size(), expected_consumed));
+        "insert_and_consume: values {} consume_count {} expected {}",
+        testing::PrintToString(values), expected_consumed.size(),
+        testing::PrintToString(expected_consumed)));
 
     auto r = invoke_contract(2, calldata);
     if (!r) {
@@ -229,11 +232,11 @@ protected:
                  ? testing::AssertionSuccess()
                  : testing::AssertionFailure()
                        << "Balance mismatch!"
-                       << "\n  Actual:   " << std::format("{}", balance)
+                       << "\n  Actual:   " << testing::PrintToString(balance)
                        << "\n  Expected: "
-                       << std::format("{}", expected_balance)
+                       << testing::PrintToString(expected_balance)
                        << "\n  Difference From Expected: "
-                       << std::format("{}", expected_balance - balance);
+                       << testing::PrintToString(expected_balance - balance);
     }
     return testing::AssertionFailure() << "Balance not found!";
   }
