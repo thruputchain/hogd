@@ -68,8 +68,8 @@ echo 'building chuckd & scpd'
 # These build scripts place the binaries in the current working directory, so we
 # [pushd BUILD_DIR] so that the binaries are placed in the [BUILD_DIR] directory.
 pushd ${BUILD_DIR} >/dev/null
-${SCRIPT_DIR}/../groundhog-go/chuckd/scripts/build_chuckd.sh > build_chuckd.log 2>&1 || (cat build_chuckd.log && exit 1)
-${SCRIPT_DIR}/../groundhog-go/chuckd/scripts/build_scpd.sh > build_scpd.log 2>&1 || (cat build_scpd.log && exit 1)
+${SCRIPT_DIR}/../groundhog-go/chuckd/scripts/build_chuckd.sh >build_chuckd.log 2>&1 || (cat build_chuckd.log && exit 1)
+${SCRIPT_DIR}/../groundhog-go/chuckd/scripts/build_scpd.sh >build_scpd.log 2>&1 || (cat build_scpd.log && exit 1)
 popd >/dev/null
 
 # package
