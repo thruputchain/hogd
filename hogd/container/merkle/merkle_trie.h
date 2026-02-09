@@ -553,7 +553,7 @@ public:
   std::pair<SHA256Hash, std::vector<std::byte>>
   get_proof(const MerkleTrie::Key &k)
   {
-    const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> &proof =
+    const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof =
         get_proof_by_node(k);
     std::pair<SHA256Hash, std::vector<std::byte>> ret;
     ret.first = proof.first;
