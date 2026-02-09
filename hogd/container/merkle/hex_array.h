@@ -240,7 +240,7 @@ private:
 
   void set_helper(size_t idx, std::byte b)
   {
-    CHECK_LE(idx, kMaxNumHexDigits);
+    CHECK_LT(idx, kMaxNumHexDigits);
 
     if (idx % 2 == 0) {
       backing_store_[idx / 2] &= std::byte{0x0F};
