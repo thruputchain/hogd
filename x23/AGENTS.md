@@ -66,7 +66,7 @@ Generated headers define structs, enums, unions, and RPC program interfaces with
 ### Coroutine types (`x23/async.h`)
 - **`Async<T>`** — awaitable coroutine return type. The primary async primitive.
 - **`MaybeAsync<T>`** — returns `T` synchronously or `Async<T>`, avoiding coroutine frame allocation for fast paths.
-- **`Detached`** — fire-and-forget coroutine. Lambda captures don't live in the coroutine frame, so unnamed lambda coroutines with captures need `(this auto)` to copy the closure into the frame (the "most vexing capture").
+- **`Detached`** — fire-and-forget coroutine. Returns before the coroutine body completes, so unnamed lambda coroutines with captures need `(this auto)` to copy the closure into the frame (the "most vexing capture").
 - **`Awaitable<T>`** / **`CoroCB<T>`** — callback-driven future/promise pair.
 
 ### Threading (`x23/threadpool.h`, `x23/event.h`)
@@ -155,7 +155,7 @@ Prefer compiler type deduction over explicit template arguments. Getting explici
 - `std::expected<T, Error>` for fallible operations, exceptions (`Errno{}.raise(...)`) for unrecoverable errors.
 - Concepts for constraining templates, `static_assert` for validating RPC server implementations.
 - `deducing this` (`this auto &&self`, `this RefPtr<T> self`) for methods that need the object's exact type or reference-counted self.
-- `(this auto)` on lambda coroutines with captures — especially `Detached`. Copies the closure (and its captures) into the coroutine frame so they survive suspension. Without it, the closure is a temporary that's destroyed before the body runs. Named closures that outlive their coroutines don't need this.
+- `(this auto)` on unnamed coroutine lambdas with captures. The coroutine returns (e.g. `Detached{}`) before the body completes, so the closure is a temporary destroyed before the coroutine finishes. `(this auto)` copies the closure into the coroutine frame so captures survive. Captureless lambdas are equivalent to function pointers and don't need this. Named closures that outlive the coroutine don't either.
 - `#if NDEBUG` / `#else` guards for debug-only code (not `#ifdef`).
 - No unnecessary abstractions. Three similar lines > a premature helper function.
 - Comments explain *why*, not *what*. Brief, direct, no docstring boilerplate.
