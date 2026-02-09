@@ -27,6 +27,33 @@ public:
 
   ~BumpAllocator() { free_all_regions(); }
 
+  // Resets the allocator for reuse. All previously allocated objects become
+  // invalid. Keeps one mmap region to avoid syscall overhead on reuse.
+  void reset()
+  {
+    // Reset per-thread private regions so no thread has a stale chunk pointer
+    {
+      auto ul = private_region_.lock_threads();
+      private_region_.for_each(ul, [](PrivateRegion &r) {
+        r.region_ = nullptr;
+        r.num_elements_ = 0;
+      });
+    }
+
+    if (allocated_regions_.empty()) {
+      current_region_offset_.store(nullptr, std::memory_order_relaxed);
+      return;
+    }
+
+    // Keep the last region, munmap the rest
+    char *last = allocated_regions_.back();
+    for (size_t i = 0; i + 1 < allocated_regions_.size(); i++) {
+      CHECK_EQ(munmap(allocated_regions_[i], kMmapLength), 0);
+    }
+    allocated_regions_ = {last};
+    current_region_offset_.store(last, std::memory_order_relaxed);
+  }
+
   T *alloc()
   {
     if (private_region_->num_elements_ == 0) {
@@ -173,6 +200,14 @@ public:
       CHECK(false);
       break;
     }
+  }
+
+  void reset()
+  {
+    CHECK(type_ == Type::kBump);
+    CHECK(bump_allocator_.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    bump_allocator_->reset();
   }
 
   Type type() const { return type_; }

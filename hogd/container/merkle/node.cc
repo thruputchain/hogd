@@ -60,13 +60,12 @@ get_path_string(std::ostringstream &oss, const HexArray &path)
 }
 
 void
-get_child_string(std::ostringstream &oss, size_t child_idx,
-                 const std::array<Node *, Node::kMaxNumBranches> children)
+get_child_string(std::ostringstream &oss, size_t child_idx, const Node *child)
 {
   oss << std::format("Child {:#x}: ", static_cast<uint8_t>(child_idx));
-  if (children[child_idx]) {
-    oss << std::format("{} ({})\n", HexArray(children[child_idx]->hash).str(),
-                       reinterpret_cast<const void *>(children[child_idx]));
+  if (child) {
+    oss << std::format("{} ({})\n", HexArray(child->hash).str(),
+                       reinterpret_cast<const void *>(child));
   }
   else {
     oss << "null\n";
@@ -95,19 +94,29 @@ get_path_encoding(std::vector<std::byte> &encoding, const HexArray &path)
 }
 
 void
-get_child_encoding(std::vector<std::byte> &encoding,
-                   const std::array<Node *, Node::kMaxNumBranches> &children,
-                   size_t num_children)
+get_branch_child_encoding(
+    std::vector<std::byte> &encoding,
+    const std::array<Node *, Node::kMaxNumBranches> &children)
 {
   size_t cur_size = encoding.size();
-  encoding.insert(encoding.end(), num_children * sizeof(SHA256Hash),
+  encoding.insert(encoding.end(), Node::kMaxNumBranches * sizeof(SHA256Hash),
                   std::byte{0x0});
-  for (size_t i = 0; i < num_children; i++) {
+  for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
     Node *child = children[i];
     if (child) {
       memcpy(&encoding[cur_size], &child->hash, sizeof(SHA256Hash));
     }
     cur_size += sizeof(SHA256Hash);
+  }
+}
+
+void
+get_single_child_encoding(std::vector<std::byte> &encoding, const Node *child)
+{
+  size_t cur_size = encoding.size();
+  encoding.insert(encoding.end(), sizeof(SHA256Hash), std::byte{0x0});
+  if (child) {
+    memcpy(&encoding[cur_size], &child->hash, sizeof(SHA256Hash));
   }
 }
 
@@ -257,8 +266,8 @@ Node::get_branch_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kBranch);
 
-  get_value_encoding(encoding, value_hash);
-  get_child_encoding(encoding, child, /*num_children=*/kMaxNumBranches);
+  get_value_encoding(encoding, branch.value_hash);
+  get_branch_child_encoding(encoding, branch.child);
 }
 
 void
@@ -266,8 +275,8 @@ Node::get_extension_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kExtension);
 
-  get_path_encoding(encoding, path);
-  get_child_encoding(encoding, child, /*num_children=*/1);
+  get_path_encoding(encoding, extension.path);
+  get_single_child_encoding(encoding, extension.child);
 }
 
 void
@@ -275,8 +284,8 @@ Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kLeaf);
 
-  get_path_encoding(encoding, path);
-  get_value_encoding(encoding, value_hash);
+  get_path_encoding(encoding, leaf.path);
+  get_value_encoding(encoding, leaf.value_hash);
 }
 
 bool
@@ -345,9 +354,9 @@ Node::get_branch_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kBranch);
 
-  get_value_string(oss, value_hash);
-  for (size_t i = 0; i < child.size(); i++) {
-    get_child_string(oss, i, child);
+  get_value_string(oss, branch.value_hash);
+  for (size_t i = 0; i < branch.child.size(); i++) {
+    get_child_string(oss, i, branch.child[i]);
   }
 }
 
@@ -356,8 +365,8 @@ Node::get_extension_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kExtension);
 
-  get_path_string(oss, path);
-  get_child_string(oss, /*child_idx=*/0, child);
+  get_path_string(oss, extension.path);
+  get_child_string(oss, /*child_idx=*/0, extension.child);
 }
 
 void
@@ -365,8 +374,8 @@ Node::get_leaf_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kLeaf);
 
-  get_path_string(oss, path);
-  get_value_string(oss, value_hash);
+  get_path_string(oss, leaf.path);
+  get_value_string(oss, leaf.value_hash);
 }
 
 } // namespace hogd

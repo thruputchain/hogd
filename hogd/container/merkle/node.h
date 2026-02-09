@@ -31,9 +31,6 @@ public:
   // slots.
   static constexpr size_t kMaxNumBranches = 16;
   static_assert(0xF + 1 == kMaxNumBranches);
-  // We also use the [child] array to hold the child of an extension node, so
-  // ensure [kMaxNumBranches] is at least 1.
-  static_assert(kMaxNumBranches != 0U);
 
   enum class Type { kBranch, kExtension, kLeaf };
 
@@ -60,7 +57,8 @@ public:
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
-  Node() = default;
+  Node() { memset(static_cast<void *>(&branch), 0, sizeof(branch)); }
+  ~Node() {} // NOLINT(modernize-use-equals-default)
   // Disable copy and move.
   Node(const Node &) = delete;
   Node &operator=(const Node &) = delete;
@@ -68,28 +66,28 @@ public:
   Node &operator=(Node &&) noexcept = delete;
 
   RwLock rw_lock;
-  Type type;
   RwLock hash_lock;
   SHA256Hash hash;
   Node *parent;
+  Type type;
 
-  // TODO(jhumphri): Optimize the variables below with a union or different node
-  // types.
+  // Type-specific fields stored in a union to reduce memory.
+  union {
+    struct {
+      std::array<Node *, kMaxNumBranches> child;
+      std::optional<SHA256Hash> value_hash;
+    } branch;
 
-  // Used by extensions and leaves.
-  HexArray path;
+    struct {
+      HexArray path;
+      Node *child;
+    } extension;
 
-  // Used by branches and leaves.
-  std::optional<SHA256Hash> value_hash;
-
-  // Used by branches and extensions.
-  //
-  // For branches, we branch on a hex digit and up to all [kMaxNumBranches]
-  // slots may be filled.
-  //
-  // For extensions, only the first slot is filled. The other
-  // [kMaxNumBranches - 1] slots are unused.
-  std::array<Node *, kMaxNumBranches> child;
+    struct {
+      HexArray path;
+      std::optional<SHA256Hash> value_hash;
+    } leaf;
+  };
 
   void init_branch(Node *parent)
   {
@@ -154,11 +152,7 @@ public:
   {
     memset(&hash, 0, sizeof(hash));
     parent = nullptr;
-    path.clear();
-    value_hash = std::nullopt;
-    memset(static_cast<void *>(child.data()), 0,
-           child.size() *
-               sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)
+    memset(static_cast<void *>(&branch), 0, sizeof(branch));
   }
 
   std::string str() const;
@@ -197,6 +191,8 @@ private:
   void get_extension_string(std::ostringstream &oss) const;
   void get_leaf_string(std::ostringstream &oss) const;
 } __attribute__((aligned(64)));
+
+static_assert(sizeof(Node) <= 256);
 
 } // namespace hogd
 
