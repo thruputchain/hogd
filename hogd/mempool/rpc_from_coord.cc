@@ -625,7 +625,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
     info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
-    if (nominated_block_cache_.tx_hashes.size() > 0) {
+    if (!nominated_block_cache_.tx_hashes.empty()) {
       info("one of the hashes is: {}",
            HexArray(nominated_block_cache_.tx_hashes[0]).str());
     }
