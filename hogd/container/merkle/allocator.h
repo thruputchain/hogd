@@ -93,6 +93,9 @@ private:
             // the bump allocator will have extra memory regions already mmap'd.
             // Thus, we reuse these extra memory regions before allocating more
             // with [mmap()].
+            info("instead of alloc, we increment current_region_idx_ from {} "
+                 "to {}",
+                 current_region_idx_, current_region_idx_ + 1);
             current_region_idx_++;
             current_region_offset_.store(
                 allocated_regions_[current_region_idx_],
@@ -220,6 +223,7 @@ public:
       CHECK(bump_allocator_.has_value());
       // We support clearing (but not freeing) regions for the bump allocator
       // only.
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       bump_allocator_->reset_all_regions();
       break;
     default:

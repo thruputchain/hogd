@@ -277,12 +277,12 @@ TEST(Node, HashLeaf)
 TEST(Node, BumpAllocatorClear)
 {
   Allocator<Node> allocator(Allocator<Node>::Type::kBump);
-  for (size_t i = 0; i < 20000; i++) {
+  for (size_t i = 0; i < 200000; i++) {
     allocator.alloc();
   }
   allocator.clear_all_regions();
 
-  for (size_t i = 0; i < 20000; i++) {
+  for (size_t i = 0; i < 200000; i++) {
     allocator.alloc();
   }
   allocator.clear_all_regions();
