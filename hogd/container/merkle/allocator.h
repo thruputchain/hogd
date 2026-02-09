@@ -54,9 +54,11 @@ public:
       private_region.num_elements_ = 0;
     });
 
+    rw_lock_.lock_writer();
     current_region_idx_ = 0;
     current_region_offset_.store(allocated_regions_[0],
                                  std::memory_order_relaxed);
+    rw_lock_.unlock();
   }
 
 private:
