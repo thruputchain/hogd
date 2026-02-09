@@ -845,7 +845,7 @@ prove(T &trie)
   EXPECT_TRUE(trie.insert(key_c, value_c_span));
 
   trie.generate_top_level_hashes();
-  const auto &[root_hash, node_encodings] = trie.get_proof(key_b);
+  const auto [root_hash, node_encodings] = trie.get_proof(key_b);
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(key_b);
   EXPECT_EQ(root_hash, root_hash_by_node);
@@ -866,7 +866,6 @@ prove(T &trie)
       if (node_encodings[i] != node_encodings_by_node_flat[i]) {
         std::println("node_encodings[{}]: {}", i, static_cast<uint8_t>(node_encodings[i]));
         std::println("node_encodings_by_node_flat[{}]: {}", i, static_cast<uint8_t>(node_encodings_by_node_flat[i]));
-        break;
       }
     }
   }

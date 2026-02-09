@@ -240,7 +240,7 @@ MerkleTrie::str() const
 std::pair<SHA256Hash, std::vector<std::byte>>
 MerkleTrie::get_proof(const Key &k)
 {
-  const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> &proof =
+  const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof =
       get_proof_by_node(k);
   std::pair<SHA256Hash, std::vector<std::byte>> ret;
   ret.first = proof.first;
