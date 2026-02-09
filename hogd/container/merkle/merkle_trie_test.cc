@@ -846,7 +846,7 @@ prove(T &trie)
 
   trie.generate_top_level_hashes();
   const auto [root_hash, node_encodings] = trie.get_proof(key_b);
-  const auto &[root_hash_by_node, node_encodings_by_node] =
+  const auto [root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(key_b);
   EXPECT_EQ(root_hash, root_hash_by_node);
 
@@ -854,6 +854,7 @@ prove(T &trie)
   // is flattened from a 2D vector into a 1D vector.
   std::vector<std::byte> node_encodings_by_node_flat;
   for (const std::vector<std::byte> &node_encoding : node_encodings_by_node) {
+    std::println("node_encoding size(): {}", node_encoding.size());
     node_encodings_by_node_flat.insert(node_encodings_by_node_flat.end(),
                                        node_encoding.begin(),
                                        node_encoding.end());
