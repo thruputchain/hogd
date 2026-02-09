@@ -520,7 +520,7 @@ SystemCallHandler::get_proposal_data() const
 }
 
 SHA256Hash
-SystemCallHandler::get_proposed_tx_hash() const
+SystemCallHandler::get_source_tx_hash() const
 {
   return sha256(signed_tx_.tx);
 }
@@ -537,7 +537,7 @@ SystemCallHandler::emit_events()
     co_return SystemStatus<void>{};
   }
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
-      .proposed_tx_hash = get_proposed_tx_hash(),
+      .proposed_tx_hash = get_source_tx_hash(),
       .events = std::move(events),
   });
 }
