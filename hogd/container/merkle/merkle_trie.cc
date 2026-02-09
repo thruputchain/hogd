@@ -1410,7 +1410,7 @@ MerkleTrie::free_all_nodes(Node *root)
       CHECK(!node.rw_lock.is_locked_relaxed());
       CHECK(!node.hash_lock.is_locked_relaxed());
       node.clear();
-      delete &node;
+      allocator_.free(&node);
     }
   };
   walk<Node>(root, prefix, f);
