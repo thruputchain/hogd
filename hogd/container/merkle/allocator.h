@@ -23,7 +23,12 @@ public:
   static constexpr size_t kMmapLength = kNumMmapPages * kPageSize;
   static_assert(kPerThreadAllocLength < kMmapLength);
 
-  BumpAllocator() { alloc_new_region(); }
+  BumpAllocator()
+  {
+    rw_lock_.lock_writer();
+    alloc_new_region();
+    rw_lock_.unlock();
+  }
 
   ~BumpAllocator() { free_all_regions(); }
 
