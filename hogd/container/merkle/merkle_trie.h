@@ -165,7 +165,12 @@ public:
   // Removes all KV pairs from the trie.
   void clear()
   {
-    free_all_nodes(&root_);
+    if (allocator_.type() == Allocator<Node>::Type::kBump) {
+      allocator_.clear_all_regions();
+    }
+    else {
+      free_all_nodes(&root_);
+    }
     init_root_node();
     size_ = 0;
   }

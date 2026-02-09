@@ -1,16 +1,21 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono> // IWYU pragma: keep
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "event.hh"
 #include "event_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "rpc_types.hh"
+#include "x23/async.h"
 #include "x23/srpc.h"
 
 namespace hogd {
@@ -33,14 +38,19 @@ TEST_F(EventRpcTest, BasicUsage)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
+  EXPECT_NE(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
             RPCError::kRPCNone);
+
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 
   EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
             RPCError::kRPCNone);
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{})(),
             RPCError::kRPCNone);
+
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
   auto result = mempool_rpc.eventsched_close_block(1, 1)();
   EXPECT_EQ(result.error(), RPCError::kRPCNone);
@@ -58,18 +68,8 @@ TEST_F(EventRpcTest, TestAbandonBlock)
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
 
-  // the tx ctx should keep the block open, at least to keep the pointer alive
-  auto tx_ctx = ctx.get_context(1)();
-  EXPECT_TRUE(tx_ctx);
-
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
-            RPCError::kRPCNone);
-
-  tx_ctx->add_event(TxEventLog{})();
-
-  ASSERT_TRUE(tx_ctx.release_reference());
-  ctx.gc_context(1)();
+  EXPECT_NE(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestEmptyBlock)
@@ -99,16 +99,154 @@ TEST_F(EventRpcTest, TestFromRPC)
                          ->client<EventExecutor1>();
   auto mempool_client = x23::SRpcMulticlient<x23::RpcLogger>::make(mempool_addr)
                             ->client<EventSched1>();
+  EXPECT_NE(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
 
   EXPECT_NE(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
 
   EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
 
   EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
   EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
             RPCError::kRPCNone);
+}
+
+// Test multiple executors with proper reference counting
+TEST_F(EventRpcTest, MultipleExecutors)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+
+  // Three executors open handles
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  // Add events from different executors
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
+            RPCError::kRPCNone);
+
+  // Close two executors
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  // close_block should wait for the third executor
+  std::atomic<bool> close_started = false;
+  std::atomic<bool> close_completed = false;
+  auto async = [&](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    close_started.store(true, std::memory_order_release);
+    auto result = co_await mempool_rpc.eventsched_close_block(1, 1);
+    EXPECT_EQ(result.error(), RPCError::kRPCNone);
+    close_completed.store(true, std::memory_order_release);
+    co_return;
+  }();
+
+  // Give close_block time to start
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+  EXPECT_TRUE(close_started.load(std::memory_order_acquire));
+  EXPECT_FALSE(close_completed.load(std::memory_order_acquire));
+
+  // close_block should be waiting for the third executor
+  // (This is hard to verify deterministically, but we can at least check it
+  // eventually completes)
+
+  // Close the third executor
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  async();
+  EXPECT_TRUE(close_completed.load(std::memory_order_acquire));
+}
+
+// Test that close_block waits for executor handles even when called first
+TEST_F(EventRpcTest, CloseBlockWaitsForExecutors)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  // Start close_block in background (it should wait for executor to close)
+  std::atomic<bool> close_completed = false;
+  auto async = [&](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    auto result = co_await mempool_rpc.eventsched_close_block(1, 1);
+    EXPECT_EQ(result.error(), RPCError::kRPCNone);
+    close_completed.store(true, std::memory_order_release);
+    co_return;
+  }();
+
+  // Give close_block time to start waiting
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // close_block should not have completed yet
+  EXPECT_FALSE(close_completed.load(std::memory_order_acquire));
+
+  // Add an event and close executor
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  // Now close_block should complete
+  async();
+  EXPECT_TRUE(close_completed.load(std::memory_order_acquire));
+}
+
+TEST_F(EventRpcTest, TestAbandonBlockThenCloseBlock)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  // should return an error because the block is abandoned
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCBadBlockID);
+}
+
+// Test abandoning a block while close_block is waiting for executors
+TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  // Start close_block in background (will wait for executor)
+  std::atomic<bool> close_completed = false;
+  auto async = [&](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    auto result = co_await mempool_rpc.eventsched_close_block(1, 1);
+    // Should get an error because block was abandoned
+    EXPECT_NE(result.error(), RPCError::kRPCNone);
+    close_completed.store(true);
+  }();
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // Abandon the block while close_block is waiting
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+
+  EXPECT_NE(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  // close_block should complete (with error) instead of hanging
+  async();
+  EXPECT_TRUE(close_completed.load());
 }
 
 } // namespace hogd

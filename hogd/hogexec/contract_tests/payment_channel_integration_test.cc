@@ -17,6 +17,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -26,7 +27,6 @@
 #include "built_contracts/simple_wallet.h"
 #include "exec_result.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -124,6 +124,16 @@ protected:
 
   uint64_t nonce_ = 0;
 
+  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
+
+  static std::tuple<int64_t, uint64_t> make_difference(int128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
+
   // Compute channel_id the same way the contract does
   uint64_t compute_channel_id(uint64_t salt) const
   {
@@ -163,8 +173,18 @@ protected:
   {
     payment_channel::ChannelState state{
         .channel_id = channel_id,
-        .balance_a = to_xdr(balance_a),
-        .balance_b = to_xdr(balance_b),
+        .balance_a =
+            {
+                .unnamed_0 = static_cast<int64_t>(balance_a >> 64),
+                .unnamed_1 =
+                    static_cast<uint64_t>(balance_a & 0xffffffffffffffffULL),
+            },
+        .balance_b =
+            {
+                .unnamed_0 = static_cast<int64_t>(balance_b >> 64),
+                .unnamed_1 =
+                    static_cast<uint64_t>(balance_b & 0xffffffffffffffffULL),
+            },
         .nonce = state_nonce,
     };
     return x23::serialize_cxs(state);
@@ -192,7 +212,7 @@ protected:
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"mint">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"mint">(wallet,
-                                                         to_xdr(amount)));
+                                                         make_amount(amount)));
     Ed25519Signature mint_sig = ed25519_sign(secret_key, mint_calldata);
 
     auto &wallet_client =
@@ -231,7 +251,7 @@ protected:
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"adjust_allowance">(
                            kPaymentChannelAddress,
-                           to_xdr(static_cast<int128_t>(amount))));
+                           make_difference(static_cast<int128_t>(amount))));
     Ed25519Signature approve_sig = ed25519_sign(secret_key, approve_calldata);
 
     auto &wallet_client =
@@ -266,7 +286,7 @@ protected:
         GasAmount{UINT64_MAX},
         pc_meta::make_calldata<"open_channel">(party_a_pubkey_, party_b_pubkey_,
                                                kWalletBAddress, kERC20Address,
-                                               to_xdr(amount), salt));
+                                               make_difference(amount), salt));
     Ed25519Signature open_sig = ed25519_sign(party_a_secret_, open_calldata);
 
     auto handler = make_new_system_call_handler(
@@ -297,12 +317,11 @@ protected:
   {
     using pc_meta = ContractTraitMeta<payment_channel::PaymentChannel>;
 
-    Calldata join_calldata =
-        x23::serialize(kPaymentChannelAddress,
-                       pc_meta::entrypoint<"join_channel">(),
-                       GasAmount{UINT64_MAX},
-                       pc_meta::make_calldata<"join_channel">(channel_id,
-                                                              to_xdr(amount)));
+    Calldata join_calldata = x23::serialize(
+        kPaymentChannelAddress, pc_meta::entrypoint<"join_channel">(),
+        GasAmount{UINT64_MAX},
+        pc_meta::make_calldata<"join_channel">(channel_id,
+                                               make_difference(amount)));
     Ed25519Signature join_sig = ed25519_sign(party_b_secret_, join_calldata);
 
     auto handler = make_new_system_call_handler(
@@ -343,8 +362,8 @@ protected:
             .tx =
                 Transaction{
                     .invocation = pc_client_.make_invocation<"close_channel">(
-                        UINT64_MAX, channel_id, to_xdr(balance_a),
-                        to_xdr(balance_b), state_nonce, sig_a, sig_b),
+                        UINT64_MAX, channel_id, make_difference(balance_a),
+                        make_difference(balance_b), state_nonce, sig_a, sig_b),
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
@@ -377,8 +396,8 @@ protected:
             .tx =
                 Transaction{
                     .invocation = pc_client_.make_invocation<"dispute">(
-                        UINT64_MAX, channel_id, to_xdr(balance_a),
-                        to_xdr(balance_b), state_nonce, sig_a, sig_b),
+                        UINT64_MAX, channel_id, make_difference(balance_a),
+                        make_difference(balance_b), state_nonce, sig_a, sig_b),
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
@@ -540,7 +559,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -600,7 +619,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -661,7 +680,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -712,7 +731,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -764,7 +783,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -819,7 +838,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -877,7 +896,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b * 2})));
+                           kWalletBAddress,
+                           make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -928,7 +948,8 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
-                           kWalletBAddress, to_xdr(uint128_t{deposit_b * 2})));
+                           kWalletBAddress,
+                           make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 

@@ -27,6 +27,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -103,6 +104,16 @@ protected:
 
   uint64_t nonce_ = 0;
 
+  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
+
+  static std::tuple<int64_t, uint64_t> make_difference(int128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
+
   // Helper to mint tokens to the wallet
   void mint_tokens_to_wallet(uint128_t amount)
   {
@@ -112,7 +123,7 @@ protected:
         x23::serialize(kERC20ContractAddress, erc20_meta::entrypoint<"mint">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"mint">(kWalletContractAddress,
-                                                         to_xdr(amount)));
+                                                         make_amount(amount)));
     Ed25519Signature mint_sig = ed25519_sign(wallet_secret_key_, mint_calldata);
 
     auto handler = make_new_system_call_handler(
@@ -143,7 +154,7 @@ protected:
         kERC20ContractAddress, erc20_meta::entrypoint<"adjust_allowance">(),
         GasAmount{UINT64_MAX},
         erc20_meta::make_calldata<"adjust_allowance">(kHTLCContractAddress,
-                                                      to_xdr(amount)));
+                                                      make_difference(amount)));
     Ed25519Signature approve_sig =
         ed25519_sign(wallet_secret_key_, approve_calldata);
 
@@ -178,7 +189,7 @@ protected:
                        GasAmount{UINT64_MAX},
                        htlc_meta::make_calldata<"create_htlc">(
                            kReceiverAddress, kERC20ContractAddress,
-                           to_xdr(amount), expiration_height, hash));
+                           make_difference(amount), expiration_height, hash));
     Ed25519Signature create_sig =
         ed25519_sign(wallet_secret_key_, create_htlc_calldata);
 
@@ -378,8 +389,10 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
           if (!result.value().value().value().is_ok()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
-          uint128_xdr balance = result.value().value().value().ok();
-          if (balance != expected_balance) {
+          auto balance = result.value().value().value().ok();
+          uint128_t balance_unsigned_int =
+              uint128_t{std::get<0>(balance)} << 64 | std::get<1>(balance);
+          if (balance_unsigned_int != from_xdr(expected_balance)) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
           return {};

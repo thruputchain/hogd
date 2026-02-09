@@ -32,9 +32,14 @@ usage(char *argv[])
   std::println("  kEventExecutorServerPort: {}",
                hogd::kEventExecutorServerPort);
   std::println("  kEventMempoolServerPort: {}", hogd::kEventMempoolServerPort);
+  std::println("  kEventIndexerServerPort: {}", hogd::kEventIndexerServerPort);
   // auth
   std::println("  kAuthDbServerPort: {}", hogd::kAuthDbServerPort);
   std::println("  kAuthMempoolServerPort: {}", hogd::kAuthMempoolServerPort);
+  // indexer
+  std::println("  kIndexerBlockExplorerServerPort: {}",
+               hogd::kIndexerBlockExplorerServerPort);
+  std::println("  kIndexerEventServerPort: {}", hogd::kIndexerEventServerPort);
   // ci control
   std::println("  kCIControlServerPort: {}", hogd::kCIControlServerPort);
   exit(EXIT_FAILURE);
@@ -91,6 +96,10 @@ get_port(const std::string &port_name)
     return hogd::kEventMempoolServerPort;
   }
 
+  if (port_name == "kEventIndexerServerPort") {
+    return hogd::kEventIndexerServerPort;
+  }
+
   // auth
   if (port_name == "kAuthDbServerPort") {
     return hogd::kAuthDbServerPort;
@@ -98,6 +107,15 @@ get_port(const std::string &port_name)
 
   if (port_name == "kAuthMempoolServerPort") {
     return hogd::kAuthMempoolServerPort;
+  }
+
+  // indexer
+  if (port_name == "kIndexerBlockExplorerServerPort") {
+    return hogd::kIndexerBlockExplorerServerPort;
+  }
+
+  if (port_name == "kIndexerEventServerPort") {
+    return hogd::kIndexerEventServerPort;
   }
 
   // ci control

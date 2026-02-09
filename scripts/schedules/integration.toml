@@ -51,6 +51,8 @@ hog_wait done
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 # coordinator_loadgen
 
@@ -100,6 +102,8 @@ killall scpd.dev chuckd.dev || true
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 # scheduler
 
@@ -156,6 +160,8 @@ hog_wait done
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 # db
 
@@ -210,6 +216,8 @@ hog_wait done
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 # exec
 
@@ -259,6 +267,8 @@ hog_wait done
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 # event
 
@@ -311,3 +321,5 @@ hog_signal event_is_up
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"

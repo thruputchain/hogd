@@ -90,6 +90,16 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
                             std::move(snapshot_cache), *event_server_proxy_,
                             worker_pool_));
   assert(inserted);
+
+  // Notify event server that we've opened a block
+  auto open_res = co_await event_server_proxy_->open_block(new_block_id);
+  if (!open_res.has_value()) [[unlikely]] {
+    error("Failed to notify event server of block open: {}", new_block_id);
+    active_blocks_.erase(new_block_id);
+    co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+    panic("unreachable");
+  }
+
   trace("Opened new block {} in mode {}", new_block_id, mode);
   co_return ExecResult::ExecResultOK;
 }
@@ -126,6 +136,14 @@ ExecutorStateManager::remove_block(BlockID block_id)
         do_gc = true;
       }
       auto event_error = co_await it->second.context.get().await_event_return();
+
+      // Notify event server that we're closing our handle to this block
+      auto close_res = co_await event_server_proxy_->close_block(block_id);
+      if (!close_res.has_value()) [[unlikely]] {
+        error("Failed to notify event server of block close: {}", block_id);
+        result = ExecResult::ExecResultSystemError;
+      }
+
       if (event_error.has_value()) [[unlikely]] {
         switch (event_error.value()) {
         case SystemErrorCode::kSystemAbortTransaction:

@@ -5,23 +5,25 @@
 #include <new>
 #include <print>
 
+#include <cstdio>
 #include <fcntl.h>
 #include <getopt.h>
 #include <set>
-#include <stdio.h>
 #include <string>
 #include <sys/fcntl.h>
 #include <unistd.h>
+#include <utility>
 
 #include "x23/cleanup.h"
 #include "x23/config.h"
 #include "x23/err.h"
 #include "x23c/defs.h"
+#include "x23c/lex.hh"
 #include "x23c/parse.hh"
 
-using namespace x23;
-
+namespace {
 std::filesystem::path progname;
+} // namespace
 
 YY_DECL;
 
@@ -29,7 +31,7 @@ struct Scanner {
   yyscan_t s;
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wignored-attributes"
-  ManagedPtr<fclose> f{nullptr};
+  x23::ManagedPtr<fclose> f{nullptr};
 #pragma GCC diagnostic pop
 
   Scanner()
@@ -40,7 +42,7 @@ struct Scanner {
   Scanner(const Scanner &) = delete;
   ~Scanner() { yylex_destroy(s); }
 
-  operator yyscan_t() { return s; }
+  operator yyscan_t() const { return s; }
 
   void set_in(FILE *in)
   {
@@ -76,7 +78,7 @@ lex(XdrCtx *xc)
 {
   FILE *in = fopen(xc->file.c_str(), "r");
   if (!in) {
-    std::println(stderr, "{}: {}", xc->file, Errno{});
+    std::println(stderr, "{}: {}", xc->file, x23::Errno{});
     exit(1);
   }
 
@@ -155,6 +157,7 @@ main(int argc, char **argv)
   bool rust_module = false;
   std::set<std::string> recursive_types;
   std::set<std::string> rust_features;
+  std::set<std::string> rust_no_features;
 
   int optind;
   for (optind = 1; optind < argc; ++optind) {
@@ -204,6 +207,14 @@ main(int argc, char **argv)
       }
       rust_features.insert(argv[optind]);
     }
+    else if (opt == "--rust-no-feature") {
+      ++optind;
+      if (optind >= argc) {
+        std::println(stderr, "missing rust no feature name");
+        exit(2);
+      }
+      rust_no_features.insert(argv[optind]);
+    }
     else {
       std::println(stderr, "invalid option {}", opt);
       usage(true);
@@ -249,7 +260,7 @@ main(int argc, char **argv)
   std::string res;
 
   if (rust_module) {
-    res = gen_rs(&ctx.defs, recursive_types, rust_features);
+    res = gen_rs(&ctx.defs, recursive_types, rust_features, rust_no_features);
   }
   else {
     res = gen_hh(&ctx.defs);
@@ -257,10 +268,9 @@ main(int argc, char **argv)
 
   int outfd = outfile == "-"
                   ? 1
-                  : open(outfile.c_str(),
-                         O_CREAT | O_WRONLY | O_TRUNC | O_WRONLY, 0666);
+                  : open(outfile.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
   if (outfd == -1) {
-    std::println(stderr, "{}: {}", outfile.string(), Errno{});
+    std::println(stderr, "{}: {}", outfile.string(), x23::Errno{});
     exit(1);
   }
   write(outfd, res.data(), res.size());

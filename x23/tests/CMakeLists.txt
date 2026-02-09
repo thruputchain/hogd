@@ -27,17 +27,44 @@ add_x23_test(heap)
 add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
+add_executable(test_rpcstress ${EXCLUDE_TOKEN} rpcstress.cc)
+target_link_libraries(test_rpcstress x23 xdrtest)
+use_x23(test_rpcstress)
+list(APPEND TEST_EXECUTABLES test_rpcstress)
+foreach(scenario bare fanout teardown writebuf shutdown)
+  add_test(NAME rpcstress_${scenario}
+    COMMAND test_rpcstress -s ${scenario} -d 5 -t 8)
+  set_tests_properties(rpcstress_${scenario} PROPERTIES
+    TIMEOUT 60 RESOURCE_LOCK rpcstress)
+endforeach()
+
+add_x23_test(poll_zombie)
+set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
+
+add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
+target_link_libraries(test_canary x23)
+list(APPEND TEST_EXECUTABLES test_canary)
+# Not registered as a ctest -- long-running soak test for coroutine frame
+# integrity.  Deterministic coverage is in the detached gtest instead.
+
+add_executable(test_rpc_dispatch_race ${EXCLUDE_TOKEN} rpc_dispatch_race.cc)
+target_link_libraries(test_rpc_dispatch_race x23 xdrtest)
+use_x23(test_rpc_dispatch_race)
+list(APPEND TEST_EXECUTABLES test_rpc_dispatch_race)
+add_test(NAME rpc_dispatch_race COMMAND test_rpc_dispatch_race -d 5 -t 8)
+set_tests_properties(rpc_dispatch_race PROPERTIES TIMEOUT 60)
+
+add_executable(test_shutdown_race ${EXCLUDE_TOKEN} shutdown_race.cc)
+target_link_libraries(test_shutdown_race x23 xdrtest)
+use_x23(test_shutdown_race)
+list(APPEND TEST_EXECUTABLES test_shutdown_race)
+# Not registered as a ctest -- this test deliberately uses an aggressive
+# shutdown path (no poison, no fail) that triggers a known destruction
+# ordering race.  Build-only; run manually with MALLOC_PERTURB_=85.
+
 add_x23_test(rpcthroughput)
 add_x23_test(srpcthroughput latency.h)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
-
-# flaky tests: prefer timeout failure over stuck CI
-#set_tests_properties(event PROPERTIES TIMEOUT 10)
-#set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
-#set_tests_properties(corowake PROPERTIES TIMEOUT 90)
-
-# example of disabling a test entirely
-#set_tests_properties(rpcthroughput PROPERTIES DISABLED TRUE)
 
 if(GOOGLETEST_PATH)
 include_directories(${GOOGLETEST_PATH}/googletest/include)
@@ -59,6 +86,7 @@ add_x23_gtest(multiclient)
 add_x23_gtest(nmvec)
 add_x23_gtest(shutdown)
 add_x23_gtest(sync)
+add_x23_gtest(detached)
 add_x23_gtest(uiobuf)
 add_x23_gtest(xdr)
 
@@ -70,6 +98,17 @@ if(BENCHMARK_PATH)
 add_executable(bench bench.cc)
 use_x23(bench)
 target_link_libraries(bench x23 benchmark::benchmark xdrtest)
+endif()
+
+option(BUILD_FUZZERS "Build fuzz targets" OFF)
+if(BUILD_FUZZERS)
+  add_executable(fuzz_deserialize EXCLUDE_FROM_ALL fuzz_deserialize.cc)
+  target_link_libraries(fuzz_deserialize x23 xdrtest)
+  use_x23(fuzz_deserialize)
+  target_compile_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address)
+  # libclang_rt.fuzzer is built against libstdc++, but this project uses
+  # libc++. Suppress automatic stdlib linking and explicitly link both.
+  target_link_options(fuzz_deserialize PRIVATE -fsanitize=fuzzer,address -nostdlib++ -lc++ -lstdc++)
 endif()
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})

@@ -5,6 +5,10 @@ on:
         branches: ["main"]
     workflow_dispatch:
 
+env:
+  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+
 jobs:
     build:
         runs-on: self-hosted
@@ -45,6 +49,8 @@ jobs:
                   --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                   --key=github_repo --value=${{ github.repository }} \
                   --key=git_commit --value=${{ github.sha }} \
+                  --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                  --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                   ./scripts/schedules/test_bindings.toml
             - name: Print Log Download Instructions
               if: always()

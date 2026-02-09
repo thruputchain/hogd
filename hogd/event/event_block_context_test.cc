@@ -1,21 +1,25 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 
 #include "event.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep#include "hogd/crypto/crypto.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -72,15 +76,17 @@ finish_file(EventBlockContext &context)
 
 } // namespace
 
-TEST_F(EventBlockContextTest, Test)
+TEST_F(EventBlockContextTest, BasicTest)
 {
   EventBlockContext context(temp_dir_, 1);
-  context.add_event(
+  context.executor_open_block();
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
+  context.executor_close_block();
 
   finish_file(context);
   auto hash = context.get_root_hash();
@@ -97,16 +103,42 @@ TEST_F(EventBlockContextTest, Test)
             ContractAddress{"test_address"});
 }
 
+TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor)
+{
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+  context.executor_close_block();
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir_, hash)));
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+}
+
+TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor)
+{
+  EventBlockContext context(temp_dir_, 1);
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir_, hash)));
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+}
+
 // What happens if there's a conflict on a filename
 TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 {
   EventBlockContext context(temp_dir_, 1);
-  context.add_event(
+  context.executor_open_block();
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
+  context.executor_close_block();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -118,12 +150,14 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
             sha256(std::as_bytes(std::span("test"))));
 
   EventBlockContext context2(temp_dir_, 2);
-  context2.add_event(
+  context2.executor_open_block();
+  EXPECT_TRUE(context2.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
+  context2.executor_close_block();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_EQ(hash, hash2);
@@ -143,12 +177,14 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 {
   EventBlockContext context(temp_dir_, 1);
-  context.add_event(
+  context.executor_open_block();
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
+  context.executor_close_block();
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -160,12 +196,14 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
             sha256(std::as_bytes(std::span("test"))));
 
   EventBlockContext context2(temp_dir_, 2);
-  context2.add_event(
+  context2.executor_open_block();
+  EXPECT_TRUE(context2.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
+                 }}})());
+  context2.executor_close_block();
   finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_NE(hash, hash2);
@@ -186,30 +224,185 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 TEST_F(EventBlockContextTest, AbandonThenAddEvent)
 {
   EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
 
   // Add an initial event to potentially trigger async buffer flushing
-  context.add_event(
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event1"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
-                 }}})();
-
+                 }}})());
   // Abandon the block - this should wait for any pending writes to complete
   context.await_abandon()();
 
   // Try to add an event after abandoning - this shouldn't crash
   // The event won't be written to the file (since state is kAbandoned),
-  // but it should still update the trie and not panic
-  context.add_event(
+  // but it should still update the trie and not panic.
+  // open_executor_handles_ is still > 0 (abandon doesn't decrement it).
+  EXPECT_TRUE(context.add_event(
       TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event2"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address2"},
                      .serialized_event = {4, 5, 6},
-                 }}})();
+                 }}})());
 
   // Verify the context can be destroyed without issues
   // (destructor asserts state is not kActive and pending_writes is 0)
+}
+
+// Test multiple executors opening and closing handles
+TEST_F(EventBlockContextTest, MultipleExecutors)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Three executors open handles
+  context.executor_open_block();
+  context.executor_open_block();
+  context.executor_open_block();
+
+  // Add some events
+  EXPECT_TRUE(context.add_event(
+      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test1"))),
+                 .events = {TxEmittedEvent{
+                     .contract_address = {"address1"},
+                     .serialized_event = {1, 2, 3},
+                 }}})());
+
+  // First executor closes
+  context.executor_close_block();
+
+  // Add more events (2 executors still open)
+  EXPECT_TRUE(context.add_event(
+      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test2"))),
+                 .events = {TxEmittedEvent{
+                     .contract_address = {"address2"},
+                     .serialized_event = {4, 5, 6},
+                 }}})());
+
+  // Second executor closes
+  context.executor_close_block();
+
+  // Third executor closes - should trigger all_executors_closed
+  context.executor_close_block();
+
+  // Verify await completes immediately since all are closed
+  context.await_all_executors_closed()();
+
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+  EXPECT_EQ(event_logs.size(), 2);
+}
+
+// Test that await_all_executors_closed waits for all executors
+TEST_F(EventBlockContextTest, AwaitWaitsForAllExecutors)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Open 2 executors
+  context.executor_open_block();
+  context.executor_open_block();
+
+  // Spawn a task that waits for all executors
+  std::atomic<bool> await_completed = false;
+  auto async = [&context, &await_completed](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    co_await context.await_all_executors_closed();
+    await_completed.store(true, std::memory_order_release);
+  }();
+
+  // Give the await task time to start waiting
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // Await should not have completed yet
+  EXPECT_FALSE(await_completed.load(std::memory_order_acquire));
+
+  // Close first executor
+  context.executor_close_block();
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  // Still should not be complete
+  EXPECT_FALSE(await_completed.load(std::memory_order_acquire));
+
+  // Close second executor - now await should complete
+  context.executor_close_block();
+  async();
+
+  EXPECT_TRUE(await_completed.load(std::memory_order_acquire));
+
+  finish_file(context);
+}
+
+// Test await when already all closed
+TEST_F(EventBlockContextTest, AwaitWhenAlreadyClosed)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  context.executor_open_block();
+  context.executor_close_block();
+
+  // Await should complete immediately
+  context.await_all_executors_closed()();
+
+  // Multiple awaits should all work
+  context.await_all_executors_closed()();
+  context.await_all_executors_closed()();
+
+  finish_file(context);
+}
+
+// Test await when no executors ever opened
+TEST_F(EventBlockContextTest, AwaitWithNoExecutors)
+{
+  EventBlockContext context(temp_dir_, 1);
+
+  // Await should complete immediately when counter is 0
+  context.await_all_executors_closed()();
+
+  finish_file(context);
+}
+
+// Note: We have an assertion in executor_close_block() that prevents underflow
+// (calling close without a matching open), but it's not practical to test with
+// EXPECT_DEATH due to destructor assertions conflicting with the death test
+// framework.
+
+// Test multiple concurrent awaits (validates futex broadcast)
+TEST_F(EventBlockContextTest, MultipleConcurrentAwaits)
+{
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+
+  std::atomic<int> completed_awaits = 0;
+
+  // Spawn 3 concurrent awaiters
+  auto awaiter = [&context, &completed_awaits](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    co_await context.await_all_executors_closed();
+    completed_awaits.fetch_add(1, std::memory_order_release);
+  };
+
+  auto async1 = awaiter();
+  auto async2 = awaiter();
+  auto async3 = awaiter();
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+  EXPECT_EQ(completed_awaits.load(), 0);
+
+  // Close executor - all 3 awaits should complete
+  context.executor_close_block();
+
+  async1();
+  async2();
+  async3();
+
+  EXPECT_EQ(completed_awaits.load(), 3);
+
+  finish_file(context);
 }
 
 } // namespace hogd

@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "loadgen.hh"
@@ -33,7 +34,6 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -108,6 +108,11 @@ private:
     CHECK(host_port.parse(event_card_.address_for_sched));
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         make_srpc_client<EventSched1>(host_port, true));
+
+    x23::HostPort exec_host_port;
+    CHECK(exec_host_port.parse(event_card_.address_for_exec));
+    event_exec_client_ = std::make_unique<event_exec_client_t>(
+        make_srpc_client<EventExecutor1>(exec_host_port, true));
   }
 
   void connect_event()
@@ -156,9 +161,19 @@ private:
     if (r != RPCError::kRPCNone) {
       throw std::runtime_error("Failed to open event block");
     }
+    auto r2 = event_exec_client_->eventexecutor_open_block(block_number);
+    if (r2 != RPCError::kRPCNone) {
+      throw std::runtime_error("Failed to open executor event handle");
+    }
   }
   void close_event_block(BlockID block_number)
   {
+    // Close executor handle first so the event server knows all events
+    // have been emitted before it finalizes the block.
+    auto r1 = event_exec_client_->eventexecutor_close_block(block_number);
+    if (r1 != RPCError::kRPCNone) {
+      throw std::runtime_error("Failed to close executor event handle");
+    }
     // We use [block_number] as the height as well.
     auto r =
         event_sched_client_->eventsched_close_block(block_number, block_number);
@@ -193,9 +208,12 @@ private:
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
   using event_sched_client_t =
       EventSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+  using event_exec_client_t =
+      EventExecutor1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
   std::unique_ptr<coord_client_t> coord_client_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
+  std::unique_ptr<event_exec_client_t> event_exec_client_;
 };
 
 inline void

@@ -178,6 +178,10 @@ run_event_bench(const std::string &exec_server_addr,
   if (res != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to open block");
   }
+  auto res2 = exec_clients[0].eventexecutor_open_block(block_number)();
+  if (res2 != RPCError::kRPCNone) {
+    throw std::runtime_error("Failed to open executor event handle");
+  }
   auto open_end = x23::fastclock::get_ns();
   double open_time = open_end - open_start;
 
@@ -205,6 +209,10 @@ run_event_bench(const std::string &exec_server_addr,
   // Close block
   auto close_start = x23::fastclock::get_ns();
   // We use [block_number] as the height as well.
+  auto res1 = exec_clients[0].eventexecutor_close_block(block_number)();
+  if (res1 != RPCError::kRPCNone) {
+    throw std::runtime_error("Failed to close executor event handle");
+  }
   auto close_res =
       event_sched_client.eventsched_close_block(block_number, block_number)();
   if (close_res.error() != RPCError::kRPCNone) {

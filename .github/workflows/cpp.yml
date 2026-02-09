@@ -7,6 +7,9 @@ on:
     #     branches: ["main"]
     # pull_request:
     #     branches: ["main"]
+env:
+    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
     build:
@@ -53,6 +56,8 @@ jobs:
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value=$BRANCH_NAME \
+                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     ./scripts/schedules/cpp.toml
             - name: Print Log Download Instructions
               if: always()

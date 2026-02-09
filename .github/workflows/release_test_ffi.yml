@@ -7,7 +7,9 @@ on:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-
+  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+  
 jobs:
   build-linux-x86_64:
     runs-on: hog1

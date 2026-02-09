@@ -50,6 +50,11 @@ public:
 
 protected:
   void SetUp() override {}
+
+  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  }
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -2213,9 +2218,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              uint128_t amount = write_cost;
 
              auto [r_transfer, g_transfer] =
-                 native_token_client.invoke_opt<"transfer">(handler,
-                                                            receiver_addr,
-                                                            to_xdr(amount));
+                 native_token_client.invoke_opt<"transfer">(
+                     handler, receiver_addr, make_amount(amount));
 
              auto transfer_result = check_result(r_transfer);
              if (!transfer_result.is_ok()) {
@@ -2239,7 +2243,12 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (from_xdr(balance_result.ok()) != 0) {
+             auto res = balance_result.ok();
+             uint128_t balance_unsigned_int = uint128_t{std::get<0>(res)}
+                                                  << 64 |
+                                              uint128_t{std::get<1>(res)};
+
+             if (balance_unsigned_int != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
