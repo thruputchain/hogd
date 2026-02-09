@@ -82,8 +82,10 @@ private:
         // do this while the others wait.
         if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
           // This thread won the race and will allocate the new region.
-          CHECK_LT(current_region_idx_, allocated_regions_.size());
-          if (current_region_idx_ == allocated_regions_.size() - 1) {
+          CHECK_LT(current_region_idx_,
+                   static_cast<ssize_t>(allocated_regions_.size()));
+          if (current_region_idx_ ==
+              static_cast<ssize_t>(allocated_regions_.size()) - 1) {
             alloc_new_region();
           }
           else {
