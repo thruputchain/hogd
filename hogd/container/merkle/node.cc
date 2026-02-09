@@ -287,10 +287,14 @@ void
 Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kLeaf);
-  CHECK_EQ(encoding.size(), 0);
+  CHECK_EQ(encoding.size(), 1U);
+
+  std::println("get_leaf_encoding() size: {}", encoding.size());
 
   get_path_encoding(encoding, leaf.path);
+  std::println("get_leaf_encoding() size: {}", encoding.size());
   get_value_encoding(encoding, leaf.value_hash);
+  std::println("get_leaf_encoding() size: {}", encoding.size());
 }
 
 bool
