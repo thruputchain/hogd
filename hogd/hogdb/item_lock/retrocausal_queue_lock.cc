@@ -215,7 +215,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     if (added_entries_.size() > consumed_from_current_block)
       blocks += 1;
 
-    int64_t live_entries = meta.live_entries + total_element_count_delta_;
+    int64_t live_entries = meta.live_entries + committed_element_count_delta_;
     assert(live_entries >= 0);
 
     return cost_model->get_retrocausal_queue_cost(static_cast<uint64_t>(
@@ -246,7 +246,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   }
 
   const int64_t element_delta = elements_added - consumed_past_entries_;
-  total_element_count_delta_ += element_delta;
+  committed_element_count_delta_ += element_delta;
 
   const int128_t cost_after = calculate_cost();
 
@@ -317,7 +317,7 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     updated_metadata.max_live_block_num = new_block.block_number;
   }
 
-  updated_metadata.live_entries += total_element_count_delta_;
+  updated_metadata.live_entries += committed_element_count_delta_;
 
   CHECK(ctx.dao->write_retrocausal_queue_metadata(ctx.key, updated_metadata)
             .has_value());
