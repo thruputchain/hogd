@@ -23,7 +23,7 @@ public:
   static constexpr size_t kMmapLength = kNumMmapPages * kPageSize;
   static_assert(kPerThreadAllocLength < kMmapLength);
 
-  BumpAllocator() = default;
+  BumpAllocator() { alloc_new_region(); }
 
   ~BumpAllocator() { free_all_regions(); }
 
@@ -41,6 +41,19 @@ public:
     return ret;
   }
 
+  void reset_all_regions()
+  {
+    std::unique_lock ul = private_region_.lock_threads();
+    private_region_.for_each(ul, [](PrivateRegion &private_region) {
+      private_region.region_ = nullptr;
+      private_region.num_elements_ = 0;
+    });
+
+    current_region_idx_ = 0;
+    current_region_offset_.store(allocated_regions_[0],
+                                 std::memory_order_relaxed);
+  }
+
 private:
   struct PrivateRegion {
     char *region_{nullptr};
@@ -52,23 +65,36 @@ private:
     while (true) {
       char *current_region_offset =
           current_region_offset_.load(std::memory_order_relaxed);
+      CHECK_PTR(current_region_offset);
 
       rw_lock_.lock_reader();
-      if (!current_region_offset ||
-          current_region_offset + kPerThreadAllocLength >
-              allocated_regions_.back() + kMmapLength) {
+      if (current_region_offset + kPerThreadAllocLength >
+          allocated_regions_[current_region_idx_] + kMmapLength) {
 
         // We may need to allocate a new region. Only one thread should should
         // do this while the others wait.
         if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
           // This thread won the race and will allocate the new region.
-          alloc_new_region();
+          CHECK_LT(current_region_idx_, allocated_regions_.size());
+          if (current_region_idx_ == allocated_regions_.size() - 1) {
+            alloc_new_region();
+          }
+          else {
+            // If we reset the bump allocator with [reset_all_regions()], then
+            // the bump allocator will have extra memory regions already mmap'd.
+            // Thus, we reuse these extra memory regions before allocating more
+            // with [mmap()].
+            current_region_idx_++;
+            current_region_offset_.store(
+                allocated_regions_[current_region_idx_],
+                std::memory_order_relaxed);
+          }
           rw_lock_.unlock();
         }
         else {
           rw_lock_.unlock();
-          // Another thread won the race and is allocating the new region. Wait
-          // until that thread is done.
+          // Another thread won the race and is allocating the new region.
+          // Wait until that thread is done.
           while (current_region_offset_.load(std::memory_order_relaxed) ==
                  current_region_offset) {
             cpu_relax();
@@ -102,6 +128,7 @@ private:
     current_region_offset_.store(static_cast<char *>(addr),
                                  std::memory_order_relaxed);
     allocated_regions_.push_back(static_cast<char *>(addr));
+    current_region_idx_++;
   }
 
   void free_all_regions()
@@ -113,6 +140,7 @@ private:
 
   RwLock rw_lock_;
   std::atomic<char *> current_region_offset_ = nullptr;
+  size_t current_region_idx_ = 0;
   std::vector<char *> allocated_regions_;
   PerThread<PrivateRegion> private_region_;
 };
@@ -168,6 +196,21 @@ public:
       CHECK(bump_allocator_.has_value());
       // We only free bump allocator objects when the bump allocator is
       // destructed.
+      break;
+    default:
+      CHECK(false);
+      break;
+    }
+  }
+
+  void clear_all_regions()
+  {
+    switch (type_) {
+    case Type::kBump:
+      CHECK(bump_allocator_.has_value());
+      // We support clearing (but not freeing) regions for the bump allocator
+      // only.
+      bump_allocator_->reset_all_regions();
       break;
     default:
       CHECK(false);
