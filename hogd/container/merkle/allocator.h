@@ -93,8 +93,8 @@ private:
         }
         else {
           rw_lock_.unlock();
-          // Another thread won the race and is allocating the new region.
-          // Wait until that thread is done.
+          // Another thread won the race and is allocating the new region. Wait
+          // until that thread is done.
           while (current_region_offset_.load(std::memory_order_relaxed) ==
                  current_region_offset) {
             cpu_relax();
