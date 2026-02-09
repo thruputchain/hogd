@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstring>
 
@@ -11,6 +12,9 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "hogd/base/log.h"
@@ -57,10 +61,7 @@ public:
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
-  // Can't be default because the union members lack default constructors.
-  // The first action taken after creating a new Node struct is to
-  // initialize it with one of {init_branch, init_extension, init_leaf}.
-  Node() {}
+  Node() = default;
   // Disable copy and move.
   Node(const Node &) = delete;
   Node &operator=(const Node &) = delete;
@@ -71,42 +72,64 @@ public:
   RwLock hash_lock;
   SHA256Hash hash;
   Node *parent;
-  Type type;
 
-  // Type-specific fields stored in a union to reduce memory.
-  union {
-    struct {
-      std::array<Node *, kMaxNumBranches> child;
-      std::optional<SHA256Hash> value_hash;
-    } branch;
-
-    struct {
-      HexArray path;
-      Node *child;
-    } extension;
-
-    struct {
-      HexArray path;
-      std::optional<SHA256Hash> value_hash;
-    } leaf;
+  struct BranchNode {
+    constexpr static Type kType = Type::kBranch;
+    std::array<Node *, kMaxNumBranches> child;
+    std::optional<SHA256Hash> value_hash;
   };
+
+  struct ExtensionNode {
+    constexpr static Type kType = Type::kExtension;
+    HexArray path;
+    Node *child;
+  };
+
+  struct LeafNode {
+    constexpr static Type kType = Type::kLeaf;
+    HexArray path;
+    std::optional<SHA256Hash> value_hash;
+  };
+
+  std::variant<std::monostate, BranchNode, ExtensionNode, LeafNode> node;
 
   void init_branch(Node *parent)
   {
-    type = Type::kBranch;
+    node.emplace<BranchNode>();
     this->parent = parent;
   }
 
   void init_extension(Node *parent)
   {
-    type = Type::kExtension;
+    node.emplace<ExtensionNode>();
     this->parent = parent;
   }
 
   void init_leaf(Node *parent)
   {
-    type = Type::kLeaf;
+    node.emplace<LeafNode>();
     this->parent = parent;
+  }
+
+  Type type() const { 
+    return std::visit([](auto const &node) -> Type {
+      if constexpr (std::same_as<const std::monostate &, decltype(node)>) {
+        CHECK(false);
+        std::unreachable();
+      } else {
+        return std::decay_t<decltype(node)>::kType;
+      }
+    }, node);
+  }
+
+  auto &branch(this auto &self) {
+    return std::get<BranchNode>(self.node);
+  }
+  auto &extension(this auto &self) {
+    return std::get<ExtensionNode>(self.node);
+  }
+  auto &leaf(this auto &self) {
+    return std::get<LeafNode>(self.node);
   }
 
   static Node *create_branch(Node *parent, Allocator<Node> &allocator)
@@ -154,7 +177,7 @@ public:
   {
     memset(&hash, 0, sizeof(hash));
     parent = nullptr;
-    memset(static_cast<void *>(&branch), 0, sizeof(branch));
+    node.emplace<std::monostate>();
   }
 
   std::string str() const;

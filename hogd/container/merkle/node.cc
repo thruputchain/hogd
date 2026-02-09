@@ -10,6 +10,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "hogd/base/log.h"
@@ -247,27 +248,31 @@ Node::get_node_encoding() const
   static PerThread<std::vector<std::byte>> to_hash;
   to_hash->clear();
 
-  to_hash->push_back(static_cast<std::byte>(type));
-  switch (type) {
-  case Node::Type::kBranch:
+  if (std::holds_alternative<BranchNode>(node)) {
+    to_hash->push_back(static_cast<std::byte>(BranchNode::kType));
     get_branch_encoding(*to_hash);
-    break;
-  case Node::Type::kExtension:
-    get_extension_encoding(*to_hash);
-    break;
-  case Node::Type::kLeaf:
-    get_leaf_encoding(*to_hash);
-    break;
   }
+  else if (std::holds_alternative<ExtensionNode>(node)) {
+    to_hash->push_back(static_cast<std::byte>(ExtensionNode::kType));
+    get_extension_encoding(*to_hash);
+  }
+  else if (std::holds_alternative<LeafNode>(node)) {
+    to_hash->push_back(static_cast<std::byte>(LeafNode::kType));
+    get_leaf_encoding(*to_hash);
+  }
+  else {
+    CHECK(false);
+  }
+
   return *to_hash;
 }
 
 void
 Node::get_branch_encoding(std::vector<std::byte> &encoding) const
 {
-  CHECK_EQ(type, Node::Type::kBranch);
   CHECK_EQ(encoding.size(), 1U);
 
+  auto const &branch = std::get<BranchNode>(node);
   get_value_encoding(encoding, branch.value_hash);
   get_branch_child_encoding(encoding, branch.child);
 }
@@ -275,8 +280,8 @@ Node::get_branch_encoding(std::vector<std::byte> &encoding) const
 void
 Node::get_extension_encoding(std::vector<std::byte> &encoding) const
 {
-  CHECK_EQ(type, Node::Type::kExtension);
   CHECK_EQ(encoding.size(), 1U);
+  auto const &extension = std::get<ExtensionNode>(node);
 
   get_path_encoding(encoding, extension.path);
   get_single_child_encoding(encoding, extension.child);
@@ -285,8 +290,8 @@ Node::get_extension_encoding(std::vector<std::byte> &encoding) const
 void
 Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
 {
-  CHECK_EQ(type, Node::Type::kLeaf);
   CHECK_EQ(encoding.size(), 1U);
+  auto const &leaf = std::get<LeafNode>(node);
 
   get_path_encoding(encoding, leaf.path);
   get_value_encoding(encoding, leaf.value_hash);
@@ -334,29 +339,31 @@ Node::str() const
 {
   std::ostringstream oss;
 
-  oss << std::format("{} ({}, {})\n", get_type_string(type),
+  oss << std::format("{} ({}, {})\n", get_type_string(type()),
                      HexArray(hash).str(),
                      reinterpret_cast<const void *>(this));
   oss << std::format("Parent: {}\n", reinterpret_cast<const void *>(parent));
 
-  switch (type) {
-  case Node::Type::kBranch:
+  if (std::holds_alternative<BranchNode>(node)) {
     get_branch_string(oss);
-    break;
-  case Node::Type::kExtension:
-    get_extension_string(oss);
-    break;
-  case Node::Type::kLeaf:
-    get_leaf_string(oss);
-    break;
   }
+  else if (std::holds_alternative<ExtensionNode>(node)) {
+    get_extension_string(oss);
+  }
+  else if (std::holds_alternative<LeafNode>(node)) {
+    get_leaf_string(oss);
+  }
+  else {
+    CHECK(false);
+  }
+
   return oss.str();
 }
 
 void
 Node::get_branch_string(std::ostringstream &oss) const
 {
-  CHECK_EQ(type, Node::Type::kBranch);
+  auto const &branch = std::get<BranchNode>(node);
 
   get_value_string(oss, branch.value_hash);
   for (size_t i = 0; i < branch.child.size(); i++) {
@@ -367,7 +374,7 @@ Node::get_branch_string(std::ostringstream &oss) const
 void
 Node::get_extension_string(std::ostringstream &oss) const
 {
-  CHECK_EQ(type, Node::Type::kExtension);
+  auto const &extension = std::get<ExtensionNode>(node);
 
   get_path_string(oss, extension.path);
   get_child_string(oss, /*child_idx=*/0, extension.child);
@@ -376,7 +383,7 @@ Node::get_extension_string(std::ostringstream &oss) const
 void
 Node::get_leaf_string(std::ostringstream &oss) const
 {
-  CHECK_EQ(type, Node::Type::kLeaf);
+  auto const &leaf = std::get<LeafNode>(node);
 
   get_path_string(oss, leaf.path);
   get_value_string(oss, leaf.value_hash);

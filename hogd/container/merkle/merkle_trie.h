@@ -179,15 +179,15 @@ public:
   void for_each(F func, const HexArray &root_prefix = HexArray())
   {
     auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
-      switch (node.type) {
+      switch (node.type()) {
       case Node::Type::kBranch:
-        if (node.branch.value_hash) {
-          func({path, *node.branch.value_hash});
+        if (node.branch().value_hash) {
+          func({path, *node.branch().value_hash});
         }
         break;
       case Node::Type::kLeaf:
-        if (node.leaf.value_hash) {
-          func({path, *node.leaf.value_hash});
+        if (node.leaf().value_hash) {
+          func({path, *node.leaf().value_hash});
         }
         break;
       default:
@@ -344,10 +344,10 @@ private:
         continue;
       }
 
-      switch (info.node->type) {
+      switch (info.node->type()) {
       case Node::Type::kBranch:
-        CHECK_LE(info.next_child_to_visit, info.node->branch.child.size());
-        if (info.next_child_to_visit == info.node->branch.child.size() ||
+        CHECK_LE(info.next_child_to_visit, info.node->branch().child.size());
+        if (info.next_child_to_visit == info.node->branch().child.size() ||
             (max_depth && info.depth == max_depth.value())) {
           // We have visited all of the branch's children, so now we can "visit"
           // (i.e., call [f] on) the branch. Or, we have reached the maximum
@@ -363,7 +363,7 @@ private:
           // [info.next_child_to_visit] is 0x3, then we know we will next visit
           // the child at index 0x3, so we append 0x3 to [info.path].
           info.path.append(std::byte(info.next_child_to_visit));
-          path.push({.node = info.node->branch.child[info.next_child_to_visit],
+          path.push({.node = info.node->branch().child[info.next_child_to_visit],
                      .parent = info.node,
                      .path = info.path,
                      .next_child_to_visit = 0,
@@ -389,15 +389,15 @@ private:
         else {
           // Append the extension node's path to [info.path] so that [info.path]
           // holds the path to the child when we push the child.
-          info.path.append(info.node->extension.path);
-          path.push({.node = info.node->extension.child,
+          info.path.append(info.node->extension().path);
+          path.push({.node = info.node->extension().child,
                      .parent = info.node,
                      .path = info.path,
                      .next_child_to_visit = 0,
                      .depth = info.depth + 1});
           // Now change [info.path] back to holding the path to the extension
           // node.
-          info.path.remove_from_back(info.node->extension.path.size());
+          info.path.remove_from_back(info.node->extension().path.size());
           info.next_child_to_visit++;
           continue;
         }
@@ -412,7 +412,7 @@ private:
 
         // Append the leaf's path to [info.path] so that the full path is passed
         // to [f].
-        info.path.append(info.node->leaf.path);
+        info.path.append(info.node->leaf().path);
         NodeType &n = *info.node;
         f(info.path, n, info.parent);
         // No need to remove the portion of the path we just appended above
@@ -545,7 +545,7 @@ public:
     Node root;
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
-      root.branch.child[i] = &tries_[i]->root_;
+      root.branch().child[i] = &tries_[i]->root_;
     }
     return root.compute_node_hash();
   }
@@ -577,7 +577,7 @@ public:
     Node root;
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
-      root.branch.child[i] = &tries_[i]->root_;
+      root.branch().child[i] = &tries_[i]->root_;
       if (i == index) {
         tries_[i]->root_.parent = &root;
       }
