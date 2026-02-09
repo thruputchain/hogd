@@ -65,7 +65,10 @@ private:
   // TODO(stutsman): Should we change the hogexec interface to have it pass
   // this information to avoid these accesses?
   size_t consumed_past_entries_{0};
-  std::atomic<ssize_t> total_element_count_delta_{0};
+  // Change in entry count in the whole queue over the set of committed deltas.
+  // This is used when calculating marginal storage costs for a committing delta
+  // in commit_change.
+  ssize_t committed_element_count_delta_{0};
 
   mutable x23::TestLock meta_init_mtx_;
   mutable x23::TestLock mtx_;
