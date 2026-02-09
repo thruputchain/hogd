@@ -148,8 +148,8 @@ public:
       // lock, is_shutdown_ready_ will be true). In the -1 case, the other
       // thread is responsible for rechecking shutdown_pending_refcount_.
       assert(prev_count >= 1000 || prev_count == kUninitializedValue ||
-            prev_count == kInitializedValue - 1 ||
-            prev_count == kInitializedValue + 1);
+             prev_count == kInitializedValue - 1 ||
+             prev_count == kInitializedValue + 1);
 
       if (prev_count == kUninitializedValue ||
           prev_count == kUninitializedValue + 1 ||
