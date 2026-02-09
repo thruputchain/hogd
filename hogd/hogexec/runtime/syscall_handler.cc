@@ -519,12 +519,6 @@ SystemCallHandler::get_proposal_data() const
                     execution_mode_data_);
 }
 
-SHA256Hash
-SystemCallHandler::get_source_tx_hash() const
-{
-  return sha256(signed_tx_.tx);
-}
-
 x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events()
 {

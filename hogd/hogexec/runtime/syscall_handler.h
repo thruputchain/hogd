@@ -310,11 +310,6 @@ private:
                ? BlockExecutionMode::kBlockExecutionModeProposal
                : BlockExecutionMode::kBlockExecutionModeValidation;
   }
-
-  // Get the hash of the proposed transaction.
-  // Can only be called after root_invoke()
-  // (as otherwise the proposal data is not available)
-  SHA256Hash get_source_tx_hash() const;
 };
 
 } // namespace hogd
