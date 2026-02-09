@@ -48,7 +48,7 @@ private:
   // Contains consume_state (head), max_live_block_num (tail), live_entries.
   mutable std::atomic<RetrocausalQueueMetadata *> meta_;
   mutable std::optional<RetrocausalQueueMetadata> meta_cell_;
-  mutable std::once_flag meta_once_flag_;
+  mutable x23::TestLock meta_init_mtx_;
 
   // Used in try_atomic_change_lock to ensure MPSC semantics;
   // ensures no two transactions both lock a consume in the same block.
@@ -70,7 +70,6 @@ private:
   // in commit_change.
   ssize_t committed_element_count_delta_{0};
 
-  mutable x23::TestLock meta_init_mtx_;
   mutable x23::TestLock mtx_;
 };
 
