@@ -55,6 +55,8 @@ public:
     });
 
     rw_lock_.lock_writer();
+    CHECK(!allocated_regions_.empty());
+    CHECK_GE(current_region_idx_, 0L);
     current_region_idx_ = 0;
     current_region_offset_.store(allocated_regions_[0],
                                  std::memory_order_relaxed);
@@ -75,6 +77,8 @@ private:
       CHECK_PTR(current_region_offset);
 
       rw_lock_.lock_reader();
+      CHECK_LT(current_region_idx_,
+               static_cast<ssize_t>(allocated_regions_.size()));
       if (current_region_offset + kPerThreadAllocLength >
           allocated_regions_[current_region_idx_] + kMmapLength) {
 
@@ -82,8 +86,6 @@ private:
         // do this while the others wait.
         if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
           // This thread won the race and will allocate the new region.
-          CHECK_LT(current_region_idx_,
-                   static_cast<ssize_t>(allocated_regions_.size()));
           if (current_region_idx_ ==
               static_cast<ssize_t>(allocated_regions_.size()) - 1) {
             alloc_new_region();
