@@ -57,6 +57,8 @@ public:
     current_region_idx_ = 0;
     current_region_offset_.store(allocated_regions_[0],
                                  std::memory_order_relaxed);
+    info("reset_all_regions, allocated_regions_.size() = {}",
+         allocated_regions_.size());
   }
 
 private:
@@ -122,6 +124,7 @@ private:
 
   void alloc_new_region()
   {
+    info("alloc_new_region");
     CHECK(rw_lock_.is_writer_locked_relaxed());
 
     void *addr =
@@ -145,7 +148,7 @@ private:
 
   RwLock rw_lock_;
   std::atomic<char *> current_region_offset_ = nullptr;
-  size_t current_region_idx_ = 0;
+  ssize_t current_region_idx_ = -1;
   std::vector<char *> allocated_regions_;
   PerThread<PrivateRegion> private_region_;
 };
