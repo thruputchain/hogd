@@ -57,8 +57,10 @@ public:
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
-  Node() { memset(static_cast<void *>(&branch), 0, sizeof(branch)); }
-  ~Node() {} // NOLINT(modernize-use-equals-default)
+  // Can't be default because the union members lack default constructors.
+  // The first action taken after creating a new Node struct is to
+  // initialize it with one of {init_branch, init_extension, init_leaf}.
+  Node() {}
   // Disable copy and move.
   Node(const Node &) = delete;
   Node &operator=(const Node &) = delete;
