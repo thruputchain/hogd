@@ -221,34 +221,6 @@ HogConservationInvariant::handle_replay_cache_item_change(
 }
 
 void
-HogConservationInvariant::handle_retrocausal_queue_item_change(
-    HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
-{
-  auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
-    if (!item.has_value()) {
-      return 0;
-    }
-    assert(item.value().type == 0);
-    RetrocausalQueueMetadata metadata;
-    try {
-      x23::deserialize(&metadata, x23::BufViewEnd(item.value().value));
-    } catch (x23::XdrException &e) {
-      warn("failed to deserialize retrocausal queue block: {}", e.what());
-      assert(false);
-      return 0;
-    }
-
-    return cost_model_.get_retrocausal_queue_cost(
-        metadata.live_entries,
-        RetrocausalQueueLock::live_block_count(metadata));
-  };
-  auto before_storage_cost = get_storage_cost(before);
-  auto after_storage_cost = get_storage_cost(after);
-
-  update_total_supply(after_storage_cost - before_storage_cost);
-}
-
-void
 HogConservationInvariant::update_total_supply(int128_t change)
 {
   [[maybe_unused]] auto r =
