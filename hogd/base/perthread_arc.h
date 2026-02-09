@@ -5,7 +5,6 @@
 #include <concepts>
 #include <cstdint>
 
-#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 
@@ -96,7 +95,7 @@ public:
         // references left
         auto prev =
             shutdown_pending_refcount_.fetch_sub(1, std::memory_order_relaxed);
-        CHECK(prev > 0);
+        assert(prev > 0);
         return prev == 1;
       }
 
@@ -122,7 +121,7 @@ public:
     // Subtract the reference from the aggregated refcount
     auto prev =
         shutdown_pending_refcount_.fetch_sub(1, std::memory_order_relaxed);
-    CHECK(prev > 0);
+    assert(prev > 0);
     return prev == 1;
   }
 
@@ -148,7 +147,7 @@ public:
       // time that the thread on try_acquire_reference() acquires the thread
       // lock, is_shutdown_ready_ will be true). In the -1 case, the other
       // thread is responsible for rechecking shutdown_pending_refcount_.
-      CHECK(prev_count >= 1000 || prev_count == kUninitializedValue ||
+      assert(prev_count >= 1000 || prev_count == kUninitializedValue ||
             prev_count == kInitializedValue - 1 ||
             prev_count == kInitializedValue + 1);
 
@@ -163,7 +162,7 @@ public:
 
       pending_count += prev_count - kInitializedValue;
     });
-    CHECK(pending_count >= 0);
+    assert(pending_count >= 0);
 
     // Now pending_count stores the count of outstanding references
     // to the object.
@@ -180,9 +179,9 @@ public:
     if (!is_shutdown_ready_.load(std::memory_order_acquire)) {
       [[maybe_unused]]
       auto r = initiate_shutdown();
-      CHECK(r);
+      assert(r);
     }
-    CHECK(shutdown_pending_refcount_ == 0);
+    assert(shutdown_pending_refcount_.load(std::memory_order_relaxed) == 0);
   }
 
 private:
@@ -224,7 +223,7 @@ private:
       // Assert that the references stored on this refcount were drained into
       // the main refcount. Or that the refcount was initialized to
       // kUninitializedValue = 0
-      CHECK(count_.load(std::memory_order_relaxed) <= 0);
+      assert(count_.load(std::memory_order_relaxed) <= 0);
     }
   };
 
