@@ -58,6 +58,7 @@ branch_has_child_hash(const Node::Raw &node, const SHA256Hash &child_hash)
 bool
 branch_get_child_index(const Node &branch, Node *child, size_t &idx)
 {
+  CHECK(branch.type == Node::Type::kBranch);
   for (idx = 0; idx < branch.branch.child.size(); idx++) {
     if (branch.branch.child[idx] == child) {
       return true;
