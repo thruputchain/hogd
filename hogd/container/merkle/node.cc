@@ -105,6 +105,7 @@ get_branch_child_encoding(
   for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
     Node *child = children[i];
     if (child) {
+      CHECK(cur_size + sizeof(SHA256Hash) <= encoding.size());
       memcpy(&encoding[cur_size], &child->hash, sizeof(SHA256Hash));
     }
     cur_size += sizeof(SHA256Hash);
@@ -286,6 +287,7 @@ void
 Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kLeaf);
+  CHECK_EQ(encoding.size(), 0);
 
   get_path_encoding(encoding, leaf.path);
   get_value_encoding(encoding, leaf.value_hash);
