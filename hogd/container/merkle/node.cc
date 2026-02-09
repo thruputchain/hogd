@@ -8,6 +8,7 @@
 #include <format>
 #include <iterator>
 #include <optional>
+#include <print>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -245,6 +246,7 @@ Node::get_node_encoding() const
 {
   static PerThread<std::vector<std::byte>> to_hash;
   to_hash->clear();
+  std::println("get_node_encoding() type: {}", type);
 
   to_hash->push_back(static_cast<std::byte>(type));
   switch (type) {
@@ -258,6 +260,7 @@ Node::get_node_encoding() const
     get_leaf_encoding(*to_hash);
     break;
   }
+  std::println("get_node_encoding() size: {}", to_hash->size());
   return *to_hash;
 }
 
