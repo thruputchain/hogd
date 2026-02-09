@@ -633,4 +633,8 @@ private:
   MVar<std::vector<ThreadPool::Job>> waiters_;
 };
 
+// CoroFutex is used as a local inside coroutine frames — must not
+// exceed default new alignment or GCC bug #104177 will SIGSEGV.
+static_assert(alignof(CoroFutex<int>) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+
 } // namespace x23
