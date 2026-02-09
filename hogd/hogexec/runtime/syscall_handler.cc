@@ -522,11 +522,7 @@ SystemCallHandler::get_proposal_data() const
 SHA256Hash
 SystemCallHandler::get_proposed_tx_hash() const
 {
-  ProposedTransaction proposed_tx{.signed_tx = signed_tx_,
-                                  .nondeterministic_proposal_data =
-                                      get_proposal_data()};
-
-  return sha256(proposed_tx);
+  return sha256(signed_tx_.tx);
 }
 
 x23::Async<SystemStatus<void>>

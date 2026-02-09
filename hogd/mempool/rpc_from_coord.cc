@@ -86,7 +86,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(sha256(txs[i]));
+      to_remove.push_back(sha256(txs[i].tx));
       to_remove_indices.push_back(i);
     }
   }
@@ -625,6 +625,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
     info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
+    if (nominated_block_cache_.tx_hashes.size() > 0) {
+      info("one of the hashes is: {}",
+           HexArray(nominated_block_cache_.tx_hashes[0]).str());
+    }
   }
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
