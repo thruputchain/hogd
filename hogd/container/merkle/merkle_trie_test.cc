@@ -859,6 +859,16 @@ prove(T &trie)
                                        node_encoding.end());
   }
   EXPECT_EQ(node_encodings, node_encodings_by_node_flat);
+  if (node_encodings != node_encodings_by_node_flat) {
+    ASSERT_EQ(node_encodings.size(), node_encodings_by_node_flat.size());
+    for (size_t i = 0; i < node_encodings.size(); i++) {
+      if (node_encodings[i] != node_encodings_by_node_flat[i]) {
+        std::println("node_encodings[{}]: {}", i, static_cast<uint8_t>(node_encodings[i]));
+        std::println("node_encodings_by_node_flat[{}]: {}", i, static_cast<uint8_t>(node_encodings_by_node_flat[i]));
+        break;
+      }
+    }
+  }
 
   // [key_b/value_b] is in the trie, so we should be able to prove it.
   EXPECT_TRUE(
