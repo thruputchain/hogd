@@ -217,15 +217,11 @@ public:
   SHA256Hash to_sha256() const
   {
     SHA256Hash ret;
+    // A SHA256Hash is 32 bytes, so the number of hex chars in the initialized
+    // HexArray should be 2 * 32 = 64.
+    CHECK_EQ(2 * sizeof(SHA256Hash), size_);
 
     memcpy(ret.data(), backing_store_.data(), sizeof(SHA256Hash));
-    if (size_ % 2) {
-      // If the size is odd, zero out the last 4 bits to ensure we consistently
-      // return the same array. Otherwise, we could end up returning garbage in
-      // the last 4 bits, which could vary between invocations of
-      // [to_byte_vector()].
-      ret.back() &= 0xF0;
-    }
     return ret;
   }
 
