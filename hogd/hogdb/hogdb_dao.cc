@@ -476,6 +476,17 @@ HogDBDAO::write_retrocausal_queue_metadata(
 }
 
 HogDBStatus<void>
+HogDBDAO::remove_retrocausal_queue_metadata(const ItemKey &key)
+{
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto before_item = get_before_item(db_key);
+  auto ret = db_.remove(db_key);
+
+  update_invariants_post(db_key, before_item);
+  return ret;
+}
+
+HogDBStatus<void>
 HogDBDAO::write_address_metadata(Address const &addr,
                                  const DeployedContractHash &hash)
 {

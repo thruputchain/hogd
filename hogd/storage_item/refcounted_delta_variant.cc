@@ -240,17 +240,22 @@ RetrocausalQueueArgs::get_current_committed_cost(
     StorageItemWrapper const *base_item) const
 {
   assert(current_model);
-  // nothing has committed yet
-  if (!insert_committed_ && !past_consume_delta_) {
-    if (base_item) {
-      return base_item->storage_cost();
-    }
+  // No base item and no insert committed: no cost.
+  if (!base_item && !insert_committed_) {
     return 0;
+  }
+  // Base item is a non-RCQ type (e.g. a bytestring that was deleted and
+  // replaced with an RCQ in this block). get_current_committed_stats cannot
+  // derive meaningful RCQ stats from a non-RCQ base, and no RCQ insert has
+  // committed yet, so the committed cost is still the old item's cost.
+  if (base_item &&
+      base_item->type() != StorageItemType::kItemTypeRetrocausalQueue &&
+      !insert_committed_) {
+    return base_item->storage_cost();
   }
 
   auto stats = get_current_committed_stats(base_item);
-  return current_model->kBaseItemCost +
-         current_model->get_retrocausal_queue_cost(stats.active_size,
+  return current_model->get_retrocausal_queue_cost(stats.active_size,
                                                    stats.active_block_count);
 }
 
@@ -308,11 +313,10 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
       .active_block_count = new_block_maybe_created ? 1U : 0U,
       .active_size = std::max<int64_t>(0, new_inserted_entries)};
 
-  bool exists_committed_delta =
-      insert_committed_ || past_consume_delta_.has_value();
-
   int128_t base_cost = [&] -> int128_t {
-    if (exists_committed_delta) {
+    // If this delta inserts nothing, it shouldn't have to pay for the base
+    // metadata item.
+    if (delta.retrocausal_queue().insert.added_entries.empty()) {
       return 0;
     }
     if (base_item) {
@@ -322,8 +326,8 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     return current_model->kBaseItemCost;
   }();
 
-  return base_cost + current_model->get_retrocausal_queue_cost(
-                         new_stats.active_size, new_stats.active_block_count);
+  return base_cost + (new_stats.active_size * current_model->kRCQCostPerEntry) +
+         (new_stats.active_block_count * current_model->kRCQCostPerBlock);
 }
 
 RetrocausalQueueStats
@@ -399,7 +403,9 @@ RetrocausalQueueArgs::commit_insert(
     }
     new_entries_.push_back(entry);
   }
-  insert_committed_ = true;
+  if (!insert_delta.added_entries.empty()) {
+    insert_committed_ = true;
+  }
 }
 
 std::optional<QueueEntry>

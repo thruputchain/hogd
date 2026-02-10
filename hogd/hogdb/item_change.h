@@ -466,6 +466,9 @@ public:
 
 private:
   RetrocausalQueueDelta delta_;
+  // Number of entries consumed from past blocks. Calculated during
+  // try_atomic_change_lock and used in commit_change.
+  mutable uint64_t consumed_past_entries_{0};
 
   friend struct std::formatter<RetrocausalQueueIt>;
   friend class RetrocausalQueueLock;

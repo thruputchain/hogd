@@ -20,7 +20,7 @@ StorageCostModel::get_retrocausal_queue_cost(int64_t active_queue_size,
   if (active_queue_size == 0 && active_block_count == 0) {
     return 0;
   }
-  return (active_queue_size * kRCQCostPerEntry) +
+  return kBaseItemCost + (active_queue_size * kRCQCostPerEntry) +
          (active_block_count * kRCQCostPerBlock);
 }
 
