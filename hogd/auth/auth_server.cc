@@ -21,6 +21,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -137,9 +138,14 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
 
-  for (std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)> &f :
-       auth_data_changes_callbacks_) {
-    co_await f(height, key_changes);
+  if (mempool_client_) {
+    try {
+      co_await mempool_client_->mempoolauth_auth_data_changed(height,
+                                                              key_changes);
+    } catch (const x23::XdrException &e) {
+      error("AuthServer: Failed to notify mempool of auth data changes: {}",
+            e.what());
+    }
   }
 }
 

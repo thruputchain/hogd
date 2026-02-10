@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/rpc_from_auth.h"
@@ -28,6 +29,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   sched_event_server_.start_server(/*port=*/0);
   sched_exec_server_.start_server(/*port=*/0);
   mempool_coord_server_.start_server(/*port=*/0);
+  mempool_auth_server_.start_server(/*port=*/0);
 
   auto sched_db_client = std::make_unique<sched_db_client_t>(
       create_client<SchedDb1>(kAddress, sched_db_server_.port())());
@@ -46,6 +48,12 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
   db_auth_server_->start_server(/*port=*/0);
 
+  std::string dbauth_address = address(kAddress, db_auth_server_->port());
+  dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
+  auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+  auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_server_);
+  auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
+
   // Start the event RPC servers.
   event_sched_server_.start_server(/*port=*/0);
   event_exec_server_.start_server(/*port=*/0);
@@ -61,6 +69,14 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
+  {
+    auto mempool_auth_client =
+        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
+    AuthCard auth_card = auth_rpc_->make_auth_card(kAddress);
+    mempool_auth_client.mempoolauth_intro_auth(auth_card)();
+    auth_server_->set_mempool_client(std::move(mempool_auth_client));
+    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+  }
   register_event_with_mempool();
   // The executor must register itself *after* the database and event servers
   // have registered!

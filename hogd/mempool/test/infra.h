@@ -15,6 +15,7 @@
 #include "built_contracts/contract_loader.h"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "hogd/auth/auth_server.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
@@ -33,6 +34,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
@@ -144,11 +146,11 @@ public:
   }
 
   x23::Async<void> register_auth_data_updates(BlockHeight height,
-                                              const KeyChangeBatch &key_changes)
+                                              KeyChangeBatch key_changes)
   {
-    CHECK_PTR(db_auth_server_->impl());
-    return mempool_coord_server_->impl()->auth()->register_auth_data_updates(
-        height, key_changes);
+    CHECK_PTR(auth_server_.get());
+    return auth_server_->register_auth_data_updates(height,
+                                                    std::move(key_changes));
   }
 
   void set_dbtip(const DbTip &db_tip)
@@ -335,8 +337,13 @@ private:
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
+  RpcServer<MempoolAuthRpc> mempool_auth_server_ =
+      RpcServer<MempoolAuthRpc>(mempool_coord_server_->impl());
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
+
+  std::unique_ptr<AuthServer> auth_server_;
+  std::unique_ptr<AuthRpcServers> auth_rpc_;
 };
 
 } // namespace hogd

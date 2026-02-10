@@ -30,6 +30,7 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "parallel.hh"
@@ -66,6 +67,46 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
 } // namespace
 
 x23::Async<void>
+MempoolCoordinatorRpc::register_auth_server(AuthCard card)
+{
+  info("got {}, expected {}", card.protocol.c_str(),
+       version::kHogdProtocol());
+  if (strcmp(card.protocol.c_str(), version::kHogdProtocol()) != 0) {
+    warn("register_auth_server: protocol mismatch");
+    co_return;
+  }
+
+  x23::HostPort hostport;
+  if (!hostport.parse(card.address_for_mempool)) {
+    error("register_auth_server: failed to parse address {}",
+          card.address_for_mempool);
+    co_return;
+  }
+
+  auth_mempool_address_ = card.address_for_mempool.c_str();
+  auth_card_ = std::move(card);
+
+  auth_ready_.store(1);
+  auth_ready_.broadcast(&default_threadpool());
+}
+
+x23::Async<void>
+MempoolCoordinatorRpc::ensure_auth_client()
+{
+  if (auth_client_) {
+    co_return;
+  }
+
+  CHECK(!auth_mempool_address_.empty());
+  x23::HostPort hostport;
+  CHECK(hostport.parse(auth_mempool_address_));
+  auto client = co_await make_rpc_client<AuthMempool1>(
+      hostport, /*retry=*/true, LoadgenRpc::kRpcMaxMessageSize);
+  auth_client_ =
+      std::make_unique<auth_mempool_client_t>(std::move(client));
+}
+
+x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
@@ -77,8 +118,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   ElapsedTimer timer;
   info("submit_unvetted, {} txs", txs.size());
-  AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
-      /*height=*/scheduler_->current_block(), txs, /*max_parallelism=*/128);
+  co_await ensure_auth_client();
+  co_await ensure_auth_client();
+  CHECK_PTR(auth_client_.get());
+  AuthErrorCodeBatch auth_ret = co_await auth_client_
+                                   ->authmempool_verify_transactions(
+                                       /*height=*/scheduler_->current_block(),
+                                       txs);
   info("auth took {}", timer.elapsed());
 
   x23::Vec<size_t> to_remove_indices;
@@ -93,7 +139,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
   // Careful: it is tempting to overlap the overhead of
-  // [auth_->verify_transactions()] with that of [scheduler_->add_txs()] (and
+  // [authmempool_verify_transactions()] with that of [scheduler_->add_txs()] (and
   // then after remove any unverified txs from the scheduler). But this would
   // make the txs visible to nominate() and validate() before the txs have been
   // verified.
@@ -987,7 +1033,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 // to the last block height seen in the callback.
 x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
-                                         const KeyChangeBatch &key_changes)
+                                         KeyChangeBatch key_changes)
 {
   info("auth_data_changed, height = {}, key_changes.size() = {}", height,
        key_changes.size());
@@ -1013,8 +1059,11 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     tx_hashes += change_tx_hashes;
     txs += change_txs;
   }
-  AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
-      /*height=*/scheduler_->current_block(), txs);
+  CHECK_PTR(auth_client_.get());
+  AuthErrorCodeBatch auth_ret = co_await auth_client_
+                                   ->authmempool_verify_transactions(
+                                       /*height=*/scheduler_->current_block(),
+                                       txs);
   x23::Vec<SignedTransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];

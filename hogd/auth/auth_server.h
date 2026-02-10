@@ -1,15 +1,12 @@
 #pragma once
 
 #include <format>
-#include <functional>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unistd.h>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -59,15 +56,14 @@ public:
   // the first will be dropped.
   x23::Async<void> register_auth_data_updates(BlockHeight height,
                                               KeyChangeBatch key_changes);
-  void add_auth_data_updates_callback(
-      const std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
-          &callback)
-  {
-    std::lock_guard<std::mutex> lock(auth_data_changes_callbacks_lock_);
-    auth_data_changes_callbacks_.push_back(callback);
-  }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
+  using mempool_auth_client_t =
+      decltype(make_rpc_client<MempoolAuth1>(x23::HostPort{})());
+  void set_mempool_client(mempool_auth_client_t &&client)
+  {
+    mempool_client_.emplace(std::move(client));
+  }
 
 private:
   // If this returns AuthErrorCode::kAuthSuccess, then auth_data will be
@@ -92,10 +88,7 @@ private:
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
 
-  std::mutex auth_data_changes_callbacks_lock_;
-  std::vector<
-      std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>>
-      auth_data_changes_callbacks_;
+  std::optional<mempool_auth_client_t> mempool_client_;
 };
 
 class AuthDBRpc {
