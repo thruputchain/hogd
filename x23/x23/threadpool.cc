@@ -342,9 +342,8 @@ ThreadPool::Worker::work()
     if (!ptr)
       return;
     auto task = qpop(ptr);
-    ptr.reset();
-
     ts.count_ = count++;
+    ptr.reset();
     task();
   }
 }

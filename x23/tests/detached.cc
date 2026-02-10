@@ -141,6 +141,30 @@ TEST(Detached, ManyCoroutinesCrossThread)
   }()();
 }
 
+// drain() guarantees all enqueued jobs complete before it returns.
+// Tight stress loop to catch the idle→executing race window.
+TEST(DrainContract, AllJobsCompleteBeforeDrainReturns)
+{
+  [] -> Async<void> {
+    constexpr int kN = 256;
+    constexpr int kIters = 100;
+
+    for (int iter = 0; iter < kIters; iter++) {
+      std::atomic_int completed{0};
+
+      for (int i = 0; i < kN; i++)
+        [](std::atomic_int &completed) -> Detached {
+          co_await pool.bg();
+          completed.fetch_add(1, std::memory_order_relaxed);
+        }(completed);
+
+      co_await pool.async(&ThreadPool::drain, &pool);
+      EXPECT_EQ(completed.load(std::memory_order_relaxed), kN);
+    }
+    co_return;
+  }()();
+}
+
 // Multiple suspend points per coroutine — parameters intact after each.
 TEST(Detached, MultipleSuspendPoints)
 {
