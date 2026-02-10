@@ -28,7 +28,7 @@ auth_init(const std::string &mempool_address)
         std::format("Invalid mempool address: {}", mempool_address));
   }
 
-  auto mempool_client =
+  AuthServer::mempool_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
 
   std::string hostname;
@@ -77,7 +77,7 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("usage: {} mempool_ip:port", argv[0]);
+  std::println("usage: {} mempool_host:port", argv[0]);
   exit(EXIT_FAILURE);
 }
 
@@ -87,8 +87,9 @@ int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
   int ret = hogd::hogd_init(argc, argv);
-  if (ret)
+  if (ret) {
     return ret;
+  }
   hogd::info("starting auth server!");
 
   if (argc != 2) {

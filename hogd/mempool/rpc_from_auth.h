@@ -25,13 +25,15 @@ public:
     info("got {}, expected {}", card.protocol.c_str(),
          version::kHogdProtocol());
     if (strcmp(card.protocol.c_str(), version::kHogdProtocol()) != 0) {
-      co_return IntroAuthResult{};
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 
-    co_await coord_.register_auth_server(std::move(card));
-
-    IntroAuthResult result;
-    Registration::registration().shards_registered(&result.shards());
+    Registration::registration().register_auth(card);
+    // TODO(jhumphri): Need to ensure all dbs have registered first!
+    x23::Vec<ShardCard> shard_cards;
+    Registration::registration().shards_registered(&shard_cards);
+    IntroAuthResult result(IntroAuthOutcome::kSuccess);
+    result.shards(shard_cards);
     co_return result;
   }
 
@@ -39,6 +41,16 @@ public:
                                                  KeyChangeBatch key_changes)
   {
     return coord_.auth_data_changed(height, std::move(key_changes));
+  }
+
+  static x23::Async<x23::Vec<auth_sched_client_t>> get_client()
+  {
+    AuthCard card;
+    CHECK(Registration::registration().auth_registered(&card));
+
+    co_return co_await create_client<AuthMempool1>(
+        server_address_to_sockaddr(card.address_for_mempool), /*retry=*/false,
+        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
   }
 
 private:

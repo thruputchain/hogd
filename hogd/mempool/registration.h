@@ -88,6 +88,21 @@ public:
     return ret;
   }
 
+  // Auth.
+  void register_auth(const AuthCard &card)
+  {
+    auth_card_ = card;
+    auth_registered_.store(true, std::memory_order_release);
+  }
+  bool auth_registered(AuthCard *card) const
+  {
+    bool ret = auth_registered_.load(std::memory_order_acquire);
+    if (card) {
+      *card = auth_card_;
+    }
+    return ret;
+  }
+
   // Databases.
   // Returns the ID of the registered shard.
   size_t register_shard(const ShardCard &card)
@@ -137,6 +152,9 @@ private:
 
   std::atomic<bool> event_registered_ = false;
   EventCard event_card_;
+
+  std::atomic<bool> auth_registered_ = false;
+  EventCard auth_card_;
 
   std::mutex shard_cards_mutex_;
   x23::Vec<ShardCard> shard_cards_;

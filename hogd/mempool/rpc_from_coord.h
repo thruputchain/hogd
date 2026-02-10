@@ -70,8 +70,6 @@ public:
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
 
-  x23::Async<void> register_auth_server(AuthCard card);
-
   static x23::Async<coord_sched_client_t> get_client()
   {
     CoordCard card;
@@ -203,7 +201,6 @@ public:
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
   BlockHeight auth_data_height() { return auth_data_height_.load(); }
-  bool auth_ready() const { return auth_ready_.load() != 0; }
 
   void dump_stats() { scheduler_->dump_runqueue(); }
 
@@ -213,8 +210,6 @@ public:
                                      KeyChangeBatch key_changes);
 
 private:
-  x23::Async<void> ensure_auth_client();
-
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
   // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -258,12 +253,8 @@ private:
         std::make_shared<Scheduler>(/*current_block=*/1, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
-    int current_ready = auth_ready_.load();
-    while (current_ready == 0) {
-      co_await auth_ready_.wait(current_ready);
-      current_ready = auth_ready_.load();
-    }
-    co_await ensure_auth_client();
+    auth_client_ = std::make_unique<auth_sched_client_t>(
+        co_await MempoolAuthRpc::get_client());
 
     ready_.store(true, std::memory_order_release);
   }
