@@ -154,7 +154,7 @@ private:
   EventCard event_card_;
 
   std::atomic<bool> auth_registered_ = false;
-  EventCard auth_card_;
+  AuthCard auth_card_;
 
   std::mutex shard_cards_mutex_;
   x23::Vec<ShardCard> shard_cards_;

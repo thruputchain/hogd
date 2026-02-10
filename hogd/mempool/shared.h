@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <vector>
 
+#include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
@@ -27,6 +28,9 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+using auth_sched_client_t =
+    AuthMempool1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 using coord_sched_client_t =
     CoordScheduler1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

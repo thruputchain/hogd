@@ -49,9 +49,9 @@ auth_init(const std::string &mempool_address)
     throw std::runtime_error("No db shards registered with mempool");
   }
 
-  const ShardCard &shard = intro.shards()[0];
-  dbauth_client_t dbauth_client =
-      make_dbauth_client(shard.address_for_auth.c_str())();
+  ShardCard &shard = intro.shards()[0];
+  const std::string address_for_auth = shard.address_for_auth.c_str();
+  dbauth_client_t dbauth_client = make_dbauth_client(address_for_auth)();
 
   AuthServer auth_server(std::move(dbauth_client));
   auth_server.set_mempool_client(std::move(mempool_client));

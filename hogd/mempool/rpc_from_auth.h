@@ -7,6 +7,7 @@
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/version.h"
@@ -30,7 +31,7 @@ public:
 
     Registration::registration().register_auth(card);
     // TODO(jhumphri): Need to ensure all dbs have registered first!
-    x23::Vec<ShardCard> shard_cards;
+    x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);
     IntroAuthResult result(IntroAuthOutcome::kSuccess);
     result.shards(shard_cards);
