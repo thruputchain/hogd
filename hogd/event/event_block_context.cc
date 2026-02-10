@@ -50,6 +50,7 @@ EventBlockContext::open_events_file()
     panic("failed to open work directory: {}", dir.error());
   }
   auto filename = temp_events_filename(work_directory_, block_id_);
+  // NOLINTNEXTLINE(misc-include-cleaner)
   auto fd = open(filename.c_str(), O_CREAT | O_WRONLY, 0666);
   if (fd == -1) {
     panic("failed to open events file: {}", strerror(errno));
