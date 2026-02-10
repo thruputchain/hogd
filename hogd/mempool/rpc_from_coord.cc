@@ -69,7 +69,6 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
-  info("submit_unvetted start!");
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
 
@@ -875,7 +874,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
     last_ = std::chrono::steady_clock::now();
-    info("schedulercoord_commit_block");
     co_return SchedulerCommitOutcome::SchedulerCommitRace;
   }
   x23::CoroGuard nominate_cg;
@@ -887,7 +885,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     last_ = std::chrono::steady_clock::now();
-    info("schedulercoord_commit_block");
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
 
@@ -977,7 +974,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
   scheduler_->increment_current_block();
   last_ = std::chrono::steady_clock::now();
-  info("schedulercoord_commit_block");
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
