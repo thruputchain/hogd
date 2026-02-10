@@ -10,6 +10,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/thread_checked_mutex.h"
+#include "hogd/base/types.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
@@ -90,6 +91,10 @@ private:
   std::vector<indexer_event_client_t> indexers_;
 
   PerThread<ContextCache> cache_;
+  // In any normal workflow we almost certainly are not seeing more than a
+  // couple open blocks at a time.
+  constexpr static size_t kMaxCachedBlocks = 5;
+  std::vector<ReusableEventBlockContextData> cached_blocks_;
   std::string work_directory_;
 };
 

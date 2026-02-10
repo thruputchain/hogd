@@ -10,6 +10,8 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string_view>
+#include <sys/fcntl.h>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -18,13 +20,16 @@
 
 #include "event.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "indexer.hh"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"
@@ -37,7 +42,50 @@ namespace hogd {
 
 constexpr static size_t kBufferThreshold = 500_KiB;
 
-// TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
+void
+EventBlockContext::open_events_file()
+{
+  auto dir = Directory::open(work_directory_);
+  if (!dir) {
+    panic("failed to open work directory: {}", dir.error());
+  }
+  auto filename = temp_events_filename(work_directory_, block_id_);
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  auto fd = open(filename.c_str(), O_CREAT | O_WRONLY, 0666);
+  if (fd == -1) {
+    panic("failed to open events file: {}", strerror(errno));
+  }
+  events_file_ = x23::UniqueFd(fd);
+}
+
+EventBlockContext::EventBlockContext(std::string_view work_directory,
+                                     BlockID block_id,
+                                     ReusableEventBlockContextData data)
+  : trie_(std::move(data.trie)), work_directory_(work_directory),
+    block_id_(block_id), event_log_(std::move(data.event_log)),
+    buffers_(std::move(data.buffers))
+{
+  trie_->clear();
+  {
+    auto ul = buffers_.lock_threads();
+    buffers_.for_each(ul, [](detail::EventContext &ctx) {
+      ctx.buf.clear();
+      ctx.event_count = 0;
+    });
+  }
+  {
+    auto ul = event_log_.lock_threads();
+    event_log_.for_each(ul, [](TxEventLogBatch &batch) { batch.clear(); });
+  }
+  open_events_file();
+}
+
+ReusableEventBlockContextData
+EventBlockContext::extract_data()
+{
+  return ReusableEventBlockContextData(std::move(trie_), std::move(event_log_),
+                                       std::move(buffers_));
+}
 
 x23::Async<bool>
 EventBlockContext::add_event(TxEventLog event)
@@ -207,7 +255,7 @@ EventBlockContext::finish_file_write()
   {
     auto ul = buffers_.lock_threads();
 
-    buffers_.for_each(ul, [this, &total_bytes](EventContext &context) {
+    buffers_.for_each(ul, [this, &total_bytes](detail::EventContext &context) {
       total_bytes += context.buf.size();
       auto r = x23::fullwrite(events_file_, x23::BufView(context.buf));
       if (!r) [[unlikely]] {
