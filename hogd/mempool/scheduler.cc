@@ -152,7 +152,7 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
-  const SignedTransactionHash &tx_hash = sha256(tx);
+  const SignedTransactionHash &tx_hash = sha256(tx.tx);
   TxValue *value = nullptr;
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back

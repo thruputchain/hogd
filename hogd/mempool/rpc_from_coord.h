@@ -142,8 +142,9 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
-    auto ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
-        genesis_configuration);
+    DbSchedResult ret =
+        co_await db_sched_client_->dbsched_load_genesis_configuration(
+            genesis_configuration);
     last_committed_block_ = {.height = 0,
                              .hash = sha256(genesis_configuration),
                              .id = generate_block_id()};

@@ -519,16 +519,6 @@ SystemCallHandler::get_proposal_data() const
                     execution_mode_data_);
 }
 
-SHA256Hash
-SystemCallHandler::get_proposed_tx_hash() const
-{
-  ProposedTransaction proposed_tx{.signed_tx = signed_tx_,
-                                  .nondeterministic_proposal_data =
-                                      get_proposal_data()};
-
-  return sha256(proposed_tx);
-}
-
 x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events()
 {
@@ -541,7 +531,7 @@ SystemCallHandler::emit_events()
     co_return SystemStatus<void>{};
   }
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
-      .proposed_tx_hash = get_proposed_tx_hash(),
+      .proposed_tx_hash = get_source_tx_hash(),
       .events = std::move(events),
   });
 }

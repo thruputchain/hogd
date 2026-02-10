@@ -81,17 +81,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       /*height=*/scheduler_->current_block(), txs, /*max_parallelism=*/128);
   info("auth took {}", timer.elapsed());
 
-  x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(sha256(txs[i]));
       to_remove_indices.push_back(i);
     }
   }
-  info("{} txs were invalid", to_remove.size());
-  if (!to_remove.empty()) {
+  info("{} txs were invalid", to_remove_indices.size());
+  if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
   // Careful: it is tempting to overlap the overhead of
@@ -373,9 +371,12 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
       create_snapshot(/*prev_block_id=*/cache.db_tip.id, cache.block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
 
-  // Open block (on event server).
-  x23::Async<RPCError> open_block_handler =
-      eventsched_open_block(cache.block_id);
+  // Open block (on event server). [open_proposal_block()] below ultimately
+  // causes RPCs to be sent to the server event server. When the event server
+  // receives those RPCs, it expects the block to already be opened. Thus, we
+  // [co_await eventsched_open_block()] below before doing
+  // [open_proposal_block()] to prevent a race.
+  CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
 
   // Open proposal blocks.
   x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
@@ -387,7 +388,6 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 
   // [co_await] the block initialization RPCs.
   DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
-  CHECK_EQ(co_await open_block_handler, RPCError::kRPCNone);
 
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
@@ -625,6 +625,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
     info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
+    if (!nominated_block_cache_.tx_hashes.empty()) {
+      info("one of the hashes is: {}",
+           HexArray(nominated_block_cache_.tx_hashes[0]).str());
+    }
   }
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
@@ -665,7 +669,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                   .nomination.block_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
-  info("nominate() took {}", timer.elapsed());
+  info("nominate() took {}, num tx hashes {}, num tx nominations {}",
+       timer.elapsed(), nominated_block_cache_.result_tx_hashes.size(),
+       nominated_block_cache_.result_tx_nominations.size());
   last_ = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
 }
