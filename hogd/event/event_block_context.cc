@@ -10,6 +10,8 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string_view>
+#include <sys/fcntl.h>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -18,13 +20,16 @@
 
 #include "event.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "indexer.hh"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"

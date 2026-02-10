@@ -28,7 +28,7 @@ EventRPCContext::open_block(BlockID block_id)
   co_await g(lock_);
 
   bool inserted = false;
-  if (cached_blocks_.empty()) {
+  if (!cached_blocks_.empty()) {
     std::tie(std::ignore, inserted) = event_block_contexts_.emplace(
         std::piecewise_construct, std::forward_as_tuple(block_id),
         std::forward_as_tuple(work_directory_, block_id,

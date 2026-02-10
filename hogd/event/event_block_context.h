@@ -15,8 +15,6 @@
 
 #include "event.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/io.h"
-#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
