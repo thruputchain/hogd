@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "auth_card.hh"
+#include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
@@ -28,8 +30,6 @@
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "parallel.hh"
-#include "auth_card.hh"
-#include "auth_rpc.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "scheduler.h"
