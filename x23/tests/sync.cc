@@ -263,10 +263,14 @@ TEST(CoroSem, ManyWaiters)
     CoroSem sem;
     co_await sem.acquire();
     std::atomic_int lastid = -1;
+    std::atomic_int waiting{0};
 
     for (int i = 0; i < 64; ++i)
-      [](CoroSem &sem, std::atomic_int &lastid, int myid) -> Detached {
+      [](CoroSem &sem, std::atomic_int &lastid, int myid,
+         std::atomic_int &waiting) -> Detached {
         co_await pool.bg();
+        waiting.fetch_add(1, std::memory_order_relaxed);
+        waiting.notify_all();
         co_await sem.acquire();
         EXPECT_GE(lastid, 0);
         EXPECT_NE(lastid, myid);
@@ -274,34 +278,65 @@ TEST(CoroSem, ManyWaiters)
         usleep(2'000);
         EXPECT_EQ(lastid, myid);
         sem.release();
-      }(sem, lastid, i);
+      }(sem, lastid, i, waiting);
 
-    usleep(50'000);
+    while (waiting.load(std::memory_order_relaxed) < 64)
+      waiting.wait(waiting.load(std::memory_order_relaxed));
     lastid = 0x1'0000;
     sem.release();
     co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
 
-TEST(CoroFutex, Basic)
+// Reproducer for the rmw→broadcast gap race (#1039).
+// Widens the gap between rmw() and broadcast() so the Async exits
+// and destroys futex before the Detached calls broadcast().
+// Run under Clang ASAN (detect_stack_use_after_return=1) to trigger.
+TEST(CoroFutex, DISABLED_DrainRace)
 {
-  x23::CoroFutex<int> futex{0};
+  std::atomic_bool rmw_done{false};
+  x23::CoroFutex<int> futex{99};
 
-  for (int i = 0; i < 50; ++i) {
+  [&](this auto) -> Detached {
+    co_await pool.bg();
     futex.rmw([](auto &i) { ++i; });
-    [&futex](this auto self) -> Detached {
-      int n;
-      while ((n = futex.load()) < 50)
-        co_await futex.wait(n);
-      if (futex.rmw([](auto &i) { return ++i; }) == 100)
-        futex.broadcast();
-    }();
-  }
-  futex.broadcast(&pool);
+    rmw_done.store(true, std::memory_order_release);
+    rmw_done.notify_all();
+    usleep(50'000);
+    futex.broadcast();
+  }();
+
+  rmw_done.wait(false);
+
   [&futex] -> Async<void> {
     int n;
     while ((n = futex.load()) < 100)
       co_await futex.wait(n);
+  }()();
+}
+
+TEST(CoroFutex, Basic)
+{
+  [] -> Async<void> {
+    x23::CoroFutex<int> futex{0};
+
+    for (int i = 0; i < 50; ++i) {
+      futex.rmw([](auto &i) { ++i; });
+      [&futex](this auto self) -> Detached {
+        int n;
+        while ((n = futex.load()) < 50)
+          co_await futex.wait(n);
+        if (futex.rmw([](auto &i) { return ++i; }) == 100)
+          futex.broadcast();
+      }();
+    }
+    futex.broadcast(&pool);
+    [&futex] -> Async<void> {
+      int n;
+      while ((n = futex.load()) < 100)
+        co_await futex.wait(n);
+    }()();
+    co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
 
@@ -315,22 +350,25 @@ static_assert(!std::atomic<TooBigForAtomic>::is_always_lock_free);
 
 TEST(CoroFutex, BigValue)
 {
-  x23::CoroFutex<TooBigForAtomic> futex{};
+  [] -> Async<void> {
+    x23::CoroFutex<TooBigForAtomic> futex{};
 
-  for (int i = 0; i < 50; ++i) {
-    futex.rmw([](auto &n) { ++n.v; });
-    [&futex](this auto self) -> Detached {
+    for (int i = 0; i < 50; ++i) {
+      futex.rmw([](auto &n) { ++n.v; });
+      [&futex](this auto self) -> Detached {
+        TooBigForAtomic n;
+        while ((n = futex.load()).v < 50)
+          co_await futex.wait(n);
+        if (futex.rmw([](auto &n) { return ++n.v; }) == 100)
+          futex.broadcast();
+      }();
+    }
+    futex.broadcast(&pool);
+    [&futex] -> Async<void> {
       TooBigForAtomic n;
-      while ((n = futex.load()).v < 50)
+      while ((n = futex.load()).v < 100)
         co_await futex.wait(n);
-      if (futex.rmw([](auto &n) { return ++n.v; }) == 100)
-        futex.broadcast();
-    }();
-  }
-  futex.broadcast(&pool);
-  [&futex] -> Async<void> {
-    TooBigForAtomic n;
-    while ((n = futex.load()).v < 100)
-      co_await futex.wait(n);
+    }()();
+    co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
