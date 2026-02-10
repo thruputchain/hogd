@@ -69,6 +69,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  info("submit_unvetted start!");
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
 
@@ -371,7 +372,11 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
       create_snapshot(/*prev_block_id=*/cache.db_tip.id, cache.block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
 
-  // Open block (on event server).
+  // Open block (on event server). [open_proposal_block()] below ultimately
+  // causes RPCs to be sent to the server event server. When the event server
+  // receives those RPCs, it expects the block to already be opened. Thus, we
+  // [co_await eventsched_open_block()] below before doing
+  // [open_proposal_block()] to prevent a race.
   CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
 
   // Open proposal blocks.
@@ -665,7 +670,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                   .nomination.block_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
-  info("nominate() took {}", timer.elapsed());
+  info("nominate() took {}, num tx hashes {}, num tx nominations {}",
+       timer.elapsed(), nominated_block_cache_.result_tx_hashes.size(),
+       nominated_block_cache_.result_tx_nominations.size());
   last_ = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
 }
@@ -868,6 +875,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
     last_ = std::chrono::steady_clock::now();
+    info("schedulercoord_commit_block");
     co_return SchedulerCommitOutcome::SchedulerCommitRace;
   }
   x23::CoroGuard nominate_cg;
@@ -879,6 +887,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     last_ = std::chrono::steady_clock::now();
+    info("schedulercoord_commit_block");
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
 
@@ -968,6 +977,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
   scheduler_->increment_current_block();
   last_ = std::chrono::steady_clock::now();
+  info("schedulercoord_commit_block");
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
