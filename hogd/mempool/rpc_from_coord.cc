@@ -81,17 +81,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       /*height=*/scheduler_->current_block(), txs, /*max_parallelism=*/128);
   info("auth took {}", timer.elapsed());
 
-  x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(sha256(txs[i].tx));
       to_remove_indices.push_back(i);
     }
   }
-  info("{} txs were invalid", to_remove.size());
-  if (!to_remove.empty()) {
+  info("{} txs were invalid", to_remove_indices.size());
+  if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
   // Careful: it is tempting to overlap the overhead of
@@ -374,8 +372,7 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
                       BlockExecutionMode::kBlockExecutionModeProposal);
 
   // Open block (on event server).
-  x23::Async<RPCError> open_block_handler =
-      eventsched_open_block(cache.block_id);
+  CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
 
   // Open proposal blocks.
   x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
@@ -387,7 +384,6 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 
   // [co_await] the block initialization RPCs.
   DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
-  CHECK_EQ(co_await open_block_handler, RPCError::kRPCNone);
 
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
