@@ -19,10 +19,13 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -41,7 +44,7 @@ protected:
     // Setup native contract
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
+            {0, // Insert
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
@@ -56,9 +59,10 @@ protected:
                }
                return {};
              }},
-            {1,
+            {1, // Consume
              [this](SystemCallHandler &handler,
                     NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               // Calldata is the number of items to consume.
                auto const &consume_count = handler.get_calldata().at(0);
                auto key = make_storage_key("rcq0");
 
@@ -78,9 +82,21 @@ protected:
                  }
                  last_consumed_values_.push_back(entry[0]);
                }
+
+               if (handler.get_calldata().size() > 1) {
+                 uint8_t abort_code = handler.get_calldata().at(1);
+                 if (abort_code == 1) {
+                   auto status = handler.abort_transaction();
+                   if (!status.has_value()) {
+                     return status.error().to_invoke_error();
+                   }
+                   return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+                 }
+               }
+
                return {};
              }},
-            {2,
+            {2, // Insert and Consume
              [this](SystemCallHandler &handler,
                     NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
@@ -90,15 +106,16 @@ protected:
                uint8_t consume_count = calldata.at(0);
                auto key = make_storage_key("rcq0");
 
+               // Insert all values (bytes after the first)
                for (size_t i = 1; i < calldata.size(); i++) {
-                 uint8_t val = calldata[i];
                  auto res = handler.retrocausal_queue_insert(
-                     key, std::as_bytes(std::span(&val, 1)));
+                     key, std::as_bytes(std::span(&calldata[i], 1)));
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
                  }
                }
 
+               // Then consume
                last_consumed_values_.clear();
                for (uint8_t i = 0; i < consume_count; i++) {
                  auto res = handler.retrocausal_queue_consume(key, false);
@@ -109,8 +126,24 @@ protected:
                    return {};
                  }
                  auto const &entry = res.value().value();
+                 if (entry.size() != 1) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
                  last_consumed_values_.push_back(entry[0]);
                }
+               return {};
+             }},
+            {3, // Write NNInt contract storage address
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &value = handler.get_calldata().at(0);
+               auto key = make_storage_key("nnint0");
+
+               auto r = handler.set_nnint(key, {value}, 0, {});
+               if (!r.has_value()) {
+                 return r.error().to_invoke_error();
+               }
+
                return {};
              }}});
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -161,6 +194,13 @@ protected:
     return testing::AssertionSuccess();
   }
 
+  testing::AssertionResult set_nnint(uint8_t value)
+  {
+    SCOPED_TRACE(
+        std::format("set_nnint: value {}", testing::PrintToString(value)));
+    return invoke_contract(3, {value});
+  }
+
   // Insert values into the rcq.
   testing::AssertionResult insert(std::vector<uint8_t> const &values)
   {
@@ -170,7 +210,8 @@ protected:
   }
 
   // Consume values from the rcq and ensure they match the expected values.
-  testing::AssertionResult consume(std::vector<uint8_t> const &expected_values)
+  testing::AssertionResult consume(std::vector<uint8_t> const &expected_values,
+                                   bool abort = false)
   {
     if (expected_values.size() > std::numeric_limits<uint8_t>::max()) {
       return testing::AssertionFailure() << "Too many values to consume";
@@ -178,7 +219,10 @@ protected:
 
     SCOPED_TRACE(std::format("consume: expected_values {}",
                              testing::PrintToString(expected_values)));
-    auto r = invoke_contract(1, {static_cast<uint8_t>(expected_values.size())});
+    auto args =
+        std::vector<uint8_t>{static_cast<uint8_t>(expected_values.size()),
+                             static_cast<uint8_t>(abort)};
+    auto r = invoke_contract(1, args);
     if (!r) {
       return r;
     }
@@ -241,6 +285,119 @@ protected:
     return testing::AssertionFailure() << "Balance not found!";
   }
 };
+
+TEST_P(RCQTest, InsertThenConsume)
+{
+  auto const initial_balance = 1'000'000'000;
+  setup_grant_storage_token(contract_address_, initial_balance);
+
+  ASSERT_TRUE(insert({1, 2, 3}));
+
+  ASSERT_TRUE(consume({1, 2}));
+
+  advance_block();
+
+  // The RCQ metadata item and one RCQ block with one RCQ entry remain.
+  ASSERT_TRUE(check_balance(
+      initial_balance -
+      get_default_cost_model()->get_retrocausal_queue_cost(1, 1)));
+
+  ASSERT_TRUE(consume({3}));
+
+  // The queue is now empty, so the storage cost should be zero.
+  advance_block();
+
+  ASSERT_TRUE(check_balance(initial_balance));
+}
+
+TEST_P(RCQTest, InsertThenAbortOnConsume)
+{
+  // Abort Case - Insert items, then attempt a consume that fails.
+  // Verify that lock state is reverted as if the consume operation never
+  // happened, and the initial insert's reservation is preserved.
+
+  auto const initial_balance = 1'000'000'000;
+  setup_grant_storage_token(contract_address_, initial_balance);
+
+  ASSERT_TRUE(insert({1, 2, 3}));
+
+  // Consume 1 item, but then intentionally abort.
+  ASSERT_FALSE(consume({1}, true));
+
+  // Reaching into the locks to verify the state is tricky. Instead infer the
+  // state by trying new consumes.
+  ASSERT_TRUE(consume({1, 2}));
+
+  advance_block();
+
+  // The RCQ metadata item and one RCQ block with one RCQ entry remain.
+  ASSERT_TRUE(check_balance(
+      initial_balance -
+      get_default_cost_model()->get_retrocausal_queue_cost(1, 1)));
+
+  ASSERT_TRUE(consume({3}));
+
+  // The queue is now empty, so the cost should be zero.
+  advance_block();
+
+  ASSERT_TRUE(check_balance(initial_balance));
+}
+
+TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
+{
+  // This test targets a race where an inserter TX could overwrite the
+  // consumed_past_entries_ of a consumer TX.
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+  ASSERT_TRUE(insert({1, 2, 3}));
+  advance_block();
+
+  // T1: Consumer TX. Propose consume.
+  auto handler_t1 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_address_,
+                                 .entrypoint =
+                                     entrypoint_from_method_id(1), // Consume
+                                 .calldata = Calldata({1})}}}, // Consume 1 item
+      *context_);
+  ASSERT_TRUE(handler_t1.root_invoke().is_root_success());
+  // At this point, T1's RetrocausalQueueIt should have consumed_past_entries_
+  // = 1.
+
+  // T2: Inserter TX. Propose insert.
+  auto handler_t2 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(
+                                                   0), // Insert
+                                           .calldata = Calldata({5, 4})}}},
+      *context_);
+  ASSERT_TRUE(handler_t2.root_invoke().is_root_success());
+  // T2's RetrocausalQueueIt should have consumed_past_entries_ = 0.
+  // In the OLD buggy code, this would have overwritten the global lock's
+  // consumed_past_entries_ to 0.
+
+  // T1 Commits.
+  ASSERT_EQ(handler_t1.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  ASSERT_FALSE(
+      consume({2, 3})); // Aborts because of T1 consume (single consumer).
+
+  // T2 Commits.
+  ASSERT_EQ(handler_t2.try_commit_transaction(), ExecResult::ExecResultOK);
+  advance_block();
+
+  // Verify final state: {2, 3, 4, 5} exactly.
+  ASSERT_TRUE(consume({2, 3}));
+  advance_block();
+  ASSERT_TRUE(consume({4, 5}));
+  advance_block();
+  ASSERT_FALSE(consume({1})); // Queue should be empty.
+}
 
 TEST_P(RCQTest, ConsumeFromPastBlock)
 {
@@ -406,6 +563,83 @@ TEST_P(RCQTest, DISABLED_ConsumeReturnsStorageCost)
   ASSERT_TRUE(consume({1}));
   advance_block();
   ASSERT_TRUE(check_balance(hogs));
+}
+
+TEST_P(RCQTest, OverflowBlockImmediately)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    // MockDB does not enforce block size limits
+    SUCCEED();
+    return;
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+  std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen + 1, 1);
+  ASSERT_FALSE(insert(values));
+}
+
+TEST_P(RCQTest, OverflowBlockSequentially)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    // MockDB does not enforce block size limits
+    SUCCEED();
+    return;
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+  // Insert up to the limit is fine.
+  std::vector<uint8_t> values_chunk1(kRetrocausalQueueBlockEntriesMaxLen - 10,
+                                     1);
+  ASSERT_TRUE(insert(values_chunk1));
+
+  // Inserting more that exceeds the limit should fail.
+  std::vector<uint8_t> values_chunk2(11, 2);
+  // Total = (Max - 10) + 11 = Max + 1. Should fail.
+  ASSERT_FALSE(insert(values_chunk2));
+}
+
+TEST_P(RCQTest, ConcurrentOverflow)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    // MockDB does not enforce block size limits
+    SUCCEED();
+    return;
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  // Both T1 and T2 try to insert 600 items. Limit is 1000.
+  // Run them concurrently.
+  std::vector<uint8_t> values(600, 1);
+
+  auto handler1 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = contract_address_,
+                          .entrypoint = entrypoint_from_method_id(0), // Insert
+                          .calldata = Calldata(values.begin(), values.end())}}},
+      *context_);
+
+  auto handler2 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = contract_address_,
+                          .entrypoint = entrypoint_from_method_id(0), // Insert
+                          .calldata = Calldata(values.begin(), values.end())}}},
+      *context_);
+
+  ASSERT_TRUE(handler1.root_invoke().is_root_success());
+  ASSERT_TRUE(handler2.root_invoke().is_root_success());
+
+  // First commit should succeed.
+  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  // Second commit should fail because it exceeds the block limit.
+  ASSERT_EQ(handler2.try_commit_transaction(),
+            ExecResult::ExecResultTxNonDeterministicError);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,

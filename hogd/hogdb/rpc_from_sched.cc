@@ -18,6 +18,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/string.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -165,7 +166,8 @@ HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
     return lsn.error();
 
   info("committed block {}: hash='{}', height='{}', lsn='{}", id,
-       ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
+       encode_base64(std::as_bytes(std::span(ctx_.get_tip().hash))),
+       ctx_.get_tip().height, *lsn);
   assert(ctx_.get_tip().height != 0);
   return {};
 }

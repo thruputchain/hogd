@@ -765,9 +765,7 @@ TEST_P(DeltaManagerTest, RCQInsertThenConsume)
                          .added_entries = {make_test_rcq_entry(1)}});
   auto lk = item.try_reserve(insert_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk);
-  EXPECT_EQ(lk->locked_tokens_,
-            cost_model.kBaseItemCost +
-                cost_model.get_retrocausal_queue_cost(1, 1));
+  EXPECT_EQ(lk->locked_tokens_, cost_model.get_retrocausal_queue_cost(1, 1));
   item.commit(insert_delta, *lk);
 
   // try consume one entry
@@ -812,9 +810,11 @@ TEST_P(DeltaManagerTest, RCQConsumeThenInsert)
   auto lk2 =
       item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk2);
-  EXPECT_GE(lk2->locked_tokens_,
-            cost_model.kBaseItemCost +
-                cost_model.get_retrocausal_queue_cost(-1, 0));
+  // Consume cost must be 0: the snapshot contains nothing to pop. Even if
+  // this consume has managed to pair with a concurrent consume that would
+  // leave the cost unchanged so 0 is conservative and a determinstic function
+  // of the delta and the snapshot.
+  EXPECT_EQ(lk2->locked_tokens_, 0);
   item.commit(consume_delta, *lk2);
 
   // try insert one entry
@@ -1131,8 +1131,7 @@ TEST_P(DeltaManagerTest, RCQAccountingEdgeCase)
             }
 
             if (net_storage_cost !=
-                cost_model.kBaseItemCost +
-                    cost_model.get_retrocausal_queue_cost(1, 1)) {
+                cost_model.get_retrocausal_queue_cost(1, 1)) {
               return false;
             }
 

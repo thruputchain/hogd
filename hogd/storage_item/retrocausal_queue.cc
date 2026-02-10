@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
-#include <limits> // NOLINT(misc-include-cleaner)
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -30,6 +30,7 @@ RetrocausalQueue::RetrocausalQueue(
     RetrocausalQueueBlock current_round_block)
   : blocks_(parent.blocks_),
     current_block_number_(current_round_block.block_number),
+    consume_state_(parent.consume_state_),
     total_size_(parent.total_size_ + current_round_block.entries.size()),
     consumed_size_(parent.consumed_size_)
 {
@@ -59,7 +60,8 @@ RetrocausalQueue::RetrocausalQueue(
     RetrocausalQueuePastBlockConsumeDelta const &consume_delta)
   : blocks_(parent.blocks_),
     current_block_number_(parent.current_block_number_),
-    total_size_(parent.total_size_), consumed_size_(parent.consumed_size_)
+    consume_state_(parent.consume_state_), total_size_(parent.total_size_),
+    consumed_size_(parent.consumed_size_)
 {
   apply_consume_delta(consume_delta);
 }
@@ -85,6 +87,7 @@ RetrocausalQueue::apply_consume_delta(
 {
   assert(!committed_consume_);
   committed_consume_ = true;
+  consume_state_ = delta;
 
   auto it = blocks_.begin();
   while (it != blocks_.end() &&

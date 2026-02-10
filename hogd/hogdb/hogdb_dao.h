@@ -338,6 +338,7 @@ public:
   HogDBStatus<void>
   write_retrocausal_queue_metadata(const ItemKey &key,
                                    const RetrocausalQueueMetadata &metadata);
+  HogDBStatus<void> remove_retrocausal_queue_metadata(const ItemKey &key);
 
   //
   // WASM Operations

@@ -54,17 +54,16 @@ private:
   // ensures no two transactions both lock a consume in the same block.
   std::atomic<bool> consumed_{false};
 
+  // Tracks the number of entries reserved by transactions in the current
+  // block. This allows try_atomic_change_lock to account for concurrent
+  // insertions when checking the block size limit.
+  std::atomic<size_t> reserved_entry_count_{0};
+
   // Used in commit_change to calculate the cost of the change and
   // stage all changes for writing. Not accessed concurrently, since
   // access is limited to commit_change and write_committed_change.
   std::vector<QueueEntry> added_entries_;
   std::optional<RetrocausalQueueConsumeDelta> consume_delta_;
-  // Records how many entries consume_delta_ consumed. This is needed because
-  // try_atomic_change_lock must access the DAO to determine how many entries
-  // were consumed by the consume_delta_. commit_write() has no DAO access.
-  // TODO(stutsman): Should we change the hogexec interface to have it pass
-  // this information to avoid these accesses?
-  size_t consumed_past_entries_{0};
   // Change in entry count in the whole queue over the set of committed deltas.
   // This is used when calculating marginal storage costs for a committing delta
   // in commit_change.
