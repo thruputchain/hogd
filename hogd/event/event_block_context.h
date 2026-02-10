@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <utility>
 #include <vector>
 
 #include "event.hh"
@@ -36,6 +37,36 @@ namespace hogd {
 using indexer_event_client_t =
     IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
+namespace detail {
+struct EventContext {
+  std::vector<uint8_t> buf;
+  uint32_t event_count = 0;
+};
+
+} // namespace detail
+
+struct ReusableEventBlockContextData {
+  ReusableEventBlockContextData(std::unique_ptr<MerkleTriePrefix> trie,
+                                PerThread<TxEventLogBatch> event_log,
+                                PerThread<detail::EventContext> buffers)
+    : trie(std::move(trie)), event_log(std::move(event_log)),
+      buffers(std::move(buffers))
+  {}
+
+  std::unique_ptr<MerkleTriePrefix> trie;
+  PerThread<TxEventLogBatch> event_log;
+  PerThread<detail::EventContext> buffers;
+
+  ReusableEventBlockContextData(
+      ReusableEventBlockContextData &&other) noexcept = default;
+  ReusableEventBlockContextData &
+  operator=(ReusableEventBlockContextData &&other) noexcept = default;
+
+  ReusableEventBlockContextData(ReusableEventBlockContextData const &) = delete;
+  ReusableEventBlockContextData &
+  operator=(ReusableEventBlockContextData const &) = delete;
+};
+
 class EventBlockContext {
 public:
   static std::string temp_events_filename(std::string_view work_directory,
@@ -56,18 +87,13 @@ public:
           /*alocator_type=*/Allocator<Node>::Type::kBump)),
       work_directory_(work_directory), block_id_(block_id)
   {
-    // Ensure the work_directory_ exists before creating the events file.
-    auto dir = Directory::open(work_directory_);
-    if (!dir) {
-      panic("failed to open work directory: {}", dir.error());
-    }
-    auto filename = temp_events_filename(work_directory_, block_id_);
-    auto fd = open(filename.c_str(), O_CREAT | O_WRONLY, 0666);
-    if (fd == -1) {
-      panic("failed to open events file: {}", strerror(errno));
-    }
-    events_file_ = x23::UniqueFd(fd);
+    open_events_file();
   }
+
+  EventBlockContext(std::string_view work_directory, BlockID block_id,
+                    ReusableEventBlockContextData data);
+
+  ReusableEventBlockContextData extract_data();
 
   ~EventBlockContext();
 
@@ -129,19 +155,14 @@ private:
   }
 
   x23::Async<void> await_pending_writes_done();
+  void open_events_file();
 
   std::unique_ptr<MerkleTriePrefix> trie_;
   std::string work_directory_;
   BlockID block_id_;
 
   PerThread<TxEventLogBatch> event_log_;
-
-  struct EventContext {
-    std::vector<uint8_t> buf;
-    uint32_t event_count;
-  };
-
-  PerThread<EventContext> buffers_;
+  PerThread<detail::EventContext> buffers_;
 
   // State transitions:
   // kActive -> kFinishing -> kFinished

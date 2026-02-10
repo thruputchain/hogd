@@ -27,11 +27,22 @@ EventRPCContext::open_block(BlockID block_id)
   x23::CoroGuard g;
   co_await g(lock_);
 
-  auto [_, inserted] =
-      event_block_contexts_.emplace(std::piecewise_construct,
-                                    std::forward_as_tuple(block_id),
-                                    std::forward_as_tuple(work_directory_,
-                                                          block_id));
+  bool inserted = false;
+  if (cached_blocks_.empty()) {
+    std::tie(std::ignore, inserted) = event_block_contexts_.emplace(
+        std::piecewise_construct, std::forward_as_tuple(block_id),
+        std::forward_as_tuple(work_directory_, block_id,
+                              std::move(cached_blocks_.back())));
+    cached_blocks_.pop_back();
+  }
+  else {
+    std::tie(std::ignore, inserted) =
+        event_block_contexts_.emplace(std::piecewise_construct,
+                                      std::forward_as_tuple(block_id),
+                                      std::forward_as_tuple(work_directory_,
+                                                            block_id));
+  }
+
   if (!inserted) {
     co_return EventError{EventErrorCode::kExists};
   }
@@ -156,6 +167,10 @@ EventRPCContext::gc_context_internal(
     std::lock_guard g(cache.mtx_);
     cache.contexts_.erase(it->first);
   });
+
+  if (cached_blocks_.size() < kMaxCachedBlocks) {
+    cached_blocks_.emplace_back(it->second.get().extract_data());
+  }
 
   event_block_contexts_.erase(it);
 }
