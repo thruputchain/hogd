@@ -126,14 +126,19 @@ NNIntItem::validate() const
 // RetrocausalQueueItem implementation
 
 void
-RetrocausalQueueItem::add_empty_consume_delta()
+RetrocausalQueueItem::construct_consume_delta()
 {
+  RetrocausalQueuePastBlockConsumeDelta past_consume = {
+      .max_fully_consumed_block_number = 0,
+      .partial_consumed_number = 0,
+  };
+
+  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
+    past_consume = base_item_.retrocausal_queue_metadata().consume_state;
+  }
+
   queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
-      .past_block_consume =
-          {
-              .max_fully_consumed_block_number = 0,
-              .partial_consumed_number = 0,
-          },
+      .past_block_consume = past_consume,
       .current_block_consumed = {},
   });
 }
@@ -168,6 +173,19 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     partial_consume_quantity =
         queue_delta_.consume->past_block_consume.partial_consumed_number;
   }
+  else {
+    // If we don't have a consume delta yet, then we're starting from
+    // wherever things left off according to the snapshot.
+    if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
+      auto const &meta = base_item_.retrocausal_queue_metadata();
+      block_index = meta.consume_state.max_fully_consumed_block_number + 1;
+      partial_consume_quantity = meta.consume_state.partial_consumed_number;
+    }
+    else {
+      block_index = 1;
+      partial_consume_quantity = 0;
+    }
+  }
 
   auto next_block_status = get_next_block(block_index);
   if (!next_block_status.has_value()) {
@@ -186,7 +204,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                  blk_size);
       if (!queue_delta_.consume) {
         assert(next_block->block_number > 0);
-        add_empty_consume_delta();
+        construct_consume_delta();
       }
       queue_delta_.consume->past_block_consume.partial_consumed_number++;
 
@@ -203,6 +221,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 
     return next_block->entries[partial_consume_quantity];
   }
+
   // otherwise, nothing in past block to consume.  Try current block.
   assert(partial_consume_quantity == 0);
 
@@ -213,7 +232,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     if (advance_cursor) {
       ++self_consumed_index_;
       if (!queue_delta_.consume) {
-        add_empty_consume_delta();
+        construct_consume_delta();
       }
       queue_delta_.consume->current_block_consumed.push_back(*self_consume_res);
     }
@@ -233,7 +252,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     if (advance_cursor) {
       ++locally_consumed_index_;
       if (!queue_delta_.consume) {
-        add_empty_consume_delta();
+        construct_consume_delta();
       }
       queue_delta_.consume->current_block_consumed.push_back(
           *concurrent_entry.value());

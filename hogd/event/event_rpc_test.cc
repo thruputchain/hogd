@@ -249,4 +249,29 @@ TEST_F(EventRpcTest, AbandonWhileCloseBlockWaiting)
   EXPECT_TRUE(close_completed.load());
 }
 
+// Test that processing multiple blocks recycles EventBlockContext internals.
+// The second block uses the cached trie/buffers from the first.
+TEST_F(EventRpcTest, RecycleContextAcrossBlocks)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  for (BlockID block_id = 1; block_id <= 3; block_id++) {
+    EXPECT_EQ(mempool_rpc.eventsched_open_block(block_id)(),
+              RPCError::kRPCNone);
+    EXPECT_EQ(exec_rpc.eventexecutor_open_block(block_id)(),
+              RPCError::kRPCNone);
+
+    EXPECT_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1, TxEventLog{})(),
+              RPCError::kRPCNone);
+
+    EXPECT_EQ(exec_rpc.eventexecutor_close_block(block_id)(),
+              RPCError::kRPCNone);
+
+    auto result = mempool_rpc.eventsched_close_block(block_id, block_id)();
+    EXPECT_EQ(result.error(), RPCError::kRPCNone);
+  }
+}
+
 } // namespace hogd

@@ -6,6 +6,7 @@
 #include <format>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <type_traits>
 #include <variant>
 
@@ -25,6 +26,7 @@
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
+#include "retrocausal_queue.hh"
 #include "x23/testlock.h"
 
 namespace hogd {
@@ -471,6 +473,11 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
     return;
   }
 
+  if (after->is_retrocausal_queue()) {
+    lock_contents_.emplace<PointerLock<RetrocausalQueueLock>>();
+    return;
+  }
+
   panic("unsupported change type");
 }
 
@@ -481,6 +488,24 @@ ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
   assert(pending_refcount_ == 0);
 
   lock_contents_ = std::monostate{};
+}
+
+std::optional<QueueEntry>
+ItemLock::get_concurrent_entry(uint32_t index) const
+{
+  return std::visit(
+      [index](auto const &lock) -> std::optional<QueueEntry> {
+        using lock_t = std::decay_t<decltype(lock)>;
+        if constexpr (std::is_same_v<lock_t,
+                                     PointerLock<RetrocausalQueueLock>>) {
+          return lock.get()->get_concurrent_entry(index);
+        }
+        else {
+          error("get_concurrent_entry called on non-retrocausal queue lock");
+          return std::nullopt;
+        }
+      },
+      lock_contents_);
 }
 
 HogDBStatus<void>

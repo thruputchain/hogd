@@ -40,10 +40,10 @@ public:
   ExpectedContract get_contract(BlockID block, SHA256Hash const &hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);
-  static ExpectedRetrocausalQueueBlock
+  ExpectedRetrocausalQueueBlock
   get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
                                    uint64_t search_start_number);
-  static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
+  ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
   ExpectedDBTip get_db_tip(BlockID block);

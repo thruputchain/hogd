@@ -41,6 +41,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -62,6 +63,7 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   // Returns true if narrowing was successful. If narrowing is unsuccessful,
   // then the change becomes exclusive and all future changes (merges)
   // attempted by other transactions for this item will fail.
+  // Note, `t` is the new change, and `arg` is the existing change.
   { t.narrow(arg) } -> std::same_as<bool>;
 } && std::formattable<T, char>;
 
@@ -442,6 +444,7 @@ template<> struct std::formatter<hogd::ReplayCacheIt> {
     format_to(ctx.out(), "ReplayCacheIt{{");
     format_to(ctx.out(), "addition_: {}, ",
               x23::show(replay_cache_item.addition_));
+    format_to(ctx.out(), "}}");
     return ctx.out();
   }
 };
@@ -449,6 +452,39 @@ template<> struct std::formatter<hogd::ReplayCacheIt> {
 namespace hogd {
 
 static_assert(hogd::is_item<hogd::PointerItem<hogd::ReplayCacheIt>>);
+
+class RetrocausalQueueIt {
+public:
+  RetrocausalQueueIt(RetrocausalQueueDelta delta) : delta_(std::move(delta)) {}
+
+  bool narrow(const RetrocausalQueueIt &earlier);
+
+  RetrocausalQueueDelta const &delta() const { return delta_; }
+
+private:
+  RetrocausalQueueDelta delta_;
+
+  friend struct std::formatter<RetrocausalQueueIt>;
+  friend class RetrocausalQueueLock;
+};
+
+} // namespace hogd
+
+template<> struct std::formatter<hogd::RetrocausalQueueIt> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::RetrocausalQueueIt &rcq_item, auto &ctx)
+  {
+    format_to(ctx.out(), "RetrocausalQueueIt{{");
+    format_to(ctx.out(), "delta: {}", x23::show(rcq_item.delta()));
+    format_to(ctx.out(), "}}");
+    return ctx.out();
+  }
+};
+
+namespace hogd {
+
+static_assert(hogd::is_item<hogd::RetrocausalQueueIt>);
 
 // ItemChange represents a pending modification to an item.
 class ItemChange {
@@ -469,6 +505,7 @@ public:
   ItemChange(ReplayCacheIt &&replay_cache)
     : type_(PointerItem<ReplayCacheIt>(std::move(replay_cache)))
   {}
+  ItemChange(RetrocausalQueueIt &&rcq) : type_(std::move(rcq)) {}
   ItemChange(Balance &&balance) : type_(std::move(balance)) {}
   ~ItemChange() = default;
 
@@ -477,6 +514,7 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   std::optional<AuthDataItem> to_auth_data() const;
   std::optional<ReplayCacheIt> to_replay_cache() const;
+  std::optional<RetrocausalQueueIt> to_retrocausal_queue() const;
   std::optional<NewContractData> to_new_contract() const;
   std::optional<DeployedContractData> to_new_deployment() const;
   std::optional<Balance> to_balance() const;
@@ -509,6 +547,10 @@ public:
   {
     return std::holds_alternative<PointerItem<ReplayCacheIt>>(type_);
   }
+  bool is_retrocausal_queue() const
+  {
+    return std::holds_alternative<RetrocausalQueueIt>(type_);
+  }
 
   bool is_balance() const { return std::holds_alternative<Balance>(type_); }
 
@@ -525,7 +567,7 @@ public:
 private:
   std::variant<std::monostate, NNInt128, Balance, Bytes, Deletion,
                DeployedContractData, NewContractData, PointerItem<AuthDataItem>,
-               PointerItem<ReplayCacheIt>>
+               PointerItem<ReplayCacheIt>, RetrocausalQueueIt>
       type_;
   bool exclusive_{false};
   bool permanent_exclusive_{false};
@@ -577,6 +619,14 @@ ItemChange::to_replay_cache() const
 {
   if (const auto *tmp = std::get_if<PointerItem<ReplayCacheIt>>(&type_); tmp)
     return *(tmp->get());
+  return std::nullopt;
+}
+
+inline std::optional<RetrocausalQueueIt>
+ItemChange::to_retrocausal_queue() const
+{
+  if (const auto *tmp = std::get_if<RetrocausalQueueIt>(&type_); tmp)
+    return *tmp;
   return std::nullopt;
 }
 

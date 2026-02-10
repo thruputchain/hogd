@@ -14,8 +14,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -59,6 +61,11 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
     return;
   case Prefix::kReplayCache:
     handle_replay_cache_item_change(before, after);
+    return;
+  case Prefix::kRetrocausalQueueBlock:
+    // The cost of queue blocks is handled by the metadata recorded in
+    // RetrocausalQueueMetadata for the queue. We cost queues as a whole
+    // instead of individual blocks.
     return;
   }
   warn("unknown db item prefix: {}", std::to_underlying(prefix));
@@ -130,6 +137,19 @@ HogConservationInvariant::handle_contract_data_item_change(
       return cost_model_.get_nnint_cost();
     case kBytes:
       return cost_model_.get_bytestring_cost(item.value().value.size());
+    case kRetrocausalQueue:
+      RetrocausalQueueMetadata metadata;
+      try {
+        x23::deserialize(&metadata, x23::BufViewEnd(item.value().value));
+      } catch (x23::XdrException &e) {
+        warn("failed to deserialize retrocausal queue metadata: {}", e.what());
+        assert(false);
+        return 0;
+      }
+
+      return cost_model_.get_retrocausal_queue_cost(
+          metadata.live_entries,
+          RetrocausalQueueLock::live_block_count(metadata));
     default:
       warn("unknown db item type: {}", item.value().type);
       assert(false);

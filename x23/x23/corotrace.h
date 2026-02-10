@@ -6,6 +6,7 @@
 #include <cassert>
 #include <concepts>
 #include <coroutine>
+#include <new>
 #include <source_location>
 #include <string>
 #include <type_traits>
@@ -48,6 +49,26 @@ struct PromiseBase {
   source_location creation_{};
   source_location suspension_{};
   PromiseBase *waiter_{}; // non-NULL if another coro is co_awaiting us
+
+  // Work around GCC bug #104177: coroutine frames are allocated via
+  // default operator new (16-byte aligned on x86-64) but may contain
+  // locals with stricter alignment (e.g., alignas(64)).  GCC never
+  // calls the aligned overload (size_t, align_val_t) — that IS the
+  // bug — so we override the unaligned overload to always return
+  // cache-line-aligned memory.  This doesn't help alignas(N) for
+  // N > hardware_destructive_interference_size, but nothing in
+  // practice needs that.  On ARM the bug is latent (misaligned
+  // accesses don't fault) but this avoids the perf penalty too.
+  static constexpr std::align_val_t kFrameAlign{
+      hardware_destructive_interference_size};
+  void *operator new(std::size_t size)
+  {
+    return ::operator new(size, kFrameAlign);
+  }
+  void operator delete(void *ptr, std::size_t size)
+  {
+    ::operator delete(ptr, size, kFrameAlign);
+  }
 
   PromiseBase(source_location sloc) noexcept
     : creation_(sloc), suspension_(creation_)
@@ -119,6 +140,18 @@ private:
 #define SLOC_COMMA_VAR
 
 struct PromiseBase {
+  // Work around GCC bug #104177 (see trace-enabled PromiseBase above).
+  static constexpr std::align_val_t kFrameAlign{
+      hardware_destructive_interference_size};
+  void *operator new(std::size_t size)
+  {
+    return ::operator new(size, kFrameAlign);
+  }
+  void operator delete(void *ptr, std::size_t size)
+  {
+    ::operator delete(ptr, size, kFrameAlign);
+  }
+
   PromiseBase() noexcept = default;
   PromiseBase(source_location) noexcept {}
   PromiseBase *waiter() const noexcept { return nullptr; }

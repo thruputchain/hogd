@@ -27,6 +27,7 @@
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
+#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/status.h"
 #include "x23/testlock.h"
 
@@ -83,6 +84,8 @@ public:
 
   HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
+
+  std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
   bool is_finalized() const { return lock_state_ != kUncommitted; }
 
@@ -145,7 +148,8 @@ private:
 
   std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
                BalanceLock, DeletionLock, NewContractLock, NewDeploymentLock,
-               PointerLock<AuthLock>, PointerLock<ReplayCacheLock>>
+               PointerLock<AuthLock>, PointerLock<ReplayCacheLock>,
+               PointerLock<RetrocausalQueueLock>>
       lock_contents_ = std::monostate{};
   // padding_ and snapshot_cost_ are readonly fields: set during the
   // constructor.

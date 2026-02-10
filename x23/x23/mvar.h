@@ -22,8 +22,7 @@ namespace x23 {
 // something like ++mvar->field.  Finally, MVar<T>::with(F) calls an
 // invocable of type F with a reference to the protected object,
 // releasing the lock on completion.
-template<typename T, typename Lock = std::mutex>
-class alignas(hardware_destructive_interference_size) MVar {
+template<typename T, typename Lock = std::mutex> class MVar {
 public:
   using value_type = T;
 
@@ -238,5 +237,10 @@ public:
 private:
   Lock m_;
 };
+
+// MVar must not exceed default new alignment — over-aligned MVars
+// crash in coroutine frames on GCC (bug #104177).  Use alignas on
+// the containing type (e.g. RunQueue) if cache-line alignment is needed.
+static_assert(alignof(MVar<int>) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
 } // namespace x23

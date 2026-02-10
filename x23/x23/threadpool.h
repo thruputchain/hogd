@@ -373,7 +373,8 @@ private:
     std::condition_variable consumed;
   };
   using QPtr = MVar<QueueState>::Ptr;
-  struct RunQueue : public MVar<QueueState> {
+  struct alignas(hardware_destructive_interference_size) RunQueue
+    : public MVar<QueueState> {
     // qtime of oldest Job at back of queue, or kEmpty if empty.  Kept
     // outside the queue state in its own cache line so it can be
     // checked approximately without acquiring the mutex.

@@ -103,7 +103,7 @@ private:
 
   const QueueEntry *get_next_self_entry(uint32_t index) const;
 
-  void add_empty_consume_delta();
+  void construct_consume_delta();
 
   RetrocausalQueueDelta queue_delta_{};
   uint32_t self_consumed_index_ = 0;

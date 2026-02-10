@@ -39,7 +39,7 @@ namespace hogd {
 // std::cout << h << std::endl;
 class HexArray {
 public:
-  static constexpr size_t kMaxNumHexDigits = 130;
+  static constexpr size_t kMaxNumHexDigits = 196;
   static_assert(kMaxNumHexDigits % 2 == 0);
 
   HexArray() { init(); }
@@ -240,7 +240,7 @@ private:
 
   void set_helper(size_t idx, std::byte b)
   {
-    CHECK_LE(idx, kMaxNumHexDigits);
+    CHECK_LT(idx, kMaxNumHexDigits);
 
     if (idx % 2 == 0) {
       backing_store_[idx / 2] &= std::byte{0x0F};
