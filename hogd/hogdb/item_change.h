@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"

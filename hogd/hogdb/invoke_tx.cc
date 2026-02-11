@@ -317,7 +317,6 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     int128_t marginal_storage = *ret;
 
     v.emplace_back(std::move(change), tx_depth_);
-
     // now lock the storage
     if (marginal_storage != 0) {
       lock_storage(key.get_address(), marginal_storage);

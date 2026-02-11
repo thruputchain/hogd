@@ -18,7 +18,6 @@
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
