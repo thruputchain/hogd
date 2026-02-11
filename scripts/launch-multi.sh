@@ -231,7 +231,7 @@ done
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
-  "$auth_server":8074
+  "$mempool_server":8074
 
 # Start mempool.
 echo "Start mempool..."
