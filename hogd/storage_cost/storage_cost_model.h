@@ -4,6 +4,7 @@
 #include "hogd/base/xdr_util.h"
 
 #include "storage_cost.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -41,6 +42,9 @@ struct StorageCostModel {
       kBalanceCost(from_xdr(model.balance_cost))
   {}
 
+  StorageCostModel(StorageCostModel const &) = default;
+  StorageCostModel(StorageCostModel &&) noexcept = default;
+
   int128_t get_bytestring_cost(size_t bytestring_len) const;
 
   constexpr int128_t get_nnint_cost() const { return kBaseItemCost; }
@@ -67,8 +71,6 @@ struct StorageCostModel {
   const int128_t kContractDeploymentCostPerByte;
   const int128_t kAuthPerKeyCost;
 
-  // TODO(geoff): make these part of the XDR, once we settle on
-  // cost/design for the RCQs.
   const int128_t kRCQCostPerEntry;
   const int128_t kRCQCostPerBlock;
 
@@ -77,6 +79,22 @@ struct StorageCostModel {
   const int128_t kBalanceCost;
 
   StorageCostModelXdr to_xdr() const;
+
+  static constexpr StorageCostModel default_cost_model()
+  {
+    return StorageCostModel(StorageCostModelXdr{
+        .ext = ExtensionPoint(0),
+        .base_data_item_cost = ::hogd::to_xdr(int128_t{12000}),
+        .bytestring_cost_per_byte = 10,
+        .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{12000}),
+        .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{10}),
+        .auth_per_key_cost = ::hogd::to_xdr(int128_t{1111}),
+        .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
+        .rcq_cost_per_block = ::hogd::to_xdr(int128_t{7}),
+        .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
+        .balance_cost = ::hogd::to_xdr(int128_t{1234}),
+    });
+  }
 };
 
 } // namespace hogd

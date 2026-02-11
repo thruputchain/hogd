@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
+#include "storage_cost.hh"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -27,7 +28,8 @@ make_dbauth_client(x23::HostPort const &hostport)
 }
 } // namespace
 
-DBContext::DBContext() : db_proxy_(nullptr), snapshot_cache_(nullptr)
+DBContext::DBContext(StorageCostModelXdr const &cost_model)
+  : db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = hogdb_wrapper_.exec_port()});
@@ -49,7 +51,7 @@ DBContext::DBContext() : db_proxy_(nullptr), snapshot_cache_(nullptr)
   auto res =
       db_sched_client_.dbsched_load_genesis_configuration(GenesisConfiguration{
           .initial_config = {},
-          .storage_cost_model = get_default_cost_model_xdr(),
+          .storage_cost_model = cost_model,
       });
   if (res != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
