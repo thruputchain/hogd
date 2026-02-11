@@ -56,17 +56,22 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
+  RpcServer<MempoolAuthRpc> auth;
+  auth->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  CHECK_EQ(auth.start_server(kMempoolAuthServerPort),
+           uint16_t{kMempoolAuthServerPort});
+  while (!registration.auth_registered(/*card=*/nullptr)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
   RpcServer<MempoolCoordinatorRpc> coord(db->impl());
   coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(coord.start_server(kMempoolCoordinatorServerPort),
            uint16_t{kMempoolCoordinatorServerPort});
-
-  RpcServer<MempoolAuthRpc> auth(
+  auth->impl()->register_callback(
       [&coord](BlockHeight height, KeyChangeBatch key_changes) {
         return coord->impl()->auth_data_changed(height, std::move(key_changes));
       });
-  CHECK_EQ(auth.start_server(kMempoolAuthServerPort),
-           uint16_t{kMempoolAuthServerPort});
 
   while (!coord->impl()->ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

@@ -21,9 +21,14 @@ public:
   using rpc_service = MempoolAuth1;
   using auth_data_callback =
       std::function<x23::Async<void>(BlockHeight, KeyChangeBatch)>;
-  explicit MempoolAuthRpc(auth_data_callback &&callback)
-    : callback_(std::move(callback))
-  {}
+
+  MempoolAuthRpc() = default;
+
+  void register_callback(auth_data_callback &&callback)
+  {
+    CHECK(!callback_.has_value());
+    callback_ = std::move(callback);
+  }
 
   x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
@@ -45,7 +50,8 @@ public:
   x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
                                                  KeyChangeBatch key_changes)
   {
-    co_await callback_(height, std::move(key_changes));
+    CHECK(callback_.has_value());
+    co_await (*callback_)(height, std::move(key_changes));
   }
 
   static x23::Async<auth_sched_client_t> get_client()
@@ -59,7 +65,7 @@ public:
   }
 
 private:
-  auth_data_callback callback_;
+  std::optional<auth_data_callback> callback_;
 };
 
 static_assert(is_MempoolAuth1<MempoolAuthRpc *, x23::Async>);

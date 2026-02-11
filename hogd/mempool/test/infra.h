@@ -282,6 +282,16 @@ private:
     CHECK_EQ(r, RPCError::kRPCNone);
   }
 
+  void register_auth_with_mempool()
+  {
+    auto client =
+        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
+    AuthCard auth_card = auth_rpc_->make_auth_card(kAddress);
+    client.mempoolauth_intro_auth(auth_card)();
+    auth_server_->set_mempool_client(std::move(client));
+    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+  }
+
   void register_executor_with_mempool()
   {
     const sockaddr_storage coordinator_sockaddr =
@@ -337,11 +347,7 @@ private:
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
-  RpcServer<MempoolAuthRpc> mempool_auth_server_ = RpcServer<MempoolAuthRpc>(
-      [this](BlockHeight height, KeyChangeBatch key_changes) {
-        return mempool_coord_server_->impl()->auth_data_changed(
-            height, std::move(key_changes));
-      });
+  RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 

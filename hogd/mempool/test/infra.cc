@@ -23,6 +23,13 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // registration at the beginning of each test.
   Registration::registration().clear();
 
+  mempool_auth_server_->impl()->register_callback(
+      [this](BlockHeight height, KeyChangeBatch key_changes) {
+        return mempool_coord_server_->impl()->auth_data_changed(
+            height, std::move(key_changes));
+      });
+  mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+
   // Start the mempool RPC servers. All of the subsystems register with the
   // mempool, so the mempool RPC servers need to start first.
   sched_db_server_.start_server(/*port=*/0);
@@ -69,15 +76,8 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
-  {
-    auto mempool_auth_client =
-        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
-    AuthCard auth_card = auth_rpc_->make_auth_card(kAddress);
-    mempool_auth_client.mempoolauth_intro_auth(auth_card)();
-    auth_server_->set_mempool_client(std::move(mempool_auth_client));
-    auth_server_->subscribe_to_auth_data_changes(auth_card)();
-  }
   register_event_with_mempool();
+  register_auth_with_mempool();
   // The executor must register itself *after* the database and event servers
   // have registered!
   register_executor_with_mempool();
