@@ -21,6 +21,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -239,7 +240,7 @@ GenesisConfigurationBuilder::add_initial_config(
 }
 
 GenesisConfiguration
-GenesisConfigurationBuilder::build() const
+GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
 {
   GenesisConfiguration genesis_configuration;
   for (auto const &entry : entries_) {
@@ -249,14 +250,7 @@ GenesisConfigurationBuilder::build() const
     });
   }
 
-  genesis_configuration.storage_cost_model = {
-      .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(int128_t{12000}),
-      .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-      .auth_per_key_cost = to_xdr(int128_t{1111}),
-  };
+  genesis_configuration.storage_cost_model = cost_model.to_xdr();
 
   if (allocated_hogs_ >
       GenesisConfigurationLoader::initial_hog_token_supply()) {
