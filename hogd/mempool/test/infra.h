@@ -337,8 +337,11 @@ private:
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
-  RpcServer<MempoolAuthRpc> mempool_auth_server_ =
-      RpcServer<MempoolAuthRpc>(mempool_coord_server_->impl());
+  RpcServer<MempoolAuthRpc> mempool_auth_server_ = RpcServer<MempoolAuthRpc>(
+      [this](BlockHeight height, KeyChangeBatch key_changes) {
+        return mempool_coord_server_->impl()->auth_data_changed(
+            height, std::move(key_changes));
+      });
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 

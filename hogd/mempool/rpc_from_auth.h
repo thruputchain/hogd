@@ -9,7 +9,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
-#include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "types.hh"
 #include "x23/async.h"
@@ -19,7 +19,11 @@ namespace hogd {
 class MempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
-  explicit MempoolAuthRpc(MempoolCoordinatorRpc &coord) : coord_(coord) {}
+  using auth_data_callback =
+      std::function<x23::Async<void>(BlockHeight, KeyChangeBatch)>;
+  explicit MempoolAuthRpc(auth_data_callback &&callback)
+    : callback_(std::move(callback))
+  {}
 
   x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
@@ -34,17 +38,17 @@ public:
     x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);
     IntroAuthResult result(IntroAuthOutcome::kSuccess);
-    result.shards(shard_cards);
+    result.shards() = shard_cards;
     co_return result;
   }
 
   x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
                                                  KeyChangeBatch key_changes)
   {
-    return coord_.auth_data_changed(height, std::move(key_changes));
+    co_await callback_(height, std::move(key_changes));
   }
 
-  static x23::Async<x23::Vec<auth_sched_client_t>> get_client()
+  static x23::Async<auth_sched_client_t> get_client()
   {
     AuthCard card;
     CHECK(Registration::registration().auth_registered(&card));
@@ -55,7 +59,7 @@ public:
   }
 
 private:
-  MempoolCoordinatorRpc &coord_;
+  auth_data_callback callback_;
 };
 
 static_assert(is_MempoolAuth1<MempoolAuthRpc *, x23::Async>);
