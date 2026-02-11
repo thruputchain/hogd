@@ -115,7 +115,6 @@ make_new_db(const uint8_t *serialized_cost_model,
         StorageCostModel::default_cost_model().to_xdr();
     if (serialized_cost_model != nullptr) {
       try {
-        StorageCostModelXdr cost_model_xdr;
         x23::deserialize(&cost_model_xdr,
                          x23::BufView{serialized_cost_model,
                                       serialized_cost_model_len});
