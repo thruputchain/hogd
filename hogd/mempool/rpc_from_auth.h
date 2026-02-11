@@ -39,7 +39,6 @@ public:
     }
 
     Registration::registration().register_auth(card);
-    // TODO(jhumphri): Need to ensure all dbs have registered first!
     x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);
     IntroAuthResult result(IntroAuthOutcome::kSuccess);
