@@ -337,11 +337,9 @@ private:
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
+  std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
-  using auth_mempool_client_t =
-      decltype(make_rpc_client<AuthMempool1>(x23::HostPort{})());
-  std::unique_ptr<auth_mempool_client_t> auth_client_;
   std::optional<AuthCard> auth_card_;
   std::string auth_mempool_address_;
 

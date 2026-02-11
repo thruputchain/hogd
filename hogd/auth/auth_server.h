@@ -29,11 +29,11 @@
 
 namespace hogd {
 
+using sched_auth_client_t =
+    MempoolAuth1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
 class AuthServer {
 public:
-  using mempool_auth_client_t =
-      decltype(make_rpc_client<MempoolAuth1>(x23::HostPort{})());
-
   explicit AuthServer(dbauth_client_t &&dbauth_client,
                       int bucket_size = 1'048'576)
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client))
@@ -64,7 +64,7 @@ public:
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
 
-  void set_mempool_client(mempool_auth_client_t &&client)
+  void set_mempool_client(sched_auth_client_t &&client)
   {
     CHECK(!mempool_client_);
     mempool_client_.emplace(std::move(client));
@@ -93,7 +93,7 @@ private:
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
 
-  std::optional<mempool_auth_client_t> mempool_client_;
+  std::optional<sched_auth_client_t> mempool_client_;
 };
 
 class AuthDBRpc {

@@ -33,7 +33,7 @@ auth_init(const std::string &mempool_address)
         std::format("Invalid mempool address: {}", mempool_address));
   }
 
-  AuthServer::mempool_auth_client_t mempool_client =
+  sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
 
   std::string hostname;

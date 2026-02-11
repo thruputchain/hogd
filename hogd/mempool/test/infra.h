@@ -286,8 +286,8 @@ private:
 
   void register_auth_with_mempool()
   {
-    auto client =
-        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
+    sched_auth_client_t client =
+        create_client<SchedAuth1>(kAddress, mempool_auth_server_.port())();
     AuthCard auth_card = auth_rpc_->make_auth_card(kAddress);
     client.mempoolauth_intro_auth(auth_card)();
     auth_server_->set_mempool_client(std::move(client));
