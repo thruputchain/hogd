@@ -3,6 +3,7 @@
 #include <future>
 #include <print>
 #include <stdexcept>
+#include <stdint.h>
 #include <string>
 #include <utility>
 
