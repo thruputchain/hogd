@@ -76,7 +76,8 @@ struct CreateDBResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
-struct CreateDBResult create_db();
+struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
+                                uint32_t serialized_cost_model_len);
 enum TestFFIErrorCode free_db(void *ptr);
 
 enum TestFFIErrorCode advance_new_block(void *db);

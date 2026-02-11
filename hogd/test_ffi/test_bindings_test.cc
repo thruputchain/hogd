@@ -31,7 +31,7 @@ namespace {
 void *
 make_db()
 {
-  auto db = create_db();
+  auto db = create_db(nullptr, 0);
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }

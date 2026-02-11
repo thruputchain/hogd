@@ -19,7 +19,6 @@
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -64,8 +63,7 @@ public:
   }
 
 protected:
-  HogdbWrapper db_wrapper_ =
-      HogdbWrapper(StorageCostModel(get_default_cost_model_xdr()));
+  HogdbWrapper db_wrapper_;
   EventServerWrapper event_wrapper_;
 
   RpcServer<LoadgenRpc> loadgen_server_{default_coropoll()};

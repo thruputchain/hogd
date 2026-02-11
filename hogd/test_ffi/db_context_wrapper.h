@@ -33,7 +33,7 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext();
+  DBContext(StorageCostModelXdr const &cost_model);
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
@@ -96,7 +96,7 @@ private:
 
   BlockID current_block_id_ = 0;
 
-  HogdbWrapper hogdb_wrapper_{StorageCostModel(get_default_cost_model_xdr())};
+  HogdbWrapper hogdb_wrapper_;
 
   std::unique_ptr<AuthServer> auth_server_;
   std::unique_ptr<AuthRpcServers> auth_rpc_servers_;
@@ -111,19 +111,6 @@ private:
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;
-
-  static constexpr StorageCostModelXdr get_default_cost_model_xdr()
-  {
-    return StorageCostModelXdr{
-        .ext = ExtensionPoint(0),
-        .base_data_item_cost = to_xdr(int128_t{12000}),
-        .bytestring_cost_per_byte = 10,
-        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-        .auth_per_key_cost = to_xdr(int128_t{1111}),
-        .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
-    };
-  }
 };
 
 } // namespace hogd

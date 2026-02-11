@@ -23,6 +23,7 @@
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -34,6 +35,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/debug.h"
@@ -105,11 +107,26 @@ enable_syscall_logging() noexcept
 }
 
 CreateDBResult
-make_new_db() noexcept
+make_new_db(const uint8_t *serialized_cost_model,
+            uint32_t serialized_cost_model_len) noexcept
 {
   lazy_init();
   try {
-    auto *db = new DBContext();
+    StorageCostModelXdr cost_model_xdr =
+        StorageCostModel::default_cost_model().to_xdr();
+    if (serialized_cost_model != nullptr) {
+      try {
+        StorageCostModelXdr cost_model_xdr;
+        x23::deserialize(&cost_model_xdr,
+                         x23::BufView{serialized_cost_model,
+                                      serialized_cost_model_len});
+      } catch (x23::XdrBadInput const &e) {
+        log_error("error deserializing cost model: {}", e);
+        return {.db = nullptr,
+                .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+      }
+    }
+    auto *db = new DBContext(cost_model_xdr);
     ffi_trace("FFI: make_new_db() -> (db={})", static_cast<void *>(db));
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
@@ -707,9 +724,10 @@ extern "C" {
 #endif
 
 CreateDBResult
-create_db()
+create_db(const uint8_t *serialized_cost_model,
+          uint32_t serialized_cost_model_len)
 {
-  return hogd::make_new_db();
+  return hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
 }
 
 TestFFIErrorCode
