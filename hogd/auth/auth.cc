@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"

@@ -1,9 +1,11 @@
 #include "hogd/mempool/test/infra.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -14,6 +16,7 @@
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
+#include "types.hh"
 
 namespace hogd {
 

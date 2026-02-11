@@ -5,7 +5,9 @@
 #include <print>
 #include <string>
 #include <thread>
+#include <utility>
 
+#include "auth_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -18,6 +20,7 @@
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "port.hh"
+#include "types.hh"
 
 namespace hogd {
 

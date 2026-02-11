@@ -79,7 +79,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   info("submit_unvetted, {} txs", txs.size());
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
-          /*height=*/scheduler_->current_block(), txs);
+          scheduler_->current_block(), txs);
   info("auth took {}", timer.elapsed());
 
   x23::Vec<size_t> to_remove_indices;
