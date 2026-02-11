@@ -4,6 +4,7 @@ set -Eeuo pipefail
 cleanup() {
   local exit_code=$1
 
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
@@ -22,6 +23,7 @@ trap 'cleanup 130' INT TERM # 130 is conventional for SIGINT
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./$BUILD_DIR/hogd/utils/get_port kCIControlServerPort)
+export MEMPOOL_AUTH_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolAuthServerPort)
 export MEMPOOL_EXECUTOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolExecutorServerPort)
 export MEMPOOL_DB_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolDbServerPort)
 export MEMPOOL_EVENT_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolEventServerPort)
@@ -29,6 +31,7 @@ export MEMPOOL_COORDINATOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolCoord
 export EVENT_INDEXER_PORT=$(./$BUILD_DIR/hogd/utils/get_port kEventIndexerServerPort)
 
 echo 'make sure bench servers are running'
+./scripts/wait-port.sh hog1 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog4 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog5 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog6 $CI_CONTROL_PORT
@@ -38,6 +41,7 @@ echo 'make sure bench servers are running'
 ./scripts/wait-port.sh hog11 $CI_CONTROL_PORT
 
 echo 'clear work dirs'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT clear_work_dir
@@ -58,6 +62,7 @@ kill_stale_processes() {
   ssh -n hog9 "killall event_exec" || true
   ssh -n hog9 "killall indexer_exec" || true
   ssh -n hog11 "killall hogdb" || true
+  ssh -n hog1 "killall auth_exec" || true
   ssh -n hog4 "killall chuckd" || true
   ssh -n hog4 "killall chuckd.dev" || true
   ssh -n hog4 "killall scpd" || true
@@ -99,6 +104,9 @@ echo 'launch indexer'
 echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
 
+echo 'launch auth'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT start hogd/auth/auth_exec hog10:$MEMPOOL_AUTH_PORT
+
 echo 'launch coordinator and scp'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
@@ -125,6 +133,7 @@ echo 'launch coordinator and scp'
   --scp-control-addr 127.0.0.1:4400
 
 echo 'make sure procs are running'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
