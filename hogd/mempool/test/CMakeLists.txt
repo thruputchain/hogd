@@ -36,6 +36,7 @@ add_executable(
 )
 
 target_link_libraries(mempool_test
+  auth
   hogd
   mempool
   exec_interface
@@ -55,6 +56,7 @@ if(BUILD_BENCHMARKS)
   )
   target_link_libraries(
     mempool_bench
+    auth
     base
     crypto
     db_interface
