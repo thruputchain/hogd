@@ -16,8 +16,10 @@
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -128,7 +130,8 @@ public:
                                   SignedTransactionBatch txs)
   {
     x23::span<const SignedTransaction> txs_span(txs.begin(), txs.end());
-    return auth_server_.verify_transactions(height, txs_span);
+    co_return co_await auth_server_.verify_transactions(
+        height, txs_span, /*max_parallelism=*/available_parallelism());
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
@@ -146,7 +149,10 @@ class AuthRpcServers {
 public:
   explicit AuthRpcServers(AuthServer &auth_server)
     : auth_db_rpc_(auth_server), auth_mempool_rpc_(auth_server)
-  {}
+  {
+    auth_db_rpc_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+    auth_mempool_rpc_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  }
 
   std::pair<uint16_t, uint16_t> start_servers(uint16_t port_for_db,
                                               uint16_t port_for_mempool)
