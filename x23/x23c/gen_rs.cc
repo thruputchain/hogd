@@ -411,7 +411,8 @@ impl ::rpc_driver::ServerDispatch for {0}_{1}_Dispatcher {{
     prtop("                    xdrs::txs::decode(data).map_err(|_| "
           "::rpc_driver::RpcError::GarbageArguments)?;\n");
     auto detuple = make_arg_detuple(proc.arg_types.size());
-    auto call_args = detuple.empty() ? std::string("client") : "client, " + detuple;
+    auto call_args =
+        detuple.empty() ? std::string("client") : "client, " + detuple;
     prtop("                let res = self.inner.{}({}).await.map_err(|_| "
           "::rpc_driver::RpcError::SystemError)?;\n",
           proc.id, call_args);
