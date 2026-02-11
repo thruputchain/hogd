@@ -76,9 +76,25 @@ struct CreateDBResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
+// A buffer of data that can be passed across the FFI boundary.
+// Must be freed with free_ffi_data_buffer()
+struct FFIDataBuffer {
+  uint8_t *data;
+  uint32_t len;
+};
+
+enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);
+
+struct GetCostModelResult {
+  struct FFIDataBuffer data;
+  enum TestFFIErrorCode ffi_error_code;
+};
+
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
                                 uint32_t serialized_cost_model_len);
 enum TestFFIErrorCode free_db(void *ptr);
+
+struct GetCostModelResult get_cost_model(void *db);
 
 enum TestFFIErrorCode advance_new_block(void *db);
 

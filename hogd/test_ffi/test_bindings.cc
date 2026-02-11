@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -132,6 +133,60 @@ make_new_db(const uint8_t *serialized_cost_model,
     return {.db = nullptr,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
+}
+
+constexpr FFIDataBuffer kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
+
+std::expected<FFIDataBuffer, TestFFIErrorCode>
+make_new_data_buffer(uint32_t len) noexcept
+{
+  if (len == 0) {
+    return FFIDataBuffer{.data = nullptr, .len = 0};
+  }
+  try {
+    auto *data = new uint8_t[len];
+    return FFIDataBuffer{.data = data, .len = len};
+  } catch (std::exception const &e) {
+    log_error("error allocating data buffer: {}", e);
+    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  }
+}
+
+GetCostModelResult
+get_cost_model(void *db) noexcept
+{
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!db_context) {
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+
+  auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
+
+  try {
+    auto serialized = x23::serialize(cost_model);
+
+    auto buffer = make_new_data_buffer(serialized.size());
+    if (!buffer.has_value()) {
+      return {.data = kNullBuffer, .ffi_error_code = buffer.error()};
+    }
+    std::memcpy(buffer.value().data, serialized.data(), serialized.size());
+    return {.data = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error serializing cost model: {}", e);
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+}
+
+TestFFIErrorCode
+free_ffi_data_buffer_impl(FFIDataBuffer buffer) noexcept
+{
+  if (buffer.data == nullptr && buffer.len != 0) {
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  delete[] buffer.data;
+  return kTestFFIErrorCodeNone;
 }
 
 TestFFIErrorCode
@@ -728,6 +783,12 @@ create_db(const uint8_t *serialized_cost_model,
   return hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
 }
 
+GetCostModelResult
+get_cost_model(void *db)
+{
+  return hogd::get_cost_model(db);
+}
+
 TestFFIErrorCode
 free_db(void *ptr)
 {
@@ -854,6 +915,12 @@ verify_signed_transaction_auth_from_db(void *db,
                                        FFISerializedSignedTransaction signed_tx)
 {
   return hogd::verify_signed_transaction_auth_from_db_impl(db, signed_tx);
+}
+
+TestFFIErrorCode
+free_ffi_data_buffer(struct FFIDataBuffer buffer)
+{
+  return hogd::free_ffi_data_buffer_impl(buffer);
 }
 
 #ifdef __cplusplus
