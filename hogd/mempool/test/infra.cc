@@ -59,7 +59,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
   db_auth_server_->start_server(/*port=*/0);
 
-  std::string dbauth_address = address(kAddress, db_auth_server_->port());
+  std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
   dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
   auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
   auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_server_);

@@ -177,7 +177,7 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
-  static std::string address(const std::string &host, uint16_t port)
+  static std::string make_address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
   }
@@ -258,9 +258,11 @@ private:
   void register_db_with_mempool()
   {
     auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port())();
-    std::string exec_address = address(kAddress, db_executor_server_->port());
-    std::string sched_address = address(kAddress, db_scheduler_server_->port());
-    std::string auth_address = address(kAddress, db_auth_server_->port());
+    std::string exec_address =
+        make_address(kAddress, db_executor_server_->port());
+    std::string sched_address =
+        make_address(kAddress, db_scheduler_server_->port());
+    std::string auth_address = make_address(kAddress, db_auth_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
                                 .address_for_exec = exec_address.c_str(),
@@ -276,9 +278,9 @@ private:
         {.protocol = version::kHogdProtocol(),
          .upid = {},
          .address_for_exec =
-             address(kAddress, event_exec_server_.port()).c_str(),
+             make_address(kAddress, event_exec_server_.port()).c_str(),
          .address_for_sched =
-             address(kAddress, event_sched_server_.port()).c_str()})();
+             make_address(kAddress, event_sched_server_.port()).c_str()})();
     CHECK_EQ(r, RPCError::kRPCNone);
   }
 
@@ -306,7 +308,7 @@ private:
         create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
                                        mempool_coord_server_.port())();
     std::string coord_address =
-        address(kAddress, coordinator_sched_server_.port());
+        make_address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol(),
                    .address_for_sched = coord_address.c_str()};
     CHECK_EQ(co_await client.schedulercoord_intro_coord(card),

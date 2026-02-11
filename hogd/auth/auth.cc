@@ -3,7 +3,6 @@
 #include <future>
 #include <print>
 #include <stdexcept>
-#include <stdint.h>
 #include <string>
 #include <utility>
 
@@ -14,6 +13,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "port.hh"
