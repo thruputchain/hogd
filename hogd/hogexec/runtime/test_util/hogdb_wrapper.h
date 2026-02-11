@@ -24,9 +24,8 @@ namespace hogd {
 
 class HogdbWrapper {
 public:
-  HogdbWrapper(StorageCostModel const &cost_model)
-    : kDefaultCostModel(cost_model),
-      ctx_(HogDBDAO(open_db()), std::make_unique<MerkleTriePrefix>(),
+  HogdbWrapper()
+    : ctx_(HogDBDAO(open_db()), std::make_unique<MerkleTriePrefix>(),
            make_sched_db_client())
   {
     db_sched_server_.start_server(/*port=*/0);
@@ -55,15 +54,12 @@ public:
     return test_sched_db_server_->impl()->get_hogs_transferred(height);
   }
 
-  // different storage cost models unimplemented currently
-  const StorageCostModel kDefaultCostModel;
-
-  const StorageCostModel *get_default_cost_model()
-  {
-    return &ctx_.get_cost_model();
-  }
-
   auto &get_db() { return ctx_.get_db(); }
+
+  StorageCostModel get_cost_model()
+  {
+    return get_db().read_cost_model().value();
+  }
 
 private:
   static HogDBDAO open_db();

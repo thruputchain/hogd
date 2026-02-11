@@ -12,11 +12,13 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -31,7 +33,7 @@ namespace {
 void *
 make_db()
 {
-  auto db = create_db();
+  auto db = create_db(nullptr, 0);
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -510,6 +512,49 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
     EXPECT_EQ(result.auth_error_code,
               std::to_underlying(AuthErrorCode::kAuthFailed));
   }
+}
+
+// Test roundtrip on cost model: create a DB with a non-default cost model,
+// retrieve it via get_cost_model, and verify the serialized form matches.
+TEST(TestBindingsTest, CostModelRoundtrip)
+{
+  // Build a non-default cost model with custom values that differ from every
+  // default field.
+  StorageCostModelXdr custom_model{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = ::hogd::to_xdr(int128_t{42}),
+      .bytestring_cost_per_byte = 7,
+      .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{100}),
+      .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{3}),
+      .auth_per_key_cost = ::hogd::to_xdr(int128_t{55}),
+      .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{11}),
+      .rcq_cost_per_block = ::hogd::to_xdr(int128_t{13}),
+      .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{17}),
+      .balance_cost = ::hogd::to_xdr(int128_t{9999}),
+  };
+
+  auto serialized_model = x23::serialize(custom_model);
+
+  // Create a DB seeded with the custom cost model.
+  auto db_result = create_db(serialized_model.data(),
+                             static_cast<uint32_t>(serialized_model.size()));
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(db_result.db, nullptr);
+  x23::Defer d([&] { free_db(db_result.db); });
+
+  // Retrieve the cost model back from the DB.
+  auto cost_result = get_cost_model(db_result.db);
+  ASSERT_EQ(cost_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(cost_result.data.data, nullptr);
+  ASSERT_GT(cost_result.data.len, 0U);
+  x23::Defer d2([&] { free_ffi_data_buffer(cost_result.data); });
+
+  // Deserialize the returned cost model and compare field by field.
+  StorageCostModelXdr roundtripped;
+  x23::deserialize(&roundtripped,
+                   x23::BufView{cost_result.data.data, cost_result.data.len});
+
+  EXPECT_EQ(custom_model, roundtripped);
 }
 
 } // namespace hogd

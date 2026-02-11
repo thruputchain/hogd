@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/debug.h"
@@ -105,11 +107,25 @@ enable_syscall_logging() noexcept
 }
 
 CreateDBResult
-make_new_db() noexcept
+make_new_db(const uint8_t *serialized_cost_model,
+            uint32_t serialized_cost_model_len) noexcept
 {
   lazy_init();
   try {
-    auto *db = new DBContext();
+    StorageCostModelXdr cost_model_xdr =
+        StorageCostModel::default_cost_model().to_xdr();
+    if (serialized_cost_model != nullptr) {
+      try {
+        x23::deserialize(&cost_model_xdr,
+                         x23::BufView{serialized_cost_model,
+                                      serialized_cost_model_len});
+      } catch (x23::XdrBadInput const &e) {
+        log_error("error deserializing cost model: {}", e);
+        return {.db = nullptr,
+                .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+      }
+    }
+    auto *db = new DBContext(cost_model_xdr);
     ffi_trace("FFI: make_new_db() -> (db={})", static_cast<void *>(db));
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
@@ -117,6 +133,60 @@ make_new_db() noexcept
     return {.db = nullptr,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
+}
+
+constexpr FFIDataBuffer kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
+
+std::expected<FFIDataBuffer, TestFFIErrorCode>
+make_new_data_buffer(uint32_t len) noexcept
+{
+  if (len == 0) {
+    return FFIDataBuffer{.data = nullptr, .len = 0};
+  }
+  try {
+    auto *data = new uint8_t[len];
+    return FFIDataBuffer{.data = data, .len = len};
+  } catch (std::exception const &e) {
+    log_error("error allocating data buffer: {}", e);
+    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  }
+}
+
+GetCostModelResult
+get_cost_model(void *db) noexcept
+{
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!db_context) {
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+
+  auto cost_model = db_context->get_base_db().get_cost_model().to_xdr();
+
+  try {
+    auto serialized = x23::serialize(cost_model);
+
+    auto buffer = make_new_data_buffer(serialized.size());
+    if (!buffer.has_value()) {
+      return {.data = kNullBuffer, .ffi_error_code = buffer.error()};
+    }
+    std::memcpy(buffer.value().data, serialized.data(), serialized.size());
+    return {.data = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error serializing cost model: {}", e);
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+}
+
+TestFFIErrorCode
+free_ffi_data_buffer_impl(FFIDataBuffer buffer) noexcept
+{
+  if (buffer.data == nullptr && buffer.len != 0) {
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  delete[] buffer.data;
+  return kTestFFIErrorCodeNone;
 }
 
 TestFFIErrorCode
@@ -707,9 +777,16 @@ extern "C" {
 #endif
 
 CreateDBResult
-create_db()
+create_db(const uint8_t *serialized_cost_model,
+          uint32_t serialized_cost_model_len)
 {
-  return hogd::make_new_db();
+  return hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
+}
+
+GetCostModelResult
+get_cost_model(void *db)
+{
+  return hogd::get_cost_model(db);
 }
 
 TestFFIErrorCode
@@ -838,6 +915,12 @@ verify_signed_transaction_auth_from_db(void *db,
                                        FFISerializedSignedTransaction signed_tx)
 {
   return hogd::verify_signed_transaction_auth_from_db_impl(db, signed_tx);
+}
+
+TestFFIErrorCode
+free_ffi_data_buffer(struct FFIDataBuffer buffer)
+{
+  return hogd::free_ffi_data_buffer_impl(buffer);
 }
 
 #ifdef __cplusplus

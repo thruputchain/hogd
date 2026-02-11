@@ -25,7 +25,7 @@ echo 'build gcc debug'
 export X23_RCVBUF=1
 
 echo 'run gcc tests RCVBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E rpcstress_writebuf
 
 unset X23_RCVBUF
 

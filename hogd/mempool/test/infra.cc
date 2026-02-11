@@ -16,6 +16,7 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
 #include "types.hh"
 
@@ -89,9 +90,10 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   if (!skip_genesis_block) {
     GenesisConfigurationBuilder builder;
-    CHECK_EQ(mempool_coord_server_->impl()
-                 ->schedcoord_load_genesis_configuration(builder.build())(),
-             DbSchedResult::DbSchedResultOK);
+    CHECK_EQ(
+        mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
+            builder.build(StorageCostModel::default_cost_model()))(),
+        DbSchedResult::DbSchedResultOK);
   }
 }
 

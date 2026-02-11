@@ -17,6 +17,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/loadgen/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -143,7 +144,7 @@ ERC20ExperimentState::generate_experiment()
   initialization_txs.emplace_back(std::move(mint_txs));
 
   // Build result step by step
-  auto genesis_config = builder.build();
+  auto genesis_config = builder.build(StorageCostModel::default_cost_model());
   LoadgenSuccessResult result;
   result.genesis_configuration = std::move(genesis_config);
   result.initialization_txs = std::move(initialization_txs);

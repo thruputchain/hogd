@@ -11,6 +11,7 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -36,7 +37,7 @@ public:
                           ContractEntrypointID entrypoint, Calldata calldata,
                           int128_t amount);
 
-  GenesisConfiguration build() const;
+  GenesisConfiguration build(StorageCostModel const &cost_model) const;
 
   // The set of transactions that claim the balances that are set up
   // in the genesis block.

@@ -128,7 +128,7 @@ private:
   std::unique_ptr<SystemCallHandler> syscall_handler_;
 
   // Boilerplate irrelevant for the test, just for creating the syscall handler.
-  HogdbWrapper hogdb_wrapper_ = HogdbWrapper(StorageCostModelXdr{});
+  HogdbWrapper hogdb_wrapper_;
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_rpc_ =
       TestEventAggregatorExecServer(event_server_);

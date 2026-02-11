@@ -4,12 +4,14 @@
 
 #include <cassert>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <sys/socket.h>
 #include <utility>
 
 // generated x23 headers
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -34,6 +36,8 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -321,15 +325,42 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
         }
       },
       [&](ContractAddress const &addr, DeployedContractHash const &hash) {
-        auto r = ctx_.get_db().write_address_metadata(addr, hash);
+        auto r = itx->request_deploy_contract(addr, hash);
         if (!r.has_value()) {
           error("failed to write genesis block deployment: {}", r.error());
           failure = true;
         }
+        return 0;
       },
       [&](ContractAddress const &addr,
           AddressAuthData const &auth_data) -> int128_t {
-        auto r = ctx_.get_db().write_address_auth_data(addr, auth_data);
+        x23::Vec<AuthDataChangeSigner, std::numeric_limits<uint32_t>::max()>
+            auth_data_change_signers;
+        for (uint32_t i = 0; i < kMaxSigners; i++) {
+          if (auth_data.public_keys[i]) {
+            auth_data_change_signers.push_back({
+                .public_key_id = i,
+                .public_key = auth_data.public_keys[i],
+            });
+          }
+        }
+
+        GasConfigChange gas_config_change{};
+        for (auto const &gas_permission : auth_data.gas_permissions) {
+          gas_config_change.new_gas_permission_configs.push_back(
+              gas_permission);
+        }
+
+        AuthDataChangeArgs auth_data_change = {
+            .auth_data_change_signers = auth_data_change_signers,
+            .new_nonce_config = auth_data.nonce_config,
+            .new_gas_config_change =
+                x23::Ptr<GasConfigChange>(gas_config_change),
+        };
+
+        auto r = itx->request_auth_data(
+            addr, auth_data_change,
+            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
         if (!r.has_value()) {
           error("failed to write genesis block auth data: {}", r.error());
           failure = true;

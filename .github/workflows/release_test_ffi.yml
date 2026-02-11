@@ -73,7 +73,7 @@ jobs:
         run: |
           cargo install bindgen-cli
           mkdir -p release_artifacts
-          bindgen hogd/test_ffi/test_bindings.h -o release_artifacts/bindings.rs
+          hogd/test_ffi/run_bindgen.sh release_artifacts/bindings.rs
           echo "Generated bindings.rs:"
           head -20 release_artifacts/bindings.rs
 
@@ -205,7 +205,7 @@ jobs:
         run: |
           cargo install bindgen-cli
           mkdir -p release_artifacts
-          bindgen hogd/test_ffi/test_bindings.h -o release_artifacts/bindings.rs
+          hogd/test_ffi/run_bindgen.sh release_artifacts/bindings.rs
           echo "Generated bindings.rs:"
           head -20 release_artifacts/bindings.rs
 

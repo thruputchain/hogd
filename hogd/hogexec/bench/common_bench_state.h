@@ -28,6 +28,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -255,7 +256,8 @@ CommonBenchState::run_genesis_configuration(
       genesis_configuration_builder.make_unfurl_genesis_transactions();
   InitializationBlock initialization_txs = {unfurl_txs.begin(),
                                             unfurl_txs.end()};
-  run_genesis_configuration(genesis_configuration_builder.build(),
+  run_genesis_configuration(genesis_configuration_builder.build(
+                                StorageCostModel::default_cost_model()),
                             {initialization_txs});
 }
 

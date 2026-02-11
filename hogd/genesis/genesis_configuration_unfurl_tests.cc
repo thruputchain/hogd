@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <set>
 
+#include "address_auth.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
@@ -20,6 +22,8 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -52,6 +56,22 @@ protected:
     SHA256Hash nonce_hash{};
     std::memcpy(nonce_hash.data(), &nonce, sizeof(nonce));
     return nonce_hash;
+  }
+
+  static int128_t
+  genesis_deployer_storage_costs(StorageCostModel const &cost_model)
+  {
+    AddressAuthData deployer_auth_data{};
+    deployer_auth_data.nonce_config.accepted_keys = 0;
+    deployer_auth_data.nonce_config.required_weight = 0;
+    deployer_auth_data.gas_permissions.push_back(
+        GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
+                            .accepted_keys = 0,
+                            .required_weight = 0});
+    deployer_auth_data.last_written_height = 0;
+    StorageItemWrapper deployer_auth_item(deployer_auth_data, &cost_model);
+    return deployer_auth_item.storage_cost(&cost_model) +
+           cost_model.get_balance_cost();
   }
 
   std::set<Uniquifier> uniquifiers_;
@@ -88,7 +108,8 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
                              caller_meta_t::make_calldata<"initialize">(
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
-  auto genesis_configuration = builder.build();
+  auto genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
@@ -183,7 +204,8 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
                              caller_meta_t::make_calldata<"initialize">(
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
-  auto genesis_configuration = builder.build();
+  auto genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
@@ -274,6 +296,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
   using caller_meta_t = ContractTraitMeta<fibonacci_call::FibonacciCaller>;
 
+  auto cost_model = StorageCostModel::default_cost_model();
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
                              fibonacci_meta_t::entrypoint<"fibonacci">(),
@@ -284,8 +307,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
       caller_contract, caller_nonce, caller_meta_t::entrypoint<"initialize">(),
       caller_meta_t::make_calldata<"initialize">(expected_fibonacci_address),
       GenesisConfigurationLoader::initial_hog_token_supply() -
-          int128_t{1'000'000'000});
-  auto block = builder.build();
+          int128_t{1'000'000'000} - genesis_deployer_storage_costs(cost_model));
+  auto block = builder.build(cost_model);
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
@@ -337,13 +360,16 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
 
+  auto cost_model = StorageCostModel::default_cost_model();
+
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(
       fibonacci_contract, fibonacci_nonce,
       fibonacci_meta_t::entrypoint<"fibonacci">(),
       fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
-      GenesisConfigurationLoader::initial_hog_token_supply());
-  auto genesis_configuration = builder.build();
+      GenesisConfigurationLoader::initial_hog_token_supply() -
+          genesis_deployer_storage_costs(cost_model));
+  auto genesis_configuration = builder.build(cost_model);
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 1);
@@ -387,7 +413,8 @@ TEST_F(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
       manual_revert_meta_t::entrypoint<"test_basic_manual_revert">(),
       manual_revert_meta_t::make_calldata<"test_basic_manual_revert">(true),
       int128_t{1'000'000'000});
-  auto genesis_configuration = builder.build();
+  auto genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 1);

@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 3
-#define TEST_FFI_VERSION_PATCH 7
+#define TEST_FFI_VERSION_MINOR 4
+#define TEST_FFI_VERSION_PATCH 1
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -76,8 +76,25 @@ struct CreateDBResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
-struct CreateDBResult create_db();
+// A buffer of data that can be passed across the FFI boundary.
+// Must be freed with free_ffi_data_buffer()
+struct FFIDataBuffer {
+  uint8_t *data;
+  uint32_t len;
+};
+
+enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);
+
+struct GetCostModelResult {
+  struct FFIDataBuffer data;
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
+                                uint32_t serialized_cost_model_len);
 enum TestFFIErrorCode free_db(void *ptr);
+
+struct GetCostModelResult get_cost_model(void *db);
 
 enum TestFFIErrorCode advance_new_block(void *db);
 

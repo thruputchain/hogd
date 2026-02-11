@@ -8,9 +8,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -20,13 +22,17 @@
 
 // xdr types
 #include "address_auth.hh"
+#include "contract.hh"
 #include "db_sched.hh"
+#include "hogd/base/bits.h"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
