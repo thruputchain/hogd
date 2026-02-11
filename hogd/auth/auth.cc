@@ -81,17 +81,6 @@ auth_init(const std::string &mempool_address)
 
 } // namespace hogd
 
-namespace {
-
-void
-usage(char *argv[])
-{
-  std::println("usage: {} mempool_host:port", argv[0]);
-  exit(EXIT_FAILURE);
-}
-
-} // namespace
-
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
@@ -102,7 +91,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting auth server!");
 
   if (argc != 2) {
-    usage(argv);
+    std::println("usage: {} mempool_host:port", argv[0]);
+    return EXIT_FAILURE;
   }
 
   const std::string mempool_address = argv[1];
