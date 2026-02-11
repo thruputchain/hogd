@@ -30,7 +30,7 @@ public:
     callback_ = std::move(callback);
   }
 
-  x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
+  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
     info("got {}, expected {}", card.protocol.c_str(),
          version::kHogdProtocol());
@@ -51,6 +51,7 @@ public:
                                                  KeyChangeBatch key_changes)
   {
     CHECK(callback_.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     co_await (*callback_)(height, std::move(key_changes));
   }
 

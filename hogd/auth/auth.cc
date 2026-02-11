@@ -1,18 +1,21 @@
 #include <cstdlib>
 #include <format>
 #include <future>
-#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
+#include "auth_rpc.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/init.h"
+#include "hogd/version.h"
 #include "port.hh"
+#include "sched_db.hh"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -59,8 +62,9 @@ auth_init(const std::string &mempool_address)
   {
     auto [auth_db_server_port, auth_mempool_server_port] =
         rpc_servers.start_servers(kAuthDbServerPort, kAuthMempoolServerPort);
-    CHECK_EQ(auth_db_server_port, kAuthDbServerPort);
-    CHECK_EQ(auth_mempool_server_port, kAuthMempoolServerPort);
+    CHECK_EQ(auth_db_server_port, static_cast<uint16_t>(kAuthDbServerPort));
+    CHECK_EQ(auth_mempool_server_port,
+             static_cast<uint16_t>(kAuthMempoolServerPort));
   }
 
   auth_server.subscribe_to_auth_data_changes(

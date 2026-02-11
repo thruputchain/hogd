@@ -30,7 +30,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "parallel.hh"
@@ -1017,7 +1016,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   }
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
-          /*height=*/scheduler_->current_block(), txs);
+          scheduler_->current_block(), txs);
   x23::Vec<SignedTransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];

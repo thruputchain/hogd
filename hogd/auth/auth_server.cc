@@ -1,7 +1,6 @@
 #include "hogd/auth/auth_server.h"
 
 #include <cassert>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -21,7 +20,6 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
