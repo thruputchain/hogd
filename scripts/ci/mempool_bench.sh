@@ -134,7 +134,7 @@ echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
-bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 2; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
