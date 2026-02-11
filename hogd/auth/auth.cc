@@ -56,9 +56,12 @@ auth_init(const std::string &mempool_address)
   AuthServer auth_server(std::move(dbauth_client));
   auth_server.set_mempool_client(std::move(mempool_client));
   AuthRpcServers rpc_servers(auth_server);
-  CHECK_EQ(rpc_servers.start_servers(kAuthDbServerPort, kAuthMempoolServerPort),
-           (std::pair<uint16_t, uint16_t>{kAuthDbServerPort,
-                                          kAuthMempoolServerPort}));
+  {
+    auto [auth_db_server_port, auth_mempool_server_port] =
+        rpc_servers.start_servers(kAuthDbServerPort, kAuthMempoolServerPort);
+    CHECK_EQ(auth_db_server_port, kAuthDbServerPort);
+    CHECK_EQ(auth_mempool_server_port, kAuthMempoolServerPort);
+  }
 
   auth_server.subscribe_to_auth_data_changes(
       rpc_servers.make_auth_card(hostname))();
