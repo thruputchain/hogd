@@ -5,18 +5,22 @@
 #include <print>
 #include <string>
 #include <thread>
+#include <utility>
 
+#include "auth_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "port.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -55,10 +59,23 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
+  RpcServer<MempoolAuthRpc> auth;
+  auth->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  CHECK_EQ(auth.start_server(kMempoolAuthServerPort),
+           uint16_t{kMempoolAuthServerPort});
+  while (!registration.auth_registered(/*card=*/nullptr)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
   RpcServer<MempoolCoordinatorRpc> coord(db->impl());
   coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(coord.start_server(kMempoolCoordinatorServerPort),
            uint16_t{kMempoolCoordinatorServerPort});
+  auth->impl()->register_callback(
+      [&coord](BlockHeight height, KeyChangeBatch key_changes) {
+        return coord->impl()->auth_data_changed(height, std::move(key_changes));
+      });
+
   while (!coord->impl()->ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }

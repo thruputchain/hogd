@@ -4,22 +4,26 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
+#include "auth_card.hh"
+#include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
-#include "hogd/auth/auth_server.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
@@ -66,7 +70,6 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
-  std::unique_ptr<AuthServer> &auth() { return auth_; }
 
   static x23::Async<coord_sched_client_t> get_client()
   {
@@ -204,6 +207,9 @@ public:
 
   void shut_down() {}
 
+  x23::Async<void> auth_data_changed(BlockHeight height,
+                                     KeyChangeBatch key_changes);
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -248,20 +254,8 @@ private:
         std::make_shared<Scheduler>(/*current_block=*/1, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
-    x23::XdrVec<ShardCard> cards;
-    Registration::registration().shards_registered(&cards);
-    CHECK(!cards.empty());
-    info("HERE ADDR IS {}", cards[0].address_for_auth);
-    dbauth_client_t dbauth_client =
-        co_await make_dbauth_client(cards[0].address_for_auth.c_str());
-    auth_ = std::make_unique<AuthServer>(std::move(dbauth_client));
-    auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_);
-    auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
-    // If we communicate with the auth server via RPC, be sure to remove the
-    // parameter reference in [auth_data_changed]!
-    auth_->add_auth_data_updates_callback(
-        std::bind_front(&MempoolCoordinatorRpc::auth_data_changed, this));
-    co_await auth_->subscribe_to_auth_data_changes(auth_rpc_->make_auth_card());
+    auth_client_ = std::make_unique<auth_sched_client_t>(
+        co_await MempoolAuthRpc::get_client());
 
     ready_.store(true, std::memory_order_release);
   }
@@ -326,9 +320,6 @@ private:
     num_validations_in_progress_--;
   }
 
-  x23::Async<void> auth_data_changed(BlockHeight height,
-                                     const KeyChangeBatch &key_changes);
-
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
@@ -346,10 +337,11 @@ private:
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
+  std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
-  std::unique_ptr<AuthServer> auth_;
-  std::unique_ptr<AuthRpcServers> auth_rpc_;
+  std::optional<AuthCard> auth_card_;
+  std::string auth_mempool_address_;
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
@@ -368,6 +360,7 @@ private:
   DbTip last_committed_block_{};
 
   x23::CoroFutex<int64_t> auth_data_height_{-1};
+  x23::CoroFutex<int> auth_ready_{0};
 
   std::atomic<bool> ready_ = false;
 

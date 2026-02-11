@@ -1,7 +1,6 @@
 #include "hogd/auth/auth_server.h"
 
 #include <cassert>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -137,9 +136,9 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
 
-  for (std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)> &f :
-       auth_data_changes_callbacks_) {
-    co_await f(height, key_changes);
+  if (mempool_client_) {
+    co_await mempool_client_->mempoolauth_auth_data_changed(height,
+                                                            key_changes);
   }
 }
 

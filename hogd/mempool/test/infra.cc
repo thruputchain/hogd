@@ -1,9 +1,13 @@
 #include "hogd/mempool/test/infra.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "auth_rpc.hh"
 #include "db_sched.hh"
+#include "hogd/auth/auth_server.h"
+#include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/rpc_from_auth.h"
@@ -14,6 +18,7 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -23,12 +28,20 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // registration at the beginning of each test.
   Registration::registration().clear();
 
+  mempool_auth_server_->impl()->register_callback(
+      [this](BlockHeight height, KeyChangeBatch key_changes) {
+        return mempool_coord_server_->impl()->auth_data_changed(
+            height, std::move(key_changes));
+      });
+  mempool_auth_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+
   // Start the mempool RPC servers. All of the subsystems register with the
   // mempool, so the mempool RPC servers need to start first.
   sched_db_server_.start_server(/*port=*/0);
   sched_event_server_.start_server(/*port=*/0);
   sched_exec_server_.start_server(/*port=*/0);
   mempool_coord_server_.start_server(/*port=*/0);
+  mempool_auth_server_.start_server(/*port=*/0);
 
   auto sched_db_client = std::make_unique<sched_db_client_t>(
       create_client<SchedDb1>(kAddress, sched_db_server_.port())());
@@ -47,6 +60,12 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
   db_auth_server_->start_server(/*port=*/0);
 
+  std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
+  dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
+  auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+  auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_server_);
+  auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
+
   // Start the event RPC servers.
   event_sched_server_.start_server(/*port=*/0);
   event_exec_server_.start_server(/*port=*/0);
@@ -63,6 +82,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
   register_event_with_mempool();
+  register_auth_with_mempool();
   // The executor must register itself *after* the database and event servers
   // have registered!
   register_executor_with_mempool();

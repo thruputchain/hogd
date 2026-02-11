@@ -22,6 +22,7 @@ trap 'cleanup 130' INT TERM # 130 is conventional for SIGINT
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./$BUILD_DIR/hogd/utils/get_port kCIControlServerPort)
+export MEMPOOL_AUTH_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolAuthServerPort)
 export MEMPOOL_EXECUTOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolExecutorServerPort)
 export MEMPOOL_DB_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolDbServerPort)
 export MEMPOOL_EVENT_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolEventServerPort)
@@ -54,7 +55,7 @@ kill_stale_processes() {
   ssh -n hog7 "killall loadgen_server" || true
   ssh -n hog5 "killall hogexec" || true
   ssh -n hog6 "killall hogexec" || true
-  ssh -n hog8 "killall hogexec" || true
+  ssh -n hog8 "killall auth_exec" || true
   ssh -n hog9 "killall event_exec" || true
   ssh -n hog9 "killall indexer_exec" || true
   ssh -n hog11 "killall hogdb" || true
@@ -82,13 +83,9 @@ echo 'launch second hogexec'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
-echo 'launch third hogexec'
-# the mempool runs on hog10
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
-# can't wait for hogexec: that's waiting on the coordinator
-
 echo 'check hogexec is running'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
 
 echo 'launch event'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
@@ -98,6 +95,9 @@ echo 'launch indexer'
 
 echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
+
+echo 'launch auth'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/auth/auth_exec hog10:$MEMPOOL_AUTH_PORT
 
 echo 'launch coordinator and scp'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT start \
@@ -134,7 +134,7 @@ echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
-bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 2; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.

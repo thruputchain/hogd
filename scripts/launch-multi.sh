@@ -12,6 +12,7 @@ hogexec_servers=("hog1" "hog2")
 event_server="hog1"
 indexer_server="hog1"
 hogdb_servers=("hog1")
+auth_server="hog1"
 logdir=/tmp/$(whoami)
 
 # override above in build or source directory hog.conf file
@@ -37,11 +38,12 @@ EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
 INDEXER_BINARY=${HOGD_BUILD_DIR}/hogd/indexer/indexer_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
+AUTH_BINARY=${HOGD_BUILD_DIR}/hogd/auth/auth_exec
 
-procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "indexer_exec" "hogdb")
+procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "indexer_exec" "hogdb" "auth_exec")
 
 binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$INDEXER_BINARY" "$HOGDB_BINARY")
-all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "$indexer_server" "${hogdb_servers[@]}")
+all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "$indexer_server" "${hogdb_servers[@]}" "${auth_server}")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -226,6 +228,11 @@ for s in "${hogdb_servers[@]}"; do
     "$logdir/hogdb.data" 10000000000 "$mempool_server":8072
 done
 
+# Start auth.
+echo "Start auth..."
+remote_launch "$auth_server" "$AUTH_BINARY" \
+  "$mempool_server":8074
+
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
@@ -279,6 +286,10 @@ for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8082
 done
 
+# Wait for auth (ports 8050-8051).
+wait_port "$auth_server" 8050
+wait_port "$auth_server" 8051
+
 # Wait for chuckd (port 7888).
 wait_port hog3 7888
 
@@ -323,6 +334,9 @@ else
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
       "tail -n +1 -f $logdir/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
   done
+
+  ssh "${COMMON_SSH_OPTS[@]}" "$auth_server" \
+    "tail -n +1 -f $logdir/auth_exec.log" | sed "s/^/[${auth_server}\/auth] /" &
 fi
 
 ssh_pids=($(jobs -pr))

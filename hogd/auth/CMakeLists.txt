@@ -22,3 +22,12 @@ target_link_libraries(auth_test
 )
 gtest_discover_tests(auth_test)
 
+add_executable(
+  auth_exec
+  auth.cc
+)
+target_link_libraries(
+  auth_exec
+  auth
+)
+set_property(TARGET auth_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

@@ -1,15 +1,12 @@
 #pragma once
 
 #include <format>
-#include <functional>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unistd.h>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -19,8 +16,10 @@
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -29,6 +28,9 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+using sched_auth_client_t =
+    MempoolAuth1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 class AuthServer {
 public:
@@ -59,15 +61,14 @@ public:
   // the first will be dropped.
   x23::Async<void> register_auth_data_updates(BlockHeight height,
                                               KeyChangeBatch key_changes);
-  void add_auth_data_updates_callback(
-      const std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
-          &callback)
-  {
-    std::lock_guard<std::mutex> lock(auth_data_changes_callbacks_lock_);
-    auth_data_changes_callbacks_.push_back(callback);
-  }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
+
+  void set_mempool_client(sched_auth_client_t &&client)
+  {
+    CHECK(!mempool_client_);
+    mempool_client_.emplace(std::move(client));
+  }
 
 private:
   // If this returns AuthErrorCode::kAuthSuccess, then auth_data will be
@@ -92,10 +93,7 @@ private:
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
 
-  std::mutex auth_data_changes_callbacks_lock_;
-  std::vector<
-      std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>>
-      auth_data_changes_callbacks_;
+  std::optional<sched_auth_client_t> mempool_client_;
 };
 
 class AuthDBRpc {
@@ -132,7 +130,8 @@ public:
                                   SignedTransactionBatch txs)
   {
     x23::span<const SignedTransaction> txs_span(txs.begin(), txs.end());
-    return auth_server_.verify_transactions(height, txs_span);
+    co_return co_await auth_server_.verify_transactions(
+        height, txs_span, /*max_parallelism=*/available_parallelism());
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
@@ -150,7 +149,10 @@ class AuthRpcServers {
 public:
   explicit AuthRpcServers(AuthServer &auth_server)
     : auth_db_rpc_(auth_server), auth_mempool_rpc_(auth_server)
-  {}
+  {
+    auth_db_rpc_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+    auth_mempool_rpc_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  }
 
   std::pair<uint16_t, uint16_t> start_servers(uint16_t port_for_db,
                                               uint16_t port_for_mempool)

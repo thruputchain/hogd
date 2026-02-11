@@ -7,7 +7,6 @@ add_library(
 )
 target_link_libraries(
   mempool
-  auth
   base
   crypto
   exec_interface
@@ -16,7 +15,6 @@ target_link_libraries(
   merkle
   protocol
   runtime
-  auth_claim
 )
 
 add_executable(
@@ -29,4 +27,3 @@ target_link_libraries(
 )
 
 set_property(TARGET mempool_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-

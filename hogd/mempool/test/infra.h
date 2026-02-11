@@ -15,6 +15,7 @@
 #include "built_contracts/contract_loader.h"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "hogd/auth/auth_server.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
@@ -32,6 +33,7 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -144,11 +146,11 @@ public:
   }
 
   x23::Async<void> register_auth_data_updates(BlockHeight height,
-                                              const KeyChangeBatch &key_changes)
+                                              KeyChangeBatch key_changes)
   {
-    CHECK_PTR(db_auth_server_->impl());
-    return mempool_coord_server_->impl()->auth()->register_auth_data_updates(
-        height, key_changes);
+    CHECK_PTR(auth_server_.get());
+    return auth_server_->register_auth_data_updates(height,
+                                                    std::move(key_changes));
   }
 
   void set_dbtip(const DbTip &db_tip)
@@ -175,7 +177,7 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
-  static std::string address(const std::string &host, uint16_t port)
+  static std::string make_address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
   }
@@ -256,9 +258,11 @@ private:
   void register_db_with_mempool()
   {
     auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port())();
-    std::string exec_address = address(kAddress, db_executor_server_->port());
-    std::string sched_address = address(kAddress, db_scheduler_server_->port());
-    std::string auth_address = address(kAddress, db_auth_server_->port());
+    std::string exec_address =
+        make_address(kAddress, db_executor_server_->port());
+    std::string sched_address =
+        make_address(kAddress, db_scheduler_server_->port());
+    std::string auth_address = make_address(kAddress, db_auth_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
                                 .address_for_exec = exec_address.c_str(),
@@ -274,10 +278,20 @@ private:
         {.protocol = version::kHogdProtocol(),
          .upid = {},
          .address_for_exec =
-             address(kAddress, event_exec_server_.port()).c_str(),
+             make_address(kAddress, event_exec_server_.port()).c_str(),
          .address_for_sched =
-             address(kAddress, event_sched_server_.port()).c_str()})();
+             make_address(kAddress, event_sched_server_.port()).c_str()})();
     CHECK_EQ(r, RPCError::kRPCNone);
+  }
+
+  void register_auth_with_mempool()
+  {
+    sched_auth_client_t client =
+        create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
+    AuthCard auth_card = auth_rpc_->make_auth_card(kAddress);
+    client.mempoolauth_intro_auth(auth_card)();
+    auth_server_->set_mempool_client(std::move(client));
+    auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
   void register_executor_with_mempool()
@@ -294,7 +308,7 @@ private:
         create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
                                        mempool_coord_server_.port())();
     std::string coord_address =
-        address(kAddress, coordinator_sched_server_.port());
+        make_address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol(),
                    .address_for_sched = coord_address.c_str()};
     CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
@@ -335,8 +349,12 @@ private:
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
       RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
+  RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
+
+  std::unique_ptr<AuthServer> auth_server_;
+  std::unique_ptr<AuthRpcServers> auth_rpc_;
 };
 
 } // namespace hogd
