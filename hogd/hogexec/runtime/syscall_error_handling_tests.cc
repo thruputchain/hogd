@@ -101,8 +101,7 @@ public:
   NativeContract dummy_native_contract_ = NativeContract(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{});
 
-  template<HostFnErrorCode Code>
-  void run_error_override_test()
+  template<HostFnErrorCode Code> void run_error_override_test()
   {
     // The handler and runtime are entirely irrelevant for this test
     // we just need them to invoke the syscall handler and manipulate available
@@ -119,25 +118,22 @@ public:
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
-    auto syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(
-            handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+    auto syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0,
+                                                          0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
 
     runtime.set_available_gas(10);
-    syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(
-            handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0, 0, 0,
+                                                     0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{});
   }
 
-  template<HostFnErrorCode Code>
-  void run_gas_limit_supercedes_test()
+  template<HostFnErrorCode Code> void run_gas_limit_supercedes_test()
   {
     // The handler and runtime are entirely irrelevant for this test
     // we just need them to invoke the syscall handler and manipulate available
@@ -154,26 +150,21 @@ public:
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
-    auto syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(
-            handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+    auto syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0,
+                                                          0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
 
     runtime.set_available_gas(10);
-    syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(
-            handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0, 0, 0,
+                                                     0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{});
   }
 };
-
-
-
 
 TEST_F(SyscallErrorHandlingTest, AbortOverridesGasLimit)
 {
@@ -197,7 +188,7 @@ TEST_F(SyscallErrorHandlingTest, GasLimitOverridesReturn)
 
 TEST_F(SyscallErrorHandlingTest, GasLimitOverridesExit)
 {
-  run_gas_limit_supercedes_test<HostFnErrorCode::kHostExit>();  
+  run_gas_limit_supercedes_test<HostFnErrorCode::kHostExit>();
 }
 
 namespace {
