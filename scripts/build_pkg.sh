@@ -87,6 +87,7 @@ cp ${BUILD_DIR}/hogd/hogexec/hogexec ${PKG_DIR}/hogexec
 cp ${BUILD_DIR}/hogd/event/event_exec ${PKG_DIR}/event_exec
 cp ${BUILD_DIR}/hogd/indexer/indexer_exec ${PKG_DIR}/indexer_exec
 cp ${BUILD_DIR}/hogd/mempool/mempool_exec ${PKG_DIR}/mempool_exec
+cp ${BUILD_DIR}/hogd/auth/auth_exec ${PKG_DIR}/auth_exec
 cp ${BUILD_DIR}/hogd/loadgen/loadgen_server ${PKG_DIR}/loadgen_server
 
 # compute package name
