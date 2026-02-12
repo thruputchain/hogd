@@ -61,8 +61,7 @@ class StorageSnapshotCache;
 //   Not implemented to be threadsafe.
 class SystemCallHandler {
 public:
-  SystemCallHandler(Transaction const& tx,
-                    StorageSnapshotCache &snapshot_cache,
+  SystemCallHandler(Transaction const &tx, StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
@@ -103,7 +102,8 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
-  InvokeResult root_invoke(std::optional<Invocation> root_invocation = std::nullopt);
+  InvokeResult
+  root_invoke(std::optional<Invocation> root_invocation = std::nullopt);
 
   // Operations after root_invoke()
 
@@ -290,9 +290,10 @@ private:
   // mode
   void check_final_validation_data();
 
-  // Convert the HostFnStatus returned from the root invocation frame into an InvokeStatus
-  // for the top level return.
-  static InvokeStatus<void> handle_root_host_fn_status(HostFnStatus<SyscallErrorCode> status);
+  // Convert the HostFnStatus returned from the root invocation frame into an
+  // InvokeStatus for the top level return.
+  static InvokeStatus<void>
+  handle_root_host_fn_status(HostFnStatus<SyscallErrorCode> status);
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

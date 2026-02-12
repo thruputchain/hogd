@@ -136,12 +136,10 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
 
   {
     auto stx = SignedTransaction{
-        .tx =
-            Transaction{.invocation =
-                            caller_client.make_invocation<"call_fibonacci">(
-                                UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
-    auto handler = make_new_system_call_handler(
-        stx, *wasm_runtime_context_);
+        .tx = Transaction{.invocation =
+                              caller_client.make_invocation<"call_fibonacci">(
+                                  UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
+    auto handler = make_new_system_call_handler(stx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -251,12 +249,10 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
   {
     auto stx = SignedTransaction{
-        .tx =
-            Transaction{.invocation =
-                            caller_client.make_invocation<"call_fibonacci">(
-                                UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
-    auto handler = make_new_system_call_handler(
-        stx, *wasm_runtime_context_);
+        .tx = Transaction{.invocation =
+                              caller_client.make_invocation<"call_fibonacci">(
+                                  UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
+    auto handler = make_new_system_call_handler(stx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -338,12 +334,10 @@ TEST_F(GenesisConfigurationUnfurlTest,
 
   {
     auto stx = SignedTransaction{
-        .tx =
-            Transaction{.invocation =
-                            caller_client.make_invocation<"call_fibonacci">(
-                                UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
-    auto handler = make_new_system_call_handler(
-        stx, *wasm_runtime_context_);
+        .tx = Transaction{.invocation =
+                              caller_client.make_invocation<"call_fibonacci">(
+                                  UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
+    auto handler = make_new_system_call_handler(stx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();

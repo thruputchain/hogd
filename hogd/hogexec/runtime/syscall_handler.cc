@@ -96,22 +96,19 @@ validate_flags(StorageDeltaFlagSet flags)
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
-    Transaction const& tx, StorageSnapshotCache &snapshot_cache,
+    Transaction const &tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context)
-  : runtime_context_(runtime_context), 
-    db_proxy_(std::move(db_proxy)),
+  : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_),
-    source_tx_hash_(sha256(tx)),
-    auth_claims_(tx.auth_claims),
-    root_invocation_(tx.invocation),
-    newly_created_contracts_([&] {
+    source_tx_hash_(sha256(tx)), auth_claims_(tx.auth_claims),
+    root_invocation_(tx.invocation), newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
 
       for (auto const &contract : tx.contracts_to_deploy) {
@@ -149,7 +146,7 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  for (auto const& [_, contract] : newly_created_contracts_) {
+  for (auto const &[_, contract] : newly_created_contracts_) {
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
@@ -189,13 +186,12 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
     root_invocation_ = std::move(invocation);
   }
   CHECK(root_invocation_.has_value());
-  auto const& root_invocation = root_invocation_.value();
+  auto const &root_invocation = root_invocation_.value();
 
-  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ <
-                                    root_invocation.gas_limit
-                                ? root_invocation.gas_limit -
-                                      cumulative_invoke_result_.gas_consumed_
-                                : 0;
+  GasAmount available_gas =
+      cumulative_invoke_result_.gas_consumed_ < root_invocation.gas_limit
+          ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
+          : 0;
 
   auto [res, gas_consumed] =
       invoke(root_invocation.invoked_address,
@@ -221,14 +217,14 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
 }
 
 InvokeStatus<void>
-SystemCallHandler::handle_root_host_fn_status(HostFnStatus<SyscallErrorCode> status)
+SystemCallHandler::handle_root_host_fn_status(
+    HostFnStatus<SyscallErrorCode> status)
 {
   if (status.has_value()) {
     // TODO(geoff): Consider whether we want to have "frame reverted" on the
     // root frame as a "transaction failed" or "transaction succeeded"
     return (status.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
-            status.value() ==
-                SyscallErrorCode::kSyscallErrorCodeFrameReverted)
+            status.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted)
                ? InvokeStatus<void>{}
                : InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }

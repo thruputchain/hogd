@@ -38,8 +38,7 @@ ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorContext::propose_transaction(Transaction const &tx,
-                                     TransactionID tx_id)
+ExecutorContext::propose_transaction(Transaction const &tx, TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto async_pair = x23::make_async<ExecProposeResult>();

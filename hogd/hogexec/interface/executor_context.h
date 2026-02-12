@@ -50,8 +50,8 @@ public:
   validate_transaction_batch(ProposedTransactionBatch const &proposed_txs,
                              TransactionID first_tx_id);
 
-  x23::Async<ExecProposeResult>
-  propose_transaction(Transaction const &tx, TransactionID tx_id);
+  x23::Async<ExecProposeResult> propose_transaction(Transaction const &tx,
+                                                    TransactionID tx_id);
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
