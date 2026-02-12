@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <span>
 #include <utility>
 
@@ -86,7 +87,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   Calldata calldata;
   try {
     calldata.resize_uninitialized(input_calldata.size());
-  } catch (x23::XdrLengthError &e) {
+  } catch (std::exception &e) {
     error("unrecoverable: failed to resize calldata: {}", e.what());
     return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
   }

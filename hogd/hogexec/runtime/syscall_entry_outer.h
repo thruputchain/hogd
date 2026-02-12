@@ -460,9 +460,9 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
     // codes. This helps catch cases where a syscall returns an error that isn't
     // documented in syscalls.yaml.
     if (syscall_result.has_value() &&
-        !is_allowed_error_code<SyscallMeta>(syscall_result.value())) {
+        !is_allowed_error_code<SyscallMeta>(*syscall_result)) {
       panic("Syscall {} returned undocumented error code {}",
-            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
     }
   }
 

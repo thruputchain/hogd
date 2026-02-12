@@ -19,7 +19,7 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
-  output_result = status.value();
+  output_result = *status;
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
