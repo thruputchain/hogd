@@ -104,9 +104,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                              calldata, input_flags);
 
   // invocation returned successfully
-  if (invoke_res &&
-      (invoke_res.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
-       invoke_res.value() ==
+  if (invoke_res.has_value() &&
+      ((*invoke_res) == SyscallErrorCode::kSyscallErrorCodeNone ||
+       (*invoke_res) ==
            SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
     auto return_buffer = syscall_handler.get_return_buffer();
     if (return_buffer.has_value()) {
@@ -115,7 +115,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     else {
       output_return_buffer_len = 0;
     }
-    return {invoke_res.value(), gas_amount};
+    return {*invoke_res, gas_amount};
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
@@ -142,7 +142,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   ReturnBuffer buffer;
   try {
     buffer.resize_uninitialized(input_buffer.size());
-  } catch (x23::XdrLengthError &e) {
+  } catch (std::exception &e) {
     error("unrecoverable: failed to resize return buffer: {}", e.what());
     return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
   }

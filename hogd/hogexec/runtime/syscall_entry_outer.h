@@ -443,7 +443,7 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
     if (runtime_log_level(LogLevel::kTrace)) {
       bool is_syscall_error =
           !res.first.has_value() ||
-          res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
+          (*res.first) != SyscallErrorCode::kSyscallErrorCodeNone;
       trace("Syscall {} Output: {}", kSyscall,
             is_syscall_error
                 ? syscall_error_message(res.first)

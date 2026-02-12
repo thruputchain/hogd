@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <new>
 #include <span>
 #include <utility>
@@ -150,7 +151,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     add_gas_permission(optional_input_permission_2);
     add_gas_permission(optional_input_permission_3);
     add_gas_permission(optional_input_permission_4);
-  } catch (x23::XdrLengthError &e) {
+  } catch (std::exception &e) {
     error("unrecoverable: failed to add bounded number of gas permission "
           "configs to vector of bounded size: {}",
           e.what());

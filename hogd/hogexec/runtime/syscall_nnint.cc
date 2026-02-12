@@ -56,11 +56,11 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   }
   auto status = syscall_handler.set_nnint(input_key, set_value, input_add_value,
                                           input_flags);
-  if (!status) {
+  if (!status.has_value()) {
     return {status.error().to_host_fn_error(), 0};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), 0};
+  if (!(*status).has_value()) {
+    return {(*status).error().code(), 0};
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
