@@ -204,7 +204,7 @@ struct NoreturnFailingSyscallMeta {
   constexpr static auto kInnerFunc = &noreturn_failing_syscall_func;
 
   constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
-  constexpr static bool kCanReturn = true;
+  constexpr static bool kCanReturn = false;
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
@@ -230,6 +230,143 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
                                                             0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostUnrecoverable);
+}
+
+namespace {
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+noerror_syscall_func() noexcept
+{
+  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist, 1000};
+}
+} // namespace
+
+struct NoErrorSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &noerror_syscall_func;
+
+  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+};
+
+static_assert(is_syscall_meta<NoErrorSyscallMeta>);
+
+TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
+{
+  auto context = make_hogexec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  auto host_call_context = std::make_unique<HostCallContext>();
+  host_call_context->syscall_handler = &handler;
+
+  handler.start_frame(make_contract_address(0), Calldata{},
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+  // Runtime ctor sets host_call_context->runtime
+  auto runtime = TestRuntime(std::move(host_call_context));
+  runtime.set_available_gas(10000);
+  auto syscall_res =
+      wrap_outer<NoErrorSyscallMeta>(handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+  ASSERT_TRUE(syscall_res.has_value());
+
+  runtime.set_available_gas(10);
+  syscall_res =
+      wrap_outer<NoErrorSyscallMeta>(handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
+}
+
+struct NoReturnNoErrorSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &noerror_syscall_func;
+
+  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static bool kCanReturn = false;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+};
+
+static_assert(is_syscall_meta<NoReturnNoErrorSyscallMeta>);
+
+TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
+{
+  auto context = make_hogexec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  auto host_call_context = std::make_unique<HostCallContext>();
+  host_call_context->syscall_handler = &handler;
+
+  handler.start_frame(make_contract_address(0), Calldata{},
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+  // Runtime ctor sets host_call_context->runtime
+  auto runtime = TestRuntime(std::move(host_call_context));
+  runtime.set_available_gas(10000);
+  auto syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime, 0,
+                                                            0, 0, 0, 0, 0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
+
+  runtime.set_available_gas(10);
+  syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime, 0, 0,
+                                                       0, 0, 0, 0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
+}
+
+struct NoReturnReadOnlySyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &noerror_syscall_func;
+
+  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static bool kCanReturn = false;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 2> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+};
+
+static_assert(is_syscall_meta<NoReturnReadOnlySyscallMeta>);
+
+TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
+{
+  auto context = make_hogexec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  auto host_call_context = std::make_unique<HostCallContext>();
+  host_call_context->syscall_handler = &handler;
+
+  handler.start_frame(make_contract_address(0), Calldata{},
+                      std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
+
+  // Runtime ctor sets host_call_context->runtime
+  auto runtime = TestRuntime(std::move(host_call_context));
+  runtime.set_available_gas(10000);
+  auto syscall_res =
+      wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime, 0, 0, 0, 0, 0,
+                                              0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
+  // Gas is not consumed by the syscall.
+  // TODO(geoff): This will break when we add a default gas cost for the error
+  // handling (calling a non-readonly syscal in read-only mode should cost at
+  // least some gas)
+  ASSERT_EQ(runtime.get_available_gas(), 10000);
+
+  runtime.set_available_gas(10);
+  syscall_res = wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime, 0, 0,
+                                                        0, 0, 0, 0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
+  // TODO(geoff): same as above
+  ASSERT_EQ(runtime.get_available_gas(), 10);
 }
 
 } // namespace hogd

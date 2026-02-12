@@ -26,17 +26,17 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), 0};
+  if (!(*status).has_value()) {
+    return {(*status).error().code(), 0};
   }
-  if (status.value().value().first.has_value()) {
-    output_current_set = *(status.value().value().first);
+  if ((*status)->first.has_value()) {
+    output_current_set = *((*status)->first);
     output_current_set_opt = true;
   }
   else {
     output_current_set_opt = false;
   }
-  output_current_add = status.value().value().second;
+  output_current_add = (*status)->second;
 
   // If we load from the snapshot, we must have a set value.
   assert(!input_force_load_from_snapshot || output_current_set_opt);
