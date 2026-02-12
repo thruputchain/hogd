@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -52,7 +51,7 @@ public:
                              TransactionID first_tx_id);
 
   x23::Async<ExecProposeResult>
-  propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id);
+  propose_transaction(Transaction const &tx, TransactionID tx_id);
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
@@ -71,7 +70,7 @@ private:
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
-  ExecProposeResult run_propose_transaction(SignedTransaction const &tx,
+  ExecProposeResult run_propose_transaction(Transaction const &tx,
                                             TransactionID tx_id);
   ExecResult run_validate_transaction(ProposedTransaction const &tx,
                                       TransactionID tx_id);

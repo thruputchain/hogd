@@ -299,7 +299,7 @@ public:
       identifier->block_id = block_number_;
       identifier->tx_id = txid;
     }
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    return SystemCallHandler(tx.tx, *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ProposalModeCtor{}, runtime_context);

@@ -22,7 +22,6 @@
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/runtime/wasmtime_runtime.h"
-#include "storage_cost.hh"
 #include "transaction.hh"
 #include "x23/sockio.h"
 
@@ -49,7 +48,7 @@ public:
     SignedTransaction signed_tx = SignedTransaction{};
     signed_tx.tx.contracts_to_deploy.push_back(contract);
     syscall_handler_ = std::make_unique<SystemCallHandler>(
-        std::move(signed_tx), snapshot_cache_,
+        std::move(signed_tx.tx), snapshot_cache_,
         PerTransactionDatabaseProxy(db_proxy_, 0, 0),
         PerTransactionEventServerProxy(event_server_proxy_, 0, 0),
         ProposalModeCtor{}, *context);
