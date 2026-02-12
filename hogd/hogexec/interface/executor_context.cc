@@ -120,7 +120,7 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
   SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ProposalModeCtor{}, *context);
-  syscall_handler.root_invoke(tx.invocation);
+  syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
   auto out = ExecProposeResult(exec_res);
@@ -179,7 +179,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
                                     ValidationModeCtor{
                                         tx.nondeterministic_proposal_data},
                                     *context);
-  syscall_handler.root_invoke(tx.signed_tx.tx.invocation);
+  syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
   if (exec_res == ExecResult::ExecResultOK) {
