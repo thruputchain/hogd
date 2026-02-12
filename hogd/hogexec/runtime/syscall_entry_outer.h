@@ -466,8 +466,6 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
     }
   }
 
-  std::println("got here");
-
   // Here we perform gas accounting.  Errors that might be handled by a contract
   // (via a parent frame) still need to have gas accounting performed.  Errors
   // that fail the whole transaction cannot be accidentally turned into an out
