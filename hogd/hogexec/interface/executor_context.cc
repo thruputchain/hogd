@@ -38,15 +38,14 @@ ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
-                                     TransactionID tx_id)
+ExecutorContext::propose_transaction(Transaction const &tx, TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto async_pair = x23::make_async<ExecProposeResult>();
   x23::Async<ExecProposeResult> &async = async_pair.first;
   x23::CoroCB<ExecProposeResult> &cb = async_pair.second;
-  worker_pool_.submit([this, &signed_tx, tx_id, cb]() {
-    auto res = run_propose_transaction(signed_tx, tx_id);
+  worker_pool_.submit([this, &tx, tx_id, cb]() {
+    auto res = run_propose_transaction(tx, tx_id);
     cb(res);
   });
   co_return co_await async;
@@ -64,7 +63,7 @@ ExecutorContext::propose_transaction_batch(
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
       batch_res.push_back(
-          run_propose_transaction(signed_txs[i], first_tx_id + i));
+          run_propose_transaction(signed_txs[i].tx, first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
@@ -112,7 +111,7 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 }
 
 ExecProposeResult
-ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
+ExecutorContext::run_propose_transaction(Transaction const &tx,
                                          TransactionID tx_id)
 {
   static thread_local auto context = make_hogexec_context();
@@ -175,7 +174,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(tx.signed_tx, *snapshot_cache_, proxy,
+  SystemCallHandler syscall_handler(tx.signed_tx.tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ValidationModeCtor{
                                         tx.nondeterministic_proposal_data},

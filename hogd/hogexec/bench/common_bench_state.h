@@ -77,7 +77,7 @@ public:
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
                                                       block_number_, txid);
-    return SystemCallHandler(signed_tx, *snapshot_cache_, std::move(proxy),
+    return SystemCallHandler(signed_tx.tx, *snapshot_cache_, std::move(proxy),
                              std::move(event_proxy), ProposalModeCtor{},
                              runtime_context);
   }

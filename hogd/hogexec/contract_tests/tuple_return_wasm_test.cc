@@ -381,19 +381,17 @@ protected:
 TEST_F(TupleReturnWasmTest, BasicTwoTuple)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = kNativeContractAddress,
-                          .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
-                          .calldata =
-                              Serializer<NativeContractBuilder::
-                                             kDefaultSerializationFormat>::
-                                  serialize(std::make_tuple(0U))
-                                      .value()}}},
+      Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = kNativeContractAddress,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata =
+                      Serializer<
+                          NativeContractBuilder::kDefaultSerializationFormat>::
+                          serialize(std::make_tuple(0U))
+                              .value()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -407,19 +405,17 @@ TEST_F(TupleReturnWasmTest, BasicTwoTuple)
 TEST_F(TupleReturnWasmTest, NestedTuple)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = kNativeContractAddress,
-                          .entrypoint = entrypoint_from_method_id(1),
-                          .gas_limit = UINT64_MAX,
-                          .calldata =
-                              Serializer<NativeContractBuilder::
-                                             kDefaultSerializationFormat>::
-                                  serialize(std::make_tuple(0U))
-                                      .value()}}},
+      Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = kNativeContractAddress,
+                  .entrypoint = entrypoint_from_method_id(1),
+                  .gas_limit = UINT64_MAX,
+                  .calldata =
+                      Serializer<
+                          NativeContractBuilder::kDefaultSerializationFormat>::
+                          serialize(std::make_tuple(0U))
+                              .value()}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -433,14 +429,11 @@ TEST_F(TupleReturnWasmTest, NestedTuple)
 TEST_F(TupleReturnWasmTest, SingleElementTuple)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(2),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -454,14 +447,11 @@ TEST_F(TupleReturnWasmTest, SingleElementTuple)
 TEST_F(TupleReturnWasmTest, ThreeElementTuple)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(3),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -475,14 +465,11 @@ TEST_F(TupleReturnWasmTest, ThreeElementTuple)
 TEST_F(TupleReturnWasmTest, DeeplyNested)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(4),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -496,14 +483,11 @@ TEST_F(TupleReturnWasmTest, DeeplyNested)
 TEST_F(TupleReturnWasmTest, TupleWithFixedArray)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(5),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -517,14 +501,11 @@ TEST_F(TupleReturnWasmTest, TupleWithFixedArray)
 TEST_F(TupleReturnWasmTest, TupleWithVariableArray)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(6),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -538,14 +519,11 @@ TEST_F(TupleReturnWasmTest, TupleWithVariableArray)
 TEST_F(TupleReturnWasmTest, NestedArrays)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(7),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -559,14 +537,11 @@ TEST_F(TupleReturnWasmTest, NestedArrays)
 TEST_F(TupleReturnWasmTest, ArrayOfTuples)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(8),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -580,14 +555,11 @@ TEST_F(TupleReturnWasmTest, ArrayOfTuples)
 TEST_F(TupleReturnWasmTest, NestedArray2D)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(9),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -601,14 +573,11 @@ TEST_F(TupleReturnWasmTest, NestedArray2D)
 TEST_F(TupleReturnWasmTest, NestedArray3D)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(10),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -622,14 +591,11 @@ TEST_F(TupleReturnWasmTest, NestedArray3D)
 TEST_F(TupleReturnWasmTest, DeeplyNestedArray)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(11),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -643,14 +609,11 @@ TEST_F(TupleReturnWasmTest, DeeplyNestedArray)
 TEST_F(TupleReturnWasmTest, TupleWithOption)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(12),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -664,14 +627,11 @@ TEST_F(TupleReturnWasmTest, TupleWithOption)
 TEST_F(TupleReturnWasmTest, TupleAllOptional)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(13),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -685,14 +645,11 @@ TEST_F(TupleReturnWasmTest, TupleAllOptional)
 TEST_F(TupleReturnWasmTest, NestedOptionTuple)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(14),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -706,14 +663,11 @@ TEST_F(TupleReturnWasmTest, NestedOptionTuple)
 TEST_F(TupleReturnWasmTest, KitchenSink)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(15),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -727,14 +681,11 @@ TEST_F(TupleReturnWasmTest, KitchenSink)
 TEST_F(TupleReturnWasmTest, ArraysAndTuples)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(16),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -748,14 +699,11 @@ TEST_F(TupleReturnWasmTest, ArraysAndTuples)
 TEST_F(TupleReturnWasmTest, TupleWithNestedArray)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(17),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -769,14 +717,11 @@ TEST_F(TupleReturnWasmTest, TupleWithNestedArray)
 TEST_F(TupleReturnWasmTest, Tuple8Elements)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(18),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -790,14 +735,11 @@ TEST_F(TupleReturnWasmTest, Tuple8Elements)
 TEST_F(TupleReturnWasmTest, Tuple16Elements)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(19),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -811,14 +753,11 @@ TEST_F(TupleReturnWasmTest, Tuple16Elements)
 TEST_F(TupleReturnWasmTest, EmptyTuple)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(20),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -832,14 +771,11 @@ TEST_F(TupleReturnWasmTest, EmptyTuple)
 TEST_F(TupleReturnWasmTest, TupleWithBytes)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(21),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -853,14 +789,11 @@ TEST_F(TupleReturnWasmTest, TupleWithBytes)
 TEST_F(TupleReturnWasmTest, TupleWithVariableBytes)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(22),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -874,14 +807,11 @@ TEST_F(TupleReturnWasmTest, TupleWithVariableBytes)
 TEST_F(TupleReturnWasmTest, NestedBytesArray)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(23),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -895,14 +825,11 @@ TEST_F(TupleReturnWasmTest, NestedBytesArray)
 TEST_F(TupleReturnWasmTest, TupleArrayOption)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(24),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -916,14 +843,11 @@ TEST_F(TupleReturnWasmTest, TupleArrayOption)
 TEST_F(TupleReturnWasmTest, NestedEverything)
 {
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(25),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+                                 .calldata = {}}},
       *multiplexed_context_);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

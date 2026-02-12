@@ -96,22 +96,22 @@ validate_flags(StorageDeltaFlagSet flags)
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
-    SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    Transaction const &tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context)
-  : runtime_context_(runtime_context), signed_tx_(std::move(signed_tx)),
-    db_proxy_(std::move(db_proxy)),
+  : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_),
-    newly_created_contracts_([&] {
+    source_tx_hash_(sha256(tx)), auth_claims_(tx.auth_claims),
+    root_invocation_(tx.invocation), newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
 
-      for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
+      for (auto const &contract : tx.contracts_to_deploy) {
         contracts.emplace(sha256(contract),
                           std::make_unique<const Contract>(contract));
       }
@@ -146,8 +146,8 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
-    auto res = runtime_context_.verify_contract(contract);
+  for (auto const &[_, contract] : newly_created_contracts_) {
+    auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
       cumulative_invoke_result_.result_ =
@@ -170,7 +170,7 @@ SystemCallHandler::check_final_validation_data()
 }
 
 InvokeResult
-SystemCallHandler::root_invoke()
+SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
 {
   perform_initial_validation();
   // if validation fails, cumulative_invoke_result_ is set to the appropriate
@@ -179,55 +179,26 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
-  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ <
-                                    signed_tx_.tx.invocation.gas_limit
-                                ? signed_tx_.tx.invocation.gas_limit -
-                                      cumulative_invoke_result_.gas_consumed_
-                                : 0;
+  if (invocation.has_value()) {
+    if (root_invocation_.has_value()) {
+      panic("two root invocations provided");
+    }
+    root_invocation_ = std::move(invocation);
+  }
+  CHECK(root_invocation_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  auto const &root_invocation = root_invocation_.value();
+
+  GasAmount available_gas =
+      cumulative_invoke_result_.gas_consumed_ < root_invocation.gas_limit
+          ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
+          : 0;
 
   auto [res, gas_consumed] =
-      invoke(signed_tx_.tx.invocation.invoked_address,
-             sdk_method_id(signed_tx_.tx.invocation.entrypoint), available_gas,
-             Calldata(signed_tx_.tx.invocation.calldata),
+      invoke(root_invocation.invoked_address,
+             sdk_method_id(root_invocation.entrypoint), available_gas,
+             Calldata(root_invocation.calldata),
              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-
-  auto handle_root_host_fn_status =
-      [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
-    if (status.has_value()) {
-      // TODO(geoff): Consider whether we want to have "frame reverted" on the
-      // root frame as a "transaction failed" or "transaction succeeded"
-      return (status.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
-              status.value() ==
-                  SyscallErrorCode::kSyscallErrorCodeFrameReverted)
-                 ? InvokeStatus<void>{}
-                 : InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    }
-    switch (status.error().code()) {
-    case HostFnErrorCode::kHostOutOfGas:
-      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-    case HostFnErrorCode::kHostReturn:
-      return InvokeStatus<void>{};
-    case HostFnErrorCode::kHostExit:
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    case HostFnErrorCode::kHostValidationFailure:
-      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-    case HostFnErrorCode::kHostAbortTransaction:
-      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-    case HostFnErrorCode::kHostUnrecoverable:
-      error("handle_root_host_fn_status: received kHostUnrecoverable");
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-    case HostFnErrorCode::kHostNoneOrRecoverable:
-      // This case should never happen, as it is instead handled by
-      // the status.has_value() check above.
-      assert(false);
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-    }
-    // Leaving the default arm out of the switch, so that the compiler
-    // will raise a warning later if we add additional InvokeError codes.
-    error("handle_root_host_fn_status: received unknown error code {}",
-          status.error().code());
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-  };
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -244,6 +215,45 @@ SystemCallHandler::root_invoke()
   }
 
   return cumulative_invoke_result_;
+}
+
+InvokeStatus<void>
+SystemCallHandler::handle_root_host_fn_status(
+    HostFnStatus<SyscallErrorCode> status)
+{
+  if (status.has_value()) {
+    // TODO(geoff): Consider whether we want to have "frame reverted" on the
+    // root frame as a "transaction failed" or "transaction succeeded"
+    return (status.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
+            status.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted)
+               ? InvokeStatus<void>{}
+               : InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  switch (status.error().code()) {
+  case HostFnErrorCode::kHostOutOfGas:
+    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+  case HostFnErrorCode::kHostReturn:
+    return InvokeStatus<void>{};
+  case HostFnErrorCode::kHostExit:
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  case HostFnErrorCode::kHostValidationFailure:
+    return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+  case HostFnErrorCode::kHostAbortTransaction:
+    return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+  case HostFnErrorCode::kHostUnrecoverable:
+    error("handle_root_host_fn_status: received kHostUnrecoverable");
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+  case HostFnErrorCode::kHostNoneOrRecoverable:
+    // This case should never happen, as it is instead handled by
+    // the status.has_value() check above.
+    panic("unreachable");
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+  }
+  // Leaving the default arm out of the switch, so that the compiler
+  // will raise a warning later if we add additional InvokeError codes.
+  error("handle_root_host_fn_status: received unknown error code {}",
+        status.error().code());
+  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
 }
 
 ExecResult
@@ -355,7 +365,7 @@ SystemCallHandler::get_current_address() const
 SHA256Hash
 SystemCallHandler::get_source_tx_hash() const
 {
-  return sha256(signed_tx_.tx);
+  return source_tx_hash_;
 }
 
 SyscallStatus<ContractAddress>
@@ -1178,6 +1188,14 @@ SystemCallHandler::set_address_gas_permission_configs(
   new_item.set_gas_permission_configs(std::move(gas_permission_configs));
   return item_view->set(new_item);
 }
+
+const AuthClaimData &
+SystemCallHandler::get_auth_claims() const
+{
+  return auth_claims_;
+}
+
+// == Hash buffer syscalls ==
 
 SyscallStatus<void>
 SystemCallHandler::sha256_update(uint32_t input_index,

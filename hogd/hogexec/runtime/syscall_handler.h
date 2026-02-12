@@ -61,8 +61,7 @@ class StorageSnapshotCache;
 //   Not implemented to be threadsafe.
 class SystemCallHandler {
 public:
-  SystemCallHandler(SignedTransaction signed_tx,
-                    StorageSnapshotCache &snapshot_cache,
+  SystemCallHandler(Transaction const &tx, StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
@@ -102,9 +101,9 @@ public:
   auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
-  // Starts the invocation that is specified within signed_tx_.
   // Must only be called once per transaction.
-  InvokeResult root_invoke();
+  InvokeResult
+  root_invoke(std::optional<Invocation> root_invocation = std::nullopt);
 
   // Operations after root_invoke()
 
@@ -142,10 +141,7 @@ public:
   // Reference invalidated when call frame changes.
   Calldata const &get_calldata() const;
 
-  AuthClaimData const &get_auth_claims() const
-  {
-    return signed_tx_.tx.auth_claims;
-  }
+  AuthClaimData const &get_auth_claims() const;
 
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
@@ -255,10 +251,13 @@ public:
 
 private:
   RuntimeContext &runtime_context_;
-  const SignedTransaction signed_tx_;
   PerTransactionDatabaseProxy db_proxy_;
   PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
+
+  const SHA256Hash source_tx_hash_;
+  const AuthClaimData auth_claims_;
+  std::optional<Invocation> root_invocation_;
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
@@ -290,6 +289,11 @@ private:
   // check the validation data at the end of a transaction, if in validation
   // mode
   void check_final_validation_data();
+
+  // Convert the HostFnStatus returned from the root invocation frame into an
+  // InvokeStatus for the top level return.
+  static InvokeStatus<void>
+  handle_root_host_fn_status(HostFnStatus<SyscallErrorCode> status);
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

@@ -288,8 +288,15 @@ public:
   void discard_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);
 
-  SystemCallHandler
+  [[deprecated("use the Transaction version instead")]] SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
+                               RuntimeContext &runtime_context,
+                               EphemeralTxIdentifier *identifier = nullptr)
+  {
+    return make_new_system_call_handler(tx.tx, runtime_context, identifier);
+  }
+  SystemCallHandler
+  make_new_system_call_handler(Transaction const &tx,
                                RuntimeContext &runtime_context,
                                EphemeralTxIdentifier *identifier = nullptr)
   {

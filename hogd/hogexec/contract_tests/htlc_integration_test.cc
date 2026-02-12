@@ -426,10 +426,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
 
     // Invoke the balance checker native contract
     auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
+        Transaction{.invocation =
                         Invocation{.invoked_address = kBalanceCheckerAddress,
                                    .entrypoint = entrypoint_from_method_id(100),
                                    .gas_limit = UINT64_MAX,
@@ -438,7 +435,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 7}}},
+                                   .nonce = 7}},
         *balance_check_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

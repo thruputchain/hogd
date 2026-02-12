@@ -63,7 +63,7 @@ protected:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
 
-  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
+  SystemCallHandler make_handler(Transaction const &tx,
                                  StorageSnapshotCache &snapshot,
                                  BlockID block_id, TransactionID tx_id,
                                  RuntimeContext &runtime_context)
@@ -72,8 +72,7 @@ protected:
     assert(event_server_proxy_ != nullptr);
 
     return SystemCallHandler(
-        signed_tx, snapshot,
-        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        tx, snapshot, PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
         ProposalModeCtor{}, runtime_context);
   }
@@ -141,10 +140,10 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
   auto context = make_context();
 
-  SignedTransaction signed_tx;
-  signed_tx.tx.contracts_to_deploy.push_back(contract);
+  Transaction tx;
+  tx.contracts_to_deploy.push_back(contract);
 
-  SystemCallHandler handler = make_handler(signed_tx, snapshot, 0, 0, *context);
+  SystemCallHandler handler = make_handler(tx, snapshot, 0, 0, *context);
 
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
@@ -275,17 +274,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                            .contract_type = contract.contract_type()});
 
   SystemCallHandler handler = make_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      {
-                          .invoked_address = kAddress,
-                          .entrypoint = entrypoint_from_method_id(2),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {},
-                      },
-              }},
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = kAddress,
+                  .entrypoint = entrypoint_from_method_id(2),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+      },
       snapshot, 0, 0, *runtime_context);
 
   auto res = handler.root_invoke();
@@ -379,17 +376,15 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       AddressAndKey{.address = address, .key = bad_full_key});
 
   SystemCallHandler handler = make_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      {
-                          .invoked_address = address,
-                          .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {},
-                      },
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = address,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
               },
+
       },
       snapshot, 0, 0, *runtime_context);
 
@@ -397,16 +392,13 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   ASSERT_TRUE(res.result_);
 
   SystemCallHandler handler2 = make_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      {
-                          .invoked_address = address,
-                          .entrypoint = entrypoint_from_method_id(1),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {},
-                      },
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = address,
+                  .entrypoint = entrypoint_from_method_id(1),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
               },
       },
       snapshot, 0, 0, *runtime_context);
@@ -522,16 +514,13 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
   {
     SystemCallHandler handler = make_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        {
-                            .invoked_address = address,
-                            .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
-                            .calldata = {},
-                        },
+        Transaction{
+            .invocation =
+                {
+                    .invoked_address = address,
+                    .entrypoint = entrypoint_from_method_id(0),
+                    .gas_limit = UINT64_MAX,
+                    .calldata = {},
                 },
         },
         snapshot, 0, 0, *context);
@@ -541,16 +530,13 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   }
   {
     SystemCallHandler handler = make_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        {
-                            .invoked_address = address,
-                            .entrypoint = entrypoint_from_method_id(1),
-                            .gas_limit = UINT64_MAX,
-                            .calldata = {},
-                        },
+        Transaction{
+            .invocation =
+                {
+                    .invoked_address = address,
+                    .entrypoint = entrypoint_from_method_id(1),
+                    .gas_limit = UINT64_MAX,
+                    .calldata = {},
                 },
         },
         snapshot, 0, 1, *context);

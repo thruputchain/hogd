@@ -51,7 +51,7 @@ ExecutorMempoolRpc::executorsched_propose_transaction(
   }
 
   auto r =
-      co_await ctx->get().propose_transaction(signed_tx, allocate_tx_ids(1));
+      co_await ctx->get().propose_transaction(signed_tx.tx, allocate_tx_ids(1));
   co_await release_context(block_id, ctx);
   co_return r;
 }
