@@ -45,10 +45,10 @@ public:
   {
     auto *context = get_context();
     assert(context != nullptr);
-    SignedTransaction signed_tx = SignedTransaction{};
-    signed_tx.tx.contracts_to_deploy.push_back(contract);
+    Transaction tx{};
+    tx.contracts_to_deploy.push_back(contract);
     syscall_handler_ = std::make_unique<SystemCallHandler>(
-        std::move(signed_tx.tx), snapshot_cache_,
+        std::move(tx), snapshot_cache_,
         PerTransactionDatabaseProxy(db_proxy_, 0, 0),
         PerTransactionEventServerProxy(event_server_proxy_, 0, 0),
         ProposalModeCtor{}, *context);

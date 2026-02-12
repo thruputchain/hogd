@@ -186,6 +186,7 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
     root_invocation_ = std::move(invocation);
   }
   CHECK(root_invocation_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto const &root_invocation = root_invocation_.value();
 
   GasAmount available_gas =
