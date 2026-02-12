@@ -17,7 +17,7 @@ SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
                                              SignedTransaction const &stx,
                                              DBContext &db)
   : identifier_(db.allocate_identifier()), db_(db),
-    handler_(stx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+    handler_(stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
              *context)
 
