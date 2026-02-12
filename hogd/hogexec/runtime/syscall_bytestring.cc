@@ -19,7 +19,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<std::byte> output_bytestring,
-                            RuntimeMemoryLength &output_written_len)
+                            RuntimeMemoryLength &output_written_len) noexcept
 {
   auto status = syscall_handler.get_bytestring(input_key);
   if (!status) {
@@ -43,7 +43,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
-                               RuntimeMemoryLength &output_length)
+                               RuntimeMemoryLength &output_length) noexcept
 {
   auto status = syscall_handler.get_bytestring(input_key);
   if (!status) {
@@ -62,7 +62,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,
-                            StorageDeltaFlagSet input_flags)
+                            StorageDeltaFlagSet input_flags) noexcept
 {
   if (input_bytestring.size() > kBytestringMaxLen) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};

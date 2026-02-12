@@ -14,7 +14,7 @@ namespace hogd {
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key,
-                           int32_t flags)
+                           int32_t flags) noexcept
 {
   auto status =
       syscall_handler.delete_object(input_key,

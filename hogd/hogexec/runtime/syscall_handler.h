@@ -105,6 +105,14 @@ public:
   InvokeResult
   root_invoke(std::optional<Invocation> root_invocation = std::nullopt);
 
+  // Lower level functions to manipulate the invocation stack.
+  // These should ONLY be used within the testing framework
+  // and from the SDK FFI bindings
+  void start_frame(ContractAddress const &address, Calldata calldata,
+                   InvokeFlagSet flags);
+  SystemStatus<std::pair<InvokeResult, bool>>
+  finish_frame(InvokeStatus<void> result);
+
   // Operations after root_invoke()
 
   // Attempt to commit the current transaction to the database.

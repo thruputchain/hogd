@@ -33,7 +33,7 @@ namespace {
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 int_type_test(uint32_t inp_1, int128_t const &inp_128,
               int128_t inp_128_by_value, uint32_t &out_1, uint64_t &out_2,
-              int128_t &out_128)
+              int128_t &out_128) noexcept
 {
   EXPECT_EQ(inp_1, 100);
   EXPECT_EQ(inp_128, int128_t{1} << 70);
@@ -47,7 +47,7 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 span_type_test(std::span<const std::byte> span_in,
-               std::span<std::byte> span_out)
+               std::span<std::byte> span_out) noexcept
 {
   EXPECT_EQ(span_in.size(), 8);
   EXPECT_EQ(span_out.size(), 4);
@@ -64,7 +64,7 @@ span_type_test(std::span<const std::byte> span_in,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-no_return_test()
+no_return_test() noexcept
 {
   return {{SyscallErrorCode::kSyscallErrorCodeNone}, 0};
 }

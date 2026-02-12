@@ -19,7 +19,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 bool input_force_load_from_snapshot,
                                 int128_t &output_current_set,
                                 bool &output_current_set_opt,
-                                int128_t &output_current_add)
+                                int128_t &output_current_add) noexcept
 {
   auto status =
       syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
@@ -48,7 +48,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
                                    int128_t input_add_value,
-                                   StorageDeltaFlagSet input_flags)
+                                   StorageDeltaFlagSet input_flags) noexcept
 {
   std::optional<int128_t> set_value = std::nullopt;
   if (optional_input_set_value) {

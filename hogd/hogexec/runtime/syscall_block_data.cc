@@ -13,7 +13,7 @@ namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
-                             BlockHeight &output_result)
+                             BlockHeight &output_result) noexcept
 {
   auto status = syscall_handler.get_block_height();
   if (!status) {

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -15,17 +16,38 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta.h"
+#include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "types.hh"
 
 namespace hogd {
 
 namespace {
 
-using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
+constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+no_syscall_func_inner() noexcept
+{
+  return {SyscallErrorCode::kSyscallErrorCodeNoSyscall, kNoSyscallCost};
+}
+
+struct NoSyscallFuncMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &no_syscall_func_inner;
+
+  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+static_assert(is_syscall_meta<NoSyscallFuncMeta>);
+
+using SyscallFunc = HostFnStatus<SyscallErrorCode> (*)(
     SystemCallHandler &, Runtime &, uint64_t, uint64_t, uint64_t, uint64_t,
-    uint64_t, uint64_t, uint64_t);
+    uint64_t, uint64_t, uint64_t) noexcept;
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
@@ -41,32 +63,35 @@ constexpr auto kSyscallTable =
 
 // returns gas_consumed, syscall error>
 template<std::same_as<uint64_t>... Args>
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+HostFnStatus<SyscallErrorCode>
 syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
                     Args... args)
 {
+  SyscallFunc syscall_fn = nullptr;
   if (syscall_no >= kSyscallTable.size()) {
     // invalid syscall
     if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
       stats->invalid_syscall_count++;
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNoSyscall, kNoSyscallCost};
+    syscall_fn = &wrap_outer<NoSyscallFuncMeta>;
+  }
+  else {
+    auto [syscall_expect, syscall_fn_outer] = kSyscallTable[syscall_no];
+    assert(syscall_expect == static_cast<SyscallNo>(syscall_no));
+    syscall_fn = syscall_fn_outer;
   }
 
   static_assert(kSyscallTable.size() < INT32_MAX,
                 "xdr enum overflow otherwise");
 
-  auto [syscall_expect, syscall_fn_outer] = kSyscallTable[syscall_no];
-
-  assert(syscall_expect == static_cast<SyscallNo>(syscall_no));
   assert(call_context->syscall_handler);
 
   if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
     stats->syscall_counts[syscall_no]++;
   }
 
-  return syscall_fn_outer(*call_context->syscall_handler,
-                          *call_context->runtime, args...);
+  return syscall_fn(*call_context->syscall_handler, *call_context->runtime,
+                    args...);
 }
 
 } // namespace
@@ -79,11 +104,8 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");
 
-  auto [err, gas_consumed] = syscall_entry_inner(call_context, arg0, arg1, arg2,
-                                                 arg3, arg4, arg5, arg6, arg7);
-  if (!call_context->runtime->consume_gas(gas_consumed)) {
-    return to_trampoline_result({HostFnError{HostFnErrorCode::kHostOutOfGas}});
-  }
+  auto err = syscall_entry_inner(call_context, arg0, arg1, arg2, arg3, arg4,
+                                 arg5, arg6, arg7);
   return to_trampoline_result(err);
 }
 
