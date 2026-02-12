@@ -121,7 +121,7 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(tx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -142,7 +142,7 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
                                 UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
     auto handler = make_new_system_call_handler(
         stx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(stx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -217,7 +217,7 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(tx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -233,7 +233,7 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
   // run the unfurl transactions
   for (auto const &tx : unfurl_txns) {
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(tx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -257,7 +257,7 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
                                 UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
     auto handler = make_new_system_call_handler(
         stx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(stx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -320,7 +320,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(tx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -344,7 +344,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
                                 UINT64_MAX, uint32_t{5}, UINT64_MAX)}};
     auto handler = make_new_system_call_handler(
         stx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(stx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -381,7 +381,7 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
-    auto res = handler.root_invoke(tx.tx.invocation);
+    auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
@@ -425,7 +425,7 @@ TEST_F(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
 
   auto const &stx = unfurl_txns[0];
   auto handler = make_new_system_call_handler(stx, *wasm_runtime_context_);
-  auto res = handler.root_invoke(stx.tx.invocation);
+  auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
 }
 
