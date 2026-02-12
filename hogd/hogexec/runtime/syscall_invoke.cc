@@ -106,8 +106,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // invocation returned successfully
   if (invoke_res.has_value() &&
       ((*invoke_res) == SyscallErrorCode::kSyscallErrorCodeNone ||
-       (*invoke_res) ==
-           SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
+       (*invoke_res) == SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
     auto return_buffer = syscall_handler.get_return_buffer();
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
