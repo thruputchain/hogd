@@ -25,7 +25,7 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     return ctx.cost_model->get_bytestring_cost(after->to_bytes().size());
   }
   if (after->is_nnint128()) {
-    return ctx.cost_model->kBaseItemCost;
+    return ctx.cost_model->get_nnint_cost();
   }
   if (after->is_deletion()) {
     return 0;
