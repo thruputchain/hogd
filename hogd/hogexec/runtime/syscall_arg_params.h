@@ -249,4 +249,9 @@ struct SyscallArgParams<const T *> {
   }
 };
 
+template<typename T>
+concept is_syscall_arg_param = requires(T t) {
+  { SyscallArgParams<T>::kNumInputs } -> std::convertible_to<size_t>;
+};
+
 } // namespace hogd

@@ -22,7 +22,7 @@ namespace hogd {
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_SHA256_inner(SystemCallHandler &handler,
                      std::span<const std::byte> input_buffer,
-                     SHA256Hash &output_hash)
+                     SHA256Hash &output_hash) noexcept
 {
   output_hash = sha256(input_buffer);
 
@@ -36,7 +36,7 @@ syscall_SHA256_inner(SystemCallHandler &handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
                            std::span<const std::byte> input_buffer,
-                           bool input_reset)
+                           bool input_reset) noexcept
 {
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
@@ -47,7 +47,7 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
-                             SHA256Hash &output_output)
+                             SHA256Hash &output_output) noexcept
 {
   auto r = handler.sha256_finalize(input_index);
   if (!r.has_value()) {
@@ -64,7 +64,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_VerifySignature_inner(int32_t scheme,
                               std::span<const std::byte> signature,
                               std::span<const std::byte> public_key,
-                              std::span<const std::byte> message)
+                              std::span<const std::byte> message) noexcept
 {
   static_assert(std::same_as<decltype(scheme),
                              std::underlying_type_t<CryptographicScheme>>);

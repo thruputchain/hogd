@@ -346,8 +346,10 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
                                                        std::as_writable_bytes(
                                                            std::span(bstring)),
                                                        written_len);
-        if (!res.has_value() ||
-            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+        // This test should fail because it accesses the bytestring the server
+        // is configured to return an unrecoverable error on
+        if (res.has_value() ||
+            res.error().code() != HostFnErrorCode::kHostUnrecoverable) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         return {};
@@ -389,7 +391,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       snapshot, 0, 0, *runtime_context);
 
   auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
+  ASSERT_TRUE(res.is_root_success());
 
   SystemCallHandler handler2 = make_handler(
       Transaction{
@@ -402,7 +404,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               },
       },
       snapshot, 0, 0, *runtime_context);
-  EXPECT_ANY_THROW(handler2.root_invoke());
+  res = handler2.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
 }
 
 TEST_F(NativeContractTest, LazyLoadingNNInt)

@@ -1,10 +1,13 @@
 
 #include "auth_claim.hh"
+#include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
 #include <cstring>
+#include <exception>
+#include <new>
 #include <span>
 #include <utility>
 
@@ -26,53 +29,59 @@ syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
     const int32_t *optional_input_key_scheme,
     std::span<const std::byte> input_key_bytes,
-    const uint32_t *optional_input_key_weight)
+    const uint32_t *optional_input_key_weight) noexcept
 {
-  auto new_key = [&] -> SyscallStatus<PublicKeyConfigOpt> {
-    // Either all of the args are empty (deleting the key) or they're all
-    // present and valid
-    if (optional_input_key_scheme == nullptr) {
-      if (optional_input_key_weight != nullptr) {
+  SyscallStatus<PublicKeyConfigOpt> new_key;
+  try {
+    new_key = [&] -> SyscallStatus<PublicKeyConfigOpt> {
+      // Either all of the args are empty (deleting the key) or they're all
+      // present and valid
+      if (optional_input_key_scheme == nullptr) {
+        if (optional_input_key_weight != nullptr) {
+          return SyscallError{
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+        }
+        if (!input_key_bytes.empty()) {
+          return SyscallError{
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+        }
+        return {nullptr};
+      }
+      // the key must exist and be valid
+      if (optional_input_key_weight == nullptr) {
         return SyscallError{
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
       }
-      if (!input_key_bytes.empty()) {
+
+      PublicKey key;
+
+      switch (static_cast<CryptographicScheme>(*optional_input_key_scheme)) {
+      case CryptographicScheme::Ed25519:
+      {
+        key.scheme(CryptographicScheme::Ed25519);
+        if (input_key_bytes.size() != key.ed25519().size()) {
+          return SyscallError{
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+        }
+        std::memcpy(key.ed25519().data(), input_key_bytes.data(),
+                    sizeof(Ed25519PublicKey));
+
+        return {x23::Ptr<PublicKeyConfig>{
+            new PublicKeyConfig{.key = key,
+                                .max_weight = *optional_input_key_weight}}};
+      }
+      default:
+        trace("Received unknown cryptographic scheme in "
+              "ChangePublicKeyRegistration: {}",
+              *optional_input_key_scheme);
         return SyscallError{
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
       }
-      return {nullptr};
-    }
-    // the key must exist and be valid
-    if (optional_input_key_weight == nullptr) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-
-    PublicKey key;
-
-    switch (static_cast<CryptographicScheme>(*optional_input_key_scheme)) {
-    case CryptographicScheme::Ed25519:
-    {
-      key.scheme(CryptographicScheme::Ed25519);
-      if (input_key_bytes.size() != key.ed25519().size()) {
-        return SyscallError{
-            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-      }
-      std::memcpy(key.ed25519().data(), input_key_bytes.data(),
-                  sizeof(Ed25519PublicKey));
-
-      return {x23::Ptr<PublicKeyConfig>{
-          new PublicKeyConfig{.key = key,
-                              .max_weight = *optional_input_key_weight}}};
-    }
-    default:
-      trace("Received unknown cryptographic scheme in "
-            "ChangePublicKeyRegistration: {}",
-            *optional_input_key_scheme);
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-  }();
+    }();
+  } catch (std::bad_alloc &e) {
+    error("unrecoverable: failed to allocate public key config: {}", e.what());
+    return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
+  }
 
   if (!new_key) {
     return {new_key.error().code(), 0};
@@ -93,7 +102,7 @@ syscall_ChangePublicKeyRegistration_inner(
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_WriteAddressNonceConfig_inner(
     SystemCallHandler &syscall_handler,
-    const generated::NonceConfig &input_nonce_config)
+    const generated::NonceConfig &input_nonce_config) noexcept
 {
   auto nonce_config =
       FFIHelperType<generated::NonceConfig>::to_cpp(input_nonce_config);
@@ -114,32 +123,40 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     const generated::GasPermissionConfig *optional_input_permission_1,
     const generated::GasPermissionConfig *optional_input_permission_2,
     const generated::GasPermissionConfig *optional_input_permission_3,
-    const generated::GasPermissionConfig *optional_input_permission_4)
+    const generated::GasPermissionConfig *optional_input_permission_4) noexcept
 {
   x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs;
   bool no_gaps = false;
   bool found_gap = false;
-  auto add_gas_permission =
-      [&](const generated::GasPermissionConfig *permission) {
-        if (permission) {
-          if (no_gaps) {
-            found_gap = true;
-            return;
-          }
-          gas_permission_configs.push_back(
-              FFIHelperType<generated::GasPermissionConfig>::to_cpp(
-                  *permission));
-        }
-        else {
-          no_gaps = true;
-        }
-      };
 
-  add_gas_permission(optional_input_permission_0);
-  add_gas_permission(optional_input_permission_1);
-  add_gas_permission(optional_input_permission_2);
-  add_gas_permission(optional_input_permission_3);
-  add_gas_permission(optional_input_permission_4);
+  try {
+    auto add_gas_permission =
+        [&](const generated::GasPermissionConfig *permission) {
+          if (permission) {
+            if (no_gaps) {
+              found_gap = true;
+              return;
+            }
+            gas_permission_configs.push_back(
+                FFIHelperType<generated::GasPermissionConfig>::to_cpp(
+                    *permission));
+          }
+          else {
+            no_gaps = true;
+          }
+        };
+
+    add_gas_permission(optional_input_permission_0);
+    add_gas_permission(optional_input_permission_1);
+    add_gas_permission(optional_input_permission_2);
+    add_gas_permission(optional_input_permission_3);
+    add_gas_permission(optional_input_permission_4);
+  } catch (std::exception &e) {
+    error("unrecoverable: failed to add bounded number of gas permission "
+          "configs to vector of bounded size: {}",
+          e.what());
+    return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
+  }
 
   if (found_gap) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
@@ -158,7 +175,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
-                                uint32_t &output_count)
+                                uint32_t &output_count) noexcept
 {
   output_count = syscall_handler.get_auth_claims().size();
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
@@ -167,7 +184,7 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
                            uint32_t input_index,
-                           generated::AuthClaim &output_auth_claim)
+                           generated::AuthClaim &output_auth_claim) noexcept
 {
   if (input_index >= syscall_handler.get_auth_claims().size()) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};

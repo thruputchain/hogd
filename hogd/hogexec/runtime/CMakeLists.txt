@@ -119,6 +119,7 @@ add_library(runtime_test_objects OBJECT
   syscall_auth_config_test.cc
   syscall_block_data_test.cc
   syscall_entry_outer_tests.cc
+  syscall_error_handling_tests.cc
   syscall_parse_tests.cc
   try_invoke_test.cc
   userctx_test.cc

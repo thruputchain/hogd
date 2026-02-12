@@ -404,12 +404,10 @@ SystemCallHandler::invoke(ContractAddress const &address,
       .gas_consumed_ = 0,
   };
 
-  invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
+  start_frame(address, std::move(calldata), flags);
 
   cumulative_result += runtime.value()->invoke(method, gas_limit);
-  auto finish_status =
-      invocation_frame_stack_.finish_frame(cumulative_result.result_,
-                                           execution_mode_data_);
+  auto finish_status = finish_frame(cumulative_result.result_);
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
@@ -428,6 +426,19 @@ SystemCallHandler::invoke(ContractAddress const &address,
   }
 
   return out;
+}
+
+void
+SystemCallHandler::start_frame(ContractAddress const &address,
+                               Calldata calldata, InvokeFlagSet flags)
+{
+  invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
+}
+
+SystemStatus<std::pair<InvokeResult, bool>>
+SystemCallHandler::finish_frame(InvokeStatus<void> result)
+{
+  return invocation_frame_stack_.finish_frame(result, execution_mode_data_);
 }
 
 void

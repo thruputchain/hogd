@@ -13,20 +13,17 @@
 
 #include "event.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "syscall_error.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 namespace hogd {
 
@@ -150,12 +147,6 @@ ForeignHostFnResult constexpr from_status(HostFnStatus<SyscallErrorCode> status)
                                  std::to_underlying(status.error().code())};
 }
 
-ForeignHostFnResult constexpr from_status(
-    std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> status)
-{
-  return from_status(status.first);
-}
-
 // Parse the arguments of a syscall and forward them to run_mock_func_inner
 template<typename SyscallMeta>
 ForeignHostFnResult
@@ -185,32 +176,8 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
                    typename syscall_t::template arg_i<Is>>(input_args)...};
 
     auto inner_res =
-        wrap_after_parse<SyscallMeta>(handler->to_handler(),
-                                      WrappedGasAmount{
-                                          mock_runtime->get_available_gas()},
+        wrap_after_parse<SyscallMeta>(handler->to_handler(), *mock_runtime,
                                       std::move(parsed_args));
-
-    auto gas_consumed = inner_res.second;
-    if (!mock_runtime->consume_gas(gas_consumed)) {
-      return {.result_code = 0,
-              .panic = std::to_underlying(HostFnErrorCode::kHostOutOfGas)};
-    }
-
-    if (!SyscallMeta::kCanReturn && inner_res.first.has_value()) {
-      return {.result_code = 0,
-              .panic = std::to_underlying(HostFnErrorCode::kHostExit)};
-    }
-
-    if constexpr (is_debug_build()) {
-      // In debug builds, verify that the syscall only returns documented error
-      // codes. This helps catch cases where a syscall returns an error that
-      // isn't documented in syscalls.yaml.
-      if (inner_res.first.has_value() &&
-          !is_allowed_error_code<SyscallMeta>(inner_res.first.value())) {
-        panic("Syscall {} returned undocumented error code {}",
-              SyscallMeta::kSyscallNo, x23::show(inner_res.first.value()));
-      }
-    }
 
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -29,7 +28,7 @@ BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   {
     auto blocked = blocked_items_.take();
     if (blocked->contains(addrkey)) {
-      throw std::runtime_error("Blocked item accessed");
+      return ExpectedStorageItem(RPCError::kRPCUnrecoverable);
     }
   }
 

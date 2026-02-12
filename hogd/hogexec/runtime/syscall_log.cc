@@ -15,7 +15,7 @@
 namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer)
+syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer) noexcept
 {
   trace("ConsoleLog: {}",
         std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
@@ -29,7 +29,7 @@ syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer)
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
                        Topic const *topic1, Topic const *topic2,
-                       std::span<const std::byte> data)
+                       std::span<const std::byte> data) noexcept
 {
   if ((topic1 && !topic0) || (topic2 && (!topic1 || !topic0))) {
     // can't have a topicN without topicN-1

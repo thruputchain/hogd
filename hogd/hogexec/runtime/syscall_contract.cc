@@ -14,7 +14,7 @@ syscall_GetDeployAddress_inner(
     SystemCallHandler &syscall_handler,
     const ContractAddress *optional_input_caller_address,
     const SHA256Hash &input_nonce, const SHA256Hash &input_contract_hash,
-    ContractAddress &output_to_be_deployed)
+    ContractAddress &output_to_be_deployed) noexcept
 {
   if (optional_input_caller_address) {
     output_to_be_deployed = SystemCallHandler::static_get_deploy_address(
@@ -33,7 +33,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_nonce,
                              const SHA256Hash &input_contract_hash,
-                             ContractAddress &output_deployed_address)
+                             ContractAddress &output_deployed_address) noexcept
 {
   auto status =
       syscall_handler.deploy_contract(input_nonce, input_contract_hash);

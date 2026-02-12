@@ -15,9 +15,9 @@
 namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_RetrocausalQueueInsert_inner(SystemCallHandler &syscall_handler,
-                                     StorageKeyContractData const &key,
-                                     std::span<const std::byte> queue_entry)
+syscall_RetrocausalQueueInsert_inner(
+    SystemCallHandler &syscall_handler, StorageKeyContractData const &key,
+    std::span<const std::byte> queue_entry) noexcept
 {
   auto status = syscall_handler.retrocausal_queue_insert(key, queue_entry);
   if (!status) {
@@ -33,11 +33,10 @@ syscall_RetrocausalQueueInsert_inner(SystemCallHandler &syscall_handler,
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
-                                      const StorageKeyContractData &input_key,
-                                      bool input_peek,
-                                      std::span<std::byte> output_queue_entry,
-                                      RuntimeMemoryLength &output_written_len)
+syscall_RetrocausalQueueConsume_inner(
+    SystemCallHandler &syscall_handler, const StorageKeyContractData &input_key,
+    bool input_peek, std::span<std::byte> output_queue_entry,
+    RuntimeMemoryLength &output_written_len) noexcept
 {
   auto status =
       syscall_handler.retrocausal_queue_consume(input_key, input_peek);

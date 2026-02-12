@@ -166,7 +166,9 @@ struct TypeNum<0, std::tuple<Arg, Args...>> {
   using type = Arg;
 };
 
-template<typename Ret, typename... Args> struct SyscallTypeParams {
+template<typename Ret, typename... Args>
+requires (is_syscall_arg_param<Args> && ...)
+struct SyscallTypeParams {
   using ret_t = Ret;
   using args_t = std::tuple<Args...>;
 
@@ -176,7 +178,8 @@ template<typename Ret, typename... Args> struct SyscallTypeParams {
   template<size_t I> requires (I < sizeof...(Args))
   using arg_i = TypeNum<I, std::tuple<Args...>>::type;
 
-  template<size_t I> constexpr static size_t offset_i()
+  template<size_t I> requires (I < sizeof...(Args))
+  constexpr static size_t offset_i()
   {
     // Can ditch access_seq, and just get the following,
     // with structured bindings for parameter packs
@@ -196,7 +199,9 @@ class SystemCallHandler;
 template<typename> struct SyscallTypes;
 
 template<typename Ret, typename... Args>
-struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount, Args...)>
+requires (is_syscall_arg_param<Args> && ...)
+struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount,
+                            Args...) noexcept>
   : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<SystemCallHandler &, WrappedGasAmount>
   extra_args(SystemCallHandler &handler, WrappedGasAmount total_available_gas)
@@ -206,7 +211,8 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount, Args...)>
 };
 
 template<typename Ret, typename... Args>
-struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
+requires (is_syscall_arg_param<Args> && ...)
+struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...) noexcept>
   : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<SystemCallHandler &>
   extra_args(SystemCallHandler &handler, WrappedGasAmount /*unused*/)
@@ -216,7 +222,9 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
 };
 
 template<typename Ret, typename... Args>
-struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {
+requires (is_syscall_arg_param<Args> && ...)
+struct SyscallTypes<Ret (*)(Args...) noexcept>
+  : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<> extra_args(SystemCallHandler & /*unused*/,
                                            WrappedGasAmount /*unused*/)
   {
@@ -225,6 +233,7 @@ struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {
 };
 
 template<size_t Offset, typename ArgToParse, typename Inputs>
+requires (is_syscall_arg_param<ArgToParse>)
 constexpr auto
 parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
 {
@@ -245,6 +254,7 @@ parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
 
 // Parse inputs to mock syscall, within native_exec.
 template<size_t Offset, typename ArgToParse, typename Inputs>
+requires (is_syscall_arg_param<ArgToParse>)
 constexpr auto
 parse_mock(Inputs const &tuple_args)
 {
@@ -374,25 +384,28 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
 // wrap_outer so as to minimize code duplication (and reduce the chance of an
 // accidental discrepancy between the test framework and the actual runtime).
 template<is_syscall_meta SyscallMeta>
-constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
-                 auto &&args)
+constexpr HostFnStatus<SyscallErrorCode>
+wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
   constexpr static SyscallNo kSyscall = SyscallMeta::kSyscallNo;
 
-  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
-    if (handler.is_read_only()) {
-      trace("Syscall {} is not read-only, but called in read-only mode",
-            kSyscall);
-      return {HostFnStatus<SyscallErrorCode>{
-                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-              0};
+  // Wrapping the logic in a lambda so that no matter what, the checks at the
+  // end to consume gas and validate return state cannot be skipped.
+  auto [syscall_result, gas_consumed] =
+      [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
+      -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
+    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+      if (handler.is_read_only()) {
+        trace("Syscall {} is not read-only, but called in read-only mode",
+              kSyscall);
+        return {HostFnStatus<SyscallErrorCode>{
+                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                0};
+      }
     }
-  }
 
-  return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
     // check whether any loads failed
     if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
                std::get<Is>(args)) &&
@@ -412,7 +425,9 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
                     std::get<Is>(args))...}));
     }
 
-    auto extra_args = syscall_t::extra_args(handler, gas_remaining);
+    auto extra_args =
+        syscall_t::extra_args(handler,
+                              WrappedGasAmount{runtime.get_available_gas()});
 
     // Invoke the inner syscall
     // template only required because we can't do auto [...handler] =
@@ -428,7 +443,7 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
     if (runtime_log_level(LogLevel::kTrace)) {
       bool is_syscall_error =
           !res.first.has_value() ||
-          res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
+          (*res.first) != SyscallErrorCode::kSyscallErrorCodeNone;
       trace("Syscall {} Output: {}", kSyscall,
             is_syscall_error
                 ? syscall_error_message(res.first)
@@ -439,16 +454,73 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
 
     return res;
   }(std::make_index_sequence<syscall_t::kNumArgs>{});
+
+  if constexpr (is_debug_build()) {
+    // In debug builds, verify that the syscall only returns documented error
+    // codes. This helps catch cases where a syscall returns an error that isn't
+    // documented in syscalls.yaml.
+    if (syscall_result.has_value() &&
+        !is_allowed_error_code<SyscallMeta>(*syscall_result)) {
+      panic("Syscall {} returned undocumented error code {}",
+            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+    }
+  }
+
+  // Here we perform gas accounting.  Errors that might be handled by a contract
+  // (via a parent frame) still need to have gas accounting performed.  Errors
+  // that fail the whole transaction cannot be accidentally turned into an out
+  // of gas error.
+  bool is_handleable_error = true;
+  if (!syscall_result.has_value()) {
+    switch (syscall_result.error().code()) {
+    case HostFnErrorCode::kHostAbortTransaction:
+    case HostFnErrorCode::kHostValidationFailure:
+    case HostFnErrorCode::kHostUnrecoverable:
+      is_handleable_error = false;
+      break;
+    case HostFnErrorCode::kHostOutOfGas:
+    case HostFnErrorCode::kHostExit:
+    case HostFnErrorCode::kHostReturn:
+      is_handleable_error = true;
+      break;
+    case HostFnErrorCode::kHostNoneOrRecoverable:
+      panic("unreachable");
+    }
+  }
+
+  bool gas_consume_res = runtime.consume_gas(gas_consumed);
+  // If the error is not something that can be handled at any layer of the
+  // transaction, then cannot swap to kHostOutOfGas here.
+  if (is_handleable_error) {
+    if (!gas_consume_res) {
+      return {HostFnError{HostFnErrorCode::kHostOutOfGas}};
+    }
+  }
+
+  // The syscall_result.has_value() check means that we only
+  // override syscall_result (by returning kHostExit) in a subset
+  // of the cases covered by the is_handleable_error guard.
+  if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
+    // If the syscall cannot return to the wasm environment but the syscall
+    // tried to return an error code, abort the entire call frame.
+    if (runtime_log_level(LogLevel::kTrace)) {
+      trace("Syscall {} attempted to return an error code {} but cannot return",
+            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+    }
+    return {HostFnError{HostFnErrorCode::kHostExit}};
+  }
+
+  return syscall_result;
 }
 
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
-constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+constexpr HostFnStatus<SyscallErrorCode>
 wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
            uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-           uint64_t arg5, uint64_t arg6)
+           uint64_t arg5, uint64_t arg6) noexcept
 {
   auto contract_memory = runtime.get_memory();
 
@@ -459,42 +531,17 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  auto [syscall_result,
-        gas_consumed] = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
-      -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
+  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
+             -> HostFnStatus<SyscallErrorCode> {
     // Attempt to load syscall arguments from contract memory.
     auto parsed_args = std::tuple{
         parse<syscall_t::template offset_i<Is>(),
               typename syscall_t::template arg_i<Is>>(contract_memory,
                                                       input_args)...};
 
-    return wrap_after_parse<SyscallMeta>(handler,
-                                         WrappedGasAmount{
-                                             runtime.get_available_gas()},
+    return wrap_after_parse<SyscallMeta>(handler, runtime,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
-
-  if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
-    // If the syscall cannot return to the wasm environment but the syscall
-    // tried to return an error code, abort the entire call frame.
-    if (runtime_log_level(LogLevel::kTrace)) {
-      trace("Syscall {} attempted to return an error code {} but cannot return",
-            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
-    }
-    return {HostFnError{HostFnErrorCode::kHostExit}, gas_consumed};
-  }
-
-  if constexpr (is_debug_build()) {
-    // In debug builds, verify that the syscall only returns documented error
-    // codes. This helps catch cases where a syscall returns an error that isn't
-    // documented in syscalls.yaml.
-    if (syscall_result.has_value() &&
-        !is_allowed_error_code<SyscallMeta>(syscall_result.value())) {
-      panic("Syscall {} returned undocumented error code {}",
-            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
-    }
-  }
-  return {syscall_result, gas_consumed};
 }
 
 } // namespace hogd
