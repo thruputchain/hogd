@@ -75,7 +75,8 @@ InvocationFrame::mark_frame_as_failed(
 void
 InvocationFrame::commit_failed_child_frame()
 {
-  child_return_output_ = InvocationFrameOutput{InvocationFrameStatusCode::kInvocationFrameStatusCodeFault};
+  child_return_output_ = InvocationFrameOutput{
+      InvocationFrameStatusCode::kInvocationFrameStatusCodeFault};
 }
 
 void
@@ -92,15 +93,15 @@ InvocationFrame::set_frame_return(InvocationFrameOutput &&return_output)
 
 namespace {
 
-StorageDelta make_deployed_contract_delta(DeployedContractHash const &hash)
+StorageDelta
+make_deployed_contract_delta(DeployedContractHash const &hash)
 {
-  StorageDelta delta =
-      StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
+  StorageDelta delta = StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
   delta.deployed_contract_hash() = hash;
   return delta;
 }
 
-}
+} // namespace
 
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
@@ -156,8 +157,7 @@ InvocationFrame::collect_storage_deltas(
     out.push_back(FlaggedStorageDelta{
         .addrkey = addrkey,
         .delta = delta,
-        .flags =
-            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone),
+        .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone),
     });
   }
 }

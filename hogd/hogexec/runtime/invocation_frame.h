@@ -104,20 +104,24 @@ public:
   SystemStatus<bool>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
 
-  void collect_storage_deltas(
-      x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
+  void
+  collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
 
-  bool should_revert() const { 
+  bool should_revert() const
+  {
     switch (to_return_output_.status_code()) {
-      case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
-        return false;
-      case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
-      case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
-        return true;
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+      return false;
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+      return true;
     }
   }
 
-  InvocationFrameOutput const &get_frame_output() const { return to_return_output_; }
+  InvocationFrameOutput const &get_frame_output() const
+  {
+    return to_return_output_;
+  }
 
   void deploy_contract(ContractAddress const &addr,
                        DeployedContractHash const &hash)
@@ -162,10 +166,6 @@ private:
   x23::Vec<TxEmittedEvent> events_;
 
   uint32_t try_invoke_frame_count_ = 0;
-
-  // Whether the frame is set to revert by an explicit call from a contract
-  // (i.e. via the Return syscall).
-  bool manual_revert_ = false;
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;

@@ -4,49 +4,27 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
-#include <string_view>
 #include <type_traits>
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
+#include "hogd/hogexec/runtime/syscall_fallback.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta.h"
-#include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "types.hh"
 
 namespace hogd {
 
 namespace {
 
-constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-no_syscall_func_inner() noexcept
-{
-  return {SyscallErrorCode::kSyscallErrorCodeNoSyscall, kNoSyscallCost};
-}
-
-struct NoSyscallFuncMeta {
-  constexpr static bool kIsReadOnlySyscall = false;
-  constexpr static auto kInnerFunc = &no_syscall_func_inner;
-
-  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
-  constexpr static bool kCanReturn = true;
-  constexpr static std::array<std::string_view, 0> kInputNames = {};
-  constexpr static std::array<std::string_view, 0> kOutputNames = {};
-  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
-};
-
-static_assert(is_syscall_meta<NoSyscallFuncMeta>);
-
 using SyscallFunc = HostFnStatus<SyscallErrorCode> (*)(
-    SystemCallHandler &, Runtime &, SyscallNo, uint64_t, uint64_t, uint64_t, uint64_t,
-    uint64_t, uint64_t, uint64_t) noexcept;
+    SystemCallHandler &, Runtime &, SyscallNo, uint64_t, uint64_t, uint64_t,
+    uint64_t, uint64_t, uint64_t, uint64_t) noexcept;
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
@@ -90,8 +68,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
   }
 
   return syscall_fn(*call_context->syscall_handler, *call_context->runtime,
-                    static_cast<SyscallNo>(syscall_no),
-                    args...);
+                    static_cast<SyscallNo>(syscall_no), args...);
 }
 
 } // namespace

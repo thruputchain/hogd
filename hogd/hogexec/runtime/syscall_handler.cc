@@ -418,7 +418,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
   if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_);
     try {
-      invocation_frame_trace_ = x23::Ptr<InvocationFrameTrace>(new InvocationFrameTrace());
+      invocation_frame_trace_ =
+          x23::Ptr<InvocationFrameTrace>(new InvocationFrameTrace());
     } catch (std::exception &e) {
       panic("Failed to create new invocation frame trace: {}", e.what());
     }
@@ -432,7 +433,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
   if (invocation_frame_trace_) {
     invocation_frame_stack_.get_active_frame().collect_storage_deltas(
         invocation_frame_trace_->storage_writes);
-    invocation_frame_trace_->status = invocation_frame_stack_.get_active_frame().get_frame_output();
+    invocation_frame_trace_->status =
+        invocation_frame_stack_.get_active_frame().get_frame_output();
   }
 
   auto finish_status = finish_frame(cumulative_result.result_);
@@ -562,16 +564,17 @@ SystemCallHandler::get_return_buffer() const
   assert(!invocation_frame_stack_.empty());
   auto const &top_frame = invocation_frame_stack_.get_active_frame();
   if (!top_frame.child_return_output_.has_value()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
 
   switch (top_frame.child_return_output_.value().status_code()) {
-    case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
-      return &top_frame.child_return_output_.value().return_buffer();
-    case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
-      return &top_frame.child_return_output_.value().abort_buffer();
-    case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
-      return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
+  case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+    return &top_frame.child_return_output_.value().return_buffer();
+  case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+    return &top_frame.child_return_output_.value().abort_buffer();
+  case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
   }
 }
 
@@ -581,14 +584,18 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
 {
   assert(!invocation_frame_stack_.empty());
   if (revert_frame) {
-    InvocationFrameOutput output(InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+    InvocationFrameOutput output(
+        InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
     output.abort_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.get_active_frame().set_frame_return(std::move(output));
+    invocation_frame_stack_.get_active_frame().set_frame_return(
+        std::move(output));
   }
   else {
-    InvocationFrameOutput output(InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    InvocationFrameOutput output(
+        InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
     output.return_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.get_active_frame().set_frame_return(std::move(output));
+    invocation_frame_stack_.get_active_frame().set_frame_return(
+        std::move(output));
   }
 }
 

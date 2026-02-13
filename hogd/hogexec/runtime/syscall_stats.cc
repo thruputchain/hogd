@@ -26,13 +26,11 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
   switch (input_statistic) {
   case TransactionStatistic::kTxStatGasRemaining:
     output_result = remaining_gas.gas_amount_;
-    if (auto *trace_data =
-            syscall_handler.get_syscall_trace_data<
-                SyscallNo::kGetTransactionStatistics>()) {
+    if (auto *trace_data = syscall_handler.get_syscall_trace_data<
+                           SyscallNo::kGetTransactionStatistics>()) {
       try {
-        trace_data->outputs.emplace(SyscallGetTransactionStatisticsOutputs{
-          .result = output_result
-        });
+        trace_data->outputs.emplace(
+            SyscallGetTransactionStatisticsOutputs{.result = output_result});
       } catch (std::exception &e) {
         panic("Failed to trace syscall {}: {}",
               SyscallNo::kGetTransactionStatistics, e.what());

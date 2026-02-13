@@ -34,10 +34,7 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   }
   if (auto *trace_data = handler.get_syscall_trace_data<SyscallNo::kSHA256>()) {
     try {
-      trace_data->outputs.emplace(
-        SyscallSHA256Outputs{
-          .hash = output_hash
-        });
+      trace_data->outputs.emplace(SyscallSHA256Outputs{.hash = output_hash});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256, e.what());
     }
@@ -55,7 +52,7 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   if (!r.has_value()) {
     return {r.error().code(), 0};
   }
- 
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -71,9 +68,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
   if (auto *trace_data =
           handler.get_syscall_trace_data<SyscallNo::kSHA256Finalize>()) {
     try {
-      trace_data->outputs.emplace(SyscallSHA256FinalizeOutputs{
-        .hash = output_output
-      });
+      trace_data->outputs.emplace(
+          SyscallSHA256FinalizeOutputs{.hash = output_output});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Finalize,
             e.what());
@@ -86,15 +82,14 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 // public key
 // Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_VerifySignature_inner(
-  int32_t input_scheme,
+syscall_VerifySignature_inner(int32_t input_scheme,
                               std::span<const std::byte> input_signature,
                               std::span<const std::byte> input_public_key,
                               std::span<const std::byte> input_message) noexcept
 {
   static_assert(std::same_as<decltype(input_scheme),
                              std::underlying_type_t<CryptographicScheme>>);
-  
+
   switch (static_cast<CryptographicScheme>(input_scheme)) {
   case CryptographicScheme::Ed25519:
     if (input_public_key.size() != sizeof(Ed25519PublicKey) ||

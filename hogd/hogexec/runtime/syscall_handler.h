@@ -125,13 +125,12 @@ public:
   void finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
                             GasAmount gas_remaining_at_end);
 
- 
-  template<SyscallNo Syscall>
-  auto * get_syscall_trace_data() noexcept
+  template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
     if constexpr (Syscall == kNoTracingSyscall) {
-      return static_cast<void*>(nullptr);
-    } else {
+      return static_cast<void *>(nullptr);
+    }
+    else {
       using return_t =
           std::remove_cvref_t<decltype(get<std::to_underlying(Syscall) + 1>(
               invocation_frame_trace_->system_calls.back().body))>;
@@ -143,8 +142,7 @@ public:
       try {
         return &get<std::to_underlying(Syscall) + 1>(
             invocation_frame_trace_->system_calls.back().body);
-      }
-      catch (const std::exception &e) {
+      } catch (const std::exception &e) {
         panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());
       }
     }

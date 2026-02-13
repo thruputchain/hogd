@@ -33,10 +33,10 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
-  auto const* bs = status.value().value();
+  auto const *bs = status.value().value();
 
-  output_written_len = std::min<RuntimeMemoryLength>(output_bytestring.size(),
-                                                     bs->size());
+  output_written_len =
+      std::min<RuntimeMemoryLength>(output_bytestring.size(), bs->size());
 
   if (output_written_len > 0) {
     std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
@@ -44,13 +44,11 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   }
 
   if (auto *trace_data =
-          syscall_handler
-              .get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
+          syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
     try {
       CHECK(bs->size() <= kBytestringMaxLen);
-      trace_data->outputs.emplace(SyscallBytestringGetOutputs{
-        .bytestring = *bs
-      });
+      trace_data->outputs.emplace(
+          SyscallBytestringGetOutputs{.bytestring = *bs});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGet,
             e.what());
@@ -80,9 +78,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
               .get_syscall_trace_data<SyscallNo::kBytestringGetLen>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallBytestringGetLenOutputs{
-          .length = output_length
-        });
+          SyscallBytestringGetLenOutputs{.length = output_length});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGetLen,
             e.what());

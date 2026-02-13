@@ -23,7 +23,8 @@ syscall_RetrocausalQueueInsert_inner(
     SystemCallHandler &syscall_handler, StorageKeyContractData const &input_key,
     std::span<const std::byte> input_queue_entry) noexcept
 {
-  auto status = syscall_handler.retrocausal_queue_insert(input_key, input_queue_entry);
+  auto status =
+      syscall_handler.retrocausal_queue_insert(input_key, input_queue_entry);
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
@@ -58,12 +59,11 @@ syscall_RetrocausalQueueConsume_inner(
               output_written_len);
 
   if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<
-              SyscallNo::kRetrocausalQueueConsume>()) {
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kRetrocausalQueueConsume>()) {
     try {
-      trace_data->outputs.emplace(SyscallRetrocausalQueueConsumeOutputs{
-        .queue_entry = queue_entry
-      });
+      trace_data->outputs.emplace(
+          SyscallRetrocausalQueueConsumeOutputs{.queue_entry = queue_entry});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
             SyscallNo::kRetrocausalQueueConsume, e.what());

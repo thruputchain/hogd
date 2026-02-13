@@ -393,13 +393,14 @@ to_xdr_trace(T const &val)
   else if constexpr (is_std_optional<T>) {
     using value_t = std::remove_cvref_t<typename T::value_type>;
     if (val) {
-      return x23::Ptr<value_t>(new value_t (to_xdr_trace(*val)));
+      return x23::Ptr<value_t>(new value_t(to_xdr_trace(*val)));
     }
     return x23::Ptr<value_t>();
   }
   else if constexpr (std::is_pointer_v<T>) {
     if (val) {
-      return x23::Ptr<decltype(to_xdr_trace(*val))>(new decltype(to_xdr_trace(*val)) (to_xdr_trace(*val)));
+      return x23::Ptr<decltype(to_xdr_trace(*val))>(
+          new decltype(to_xdr_trace(*val))(to_xdr_trace(*val)));
     }
     return x23::Ptr<decltype(to_xdr_trace(*val))>();
   }
@@ -429,14 +430,18 @@ set_syscall_trace_inputs(Target &target, std::tuple<Args...> const &parsed_args)
 // wrap_outer so as to minimize code duplication (and reduce the chance of an
 // accidental discrepancy between the test framework and the actual runtime).
 //
-// Passes in the syscall number so that tracing can handle invalid syscall numbers.
+// Passes in the syscall number so that tracing can handle invalid syscall
+// numbers.
 template<is_syscall_meta SyscallMeta>
 constexpr HostFnStatus<SyscallErrorCode>
-wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no, auto &&args)
+wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
+                 SyscallNo syscall_no, auto &&args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
   constexpr static SyscallNo kSyscall = SyscallMeta::kSyscallNo;
+
+  handler.start_syscall_trace(syscall_no, runtime.get_available_gas());
 
   // Wrapping the logic in a lambda so that no matter what, the checks at the
   // end to consume gas and validate return state cannot be skipped.
@@ -472,19 +477,20 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall
                     std::get<Is>(args))...}));
     }
 
-    handler.start_syscall_trace(
-        syscall_no,
-        runtime.get_available_gas());
     if constexpr (SyscallMeta::kSyscallNo != kNoTracingSyscall) {
-      if (auto *trace_data = handler.get_syscall_trace_data<SyscallMeta::kSyscallNo>()) {
+      if (auto *trace_data =
+              handler.get_syscall_trace_data<SyscallMeta::kSyscallNo>()) {
         try {
           [&]<size_t... Inputs>(std::index_sequence<Inputs...> /*unused*/) {
-            set_syscall_trace_inputs(trace_data->inputs, std::tuple{
-              SyscallArgParams<typename syscall_t::template arg_i<Inputs>>::deref(
-                  std::get<Inputs>(args))...});
-          }(std::make_index_sequence<std::tuple_size_v<decltype(trace_data->inputs)>>{});
+            set_syscall_trace_inputs(
+                trace_data->inputs,
+                std::tuple{SyscallArgParams<typename syscall_t::template arg_i<
+                    Inputs>>::deref(std::get<Inputs>(args))...});
+          }(std::make_index_sequence<
+              std::tuple_size_v<decltype(trace_data->inputs)>>{});
         } catch (std::exception &e) {
-          panic("Failed to trace syscall {}: {}", SyscallMeta::kSyscallNo, e.what());
+          panic("Failed to trace syscall {}: {}", SyscallMeta::kSyscallNo,
+                e.what());
         }
       }
     }
@@ -552,28 +558,33 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall
     }
   }
 
-  bool gas_consume_res = runtime.consume_gas(gas_consumed);
-  // If the error is not something that can be handled at any layer of the
-  // transaction, then cannot swap to kHostOutOfGas here.
-  if (is_handleable_error) {
-    if (!gas_consume_res) {
-      return {HostFnError{HostFnErrorCode::kHostOutOfGas}};
+  syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
+    bool gas_consume_res = runtime.consume_gas(gas_consumed);
+    // If the error is not something that can be handled at any layer of the
+    // transaction, then cannot swap to kHostOutOfGas here.
+    if (is_handleable_error) {
+      if (!gas_consume_res) {
+        return {HostFnError{HostFnErrorCode::kHostOutOfGas}};
+      }
     }
-  }
 
-  // The syscall_result.has_value() check means that we only
-  // override syscall_result (by returning kHostExit) in a subset
-  // of the cases covered by the is_handleable_error guard.
-  if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
-    // If the syscall cannot return to the wasm environment but the syscall
-    // tried to return an error code, abort the entire call frame.
-    if (runtime_log_level(LogLevel::kTrace)) {
-      trace("Syscall {} attempted to return an error code {} but cannot return",
+    // The syscall_result.has_value() check means that we only
+    // override syscall_result (by returning kHostExit) in a subset
+    // of the cases covered by the is_handleable_error guard.
+    if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
+      // If the syscall cannot return to the wasm environment but the syscall
+      // tried to return an error code, abort the entire call frame.
+      if (runtime_log_level(LogLevel::kTrace)) {
+        trace(
+            "Syscall {} attempted to return an error code {} but cannot return",
             SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+      }
+      return {HostFnError{HostFnErrorCode::kHostExit}};
     }
-    return {HostFnError{HostFnErrorCode::kHostExit}};
-  }
+    return syscall_result;
+  }();
 
+  handler.finish_syscall_trace(syscall_result, runtime.get_available_gas());
   return syscall_result;
 }
 
@@ -582,9 +593,9 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
 constexpr HostFnStatus<SyscallErrorCode>
-wrap_outer(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no, uint64_t arg0,
-           uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-           uint64_t arg5, uint64_t arg6) noexcept
+wrap_outer(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no,
+           uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+           uint64_t arg4, uint64_t arg5, uint64_t arg6) noexcept
 {
   auto contract_memory = runtime.get_memory();
 
@@ -603,12 +614,9 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no, u
               typename syscall_t::template arg_i<Is>>(contract_memory,
                                                       input_args)...};
 
-    return wrap_after_parse<SyscallMeta>(handler, runtime,
-                                         syscall_no,
+    return wrap_after_parse<SyscallMeta>(handler, runtime, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
-
-  handler.finish_syscall_trace(res, runtime.get_available_gas());
   return res;
 }
 

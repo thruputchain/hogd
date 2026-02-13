@@ -19,8 +19,7 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key,
                            StorageDeltaFlagSet input_flags) noexcept
 {
-  auto status =
-      syscall_handler.delete_object(input_key, input_flags);
+  auto status = syscall_handler.delete_object(input_key, input_flags);
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }

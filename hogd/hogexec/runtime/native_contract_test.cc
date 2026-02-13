@@ -330,7 +330,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         assert(r2.value().value());
-        if (*r2.value().value() != bstring) { 
+        if (*r2.value().value() != bstring) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         return {};

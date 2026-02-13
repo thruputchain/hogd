@@ -186,9 +186,7 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
               .get_syscall_trace_data<SyscallNo::kGetAuthClaimCount>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetAuthClaimCountOutputs{
-          .count = output_count
-        });
+          SyscallGetAuthClaimCountOutputs{.count = output_count});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaimCount,
             e.what());
@@ -209,13 +207,10 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
 
   if (auto *trace_data =
-          syscall_handler
-              .get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {
+          syscall_handler.get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetAuthClaimOutputs{
-          .auth_claim = claim
-        });
+          SyscallGetAuthClaimOutputs{.auth_claim = claim});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaim,
             e.what());

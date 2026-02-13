@@ -1155,6 +1155,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "no_syscall_test"
+version = "0.1.0"
+dependencies = [
+ "no_syscall_test",
+ "sdk",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

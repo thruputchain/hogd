@@ -34,13 +34,10 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
 
   output_sender = *status;
   if (auto *trace_data =
-          syscall_handler
-              .get_syscall_trace_data<SyscallNo::kGetMsgSender>()) {
+          syscall_handler.get_syscall_trace_data<SyscallNo::kGetMsgSender>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetMsgSenderOutputs{
-          .sender = output_sender
-        });
+          SyscallGetMsgSenderOutputs{.sender = output_sender});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetMsgSender,
             e.what());
@@ -59,9 +56,7 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
               .get_syscall_trace_data<SyscallNo::kGetCurrentAddress>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetCurrentAddressOutputs{
-          .address = output_address
-        });
+          SyscallGetCurrentAddressOutputs{.address = output_address});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCurrentAddress,
             e.what());
@@ -77,13 +72,11 @@ syscall_GetSourceTransactionHash_inner(
 {
   output_source_tx_hash = syscall_handler.get_source_tx_hash();
   if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<
-              SyscallNo::kGetSourceTransactionHash>()) {
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetSourceTransactionHash>()) {
     try {
-      trace_data->outputs.emplace(
-        SyscallGetSourceTransactionHashOutputs{
-          .source_tx_hash = output_source_tx_hash
-        });
+      trace_data->outputs.emplace(SyscallGetSourceTransactionHashOutputs{
+          .source_tx_hash = output_source_tx_hash});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
             SyscallNo::kGetSourceTransactionHash, e.what());
@@ -102,9 +95,7 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
               .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetCalldataLenOutputs{
-          .len = output_len
-        });
+          SyscallGetCalldataLenOutputs{.len = output_len});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldataLen,
             e.what());
@@ -127,13 +118,10 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   }
 
   if (auto *trace_data =
-          syscall_handler
-              .get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
+          syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetCalldataOutputs{
-          .calldata = calldata
-        });
+          SyscallGetCalldataOutputs{.calldata = calldata});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldata,
             e.what());
@@ -244,11 +232,7 @@ syscall_GetReturnedBuffer_inner(
               .get_syscall_trace_data<SyscallNo::kGetReturnedBuffer>()) {
     try {
       trace_data->outputs.emplace(
-        SyscallGetReturnedBufferOutputs{
-          .buffer = *(*status)
-        });
-      trace_data->outputs->buffer.append((*status)->data(),
-                                          (*status)->data() + (*status)->size());
+          SyscallGetReturnedBufferOutputs{.buffer = *(*status)});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetReturnedBuffer,
             e.what());
