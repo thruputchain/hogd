@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <exception>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -12,6 +13,7 @@
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -28,6 +30,15 @@ syscall_SHA256_inner(SystemCallHandler &handler,
 
   if (auto *stats = handler.get_transaction_stats()) {
     stats->sha256_total_bytes_processed += input_buffer.size();
+  }
+  if (auto *trace_data = handler.get_syscall_trace_data<SyscallNo::kSHA256>()) {
+    try {
+      auto const *data = reinterpret_cast<const uint8_t *>(input_buffer.data());
+      trace_data->success().input.append(data, data + input_buffer.size());
+      trace_data->success().output = output_hash;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256, e.what());
+    }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone,
           SHA256HashCost(input_buffer.size())};

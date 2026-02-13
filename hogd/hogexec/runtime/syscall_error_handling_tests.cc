@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -98,8 +99,11 @@ public:
           TestDB::kHogDB)
   {}
 
-  NativeContract dummy_native_contract_ = NativeContract(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{});
+  constexpr static Invocation kPlaceholderInvocation = {
+      .invoked_address = make_contract_address(0),
+      .entrypoint = ContractEntrypointID{},
+      .gas_limit = 10000,
+      .calldata = Calldata{}};
 
   template<HostFnErrorCode Code> void run_error_override_test()
   {
@@ -112,7 +116,7 @@ public:
     auto host_call_context = std::make_unique<HostCallContext>();
     host_call_context->syscall_handler = &handler;
 
-    handler.start_frame(make_contract_address(0), Calldata{},
+    handler.start_frame(kPlaceholderInvocation,
                         std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
     // Runtime ctor sets host_call_context->runtime
@@ -144,7 +148,7 @@ public:
     auto host_call_context = std::make_unique<HostCallContext>();
     host_call_context->syscall_handler = &handler;
 
-    handler.start_frame(make_contract_address(0), Calldata{},
+    handler.start_frame(kPlaceholderInvocation,
                         std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
     // Runtime ctor sets host_call_context->runtime
@@ -220,7 +224,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   auto host_call_context = std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = &handler;
 
-  handler.start_frame(make_contract_address(0), Calldata{},
+  handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
   // Runtime ctor sets host_call_context->runtime
@@ -263,7 +267,7 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   auto host_call_context = std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = &handler;
 
-  handler.start_frame(make_contract_address(0), Calldata{},
+  handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
   // Runtime ctor sets host_call_context->runtime
@@ -302,7 +306,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   auto host_call_context = std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = &handler;
 
-  handler.start_frame(make_contract_address(0), Calldata{},
+  handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
   // Runtime ctor sets host_call_context->runtime
@@ -343,7 +347,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto host_call_context = std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = &handler;
 
-  handler.start_frame(make_contract_address(0), Calldata{},
+  handler.start_frame(kPlaceholderInvocation,
                       std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
 
   // Runtime ctor sets host_call_context->runtime
