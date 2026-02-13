@@ -41,6 +41,7 @@ add_xdr(
   ../../protocol/storage_item.x
   ../../protocol/storage_lock.x
   ../../protocol/transaction.x
+  ../../protocol/transaction_trace.x
   ../../protocol/types.x
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x

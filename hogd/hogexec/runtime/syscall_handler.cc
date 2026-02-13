@@ -37,8 +37,10 @@
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/format.h"
@@ -404,7 +406,12 @@ SystemCallHandler::invoke(ContractAddress const &address,
       .gas_consumed_ = 0,
   };
 
-  start_frame(address, std::move(calldata), flags);
+  Invocation invocation = {.invoked_address = address,
+                           .entrypoint = entrypoint_from_method_id(method),
+                           .gas_limit = gas_limit,
+                           .calldata = std::move(calldata)};
+
+  start_frame(invocation, flags);
 
   cumulative_result += runtime.value()->invoke(method, gas_limit);
   auto finish_status = finish_frame(cumulative_result.result_);
@@ -429,16 +436,76 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 void
-SystemCallHandler::start_frame(ContractAddress const &address,
-                               Calldata calldata, InvokeFlagSet flags)
+SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags)
 {
-  invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
+  if (invocation_frame_trace_) {
+    invocation_frame_trace_->invocation = invocation;
+  }
+  invocation_frame_stack_.start_frame(invocation.invoked_address,
+                                      std::move(invocation.calldata), flags);
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>
 SystemCallHandler::finish_frame(InvokeStatus<void> result)
 {
   return invocation_frame_stack_.finish_frame(result, execution_mode_data_);
+}
+
+void
+SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
+                                       GasAmount current_gas_remaining)
+{
+  if (invocation_frame_trace_) {
+    invocation_frame_trace_->system_calls.push_back(SyscallTrace{
+        .gas_remaining_at_start = current_gas_remaining,
+        // This field is filled in when the syscall finishes.
+        .gas_remaining_at_end = current_gas_remaining,
+        // This field is filled in by the individual syscall
+        .body = SyscallTraceBody(syscall_number),
+        // This field is filled in when the syscall finishes.
+        .status = HostFunctionStatusXdr(HostFnErrorCode::kHostUnrecoverable),
+    });
+  }
+}
+
+void
+SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
+                                        GasAmount gas_remaining_at_end)
+{
+  if (invocation_frame_trace_) {
+    assert(!invocation_frame_trace_->system_calls.empty());
+    // field is uninitialized
+    assert(invocation_frame_trace_->system_calls.back().gas_remaining_at_end ==
+           invocation_frame_trace_->system_calls.back().gas_remaining_at_start);
+    invocation_frame_trace_->system_calls.back().gas_remaining_at_end =
+        gas_remaining_at_end;
+
+    // field is uninitialized
+    assert(invocation_frame_trace_->system_calls.back().status.error() ==
+           HostFnErrorCode::kHostUnrecoverable);
+    auto &status_field = invocation_frame_trace_->system_calls.back().status;
+    if (status.has_value()) {
+      status_field.error(HostFnErrorCode::kHostNoneOrRecoverable);
+      status_field.syscall_return_code() = status.value();
+    }
+    else {
+      status_field.error(status.error().code());
+    }
+  }
+}
+
+void
+SystemCallHandler::enable_tracing()
+{
+  // enable tracing before transaction execution starts
+  assert(invocation_frame_stack_.empty());
+  invocation_frame_trace_ = std::make_unique<InvocationFrameTrace>();
+}
+
+InvocationFrameTrace const *
+SystemCallHandler::get_trace() const
+{
+  return invocation_frame_trace_.get();
 }
 
 void

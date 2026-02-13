@@ -529,10 +529,13 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
   auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5, arg6};
 
+  handler.start_syscall_trace(SyscallMeta::kSyscallNo,
+                              runtime.get_available_gas());
+
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
-             -> HostFnStatus<SyscallErrorCode> {
+  auto res = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
+      -> HostFnStatus<SyscallErrorCode> {
     // Attempt to load syscall arguments from contract memory.
     auto parsed_args = std::tuple{
         parse<syscall_t::template offset_i<Is>(),
@@ -542,6 +545,9 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     return wrap_after_parse<SyscallMeta>(handler, runtime,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+
+  handler.finish_syscall_trace(res, runtime.get_available_gas());
+  return res;
 }
 
 } // namespace hogd

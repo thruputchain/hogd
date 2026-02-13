@@ -2,9 +2,11 @@
 
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -29,8 +31,10 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -108,10 +112,35 @@ public:
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
   // and from the SDK FFI bindings
-  void start_frame(ContractAddress const &address, Calldata calldata,
-                   InvokeFlagSet flags);
+  void start_frame(Invocation invocation, InvokeFlagSet flags);
   SystemStatus<std::pair<InvokeResult, bool>>
   finish_frame(InvokeStatus<void> result);
+
+  void enable_tracing();
+  InvocationFrameTrace const *get_trace() const;
+  ;
+  void start_syscall_trace(SyscallNo syscall_number,
+                           GasAmount current_gas_remaining);
+  void finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
+                            GasAmount gas_remaining_at_end);
+
+  template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
+  {
+    using return_t =
+        std::remove_cvref_t<decltype(get<std::to_underlying(Syscall) + 1>(
+            invocation_frame_trace_->system_calls.back().body))>;
+
+    if (!invocation_frame_trace_) {
+      return static_cast<return_t *>(nullptr);
+    }
+    assert(!invocation_frame_trace_->system_calls.empty());
+    try {
+      return &get<std::to_underlying(Syscall) + 1>(
+          invocation_frame_trace_->system_calls.back().body);
+    } catch (const std::exception &e) {
+      panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());
+    }
+  }
 
   // Operations after root_invoke()
 
@@ -262,6 +291,7 @@ private:
   PerTransactionDatabaseProxy db_proxy_;
   PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
+  std::unique_ptr<InvocationFrameTrace> invocation_frame_trace_;
 
   const SHA256Hash source_tx_hash_;
   const AuthClaimData auth_claims_;

@@ -18,7 +18,8 @@ members = [
     "integration_test_contracts/htlc",
     "integration_test_contracts/payment_channel",
     "integration_test_contracts/return_fault_test",
-    "integration_test_contracts/tuple_return"
+    "integration_test_contracts/tuple_return",
+    "integration_test_contracts/sha256_wrapper"
 ]
 resolver = "2"
 
@@ -33,6 +34,7 @@ erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 serde = { version = "1.0.217", default-features = false }
+sha2 = { version = "0.10.6" }
 
 [profile.dev]
 opt-level = "z"
