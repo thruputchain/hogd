@@ -352,15 +352,14 @@ Gen::show_type(const StructBody &s, string t)
   for (const auto &d : s)
     show_decl(d);
   top_ += '\n';
-  prtop("bool operator==(const {} &) const = default;\n", t);
-  if (scopes_.size() > 1)
-    // This doesn't work for recursive structures (e.g., that contain
-    // a Ptr or Vec of themselves).  But we know in-line structures
-    // cannot be recursive, since they have no name in the XDR file.
-    prtop("auto operator<=>(const {} &) const = default;\n", t);
+  prtop("bool operator==(const {} &) const noexcept = default;\n", t);
+  if (scopes_.size() > 1) {
+    prtop("friend auto\n");
+    prtop("operator<=>(const {0} &, const {0} &) noexcept;\n", t);
+  }
   else {
     prtop("friend std::partial_ordering\n");
-    prtop("operator<=> (const {0} &, const {0} &);\n", t);
+    prtop("operator<=> (const {0} &, const {0} &) noexcept;\n", t);
   }
 
   size_t nonvoid_count = 0;
@@ -418,14 +417,15 @@ struct x23::xdr_meta<struct {1}> {{
   if (!namespaces_.empty())
     bottom_ += format("\nnamespace {} {{\n", ns());
 
-  if (scopes_.size() == 1)
-    bottom_ += std::format(R"(inline std::partial_ordering
-operator<=>(const struct {0} &a, const struct {0} &b)
+  bottom_ +=
+      std::format(R"(inline {1}
+operator<=>(const struct {0} &a, const struct {0} &b) noexcept
 {{
   return x23::xdr_cmp(a, b);
 }}
 )",
-                           scope());
+                  scope(),
+                  scopes_.size() > 1 ? "auto"s : "std::partial_ordering"s);
 
   if (!namespaces_.empty())
     bottom_ += format("}} // namespace {}\n", ns());
@@ -517,9 +517,9 @@ Gen::show_type(const UnionBody &b, string t)
   }
   if (num_non_void)
     top_ += '\n';
-  prtop("friend bool operator==(const {0} &, const {0} &);\n", t);
+  prtop("friend bool operator==(const {0} &, const {0} &) noexcept;\n", t);
   prtop("friend {}\n", scopes_.size() > 1 ? "auto"s : "std::partial_ordering"s);
-  prtop("operator<=>(const {0} &, const {0} &);\n", t);
+  prtop("operator<=>(const {0} &, const {0} &) noexcept;\n", t);
   // Note __xdr_union_arm_number is used by the gdb python scripts to
   // print the active arm.  We tag it gnu::used so it doesn't get
   // optimized away.
@@ -685,12 +685,12 @@ get(U &&u)
     return ops::get<I>(std::forward<U>(u));
 }}
 inline bool
-operator==(const struct {1} &a, const struct {1} &b)
+operator==(const struct {1} &a, const struct {1} &b) noexcept
 {{
   return x23::union_ops<struct {1}>::eq(a, b);
 }}
 inline {5}
-operator<=>(const struct {1} &a, const struct {1} &b)
+operator<=>(const struct {1} &a, const struct {1} &b) noexcept
 {{
   return x23::union_ops<struct {1}>::cmp(a, b);
 }}
