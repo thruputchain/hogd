@@ -352,12 +352,11 @@ Gen::show_type(const StructBody &s, string t)
   for (const auto &d : s)
     show_decl(d);
   top_ += '\n';
-  prtop("bool operator==(const {} &) const = default;\n", t);
-  if (scopes_.size() > 1)
-    // This doesn't work for recursive structures (e.g., that contain
-    // a Ptr or Vec of themselves).  But we know in-line structures
-    // cannot be recursive, since they have no name in the XDR file.
-    prtop("auto operator<=>(const {} &) const = default;\n", t);
+  prtop("friend bool operator==(const {0} &, const {0} &);\n", t);
+  if (scopes_.size() > 1) {
+    prtop("friend auto\n");
+    prtop("operator<=>(const {0} &, const {0} &);\n", t);
+  }
   else {
     prtop("friend std::partial_ordering\n");
     prtop("operator<=> (const {0} &, const {0} &);\n", t);
@@ -418,14 +417,20 @@ struct x23::xdr_meta<struct {1}> {{
   if (!namespaces_.empty())
     bottom_ += format("\nnamespace {} {{\n", ns());
 
-  if (scopes_.size() == 1)
-    bottom_ += std::format(R"(inline std::partial_ordering
+  bottom_ +=
+      std::format(R"(inline bool
+operator==(const struct {0} &a, const struct {0} &b)
+{{
+  return x23::xdr_eq(a, b);
+}}
+inline {1}
 operator<=>(const struct {0} &a, const struct {0} &b)
 {{
   return x23::xdr_cmp(a, b);
 }}
 )",
-                           scope());
+                  scope(),
+                  scopes_.size() > 1 ? "auto"s : "std::partial_ordering"s);
 
   if (!namespaces_.empty())
     bottom_ += format("}} // namespace {}\n", ns());

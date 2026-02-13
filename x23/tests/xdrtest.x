@@ -41,17 +41,22 @@ struct contains_test_recursive {
   test_recursive t;
 };
 
-// Mutually recursive structs (X contains Ptr<Y>, Y contains X)
-%struct mutual_b;
+// Mutually recursive structs (inline struct in union with forward ref)
+%struct MutualFrame;
 
-struct mutual_a {
-  string name<>;
-  mutual_b *b;
+union MutualBody switch (int which)
+{
+case 0:
+  struct {
+    int x;
+    MutualFrame *child;
+  } success;
+default:
+  void;
 };
 
-struct mutual_b {
-  int val;
-  mutual_a* a;
+struct MutualFrame {
+  MutualBody body;
 };
 
 struct fix_4 {

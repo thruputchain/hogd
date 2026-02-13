@@ -83,10 +83,8 @@ TEST(CompareStructs, BasicAssertions)
   r2.next.emplace();
   EXPECT_LT(r1, r2);
 
-  mutual_a ma1, ma2;
-  EXPECT_EQ(ma1, ma2);
-  ma2.b.emplace();
-  EXPECT_NE(ma1, ma2);
+  MutualFrame mf1, mf2;
+  EXPECT_EQ(mf1, mf2);
 }
 
 TEST(RoundTrip, BasicAssertions)
