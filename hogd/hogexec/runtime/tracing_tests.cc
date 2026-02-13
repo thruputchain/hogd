@@ -4,7 +4,6 @@
 #include <memory>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
 #include "built_contracts/no_syscall_test.h"
 #include "built_contracts/sha256_wrapper.h"
