@@ -1,10 +1,8 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <span>

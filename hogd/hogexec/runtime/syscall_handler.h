@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -133,8 +134,12 @@ public:
       return static_cast<return_t *>(nullptr);
     }
     assert(!invocation_frame_trace_->system_calls.empty());
-    return &get<std::to_underlying(Syscall) + 1>(
-        invocation_frame_trace_->system_calls.back().body);
+    try {
+      return &get<std::to_underlying(Syscall) + 1>(
+          invocation_frame_trace_->system_calls.back().body);
+    } catch (const std::exception &e) {
+      panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());
+    }
   }
 
   // Operations after root_invoke()
