@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 4
-#define TEST_FFI_VERSION_PATCH 1
+#define TEST_FFI_VERSION_MINOR 5
+#define TEST_FFI_VERSION_PATCH 0
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -30,6 +30,16 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeEventLogNotFound = 6,
 };
 
+// A buffer of data that can be passed across the FFI boundary.
+// Must be freed with free_ffi_data_buffer()
+struct FFIDataBuffer {
+  uint8_t *data;
+  uint32_t len;
+};
+
+enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);
+
+
 // Translation of InvokeStatus<void> into an FFI-safe type.
 // This is the type returned by an invocation to a mocked contract.
 struct ForeignInvokeResult {
@@ -42,6 +52,8 @@ struct ForeignInvokeResult {
 struct ForeignRootInvokeResult {
   struct ForeignInvokeResult result;
   uint64_t gas_consumed;
+
+  struct FFIDataBuffer serialized_trace;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
   // of hogexec.
@@ -75,15 +87,6 @@ struct CreateDBResult {
   void *db;
   enum TestFFIErrorCode ffi_error_code;
 };
-
-// A buffer of data that can be passed across the FFI boundary.
-// Must be freed with free_ffi_data_buffer()
-struct FFIDataBuffer {
-  uint8_t *data;
-  uint32_t len;
-};
-
-enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);
 
 struct GetCostModelResult {
   struct FFIDataBuffer data;
@@ -182,7 +185,7 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg5, uint64_t arg6,
                                                    uint64_t arg7);
 
-struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
+struct ForeignRootInvokeResult root_invoke(void *syscall_handler, bool enable_tracing);
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
