@@ -357,7 +357,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
     }
     auto res = context->root_invoke();
     if (enable_tracing) {
-      auto const* trace = context->to_handler().get_trace();
+      auto const *trace = context->to_handler().get_trace();
       if (trace) {
         auto serialized_trace = x23::serialize(*trace);
         auto buffer = make_new_data_buffer(serialized_trace.size());
@@ -366,7 +366,8 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
           return make_ffi_result_type<ForeignRootInvokeResult>(
               kTestFFIErrorCodeUnrecoverableError);
         }
-        std::memcpy(buffer.value().data, serialized_trace.data(), serialized_trace.size());
+        std::memcpy(buffer.value().data, serialized_trace.data(),
+                    serialized_trace.size());
         res.serialized_trace = buffer.value();
       }
     }

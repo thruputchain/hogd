@@ -319,14 +319,21 @@ public:
 
     auto return_buffer = handler.get_return_buffer();
     if (!return_buffer.has_value()) {
-      trace("No return buffer available: {}", return_buffer.error());
-      return std::pair{return_buffer.error(), res.second};
+      return {return_buffer.error().to_host_fn_error(), res.second};
     }
     assert(*return_buffer);
-    std::span<const std::byte> return_span = std::as_bytes(
-        std::span((*return_buffer)->data(), (*return_buffer)->size()));
+    if (!(*return_buffer).has_value()) {
+      trace("No return buffer available: {}", return_buffer.value().error());
+      return std::pair{(*return_buffer).error(), res.second};
+    }
+    assert(**return_buffer);
+    auto const *unwrapped_return_buffer = **return_buffer;
+    assert(unwrapped_return_buffer);
+    std::span<const std::byte> return_span =
+        std::as_bytes(std::span(unwrapped_return_buffer->data(),
+                                unwrapped_return_buffer->size()));
 
-    trace("Received return buffer: {}", x23::show(**return_buffer));
+    trace("Received return buffer: {}", x23::show(*unwrapped_return_buffer));
 
     bool manually_reverted =
         host_fn_res.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted;

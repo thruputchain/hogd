@@ -558,7 +558,7 @@ SystemCallHandler::commit_last_call_frame_success(InvocationFrame &&frame)
   last_frame_.emplace(std::move(frame));
 }
 
-SyscallStatus<const ReturnBuffer *>
+SystemStatus<SyscallStatus<const ReturnBuffer *>>
 SystemCallHandler::get_return_buffer() const
 {
   assert(!invocation_frame_stack_.empty());
@@ -576,6 +576,9 @@ SystemCallHandler::get_return_buffer() const
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
   }
+  error("Unrecoverable; Invalid invocation frame status code: {}",
+        top_frame.child_return_output_.value().status_code());
+  return SystemError{SystemErrorCode::kSystemUnrecoverable};
 }
 
 void

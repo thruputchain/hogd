@@ -39,7 +39,6 @@ struct FFIDataBuffer {
 
 enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);
 
-
 // Translation of InvokeStatus<void> into an FFI-safe type.
 // This is the type returned by an invocation to a mocked contract.
 struct ForeignInvokeResult {
@@ -185,7 +184,8 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg5, uint64_t arg6,
                                                    uint64_t arg7);
 
-struct ForeignRootInvokeResult root_invoke(void *syscall_handler, bool enable_tracing);
+struct ForeignRootInvokeResult root_invoke(void *syscall_handler,
+                                           bool enable_tracing);
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
