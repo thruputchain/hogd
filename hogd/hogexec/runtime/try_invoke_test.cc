@@ -135,11 +135,12 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
            }
 
            auto returned_buffer = handler.get_return_buffer();
-           if (!returned_buffer.has_value()) {
+           if (!returned_buffer.has_value() ||
+               !returned_buffer.value().has_value()) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
-           auto const &returned_buffer_data = returned_buffer.value();
+           auto const &returned_buffer_data = returned_buffer.value().value();
 
            if (returned_buffer_data->size() != calldata.size()) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -2810,10 +2811,11 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 
              // assert that we can actually get a ReturnBuffer back
              auto return_buf = handler.get_return_buffer();
-             if (!return_buf.has_value() || !return_buf.value()) {
+             if (!return_buf.has_value() || !return_buf.value().has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (!return_buf.value()->empty()) {
+             assert(**return_buf);
+             if (!return_buf.value().value()->empty()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
