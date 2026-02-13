@@ -51,8 +51,9 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     try {
       trace_data->success().key = input_key;
       trace_data->success().force_load = input_force_load_from_snapshot;
-      trace_data->success().current_set = to_xdr(output_current_set);
-      trace_data->success().current_set_present = output_current_set_opt;
+      if (output_current_set_opt) {
+        trace_data->success().current_set = to_xdr(output_current_set);
+      }
       trace_data->success().current_add = to_xdr(output_current_add);
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kNonnegativeIntGet,
@@ -87,10 +88,9 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
               SyscallNo::kNonnegativeIntSetAdd>()) {
     try {
       trace_data->success().key = input_key;
-      trace_data->success().has_set_value =
-          (optional_input_set_value != nullptr);
-      trace_data->success().set_value = to_xdr(
-          optional_input_set_value ? *optional_input_set_value : 0);
+      if (optional_input_set_value) {
+        trace_data->success().set_value = to_xdr(*optional_input_set_value);
+      }
       trace_data->success().add_value = to_xdr(input_add_value);
       trace_data->success().flags = input_flags;
     } catch (std::exception &e) {

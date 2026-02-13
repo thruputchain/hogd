@@ -46,14 +46,11 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kLogEvent>()) {
     try {
-      // TODO(geoff): the topics should be included in the trace data
       auto const *d = reinterpret_cast<const uint8_t *>(data.data());
       trace_data->success().data.append(d, d + data.size());
-      uint32_t num_topics = 0;
-      if (topic0) num_topics++;
-      if (topic1) num_topics++;
-      if (topic2) num_topics++;
-      trace_data->success().num_topics = num_topics;
+      if (topic0) trace_data->success().topics.push_back(*topic0);
+      if (topic1) trace_data->success().topics.push_back(*topic1);
+      if (topic2) trace_data->success().topics.push_back(*topic2);
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kLogEvent, e.what());
     }

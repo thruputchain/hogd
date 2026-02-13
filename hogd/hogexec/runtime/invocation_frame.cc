@@ -89,6 +89,18 @@ InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
   to_return_ = std::move(return_buffer);
 }
 
+namespace {
+
+StorageDelta make_deployed_contract_delta(DeployedContractHash const &hash)
+{
+  StorageDelta delta =
+      StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
+  delta.deployed_contract_hash() = hash;
+  return delta;
+}
+
+}
+
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
@@ -104,9 +116,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
     AddressAndKey addrkey = {
         .address = addr,
         .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
-    StorageDelta delta =
-        StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
-    delta.deployed_contract_hash() = deployment;
+    StorageDelta delta = make_deployed_contract_delta(deployment);
     db_proxy.add_delta(addrkey, delta,
                        std::to_underlying(
                            StorageDeltaFlags::kStorageDeltaFlagNone));
@@ -141,9 +151,7 @@ InvocationFrame::collect_storage_deltas(
     AddressAndKey addrkey = {
         .address = addr,
         .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
-    StorageDelta delta =
-        StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
-    delta.deployed_contract_hash() = deployment;
+    StorageDelta delta = make_deployed_contract_delta(deployment);
     out.push_back(FlaggedStorageDelta{
         .addrkey = addrkey,
         .delta = delta,

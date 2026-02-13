@@ -102,18 +102,16 @@ syscall_ChangePublicKeyRegistration_inner(
               SyscallNo::kChangePublicKeyRegistration>()) {
     try {
       trace_data->success().key_index = input_key_index;
-      trace_data->success().has_key_scheme =
-          (optional_input_key_scheme != nullptr);
-      trace_data->success().key_scheme =
-          optional_input_key_scheme ? *optional_input_key_scheme : 0;
+      if (optional_input_key_scheme) {
+        trace_data->success().key_scheme = *optional_input_key_scheme;
+      }
       auto const *kb_data =
           reinterpret_cast<const uint8_t *>(input_key_bytes.data());
       trace_data->success().key_bytes.append(kb_data,
                                              kb_data + input_key_bytes.size());
-      trace_data->success().has_key_weight =
-          (optional_input_key_weight != nullptr);
-      trace_data->success().key_weight =
-          optional_input_key_weight ? *optional_input_key_weight : 0;
+      if (optional_input_key_weight) {
+        trace_data->success().key_weight = *optional_input_key_weight;
+      }
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
             SyscallNo::kChangePublicKeyRegistration, e.what());
