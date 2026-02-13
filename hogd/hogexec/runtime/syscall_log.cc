@@ -18,20 +18,11 @@
 namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_ConsoleLog_inner(SystemCallHandler &syscall_handler, std::span<const std::byte> input_buffer) noexcept
+syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer) noexcept
 {
   trace("ConsoleLog: {}",
         std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
                          input_buffer.size()));
-  if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<SyscallNo::kConsoleLog>()) {
-    try {
-      auto const *d = reinterpret_cast<const uint8_t *>(input_buffer.data());
-      trace_data->buffer.append(d, d + input_buffer.size());
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kConsoleLog, e.what());
-    }
-  }
 
   // TODO(geoff): maybe entirely disable this call in release builds?  Unclear
   // if spinning on this could be e.g. a DoS vector, if we charge 0 gas forit.
@@ -51,19 +42,6 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
   auto r = syscall_handler.log_event(topic0, topic1, topic2, data);
   if (!r.has_value()) {
     return {r.error().code(), 0};
-  }
-
-  if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<SyscallNo::kLogEvent>()) {
-    try {
-      auto const *d = reinterpret_cast<const uint8_t *>(data.data());
-      trace_data->data.append(d, d + data.size());
-      if (topic0) trace_data->topics.push_back(*topic0);
-      if (topic1) trace_data->topics.push_back(*topic1);
-      if (topic2) trace_data->topics.push_back(*topic2);
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kLogEvent, e.what());
-    }
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};

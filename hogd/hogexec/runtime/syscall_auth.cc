@@ -19,6 +19,7 @@
 #include "hogd/rust/contract_types/bindings.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -97,27 +98,6 @@ syscall_ChangePublicKeyRegistration_inner(
     return {status.value().error().code(), 0};
   }
 
-  if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<
-              SyscallNo::kChangePublicKeyRegistration>()) {
-    try {
-      trace_data->key_index = input_key_index;
-      if (optional_input_key_scheme) {
-        trace_data->key_scheme = *optional_input_key_scheme;
-      }
-      auto const *kb_data =
-          reinterpret_cast<const uint8_t *>(input_key_bytes.data());
-      trace_data->key_bytes.append(kb_data,
-                                             kb_data + input_key_bytes.size());
-      if (optional_input_key_weight) {
-        trace_data->key_weight = *optional_input_key_weight;
-      }
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}",
-            SyscallNo::kChangePublicKeyRegistration, e.what());
-    }
-  }
-
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -136,16 +116,6 @@ syscall_WriteAddressNonceConfig_inner(
     return {status.value().error().code(), 0};
   }
 
-  if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<
-              SyscallNo::kWriteAddressNonceConfig>()) {
-    try {
-      trace_data->nonce_config = nonce_config;
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}",
-            SyscallNo::kWriteAddressNonceConfig, e.what());
-    }
-  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -203,30 +173,6 @@ syscall_WriteAddressGasPermissionConfigs_inner(
   if (!status.value()) {
     return {status.value().error().code(), 0};
   }
-
-  if (auto *trace_data =
-          syscall_handler.get_syscall_trace_data<
-              SyscallNo::kWriteAddressGasPermissionConfigs>()) {
-    try {
-      // Reconstruct the permissions from the original inputs
-      auto add_perm =
-          [&](const generated::GasPermissionConfig *perm) {
-            if (perm) {
-              trace_data->permissions.push_back(
-                  FFIHelperType<generated::GasPermissionConfig>::to_cpp(
-                      *perm));
-            }
-          };
-      add_perm(optional_input_permission_0);
-      add_perm(optional_input_permission_1);
-      add_perm(optional_input_permission_2);
-      add_perm(optional_input_permission_3);
-      add_perm(optional_input_permission_4);
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}",
-            SyscallNo::kWriteAddressGasPermissionConfigs, e.what());
-    }
-  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -239,7 +185,10 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetAuthClaimCount>()) {
     try {
-      trace_data->output.success().count = output_count;
+      trace_data->outputs.emplace(
+        SyscallGetAuthClaimCountOutputs{
+          .count = output_count
+        });
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaimCount,
             e.what());
@@ -263,8 +212,10 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {
     try {
-      trace_data->index = input_index;
-      trace_data->output.success().auth_claim = claim;
+      trace_data->outputs.emplace(
+        SyscallGetAuthClaimOutputs{
+          .auth_claim = claim
+        });
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaim,
             e.what());

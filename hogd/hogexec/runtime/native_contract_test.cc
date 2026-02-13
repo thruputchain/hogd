@@ -329,11 +329,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         if (!r2.has_value() || !r2.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (r2.value().value().size() != bstring.size()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        if (std::memcmp(r2.value().value().data(), bstring.data(),
-                        bstring.size()) != 0) {
+        assert(r2.value().value());
+        if (*r2.value().value() != bstring) { 
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         return {};

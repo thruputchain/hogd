@@ -5,6 +5,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <exception>
 #include <format>
 #include <optional>
 #include <ranges>
@@ -33,6 +34,7 @@
 #include "syscall_error.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -378,14 +380,59 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
   return std::format("Syscall Error: {}", x23::show(status.value()));
 }
 
+template<typename T>
+auto
+to_xdr_trace(T const &val)
+{
+  if constexpr (std::same_as<T, std::span<const std::byte>> ||
+                std::same_as<T, std::span<std::byte>>) {
+    x23::Vec<uint8_t> out;
+    out.append(reinterpret_cast<const uint8_t *>(val.data()), val.size());
+    return out;
+  }
+  else if constexpr (is_std_optional<T>) {
+    using value_t = std::remove_cvref_t<typename T::value_type>;
+    if (val) {
+      return x23::Ptr<value_t>(new value_t (to_xdr_trace(*val)));
+    }
+    return x23::Ptr<value_t>();
+  }
+  else if constexpr (std::is_pointer_v<T>) {
+    if (val) {
+      return x23::Ptr<decltype(to_xdr_trace(*val))>(new decltype(to_xdr_trace(*val)) (to_xdr_trace(*val)));
+    }
+    return x23::Ptr<decltype(to_xdr_trace(*val))>();
+  }
+  else if constexpr (is_ffi_helper_required<T>) {
+    return FFIHelperType<T>::to_cpp(val);
+  }
+  else if constexpr (std::same_as<T, int128_t> || std::same_as<T, uint128_t>) {
+    return to_xdr(val);
+  }
+  else {
+    return val;
+  }
+}
+
+template<typename Target, typename... Args>
+void
+set_syscall_trace_inputs(Target &target, std::tuple<Args...> const &parsed_args)
+{
+  [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+    ((get<Is>(target) = to_xdr_trace(std::get<Is>(parsed_args))), ...);
+  }(std::make_index_sequence<std::tuple_size_v<Target>>{});
+}
+
 // This logic -- validating all of the syscall inputs, calling the inner
 // syscall, logging, read-only checks, and returning the result -- is common to
 // both the regular and mock syscall handlers.  This is split out from
 // wrap_outer so as to minimize code duplication (and reduce the chance of an
 // accidental discrepancy between the test framework and the actual runtime).
+//
+// Passes in the syscall number so that tracing can handle invalid syscall numbers.
 template<is_syscall_meta SyscallMeta>
 constexpr HostFnStatus<SyscallErrorCode>
-wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
+wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no, auto &&args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
@@ -423,6 +470,23 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
             make_syscall_input_message<SyscallMeta>(std::tuple{
                 SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                     std::get<Is>(args))...}));
+    }
+
+    handler.start_syscall_trace(
+        syscall_no,
+        runtime.get_available_gas());
+    if constexpr (SyscallMeta::kSyscallNo != kNoTracingSyscall) {
+      if (auto *trace_data = handler.get_syscall_trace_data<SyscallMeta::kSyscallNo>()) {
+        try {
+          [&]<size_t... Inputs>(std::index_sequence<Inputs...> /*unused*/) {
+            set_syscall_trace_inputs(trace_data->inputs, std::tuple{
+              SyscallArgParams<typename syscall_t::template arg_i<Inputs>>::deref(
+                  std::get<Inputs>(args))...});
+          }(std::make_index_sequence<std::tuple_size_v<decltype(trace_data->inputs)>>{});
+        } catch (std::exception &e) {
+          panic("Failed to trace syscall {}: {}", SyscallMeta::kSyscallNo, e.what());
+        }
+      }
     }
 
     auto extra_args =
@@ -518,7 +582,7 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime, auto &&args)
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
 constexpr HostFnStatus<SyscallErrorCode>
-wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
+wrap_outer(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no, uint64_t arg0,
            uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
            uint64_t arg5, uint64_t arg6) noexcept
 {
@@ -528,9 +592,6 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
 
   auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5, arg6};
-
-  handler.start_syscall_trace(SyscallMeta::kSyscallNo,
-                              runtime.get_available_gas());
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
@@ -543,6 +604,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
                                                       input_args)...};
 
     return wrap_after_parse<SyscallMeta>(handler, runtime,
+                                         syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 

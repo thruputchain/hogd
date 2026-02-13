@@ -35,7 +35,7 @@ struct NoSyscallFuncMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &no_syscall_func_inner;
 
-  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
   constexpr static bool kCanReturn = true;
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
@@ -45,7 +45,7 @@ struct NoSyscallFuncMeta {
 static_assert(is_syscall_meta<NoSyscallFuncMeta>);
 
 using SyscallFunc = HostFnStatus<SyscallErrorCode> (*)(
-    SystemCallHandler &, Runtime &, uint64_t, uint64_t, uint64_t, uint64_t,
+    SystemCallHandler &, Runtime &, SyscallNo, uint64_t, uint64_t, uint64_t, uint64_t,
     uint64_t, uint64_t, uint64_t) noexcept;
 
 template<size_t... Is>
@@ -90,6 +90,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
   }
 
   return syscall_fn(*call_context->syscall_handler, *call_context->runtime,
+                    static_cast<SyscallNo>(syscall_no),
                     args...);
 }
 

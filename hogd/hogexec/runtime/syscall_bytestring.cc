@@ -14,6 +14,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -32,22 +33,24 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
+  auto const* bs = status.value().value();
+
   output_written_len = std::min<RuntimeMemoryLength>(output_bytestring.size(),
-                                                     status.value()->size());
+                                                     bs->size());
 
   if (output_written_len > 0) {
     std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
-                status.value()->data(), output_written_len);
+                bs->data(), output_written_len);
   }
 
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
     try {
-      trace_data->key = input_key;
-      auto const &bs = *status.value();
-      auto const *data = reinterpret_cast<const uint8_t *>(bs.data());
-      trace_data->output.success().bytestring.append(data, data + bs.size());
+      CHECK(bs->size() <= kBytestringMaxLen);
+      trace_data->outputs.emplace(SyscallBytestringGetOutputs{
+        .bytestring = *bs
+      });
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGet,
             e.what());
@@ -70,14 +73,16 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
-  output_length = status.value()->size();
+  output_length = (*(*status))->size();
 
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kBytestringGetLen>()) {
     try {
-      trace_data->key = input_key;
-      trace_data->output.success().length = output_length;
+      trace_data->outputs.emplace(
+        SyscallBytestringGetLenOutputs{
+          .length = output_length
+        });
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGetLen,
             e.what());
@@ -103,22 +108,6 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   }
   if (!status.value()) {
     return {status.value().error().code(), 0};
-  }
-
-  if (auto *trace_data =
-          syscall_handler
-              .get_syscall_trace_data<SyscallNo::kBytestringSet>()) {
-    try {
-      trace_data->key = input_key;
-      auto const *data =
-          reinterpret_cast<const uint8_t *>(input_bytestring.data());
-      trace_data->bytestring.append(data,
-                                              data + input_bytestring.size());
-      trace_data->flags = input_flags;
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringSet,
-            e.what());
-    }
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};

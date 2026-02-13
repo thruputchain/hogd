@@ -23,4 +23,7 @@ concept is_syscall_meta = requires(SyscallMeta syscall_meta) {
   { syscall_meta.kCanReturn } -> std::convertible_to<bool>;
 };
 
+// Used for test syscalls that do not have trace data infrastructure integrated
+constexpr static SyscallNo kNoTracingSyscall = static_cast<SyscallNo>(-1);
+
 } // namespace hogd

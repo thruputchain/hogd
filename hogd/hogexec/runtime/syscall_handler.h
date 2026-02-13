@@ -27,6 +27,7 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/transaction_stats.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -124,26 +125,30 @@ public:
   void finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
                             GasAmount gas_remaining_at_end);
 
-  template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
+ 
+  template<SyscallNo Syscall>
+  auto * get_syscall_trace_data() noexcept
   {
-    using return_t =
-        std::remove_cvref_t<decltype(get<std::to_underlying(Syscall) + 1>(
-            invocation_frame_trace_->system_calls.back().body))>;
+    if constexpr (Syscall == kNoTracingSyscall) {
+      return static_cast<void*>(nullptr);
+    } else {
+      using return_t =
+          std::remove_cvref_t<decltype(get<std::to_underlying(Syscall) + 1>(
+              invocation_frame_trace_->system_calls.back().body))>;
 
-    if (!invocation_frame_trace_) {
-      return static_cast<return_t *>(nullptr);
-    }
-    assert(!invocation_frame_trace_->system_calls.empty());
-    try {
-      auto* out = &get<std::to_underlying(Syscall) + 1>(
-          invocation_frame_trace_->system_calls.back().body);
-      out->output.error(SyscallErrorCode::kSyscallErrorCodeNone);
-      return out;
-    } catch (const std::exception &e) {
-      panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());
+      if (!invocation_frame_trace_) {
+        return static_cast<return_t *>(nullptr);
+      }
+      assert(!invocation_frame_trace_->system_calls.empty());
+      try {
+        return &get<std::to_underlying(Syscall) + 1>(
+            invocation_frame_trace_->system_calls.back().body);
+      }
+      catch (const std::exception &e) {
+        panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());
+      }
     }
   }
-
   // Operations after root_invoke()
 
   // Attempt to commit the current transaction to the database.
@@ -218,7 +223,7 @@ public:
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  SystemStatus<SyscallStatus<std::span<const std::byte>>>
+  SystemStatus<SyscallStatus<const Bytestring *>>
   get_bytestring(StorageKeyContractData const &storage_key);
   SystemStatus<SyscallStatus<void>>
   set_bytestring(StorageKeyContractData const &storage_key,

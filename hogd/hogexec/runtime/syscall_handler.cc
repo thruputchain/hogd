@@ -458,7 +458,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
     auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
     CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
     try {
-      invoke_body.invoke().output.success().child_trace = std::move(*child_trace);
+      auto &out = invoke_body.invoke();
+      out.outputs.emplace(SyscallInvokeOutputs());
+      out.outputs->child_trace = std::move(*child_trace);
     } catch (...) {
       panic("impossible");
     }
@@ -530,16 +532,6 @@ SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
     }
     else {
       status_field.error(status.error().code());
-    }
-
-    // If the syscall returned an error, set the per-syscall output error code
-    if (status.has_value() &&
-        status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      x23::union_visit_arm(
-          [&](auto &trace_struct) {
-            trace_struct.output.error(status.value());
-          },
-          invocation_frame_trace_->system_calls.back().body);
     }
   }
 }
@@ -838,14 +830,14 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   return deploy_addr;
 }
 
-SystemStatus<SyscallStatus<std::span<const std::byte>>>
+SystemStatus<SyscallStatus<const Bytestring *>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    return std::as_bytes(std::span(bytestring_item->bytestring_));
+    return &bytestring_item->bytestring_;
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -870,7 +862,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
-    return std::as_bytes(std::span(base_item.bytestring()));
+    return &base_item.bytestring();
   }
 
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};

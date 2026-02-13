@@ -101,10 +101,10 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
            }
 
            ReturnBuffer out;
-           out.resize(res.value().value().size());
+           out.resize(res.value().value()->size());
            if (!out.empty()) {
-             std::memcpy(out.data(), res.value().value().data(),
-                         res.value().value().size());
+             std::memcpy(out.data(), res.value().value()->data(),
+                         res.value().value()->size());
            }
 
            handler.set_return_buffer(std::move(out), false);
