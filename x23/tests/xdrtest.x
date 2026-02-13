@@ -41,6 +41,19 @@ struct contains_test_recursive {
   test_recursive t;
 };
 
+// Mutually recursive structs (X contains Ptr<Y>, Y contains X)
+%struct mutual_b;
+
+struct mutual_a {
+  string name<>;
+  mutual_b *b;
+};
+
+struct mutual_b {
+  int val;
+  mutual_a* a;
+};
+
 struct fix_4 {
   int i;
 };
