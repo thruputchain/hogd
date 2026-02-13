@@ -1,4 +1,3 @@
-#include "event.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -6,6 +5,7 @@
 #include <string_view>
 #include <utility>
 
+#include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -40,6 +40,7 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
   if (!r.has_value()) {
     return {r.error().code(), 0};
   }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

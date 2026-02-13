@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -33,9 +34,7 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   }
   if (auto *trace_data = handler.get_syscall_trace_data<SyscallNo::kSHA256>()) {
     try {
-      auto const *data = reinterpret_cast<const uint8_t *>(input_buffer.data());
-      trace_data->success().input.append(data, data + input_buffer.size());
-      trace_data->success().output = output_hash;
+      trace_data->outputs.emplace(SyscallSHA256Outputs{.hash = output_hash});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256, e.what());
     }
@@ -53,6 +52,7 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   if (!r.has_value()) {
     return {r.error().code(), 0};
   }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -65,6 +65,16 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
     return {r.error().code(), 0};
   }
   output_output = r.value();
+  if (auto *trace_data =
+          handler.get_syscall_trace_data<SyscallNo::kSHA256Finalize>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallSHA256FinalizeOutputs{.hash = output_output});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Finalize,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -72,23 +82,23 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 // public key
 // Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_VerifySignature_inner(int32_t scheme,
-                              std::span<const std::byte> signature,
-                              std::span<const std::byte> public_key,
-                              std::span<const std::byte> message) noexcept
+syscall_VerifySignature_inner(int32_t input_scheme,
+                              std::span<const std::byte> input_signature,
+                              std::span<const std::byte> input_public_key,
+                              std::span<const std::byte> input_message) noexcept
 {
-  static_assert(std::same_as<decltype(scheme),
+  static_assert(std::same_as<decltype(input_scheme),
                              std::underlying_type_t<CryptographicScheme>>);
 
-  switch (static_cast<CryptographicScheme>(scheme)) {
+  switch (static_cast<CryptographicScheme>(input_scheme)) {
   case CryptographicScheme::Ed25519:
-    if (public_key.size() != sizeof(Ed25519PublicKey) ||
-        signature.size() != sizeof(Ed25519Signature)) {
+    if (input_public_key.size() != sizeof(Ed25519PublicKey) ||
+        input_signature.size() != sizeof(Ed25519Signature)) {
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
     }
-    if (!ed25519_verify(public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
-                        signature.subspan<0, sizeof(Ed25519Signature)>(),
-                        message)) {
+    if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
+                        input_signature.subspan<0, sizeof(Ed25519Signature)>(),
+                        input_message)) {
       trace("Signature verification failed");
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
     }

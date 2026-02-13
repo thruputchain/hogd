@@ -11,12 +11,14 @@
 
 #include "contract.hh"
 #include "event.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/hash_buffers.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -45,7 +47,7 @@ public:
 
   // The value of the last _child_ call frame's returned string.
   // Set to nullopt on failed calls, or before any child call happens.
-  std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
+  std::optional<InvocationFrameOutput> child_return_output_ = std::nullopt;
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
@@ -64,7 +66,7 @@ public:
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
-  void set_frame_return(ReturnBuffer &&return_buffer);
+  void set_frame_return(InvocationFrameOutput &&return_output);
 
   // add a log message to the output of the transaction, associated with the
   // current call frame.
@@ -103,8 +105,25 @@ public:
   SystemStatus<bool>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
 
-  void set_should_revert() { manual_revert_ = true; }
-  bool should_revert() const { return manual_revert_; }
+  void
+  collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
+
+  bool should_revert() const
+  {
+    switch (to_return_output_.status_code()) {
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+      return false;
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+      return true;
+    }
+    panic("Unreachable");
+  }
+
+  InvocationFrameOutput const &get_frame_output() const
+  {
+    return to_return_output_;
+  }
 
   void deploy_contract(ContractAddress const &addr,
                        DeployedContractHash const &hash)
@@ -139,8 +158,8 @@ private:
   const ContractAddress address_;
   const Calldata calldata_;
 
-  // buffer (bytestring) to return to parent
-  ReturnBuffer to_return_;
+  // buffer to return to parent
+  InvocationFrameOutput to_return_output_;
 
   // flags on the invocation
   const InvokeFlagSet flags_;
@@ -149,10 +168,6 @@ private:
   x23::Vec<TxEmittedEvent> events_;
 
   uint32_t try_invoke_frame_count_ = 0;
-
-  // Whether the frame is set to revert by an explicit call from a contract
-  // (i.e. via the Return syscall).
-  bool manual_revert_ = false;
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;

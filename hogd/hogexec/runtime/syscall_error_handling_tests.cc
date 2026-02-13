@@ -68,7 +68,7 @@ template<HostFnErrorCode Code> struct ErrorSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &error_syscall_func<Code>;
 
-  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
   constexpr static bool kCanReturn = true;
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
@@ -121,15 +121,17 @@ public:
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
-    auto syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0,
-                                                          0, 0, 0, 0, 0, 0);
+    auto syscall_res =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
+                                           0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
 
     runtime.set_available_gas(10);
-    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0, 0, 0,
-                                                     0, 0, 0, 0);
+    syscall_res =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
+                                           0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
@@ -153,15 +155,17 @@ public:
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
-    auto syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0,
-                                                          0, 0, 0, 0, 0, 0);
+    auto syscall_res =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
+                                           0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
 
     runtime.set_available_gas(10);
-    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, 0, 0, 0,
-                                                     0, 0, 0, 0);
+    syscall_res =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
+                                           0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
 
@@ -206,7 +210,7 @@ struct NoreturnFailingSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &noreturn_failing_syscall_func;
 
-  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
   constexpr static bool kCanReturn = false;
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
@@ -229,8 +233,10 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
   runtime.set_available_gas(10000);
-  auto syscall_res = wrap_outer<NoreturnFailingSyscallMeta>(handler, runtime, 0,
-                                                            0, 0, 0, 0, 0, 0);
+  auto syscall_res =
+      wrap_outer<NoreturnFailingSyscallMeta>(handler, runtime,
+                                             kNoTracingSyscall, 0, 0, 0, 0, 0,
+                                             0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostUnrecoverable);
 }
@@ -248,7 +254,7 @@ struct NoErrorSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &noerror_syscall_func;
 
-  constexpr static SyscallNo kSyscallNo = static_cast<SyscallNo>(-1);
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
   constexpr static bool kCanReturn = true;
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
@@ -273,12 +279,14 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   auto runtime = TestRuntime(std::move(host_call_context));
   runtime.set_available_gas(10000);
   auto syscall_res =
-      wrap_outer<NoErrorSyscallMeta>(handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+      wrap_outer<NoErrorSyscallMeta>(handler, runtime, kNoTracingSyscall, 0, 0,
+                                     0, 0, 0, 0, 0);
   ASSERT_TRUE(syscall_res.has_value());
 
   runtime.set_available_gas(10);
   syscall_res =
-      wrap_outer<NoErrorSyscallMeta>(handler, runtime, 0, 0, 0, 0, 0, 0, 0);
+      wrap_outer<NoErrorSyscallMeta>(handler, runtime, kNoTracingSyscall, 0, 0,
+                                     0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
 }
@@ -311,13 +319,16 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
   runtime.set_available_gas(10000);
-  auto syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime, 0,
-                                                            0, 0, 0, 0, 0, 0);
+  auto syscall_res =
+      wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
+                                             kNoTracingSyscall, 0, 0, 0, 0, 0,
+                                             0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
 
   runtime.set_available_gas(10);
-  syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime, 0, 0,
+  syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
+                                                       kNoTracingSyscall, 0, 0,
                                                        0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
@@ -353,7 +364,8 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto runtime = TestRuntime(std::move(host_call_context));
   runtime.set_available_gas(10000);
   auto syscall_res =
-      wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime, 0, 0, 0, 0, 0,
+      wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime,
+                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
                                               0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
@@ -364,7 +376,8 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   ASSERT_EQ(runtime.get_available_gas(), 10000);
 
   runtime.set_available_gas(10);
-  syscall_res = wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime, 0, 0,
+  syscall_res = wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime,
+                                                        kNoTracingSyscall, 0, 0,
                                                         0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);

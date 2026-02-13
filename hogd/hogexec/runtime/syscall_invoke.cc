@@ -1,4 +1,3 @@
-#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
@@ -9,13 +8,16 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -31,6 +33,16 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
   }
 
   output_sender = *status;
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<SyscallNo::kGetMsgSender>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallGetMsgSenderOutputs{.sender = output_sender});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetMsgSender,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -39,6 +51,17 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
                                 ContractAddress &output_address) noexcept
 {
   output_address = syscall_handler.get_current_address();
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetCurrentAddress>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallGetCurrentAddressOutputs{.address = output_address});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetCurrentAddress,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -48,6 +71,17 @@ syscall_GetSourceTransactionHash_inner(
     SHA256Hash &output_source_tx_hash) noexcept
 {
   output_source_tx_hash = syscall_handler.get_source_tx_hash();
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetSourceTransactionHash>()) {
+    try {
+      trace_data->outputs.emplace(SyscallGetSourceTransactionHashOutputs{
+          .source_tx_hash = output_source_tx_hash});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kGetSourceTransactionHash, e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -56,6 +90,17 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len) noexcept
 {
   output_len = syscall_handler.get_calldata().size();
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallGetCalldataLenOutputs{.len = output_len});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldataLen,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -72,6 +117,16 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                 calldata.data(), output_written_len);
   }
 
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallGetCalldataOutputs{.calldata = calldata});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldata,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -107,7 +162,14 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (invoke_res.has_value() &&
       ((*invoke_res) == SyscallErrorCode::kSyscallErrorCodeNone ||
        (*invoke_res) == SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
-    auto return_buffer = syscall_handler.get_return_buffer();
+    auto return_buffer_host = syscall_handler.get_return_buffer();
+    if (!return_buffer_host.has_value()) {
+      // Handle the SystemError case
+      return {return_buffer_host.error().to_host_fn_error(), gas_amount};
+    }
+
+    SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
+
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
     }
@@ -150,6 +212,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                 reinterpret_cast<const uint8_t *>(input_buffer.data()),
                 input_buffer.size());
   }
+
   syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame);
 
   return {HostFnError{HostFnErrorCode::kHostReturn}, 0};
@@ -161,15 +224,39 @@ syscall_GetReturnedBuffer_inner(
     RuntimeMemoryLength &output_written_len) noexcept
 {
   auto status = syscall_handler.get_return_buffer();
-  if (!status) {
-    return {status.error().code(), 0};
+  if (!status.has_value()) {
+    return {status.error().to_host_fn_error(), 0};
   }
+  if (!(*status).has_value()) {
+    return {status->error().code(), 0};
+  }
+  CHECK(**status != nullptr);
 
-  size_t write_len = std::min(output_buffer.size(), (*status)->size());
+  bool written = false;
+  size_t write_len = std::min(output_buffer.size(), (**status)->size());
   if (write_len > 0) {
-    std::memcpy(output_buffer.data(), (*status)->data(), write_len);
+    std::memcpy(output_buffer.data(), (**status)->data(), write_len);
+    written = true;
   }
   output_written_len = write_len;
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetReturnedBuffer>()) {
+    try {
+      if (written) {
+        trace_data->outputs.emplace(
+            SyscallGetReturnedBufferOutputs{.buffer = ***status});
+      }
+      else {
+        trace_data->outputs.emplace(
+            SyscallGetReturnedBufferOutputs{.buffer = ReturnBuffer()});
+      }
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetReturnedBuffer,
+            e.what());
+    }
+  }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }

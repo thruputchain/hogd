@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_fallback.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -141,7 +142,7 @@ TEST(MockSyscallTest, IntTypeTest)
   int128_t out_128;
 
   auto res = mock_syscall_parser<IntTypeTestSyscallMeta>(
-      inp_1, reinterpret_cast<uint64_t>(&inp_128),
+      SyscallNo::kExit, inp_1, reinterpret_cast<uint64_t>(&inp_128),
       reinterpret_cast<uint64_t>(&inp_128_by_value),
       reinterpret_cast<uint64_t>(&out_1), reinterpret_cast<uint64_t>(&out_2),
       reinterpret_cast<uint64_t>(&out_128), 0);
@@ -178,8 +179,9 @@ TEST(MockSyscallTest, SpanTest)
   std::span<std::byte> out_span = std::as_writable_bytes(std::span(&out, 1));
 
   auto res = mock_syscall_parser<SpanTypeTestSyscallMeta>(
-      reinterpret_cast<uint64_t>(inp_span.data()), inp_span.size(),
-      reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0, 0);
+      SyscallNo::kExit, reinterpret_cast<uint64_t>(inp_span.data()),
+      inp_span.size(), reinterpret_cast<uint64_t>(out_span.data()),
+      out_span.size(), 0, 0, 0);
   context.pop_mock_runtime();
   context.pop_context();
 
@@ -204,12 +206,37 @@ TEST(MockSyscallTest, NoReturnTest)
   context.push_mock_runtime(&mock_runtime);
   mock_runtime.set_available_gas(1000);
 
-  auto res = mock_syscall_parser<NoReturnSyscallMeta>(0, 0, 0, 0, 0, 0, 0);
+  auto res =
+      mock_syscall_parser<NoReturnSyscallMeta>(SyscallNo::kGetReturnedBuffer, 0,
+                                               0, 0, 0, 0, 0, 0);
   context.pop_mock_runtime();
   context.pop_context();
 
   ASSERT_EQ(res.panic, std::to_underlying(HostFnErrorCode::kHostExit));
   ASSERT_EQ(res.result_code, 0);
+}
+
+TEST(MockSyscallTest, NoSyscallTest)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+  mock_runtime.set_available_gas(1000);
+
+  auto res = mock_syscall_entrypoint(-1, 0, 0, 0, 0, 0, 0, 0);
+
+  context.pop_mock_runtime();
+  context.pop_context();
+
+  ASSERT_EQ(res.panic, 0);
+  ASSERT_EQ(res.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
 }
 
 } // namespace hogd

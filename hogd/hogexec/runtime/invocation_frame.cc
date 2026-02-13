@@ -19,6 +19,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -32,13 +33,13 @@ void
 InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
 {
   assert(frame.should_revert());
-  child_return_buffer_ = std::move(frame.to_return_);
+  child_return_output_ = std::move(frame.to_return_output_);
 }
 
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
-  child_return_buffer_ = std::move(frame.to_return_);
+  child_return_output_ = std::move(frame.to_return_output_);
   events_.append_range(
       std::ranges::subrange(std::make_move_iterator(frame.events_.begin()),
                             std::make_move_iterator(frame.events_.end())));
@@ -74,7 +75,8 @@ InvocationFrame::mark_frame_as_failed(
 void
 InvocationFrame::commit_failed_child_frame()
 {
-  child_return_buffer_ = std::nullopt;
+  child_return_output_ = InvocationFrameOutput{
+      InvocationFrameStatusCode::kInvocationFrameStatusCodeFault};
 }
 
 void
@@ -84,10 +86,22 @@ InvocationFrame::log_event(TxEmittedEvent event)
 }
 
 void
-InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
+InvocationFrame::set_frame_return(InvocationFrameOutput &&return_output)
 {
-  to_return_ = std::move(return_buffer);
+  to_return_output_ = std::move(return_output);
 }
+
+namespace {
+
+StorageDelta
+make_deployed_contract_delta(DeployedContractHash const &hash)
+{
+  StorageDelta delta = StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
+  delta.deployed_contract_hash() = hash;
+  return delta;
+}
+
+} // namespace
 
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
@@ -104,9 +118,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
     AddressAndKey addrkey = {
         .address = addr,
         .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
-    StorageDelta delta =
-        StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
-    delta.deployed_contract_hash() = deployment;
+    StorageDelta delta = make_deployed_contract_delta(deployment);
     db_proxy.add_delta(addrkey, delta,
                        std::to_underlying(
                            StorageDeltaFlags::kStorageDeltaFlagNone));
@@ -120,6 +132,34 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
     try_invoke_frame_count_++;
   }
   return res.value();
+}
+
+void
+InvocationFrame::collect_storage_deltas(
+    x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const
+{
+  for (auto const &[addrkey, item_view] : modified_items_) {
+    auto [delta, flags] = item_view.get_delta();
+    if (delta) {
+      out.push_back(FlaggedStorageDelta{
+          .addrkey = addrkey,
+          .delta = *delta,
+          .flags = flags,
+      });
+    }
+  }
+
+  for (auto const &[addr, deployment] : new_contract_deployments_) {
+    AddressAndKey addrkey = {
+        .address = addr,
+        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
+    StorageDelta delta = make_deployed_contract_delta(deployment);
+    out.push_back(FlaggedStorageDelta{
+        .addrkey = addrkey,
+        .delta = delta,
+        .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone),
+    });
+  }
 }
 
 void

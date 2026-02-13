@@ -150,8 +150,9 @@ ForeignHostFnResult constexpr from_status(HostFnStatus<SyscallErrorCode> status)
 // Parse the arguments of a syscall and forward them to run_mock_func_inner
 template<typename SyscallMeta>
 ForeignHostFnResult
-mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-                    uint64_t arg5, uint64_t arg6, uint64_t arg7)
+mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
+                    uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6,
+                    uint64_t arg7)
 {
   auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
   using syscall_t =
@@ -177,7 +178,7 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
 
     auto inner_res =
         wrap_after_parse<SyscallMeta>(handler->to_handler(), *mock_runtime,
-                                      std::move(parsed_args));
+                                      syscall_no, std::move(parsed_args));
 
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

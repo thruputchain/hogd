@@ -186,16 +186,16 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
 
              // Check that child's return data is available
              auto status = handler.get_return_buffer();
-             if (!status) {
+             if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Parent should be able to access child's return data
              auto expected_child_data = make_bytestring("child_error");
-             if ((*status)->size() != expected_child_data.size()) {
+             if ((**status)->size() != expected_child_data.size()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (std::memcmp((*status)->data(), expected_child_data.data(),
+             if (std::memcmp((**status)->data(), expected_child_data.data(),
                              expected_child_data.size()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }

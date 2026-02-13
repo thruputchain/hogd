@@ -102,16 +102,16 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
              // Contract A should receive Contract B's return data
              auto status = handler.get_return_buffer();
-             if (!status) {
+             if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Verify return data matches expected
              auto expected_data = make_bytestring("contract_b_error");
-             if ((*status)->size() != expected_data.size()) {
+             if ((**status)->size() != expected_data.size()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (std::memcmp((*status)->data(), expected_data.data(),
+             if (std::memcmp((**status)->data(), expected_data.data(),
                              expected_data.size()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -253,16 +253,16 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Contract A should receive Contract B's processed return data
              auto status = handler.get_return_buffer();
-             if (!status) {
+             if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Verify return data matches expected
              auto expected_data = make_bytestring("contract_b_processed");
-             if ((*status)->size() != expected_data.size()) {
+             if ((**status)->size() != expected_data.size()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (std::memcmp((*status)->data(), expected_data.data(),
+             if (std::memcmp((**status)->data(), expected_data.data(),
                              expected_data.size()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -303,16 +303,16 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Contract B receives Contract C's return data
              auto status = handler.get_return_buffer();
-             if (!status) {
+             if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Verify C's return data
              auto expected_c_data = make_bytestring("contract_c_error");
-             if ((*status)->size() != expected_c_data.size()) {
+             if ((**status)->size() != expected_c_data.size()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (std::memcmp((*status)->data(), expected_c_data.data(),
+             if (std::memcmp((**status)->data(), expected_c_data.data(),
                              expected_c_data.size()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -460,16 +460,16 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
              // Contract A should receive Contract B's return data
              auto status = handler.get_return_buffer();
-             if (!status) {
+             if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Verify return data matches expected
              auto expected_data = make_bytestring("contract_b_error");
-             if ((*status)->size() != expected_data.size()) {
+             if ((**status)->size() != expected_data.size()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (std::memcmp((*status)->data(), expected_data.data(),
+             if (std::memcmp((**status)->data(), expected_data.data(),
                              expected_data.size()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }

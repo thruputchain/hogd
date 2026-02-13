@@ -342,7 +342,7 @@ format_foreign_root_invoke_result(const ForeignRootInvokeResult &result)
 }
 
 ForeignRootInvokeResult
-root_invoke(void *syscall_handler) noexcept
+root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 {
   if (!syscall_handler) {
     error("root_invoke error: no syscall handler!");
@@ -352,7 +352,25 @@ root_invoke(void *syscall_handler) noexcept
 
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    if (enable_tracing) {
+      context->to_handler().enable_tracing();
+    }
     auto res = context->root_invoke();
+    if (enable_tracing) {
+      auto const *trace = context->to_handler().get_trace();
+      if (trace) {
+        auto serialized_trace = x23::serialize(*trace);
+        auto buffer = make_new_data_buffer(serialized_trace.size());
+        if (!buffer.has_value()) {
+          error("failed to allocate memory for serialized trace!");
+          return make_ffi_result_type<ForeignRootInvokeResult>(
+              kTestFFIErrorCodeUnrecoverableError);
+        }
+        std::memcpy(buffer.value().data, serialized_trace.data(),
+                    serialized_trace.size());
+        res.serialized_trace = buffer.value();
+      }
+    }
     ffi_trace("FFI: root_invoke(syscall_handler={}) -> ({})", syscall_handler,
               format_foreign_root_invoke_result(res));
     return res;
@@ -857,9 +875,9 @@ close_syscall_handler(void *syscall_handler)
 }
 
 struct ForeignRootInvokeResult
-root_invoke(void *syscall_handler)
+root_invoke(void *syscall_handler, uint8_t enable_tracing)
 {
-  return hogd::root_invoke(syscall_handler);
+  return hogd::root_invoke(syscall_handler, enable_tracing == 1);
 }
 
 struct ForeignTryCommitResult

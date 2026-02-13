@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -45,6 +46,7 @@
 #include "x23/async.h"
 #include "x23/format.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -411,18 +413,60 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
+  // Stash parent trace for nested calls, create child trace
+  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace;
+  if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
+    stashed_parent_trace = std::move(invocation_frame_trace_);
+    try {
+      invocation_frame_trace_ =
+          x23::Ptr<InvocationFrameTrace>(new InvocationFrameTrace());
+    } catch (std::exception &e) {
+      panic("Failed to create new invocation frame trace: {}", e.what());
+    }
+  }
+
   start_frame(invocation, flags);
 
   cumulative_result += runtime.value()->invoke(method, gas_limit);
+
+  // Collect storage deltas BEFORE finish_frame destroys the frame
+  if (invocation_frame_trace_) {
+    invocation_frame_stack_.get_active_frame().collect_storage_deltas(
+        invocation_frame_trace_->storage_writes);
+    invocation_frame_trace_->status =
+        invocation_frame_stack_.get_active_frame().get_frame_output();
+  }
+
   auto finish_status = finish_frame(cumulative_result.result_);
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
+    // Restore parent trace on error path
+    if (stashed_parent_trace) {
+      invocation_frame_trace_ = std::move(stashed_parent_trace);
+    }
     return {finish_status.error().to_host_fn_error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
+
+  // Restore parent trace and attach child
+  if (stashed_parent_trace) {
+    auto child_trace = std::move(invocation_frame_trace_);
+    invocation_frame_trace_ = std::move(stashed_parent_trace);
+    // Attach child_trace to parent's last syscall (the Invoke entry)
+    assert(!invocation_frame_trace_->system_calls.empty());
+    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
+    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
+    try {
+      auto &out = invoke_body.invoke();
+      out.outputs.emplace(SyscallInvokeOutputs());
+      out.outputs->child_trace = std::move(*child_trace);
+    } catch (...) {
+      panic("impossible");
+    }
+  }
 
   auto out = cumulative_result.to_host_fn_result();
   if (out.first.has_value() &&
@@ -514,17 +558,27 @@ SystemCallHandler::commit_last_call_frame_success(InvocationFrame &&frame)
   last_frame_.emplace(std::move(frame));
 }
 
-SyscallStatus<const ReturnBuffer *>
+SystemStatus<SyscallStatus<const ReturnBuffer *>>
 SystemCallHandler::get_return_buffer() const
 {
   assert(!invocation_frame_stack_.empty());
   auto const &top_frame = invocation_frame_stack_.get_active_frame();
+  if (!top_frame.child_return_output_.has_value()) {
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+  }
 
-  return top_frame.child_return_buffer_.has_value()
-             ? SyscallStatus<const ReturnBuffer *>(
-                   &(*top_frame.child_return_buffer_))
-             : SyscallError{
-                   SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+  switch (top_frame.child_return_output_.value().status_code()) {
+  case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+    return &top_frame.child_return_output_.value().return_buffer();
+  case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+    return &top_frame.child_return_output_.value().abort_buffer();
+  case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
+  }
+  error("Unrecoverable; Invalid invocation frame status code: {}",
+        top_frame.child_return_output_.value().status_code());
+  return SystemError{SystemErrorCode::kSystemUnrecoverable};
 }
 
 void
@@ -532,11 +586,19 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
                                      bool revert_frame)
 {
   assert(!invocation_frame_stack_.empty());
-  invocation_frame_stack_.get_active_frame().set_frame_return(
-      std::move(returned_buffer));
-
   if (revert_frame) {
-    invocation_frame_stack_.get_active_frame().set_should_revert();
+    InvocationFrameOutput output(
+        InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+    output.abort_buffer() = std::move(returned_buffer);
+    invocation_frame_stack_.get_active_frame().set_frame_return(
+        std::move(output));
+  }
+  else {
+    InvocationFrameOutput output(
+        InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    output.return_buffer() = std::move(returned_buffer);
+    invocation_frame_stack_.get_active_frame().set_frame_return(
+        std::move(output));
   }
 }
 
@@ -778,14 +840,14 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   return deploy_addr;
 }
 
-SystemStatus<SyscallStatus<std::span<const std::byte>>>
+SystemStatus<SyscallStatus<const Bytestring *>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    return std::as_bytes(std::span(bytestring_item->bytestring_));
+    return &bytestring_item->bytestring_;
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -810,7 +872,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
-    return std::as_bytes(std::span(base_item.bytestring()));
+    return &base_item.bytestring();
   }
 
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};

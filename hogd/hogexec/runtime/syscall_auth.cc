@@ -17,7 +17,9 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/contract_types/bindings.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -113,6 +115,7 @@ syscall_WriteAddressNonceConfig_inner(
   if (!status.value()) {
     return {status.value().error().code(), 0};
   }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -178,6 +181,17 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
                                 uint32_t &output_count) noexcept
 {
   output_count = syscall_handler.get_auth_claims().size();
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetAuthClaimCount>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallGetAuthClaimCountOutputs{.count = output_count});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaimCount,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -191,6 +205,17 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   }
   auto const &claim = syscall_handler.get_auth_claims()[input_index];
   output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
+
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallGetAuthClaimOutputs{.auth_claim = claim});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaim,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

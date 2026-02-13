@@ -184,7 +184,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   auto *syscall_handler = make_syscall_handler(db, rc, stx);
   x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
 
-  auto result = root_invoke(syscall_handler);
+  auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.result.panic,
             std::to_underlying(InvokeErrorCode::kInvokeNone));
 

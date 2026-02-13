@@ -1,14 +1,19 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cassert>
+#include <exception>
 #include <optional>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -40,6 +45,21 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 
   // If we load from the snapshot, we must have a set value.
   assert(!input_force_load_from_snapshot || output_current_set_opt);
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kNonnegativeIntGet>()) {
+    try {
+      trace_data->outputs.emplace(SyscallNonnegativeIntGetOutputs());
+      if (output_current_set_opt) {
+        trace_data->outputs->current_set = to_xdr(output_current_set);
+      }
+      trace_data->outputs->current_add = to_xdr(output_current_add);
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kNonnegativeIntGet,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
