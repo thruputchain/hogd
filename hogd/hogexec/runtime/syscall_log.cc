@@ -1,17 +1,14 @@
-#include "event.hh"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
-#include <exception>
 #include <span>
 #include <string_view>
 #include <utility>
 
+#include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 

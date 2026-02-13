@@ -26,14 +26,14 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             RuntimeMemoryLength &output_written_len) noexcept
 {
   auto status = syscall_handler.get_bytestring(input_key);
-  if (!status) {
+  if (!status.has_value()) {
     return {status.error().to_host_fn_error(), 0};
   }
-  if (!status.value()) {
-    return {status.value().error().code(), 0};
+  if (!(*status).has_value()) {
+    return {status->error().code(), 0};
   }
 
-  auto const *bs = status.value().value();
+  auto const *bs = (*(*status));
 
   output_written_len =
       std::min<RuntimeMemoryLength>(output_bytestring.size(), bs->size());

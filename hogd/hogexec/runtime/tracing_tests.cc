@@ -203,8 +203,9 @@ TEST_F(TracingTest, NoSyscallTest)
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client.make_invocation<"run_test">(10000, 12345ULL)},
+      Transaction{
+          .invocation =
+              client.make_invocation<"run_test">(10000, uint64_t{12345})},
       *runtime_context_);
   handler.enable_tracing();
   auto res = handler.root_invoke();
