@@ -562,6 +562,145 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
   ASSERT_EQ(auth_data.gas_permissions[1].required_weight, Weight{5});
 }
 
+// Test WriteAddressNonceConfig_inner rejects invalid accepted_keys bitmap
+TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             // Bit set beyond kMaxSigners (bit 21 set, kMaxSigners=21)
+             generated::NonceConfig ffi_nonce_config{};
+             ffi_nonce_config.accepted_keys = 1U << kMaxSigners;
+             ffi_nonce_config.required_weight = Weight{1};
+
+             auto [status, gas] =
+                 syscall_WriteAddressNonceConfig_inner(handler,
+                                                       ffi_nonce_config);
+             if (!status.has_value() ||
+                 status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE()
+                   << "Bitmap with bit beyond kMaxSigners should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // All bits set - should also fail
+             ffi_nonce_config.accepted_keys = 0xFFFF'FFFF;
+             auto [status2, gas2] =
+                 syscall_WriteAddressNonceConfig_inner(handler,
+                                                       ffi_nonce_config);
+             if (!status2.has_value() ||
+                 status2.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "Bitmap 0xFFFFFFFF should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Valid bitmap (highest valid bit) should succeed
+             ffi_nonce_config.accepted_keys = 1U << (kMaxSigners - 1);
+             auto [status3, gas3] =
+                 syscall_WriteAddressNonceConfig_inner(handler,
+                                                       ffi_nonce_config);
+             if (!status3.has_value() ||
+                 status3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Valid bitmap should succeed";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+// Test WriteAddressGasPermissionConfigs_inner rejects invalid accepted_keys
+// bitmap
+TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsInvalidBitmap)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             // First config valid, second has invalid bitmap
+             generated::GasPermissionConfig valid_config{};
+             valid_config.limit = GasAmount{1000};
+             valid_config.accepted_keys = 0x01;
+             valid_config.required_weight = Weight{1};
+
+             generated::GasPermissionConfig invalid_config{};
+             invalid_config.limit = GasAmount{2000};
+             invalid_config.accepted_keys = 1U << kMaxSigners;
+             invalid_config.required_weight = Weight{1};
+
+             auto [status, gas] =
+                 syscall_WriteAddressGasPermissionConfigs_inner(
+                     handler, &valid_config, &invalid_config, nullptr, nullptr,
+                     nullptr);
+             if (!status.has_value() ||
+                 status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "Gas config with invalid bitmap should be "
+                                "rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
