@@ -221,7 +221,8 @@ TEST_F(TracingTest, NoSyscallTest)
   ASSERT_EQ(trace->system_calls[0].body.syscall_number(),
             SyscallNo::kGetCalldata);
 
-  ASSERT_EQ(trace->system_calls[1].body.syscall_number(), static_cast<SyscallNo>(12345));
+  ASSERT_EQ(trace->system_calls[1].body.syscall_number(),
+            static_cast<SyscallNo>(12345));
   ASSERT_EQ(trace->system_calls[1].status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeNoSyscall);
 
