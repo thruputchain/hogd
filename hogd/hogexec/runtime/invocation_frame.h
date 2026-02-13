@@ -11,6 +11,7 @@
 
 #include "contract.hh"
 #include "event.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -116,6 +117,7 @@ public:
     case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
       return true;
     }
+    panic("Unreachable");
   }
 
   InvocationFrameOutput const &get_frame_output() const
