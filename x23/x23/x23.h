@@ -361,7 +361,7 @@ public:
       I == 0, discriminant_type,
       std::remove_reference_t<decltype(get<I>(std::declval<union_type>()))>>;
 
-  static bool eq(const union_type &a, const union_type &b)
+  static bool eq(const union_type &a, const union_type &b) noexcept
   {
     discriminant_type d = get_discriminant(a);
     if (d != get_discriminant(b))
@@ -374,7 +374,7 @@ public:
       });
   }
 
-  static auto cmp(const union_type &a, const union_type &b)
+  static auto cmp(const union_type &a, const union_type &b) noexcept
   {
     using return_type = decltype([]<size_t... I>(std::index_sequence<I...>) {
       return common_twc_result<union_element_t<I>...>{0 <=> 0};
