@@ -26,6 +26,15 @@
 
 namespace hogd {
 
+namespace {
+constexpr bool
+valid_accepted_keys_bitmap(BitMap bitmap)
+{
+  static_assert(kMaxSigners <= 32);
+  return (bitmap & (0xFFFF'FFFF << kMaxSigners)) == 0;
+}
+} // namespace
+
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
@@ -106,6 +115,10 @@ syscall_WriteAddressNonceConfig_inner(
     SystemCallHandler &syscall_handler,
     const generated::NonceConfig &input_nonce_config) noexcept
 {
+  if (!valid_accepted_keys_bitmap(input_nonce_config.accepted_keys)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+  }
+
   auto nonce_config =
       FFIHelperType<generated::NonceConfig>::to_cpp(input_nonce_config);
   auto status = syscall_handler.set_address_nonce_config(nonce_config);
@@ -131,6 +144,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
   x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs;
   bool no_gaps = false;
   bool found_gap = false;
+  bool invalid_bitmap = false;
 
   try {
     auto add_gas_permission =
@@ -138,6 +152,10 @@ syscall_WriteAddressGasPermissionConfigs_inner(
           if (permission) {
             if (no_gaps) {
               found_gap = true;
+              return;
+            }
+            if (!valid_accepted_keys_bitmap(permission->accepted_keys)) {
+              invalid_bitmap = true;
               return;
             }
             gas_permission_configs.push_back(
@@ -161,7 +179,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
   }
 
-  if (found_gap) {
+  if (found_gap || invalid_bitmap) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 

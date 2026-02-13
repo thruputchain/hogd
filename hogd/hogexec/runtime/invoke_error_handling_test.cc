@@ -188,6 +188,125 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   }
 }
 
+// Test that invalid InvokeFlag bits are rejected
+TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
+{
+  auto native_contract_xdr = make_native_contract(0);
+  auto native_contract_address = make_contract_address(0);
+  auto target_xdr = make_native_contract(1);
+  auto target_address = make_contract_address(1);
+
+  auto target_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler & /*unused*/,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             return {};
+           }}});
+
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             // Valid flags should succeed
+             auto [r1, _g1] =
+                 handler.invoke(target_address, 0, UINT64_MAX, {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r1.has_value() ||
+                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Valid flag TryInvoke should succeed";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto [r2, _g2] =
+                 handler.invoke(target_address, 0, UINT64_MAX, {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagReadOnly));
+             if (!r2.has_value() ||
+                 r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Valid flag ReadOnly should succeed";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Combined valid flags should succeed
+             auto [r3, _g3] = handler.invoke(
+                 target_address, 0, UINT64_MAX, {},
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke) |
+                     std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
+             if (!r3.has_value() ||
+                 r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "Combined valid flags TryInvoke|ReadOnly should succeed";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
+             auto [r4, _g4] =
+                 handler.invoke(target_address, 0, UINT64_MAX, {}, 0x4);
+             if (!r4.has_value() ||
+                 r4.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "Flag 0x4 should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Arbitrary garbage bits
+             auto [r5, _g5] =
+                 handler.invoke(target_address, 0, UINT64_MAX, {}, 0xFF);
+             if (!r5.has_value() ||
+                 r5.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "Garbage flag bits 0xFF should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // High bits set
+             auto [r6, _g6] = handler.invoke(target_address, 0, UINT64_MAX, {},
+                                             0x7FFF'FFFF);
+             if (!r6.has_value() ||
+                 r6.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "High flag bits should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(target_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_address, native_contract_xdr);
+  write_contract(target_xdr);
+  write_deployment(target_address, target_xdr);
+
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = native_contract_address,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {},
+                        },
+                }},
+        *runtime_context);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto r = handler.try_commit_transaction();
+    ASSERT_EQ(r, ExecResult::ExecResultOK);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

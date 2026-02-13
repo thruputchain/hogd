@@ -87,12 +87,11 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
 }
 
 namespace {
-template<StorageDeltaFlags... Flags>
+template<auto... Flags, typename FlagSet>
 constexpr bool
-validate_flags(StorageDeltaFlagSet flags)
+validate_flags(FlagSet flags)
 {
-  constexpr StorageDeltaFlagSet kAllowedFlags =
-      (0 | ... | std::to_underlying(Flags));
+  constexpr FlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
   return (flags & kAllowedFlags) == flags;
 }
 } // namespace
@@ -388,6 +387,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags)
 {
+  if (!validate_flags<InvokeFlag::kInvokeFlagTryInvoke,
+                      InvokeFlag::kInvokeFlagReadOnly>(flags)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+  }
+
   auto runtime = resolve_runtime(address);
   if (!runtime) {
     trace("SystemError: resolving runtime for address: {}, error {}",
