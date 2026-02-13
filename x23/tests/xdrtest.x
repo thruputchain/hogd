@@ -41,6 +41,24 @@ struct contains_test_recursive {
   test_recursive t;
 };
 
+// Mutually recursive structs (inline struct in union with forward ref)
+%struct MutualFrame;
+
+union MutualBody switch (int which)
+{
+case 0:
+  struct {
+    int x;
+    MutualFrame *child;
+  } success;
+default:
+  void;
+};
+
+struct MutualFrame {
+  MutualBody body;
+};
+
 struct fix_4 {
   int i;
 };
