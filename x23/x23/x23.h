@@ -581,15 +581,6 @@ xdr_type_name()
 }
 
 template<is_xdr_struct T>
-inline bool
-xdr_eq(const T &a, const T &b)
-{
-  return [&a, &b]<size_t... I>(std::index_sequence<I...>) {
-    return ((get<I>(a) == get<I>(b)) && ...);
-  }(std::make_index_sequence<std::tuple_size_v<T>>{});
-}
-
-template<is_xdr_struct T>
 inline auto
 xdr_cmp(const T &a, const T &b)
 {

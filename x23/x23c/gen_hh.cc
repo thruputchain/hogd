@@ -352,7 +352,7 @@ Gen::show_type(const StructBody &s, string t)
   for (const auto &d : s)
     show_decl(d);
   top_ += '\n';
-  prtop("friend bool operator==(const {0} &, const {0} &);\n", t);
+  prtop("bool operator==(const {} &) const = default;\n", t);
   if (scopes_.size() > 1) {
     prtop("friend auto\n");
     prtop("operator<=>(const {0} &, const {0} &);\n", t);
@@ -418,12 +418,7 @@ struct x23::xdr_meta<struct {1}> {{
     bottom_ += format("\nnamespace {} {{\n", ns());
 
   bottom_ +=
-      std::format(R"(inline bool
-operator==(const struct {0} &a, const struct {0} &b)
-{{
-  return x23::xdr_eq(a, b);
-}}
-inline {1}
+      std::format(R"(inline {1}
 operator<=>(const struct {0} &a, const struct {0} &b)
 {{
   return x23::xdr_cmp(a, b);
