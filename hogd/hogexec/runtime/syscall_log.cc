@@ -2,6 +2,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
+#include <exception>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -9,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -40,6 +42,23 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
   if (!r.has_value()) {
     return {r.error().code(), 0};
   }
+
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<SyscallNo::kLogEvent>()) {
+    try {
+      // TODO(geoff): the topis should be included in the trace data
+      auto const *d = reinterpret_cast<const uint8_t *>(data.data());
+      trace_data->success().data.append(d, d + data.size());
+      uint32_t num_topics = 0;
+      if (topic0) num_topics++;
+      if (topic1) num_topics++;
+      if (topic2) num_topics++;
+      trace_data->success().num_topics = num_topics;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kLogEvent, e.what());
+    }
+  }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

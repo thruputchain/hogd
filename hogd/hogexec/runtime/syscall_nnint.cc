@@ -1,13 +1,17 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cassert>
+#include <exception>
 #include <optional>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -40,6 +44,21 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 
   // If we load from the snapshot, we must have a set value.
   assert(!input_force_load_from_snapshot || output_current_set_opt);
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kNonnegativeIntGet>()) {
+    try {
+      trace_data->success().key = input_key;
+      trace_data->success().force_load = input_force_load_from_snapshot;
+      trace_data->success().current_set = to_xdr(output_current_set);
+      trace_data->success().current_set_present = output_current_set_opt;
+      trace_data->success().current_add = to_xdr(output_current_add);
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kNonnegativeIntGet,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -61,6 +80,23 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   }
   if (!(*status).has_value()) {
     return {(*status).error().code(), 0};
+  }
+
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<
+              SyscallNo::kNonnegativeIntSetAdd>()) {
+    try {
+      trace_data->success().key = input_key;
+      trace_data->success().has_set_value =
+          (optional_input_set_value != nullptr);
+      trace_data->success().set_value = to_xdr(
+          optional_input_set_value ? *optional_input_set_value : 0);
+      trace_data->success().add_value = to_xdr(input_add_value);
+      trace_data->success().flags = input_flags;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kNonnegativeIntSetAdd, e.what());
+    }
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};

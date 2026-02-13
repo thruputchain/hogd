@@ -3,13 +3,16 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <span>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -37,6 +40,19 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                 status.value()->data(), output_written_len);
   }
 
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
+    try {
+      trace_data->success().key = input_key;
+      auto const &bs = *status.value();
+      trace_data->success().bytestring.append(bs.data(), bs.data() + bs.size());
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGet,
+            e.what());
+    }
+  }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
@@ -54,6 +70,18 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   }
 
   output_length = status.value()->size();
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kBytestringGetLen>()) {
+    try {
+      trace_data->success().key = input_key;
+      trace_data->success().length = output_length;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGetLen,
+            e.what());
+    }
+  }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
@@ -74,6 +102,22 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   }
   if (!status.value()) {
     return {status.value().error().code(), 0};
+  }
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kBytestringSet>()) {
+    try {
+      trace_data->success().key = input_key;
+      auto const *data =
+          reinterpret_cast<const uint8_t *>(input_bytestring.data());
+      trace_data->success().bytestring.append(data,
+                                              data + input_bytestring.size());
+      trace_data->success().flags = input_flags;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringSet,
+            e.what());
+    }
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};

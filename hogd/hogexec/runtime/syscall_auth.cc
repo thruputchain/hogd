@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/contract_types/bindings.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -96,6 +97,29 @@ syscall_ChangePublicKeyRegistration_inner(
     return {status.value().error().code(), 0};
   }
 
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<
+              SyscallNo::kChangePublicKeyRegistration>()) {
+    try {
+      trace_data->success().key_index = input_key_index;
+      trace_data->success().has_key_scheme =
+          (optional_input_key_scheme != nullptr);
+      trace_data->success().key_scheme =
+          optional_input_key_scheme ? *optional_input_key_scheme : 0;
+      auto const *kb_data =
+          reinterpret_cast<const uint8_t *>(input_key_bytes.data());
+      trace_data->success().key_bytes.append(kb_data,
+                                             kb_data + input_key_bytes.size());
+      trace_data->success().has_key_weight =
+          (optional_input_key_weight != nullptr);
+      trace_data->success().key_weight =
+          optional_input_key_weight ? *optional_input_key_weight : 0;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kChangePublicKeyRegistration, e.what());
+    }
+  }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -112,6 +136,17 @@ syscall_WriteAddressNonceConfig_inner(
   }
   if (!status.value()) {
     return {status.value().error().code(), 0};
+  }
+
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<
+              SyscallNo::kWriteAddressNonceConfig>()) {
+    try {
+      trace_data->success().nonce_config = nonce_config;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kWriteAddressNonceConfig, e.what());
+    }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
@@ -170,6 +205,30 @@ syscall_WriteAddressGasPermissionConfigs_inner(
   if (!status.value()) {
     return {status.value().error().code(), 0};
   }
+
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<
+              SyscallNo::kWriteAddressGasPermissionConfigs>()) {
+    try {
+      // Reconstruct the permissions from the original inputs
+      auto add_perm =
+          [&](const generated::GasPermissionConfig *perm) {
+            if (perm) {
+              trace_data->success().permissions.push_back(
+                  FFIHelperType<generated::GasPermissionConfig>::to_cpp(
+                      *perm));
+            }
+          };
+      add_perm(optional_input_permission_0);
+      add_perm(optional_input_permission_1);
+      add_perm(optional_input_permission_2);
+      add_perm(optional_input_permission_3);
+      add_perm(optional_input_permission_4);
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kWriteAddressGasPermissionConfigs, e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -178,6 +237,16 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
                                 uint32_t &output_count) noexcept
 {
   output_count = syscall_handler.get_auth_claims().size();
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetAuthClaimCount>()) {
+    try {
+      trace_data->success().count = output_count;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaimCount,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -191,6 +260,18 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   }
   auto const &claim = syscall_handler.get_auth_claims()[input_index];
   output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {
+    try {
+      trace_data->success().index = input_index;
+      trace_data->success().auth_claim = claim;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaim,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

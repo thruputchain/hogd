@@ -4,11 +4,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <span>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -29,6 +32,20 @@ syscall_RetrocausalQueueInsert_inner(
   }
 
   // insertion has been successful
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<
+              SyscallNo::kRetrocausalQueueInsert>()) {
+    try {
+      trace_data->success().key = key;
+      auto const *data =
+          reinterpret_cast<const uint8_t *>(queue_entry.data());
+      trace_data->success().queue_entry.append(data,
+                                               data + queue_entry.size());
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kRetrocausalQueueInsert, e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
@@ -53,6 +70,21 @@ syscall_RetrocausalQueueConsume_inner(
                                                      queue_entry.size());
   std::memcpy(output_queue_entry.data(), queue_entry.data(),
               output_written_len);
+
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<
+              SyscallNo::kRetrocausalQueueConsume>()) {
+    try {
+      trace_data->success().key = input_key;
+      trace_data->success().peek = input_peek;
+      trace_data->success().queue_entry.append(queue_entry.data(),
+                                               queue_entry.data() +
+                                                   queue_entry.size());
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kRetrocausalQueueConsume, e.what());
+    }
+  }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }

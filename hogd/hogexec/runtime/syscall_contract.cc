@@ -1,9 +1,12 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
+#include <exception>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -26,6 +29,18 @@ syscall_GetDeployAddress_inner(
         input_contract_hash);
   }
 
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetDeployAddress>()) {
+    try {
+      trace_data->success().nonce = input_nonce;
+      trace_data->success().contract_hash = input_contract_hash;
+      trace_data->success().to_be_deployed = output_to_be_deployed;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kGetDeployAddress,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -44,6 +59,19 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
   output_deployed_address = *status.value();
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kDeployContract>()) {
+    try {
+      trace_data->success().nonce = input_nonce;
+      trace_data->success().contract_hash = input_contract_hash;
+      trace_data->success().deployed_address = output_deployed_address;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kDeployContract,
+            e.what());
+    }
+  }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }

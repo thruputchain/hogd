@@ -53,6 +53,19 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   if (!r.has_value()) {
     return {r.error().code(), 0};
   }
+  if (auto *trace_data =
+          handler.get_syscall_trace_data<SyscallNo::kSHA256Update>()) {
+    try {
+      trace_data->success().index = input_index;
+      auto const *data =
+          reinterpret_cast<const uint8_t *>(input_buffer.data());
+      trace_data->success().buffer.append(data, data + input_buffer.size());
+      trace_data->success().reset = input_reset;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Update,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
@@ -65,6 +78,16 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
     return {r.error().code(), 0};
   }
   output_output = r.value();
+  if (auto *trace_data =
+          handler.get_syscall_trace_data<SyscallNo::kSHA256Finalize>()) {
+    try {
+      trace_data->success().index = input_index;
+      trace_data->success().output = output_output;
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Finalize,
+            e.what());
+    }
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

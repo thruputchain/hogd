@@ -123,6 +123,37 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 }
 
 void
+InvocationFrame::collect_storage_deltas(
+    x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const
+{
+  for (auto const &[addrkey, item_view] : modified_items_) {
+    auto [delta, flags] = item_view.get_delta();
+    if (delta) {
+      out.push_back(FlaggedStorageDelta{
+          .addrkey = addrkey,
+          .delta = *delta,
+          .flags = flags,
+      });
+    }
+  }
+
+  for (auto const &[addr, deployment] : new_contract_deployments_) {
+    AddressAndKey addrkey = {
+        .address = addr,
+        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
+    StorageDelta delta =
+        StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
+    delta.deployed_contract_hash() = deployment;
+    out.push_back(FlaggedStorageDelta{
+        .addrkey = addrkey,
+        .delta = delta,
+        .flags =
+            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone),
+    });
+  }
+}
+
+void
 InvocationFrameStack::start_frame(ContractAddress const &address,
                                   Calldata &&calldata, InvokeFlagSet flags)
 {

@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/hash_buffers.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -102,6 +103,9 @@ public:
 
   SystemStatus<bool>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+
+  void collect_storage_deltas(
+      x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
 
   void set_should_revert() { manual_revert_ = true; }
   bool should_revert() const { return manual_revert_; }

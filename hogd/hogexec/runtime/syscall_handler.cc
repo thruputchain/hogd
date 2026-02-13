@@ -411,18 +411,94 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
+  // Stash parent trace for nested calls, create child trace
+  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace;
+  if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
+    stashed_parent_trace = std::move(invocation_frame_trace_);
+    invocation_frame_trace_ = std::make_unique<InvocationFrameTrace>();
+  }
+
   start_frame(invocation, flags);
 
   cumulative_result += runtime.value()->invoke(method, gas_limit);
+
+  // Collect storage deltas BEFORE finish_frame destroys the frame
+  if (invocation_frame_trace_) {
+    invocation_frame_stack_.get_active_frame().collect_storage_deltas(
+        invocation_frame_trace_->storage_writes);
+  }
+
   auto finish_status = finish_frame(cumulative_result.result_);
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
+    // Restore parent trace on error path
+    if (stashed_parent_trace) {
+      invocation_frame_trace_ = std::move(stashed_parent_trace);
+    }
     return {finish_status.error().to_host_fn_error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
+
+  // Set frame status on trace
+  if (invocation_frame_trace_) {
+    if (frame_result.should_frame_revert() && !manually_reverted) {
+      invocation_frame_trace_->status.status_code(
+          InvocationFrameStatusCode::kFrameFault);
+    }
+    else if (manually_reverted) {
+      invocation_frame_trace_->status.status_code(
+          InvocationFrameStatusCode::kFrameAbort);
+      // Find the return buffer from the Return syscall trace, if any
+      for (auto const &sc : invocation_frame_trace_->system_calls) {
+        if (sc.body.syscall_number() == SyscallNo::kReturn) {
+          try {
+            auto const &ret = sc.body.return_trace();
+            if (ret.error() == SyscallErrorCode::kSyscallErrorCodeNone) {
+              invocation_frame_trace_->status.buffer() =
+                  ret.success().buffer;
+            }
+          } catch (...) {
+          }
+        }
+      }
+    }
+    else {
+      invocation_frame_trace_->status.status_code(
+          InvocationFrameStatusCode::kFrameReturn);
+      // Find the return buffer from the Return syscall trace, if any
+      for (auto const &sc : invocation_frame_trace_->system_calls) {
+        if (sc.body.syscall_number() == SyscallNo::kReturn) {
+          try {
+            auto const &ret = sc.body.return_trace();
+            if (ret.error() == SyscallErrorCode::kSyscallErrorCodeNone) {
+              invocation_frame_trace_->status.buffer() =
+                  ret.success().buffer;
+            }
+          } catch (...) {
+          }
+        }
+      }
+    }
+  }
+
+  // Restore parent trace and attach child
+  if (stashed_parent_trace) {
+    auto child_trace = std::move(invocation_frame_trace_);
+    invocation_frame_trace_ = std::move(stashed_parent_trace);
+    // Attach child_trace to parent's last syscall (the Invoke entry)
+    assert(!invocation_frame_trace_->system_calls.empty());
+    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
+    if (invoke_body.syscall_number() == SyscallNo::kInvoke) {
+      try {
+        invoke_body.invoke().success().child_trace =
+            std::make_unique<InvocationFrameTrace>(std::move(*child_trace));
+      } catch (...) {
+      }
+    }
+  }
 
   auto out = cumulative_result.to_host_fn_result();
   if (out.first.has_value() &&
