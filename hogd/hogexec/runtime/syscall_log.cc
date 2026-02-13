@@ -46,7 +46,7 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kLogEvent>()) {
     try {
-      // TODO(geoff): the topis should be included in the trace data
+      // TODO(geoff): the topics should be included in the trace data
       auto const *d = reinterpret_cast<const uint8_t *>(data.data());
       trace_data->success().data.append(d, d + data.size());
       uint32_t num_topics = 0;

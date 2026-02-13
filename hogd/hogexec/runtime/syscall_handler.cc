@@ -494,7 +494,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
     if (invoke_body.syscall_number() == SyscallNo::kInvoke) {
       try {
         invoke_body.invoke().success().child_trace =
-            std::make_unique<InvocationFrameTrace>(std::move(*child_trace));
+            x23::Ptr<InvocationFrameTrace>(std::move(*child_trace));
       } catch (...) {
       }
     }

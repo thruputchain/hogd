@@ -46,7 +46,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     try {
       trace_data->success().key = input_key;
       auto const &bs = *status.value();
-      trace_data->success().bytestring.append(bs.data(), bs.data() + bs.size());
+      auto const *data = reinterpret_cast<const uint8_t *>(bs.data());
+      trace_data->success().bytestring.append(data, data + bs.size());
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGet,
             e.what());
