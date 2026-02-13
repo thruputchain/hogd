@@ -118,7 +118,7 @@ public:
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;
-  ;
+
   void start_syscall_trace(SyscallNo syscall_number,
                            GasAmount current_gas_remaining);
   void finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
@@ -135,8 +135,10 @@ public:
     }
     assert(!invocation_frame_trace_->system_calls.empty());
     try {
-      return &get<std::to_underlying(Syscall) + 1>(
+      auto* out = &get<std::to_underlying(Syscall) + 1>(
           invocation_frame_trace_->system_calls.back().body);
+      out->error(SyscallErrorCode::kSyscallErrorCodeNone);
+      return out;
     } catch (const std::exception &e) {
       panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());
     }

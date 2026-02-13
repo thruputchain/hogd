@@ -95,14 +95,16 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 // public key
 // Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_VerifySignature_inner(int32_t scheme,
+syscall_VerifySignature_inner(
+  SystemCallHandler &handler,
+  int32_t scheme,
                               std::span<const std::byte> signature,
                               std::span<const std::byte> public_key,
                               std::span<const std::byte> message) noexcept
 {
   static_assert(std::same_as<decltype(scheme),
                              std::underlying_type_t<CryptographicScheme>>);
-
+  
   switch (static_cast<CryptographicScheme>(scheme)) {
   case CryptographicScheme::Ed25519:
     if (public_key.size() != sizeof(Ed25519PublicKey) ||
@@ -115,10 +117,24 @@ syscall_VerifySignature_inner(int32_t scheme,
       trace("Signature verification failed");
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
   default:
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
+
+  if (auto *trace_data =
+        handler.get_syscall_trace_data<SyscallNo::kVerifySignature>()) {
+    try {
+      trace_data->success().scheme = scheme;
+      trace_data->success().signature.append(reinterpret_cast<const uint8_t *>(signature.data()), reinterpret_cast<const uint8_t *>(signature.data() + signature.size()));
+      trace_data->success().public_key.append(reinterpret_cast<const uint8_t *>(public_key.data()), reinterpret_cast<const uint8_t *>(public_key.data() + public_key.size()));
+      trace_data->success().message.append(reinterpret_cast<const uint8_t *>(message.data()), reinterpret_cast<const uint8_t *>(message.data() + message.size()));
+      } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kVerifySignature,
+            e.what());
+    }
+  }
+
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 } // namespace hogd

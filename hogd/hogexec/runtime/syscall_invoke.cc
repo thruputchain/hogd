@@ -276,9 +276,8 @@ syscall_GetReturnedBuffer_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_Exit_inner() noexcept
+syscall_Exit_inner(SystemCallHandler &syscall_handler) noexcept
 {
-  // kExit has no trace data to record
   return {HostFnError{HostFnErrorCode::kHostExit}, 0};
 }
 

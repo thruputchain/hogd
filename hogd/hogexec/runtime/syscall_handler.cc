@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -45,6 +46,7 @@
 #include "x23/async.h"
 #include "x23/format.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -415,7 +417,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace;
   if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_);
-    invocation_frame_trace_ = std::make_unique<InvocationFrameTrace>();
+    try {
+      invocation_frame_trace_ = x23::Ptr<InvocationFrameTrace>(new InvocationFrameTrace());
+    } catch (std::exception &e) {
+      panic("Failed to create new invocation frame trace: {}", e.what());
+    }
   }
 
   start_frame(invocation, flags);
@@ -426,6 +432,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   if (invocation_frame_trace_) {
     invocation_frame_stack_.get_active_frame().collect_storage_deltas(
         invocation_frame_trace_->storage_writes);
+    invocation_frame_trace_->status = invocation_frame_stack_.get_active_frame().get_frame_output();
   }
 
   auto finish_status = finish_frame(cumulative_result.result_);
@@ -442,48 +449,6 @@ SystemCallHandler::invoke(ContractAddress const &address,
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
 
-  // Set frame status on trace
-  if (invocation_frame_trace_) {
-    if (frame_result.should_frame_revert() && !manually_reverted) {
-      invocation_frame_trace_->status.status_code(
-          InvocationFrameStatusCode::kFrameFault);
-    }
-    else if (manually_reverted) {
-      invocation_frame_trace_->status.status_code(
-          InvocationFrameStatusCode::kFrameAbort);
-      // Find the return buffer from the Return syscall trace, if any
-      for (auto const &sc : invocation_frame_trace_->system_calls) {
-        if (sc.body.syscall_number() == SyscallNo::kReturn) {
-          try {
-            auto const &ret = sc.body.return_trace();
-            if (ret.error() == SyscallErrorCode::kSyscallErrorCodeNone) {
-              invocation_frame_trace_->status.buffer() =
-                  ret.success().buffer;
-            }
-          } catch (...) {
-          }
-        }
-      }
-    }
-    else {
-      invocation_frame_trace_->status.status_code(
-          InvocationFrameStatusCode::kFrameReturn);
-      // Find the return buffer from the Return syscall trace, if any
-      for (auto const &sc : invocation_frame_trace_->system_calls) {
-        if (sc.body.syscall_number() == SyscallNo::kReturn) {
-          try {
-            auto const &ret = sc.body.return_trace();
-            if (ret.error() == SyscallErrorCode::kSyscallErrorCodeNone) {
-              invocation_frame_trace_->status.buffer() =
-                  ret.success().buffer;
-            }
-          } catch (...) {
-          }
-        }
-      }
-    }
-  }
-
   // Restore parent trace and attach child
   if (stashed_parent_trace) {
     auto child_trace = std::move(invocation_frame_trace_);
@@ -491,12 +456,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
     // Attach child_trace to parent's last syscall (the Invoke entry)
     assert(!invocation_frame_trace_->system_calls.empty());
     auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
-    if (invoke_body.syscall_number() == SyscallNo::kInvoke) {
-      try {
-        invoke_body.invoke().success().child_trace =
-            x23::Ptr<InvocationFrameTrace>(std::move(*child_trace));
-      } catch (...) {
-      }
+    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
+    try {
+      invoke_body.invoke().success().child_trace = std::move(*child_trace);
+    } catch (...) {
+      panic("impossible");
     }
   }
 
@@ -595,12 +559,18 @@ SystemCallHandler::get_return_buffer() const
 {
   assert(!invocation_frame_stack_.empty());
   auto const &top_frame = invocation_frame_stack_.get_active_frame();
+  if (!top_frame.child_return_output_.has_value()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+  }
 
-  return top_frame.child_return_buffer_.has_value()
-             ? SyscallStatus<const ReturnBuffer *>(
-                   &(*top_frame.child_return_buffer_))
-             : SyscallError{
-                   SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+  switch (top_frame.child_return_output_.value().status_code()) {
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+      return &top_frame.child_return_output_.value().return_buffer();
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+      return &top_frame.child_return_output_.value().abort_buffer();
+    case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
+  }
 }
 
 void
@@ -608,11 +578,15 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
                                      bool revert_frame)
 {
   assert(!invocation_frame_stack_.empty());
-  invocation_frame_stack_.get_active_frame().set_frame_return(
-      std::move(returned_buffer));
-
   if (revert_frame) {
-    invocation_frame_stack_.get_active_frame().set_should_revert();
+    InvocationFrameOutput output(InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+    output.abort_buffer() = std::move(returned_buffer);
+    invocation_frame_stack_.get_active_frame().set_frame_return(std::move(output));
+  }
+  else {
+    InvocationFrameOutput output(InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    output.return_buffer() = std::move(returned_buffer);
+    invocation_frame_stack_.get_active_frame().set_frame_return(std::move(output));
   }
 }
 

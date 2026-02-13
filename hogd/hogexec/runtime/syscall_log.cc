@@ -17,11 +17,20 @@
 namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer) noexcept
+syscall_ConsoleLog_inner(SystemCallHandler &syscall_handler, std::span<const std::byte> input_buffer) noexcept
 {
   trace("ConsoleLog: {}",
         std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
                          input_buffer.size()));
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<SyscallNo::kConsoleLog>()) {
+    try {
+      auto const *d = reinterpret_cast<const uint8_t *>(input_buffer.data());
+      trace_data->success().buffer.append(d, d + input_buffer.size());
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kConsoleLog, e.what());
+    }
+  }
 
   // TODO(geoff): maybe entirely disable this call in release builds?  Unclear
   // if spinning on this could be e.g. a DoS vector, if we charge 0 gas forit.
