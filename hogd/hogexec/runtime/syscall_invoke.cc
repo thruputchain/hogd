@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -19,8 +20,6 @@
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
-#include "hogd/base/log.h"
-
 
 namespace hogd {
 
@@ -169,7 +168,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
       return {return_buffer_host.error().to_host_fn_error(), gas_amount};
     }
 
-    SyscallStatus<const ReturnBuffer*> return_buffer = *return_buffer_host;
+    SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
 
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
@@ -246,7 +245,7 @@ syscall_GetReturnedBuffer_inner(
               .get_syscall_trace_data<SyscallNo::kGetReturnedBuffer>()) {
     try {
       if (written) {
-      trace_data->outputs.emplace(
+        trace_data->outputs.emplace(
             SyscallGetReturnedBufferOutputs{.buffer = ***status});
       }
       else {
