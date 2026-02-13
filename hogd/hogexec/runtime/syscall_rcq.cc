@@ -36,10 +36,10 @@ syscall_RetrocausalQueueInsert_inner(
           syscall_handler.get_syscall_trace_data<
               SyscallNo::kRetrocausalQueueInsert>()) {
     try {
-      trace_data->success().key = key;
+      trace_data->key = key;
       auto const *data =
           reinterpret_cast<const uint8_t *>(queue_entry.data());
-      trace_data->success().queue_entry.append(data,
+      trace_data->queue_entry.append(data,
                                                data + queue_entry.size());
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
@@ -75,9 +75,9 @@ syscall_RetrocausalQueueConsume_inner(
           syscall_handler.get_syscall_trace_data<
               SyscallNo::kRetrocausalQueueConsume>()) {
     try {
-      trace_data->success().key = input_key;
-      trace_data->success().peek = input_peek;
-      trace_data->success().queue_entry.append(queue_entry.data(),
+      trace_data->key = input_key;
+      trace_data->peek = input_peek;
+      trace_data->output.success().queue_entry.append(queue_entry.data(),
                                                queue_entry.data() +
                                                    queue_entry.size());
     } catch (std::exception &e) {

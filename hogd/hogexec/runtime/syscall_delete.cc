@@ -32,8 +32,8 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kDeleteObject>()) {
     try {
-      trace_data->success().key = input_key;
-      trace_data->success().flags = input_flags;
+      trace_data->key = input_key;
+      trace_data->flags = input_flags;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kDeleteObject,
             e.what());

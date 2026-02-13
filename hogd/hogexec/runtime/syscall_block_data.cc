@@ -27,7 +27,7 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetBlockHeight>()) {
     try {
-      trace_data->success().result = output_result;
+      trace_data->output.success().result = output_result;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetBlockHeight,
             e.what());

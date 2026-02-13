@@ -33,9 +33,9 @@ syscall_GetDeployAddress_inner(
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetDeployAddress>()) {
     try {
-      trace_data->success().nonce = input_nonce;
-      trace_data->success().contract_hash = input_contract_hash;
-      trace_data->success().to_be_deployed = output_to_be_deployed;
+      trace_data->nonce = input_nonce;
+      trace_data->contract_hash = input_contract_hash;
+      trace_data->output.success().to_be_deployed = output_to_be_deployed;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetDeployAddress,
             e.what());
@@ -64,9 +64,9 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kDeployContract>()) {
     try {
-      trace_data->success().nonce = input_nonce;
-      trace_data->success().contract_hash = input_contract_hash;
-      trace_data->success().deployed_address = output_deployed_address;
+      trace_data->nonce = input_nonce;
+      trace_data->contract_hash = input_contract_hash;
+      trace_data->output.success().deployed_address = output_deployed_address;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kDeployContract,
             e.what());

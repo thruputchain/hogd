@@ -34,8 +34,8 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   if (auto *trace_data = handler.get_syscall_trace_data<SyscallNo::kSHA256>()) {
     try {
       auto const *data = reinterpret_cast<const uint8_t *>(input_buffer.data());
-      trace_data->success().input.append(data, data + input_buffer.size());
-      trace_data->success().output = output_hash;
+      trace_data->input.append(data, data + input_buffer.size());
+      trace_data->output.success().hash = output_hash;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256, e.what());
     }
@@ -56,11 +56,11 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   if (auto *trace_data =
           handler.get_syscall_trace_data<SyscallNo::kSHA256Update>()) {
     try {
-      trace_data->success().index = input_index;
+      trace_data->index = input_index;
       auto const *data =
           reinterpret_cast<const uint8_t *>(input_buffer.data());
-      trace_data->success().buffer.append(data, data + input_buffer.size());
-      trace_data->success().reset = input_reset;
+      trace_data->buffer.append(data, data + input_buffer.size());
+      trace_data->reset = input_reset;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Update,
             e.what());
@@ -81,8 +81,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
   if (auto *trace_data =
           handler.get_syscall_trace_data<SyscallNo::kSHA256Finalize>()) {
     try {
-      trace_data->success().index = input_index;
-      trace_data->success().output = output_output;
+      trace_data->index = input_index;
+      trace_data->output.success().hash = output_output;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kSHA256Finalize,
             e.what());
@@ -124,10 +124,10 @@ syscall_VerifySignature_inner(
   if (auto *trace_data =
         handler.get_syscall_trace_data<SyscallNo::kVerifySignature>()) {
     try {
-      trace_data->success().scheme = scheme;
-      trace_data->success().signature.append(reinterpret_cast<const uint8_t *>(signature.data()), reinterpret_cast<const uint8_t *>(signature.data() + signature.size()));
-      trace_data->success().public_key.append(reinterpret_cast<const uint8_t *>(public_key.data()), reinterpret_cast<const uint8_t *>(public_key.data() + public_key.size()));
-      trace_data->success().message.append(reinterpret_cast<const uint8_t *>(message.data()), reinterpret_cast<const uint8_t *>(message.data() + message.size()));
+      trace_data->scheme = scheme;
+      trace_data->signature.append(reinterpret_cast<const uint8_t *>(signature.data()), reinterpret_cast<const uint8_t *>(signature.data() + signature.size()));
+      trace_data->public_key.append(reinterpret_cast<const uint8_t *>(public_key.data()), reinterpret_cast<const uint8_t *>(public_key.data() + public_key.size()));
+      trace_data->message.append(reinterpret_cast<const uint8_t *>(message.data()), reinterpret_cast<const uint8_t *>(message.data() + message.size()));
       } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kVerifySignature,
             e.what());

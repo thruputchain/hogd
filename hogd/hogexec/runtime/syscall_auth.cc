@@ -101,16 +101,16 @@ syscall_ChangePublicKeyRegistration_inner(
           syscall_handler.get_syscall_trace_data<
               SyscallNo::kChangePublicKeyRegistration>()) {
     try {
-      trace_data->success().key_index = input_key_index;
+      trace_data->key_index = input_key_index;
       if (optional_input_key_scheme) {
-        trace_data->success().key_scheme = *optional_input_key_scheme;
+        trace_data->key_scheme = *optional_input_key_scheme;
       }
       auto const *kb_data =
           reinterpret_cast<const uint8_t *>(input_key_bytes.data());
-      trace_data->success().key_bytes.append(kb_data,
+      trace_data->key_bytes.append(kb_data,
                                              kb_data + input_key_bytes.size());
       if (optional_input_key_weight) {
-        trace_data->success().key_weight = *optional_input_key_weight;
+        trace_data->key_weight = *optional_input_key_weight;
       }
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
@@ -140,7 +140,7 @@ syscall_WriteAddressNonceConfig_inner(
           syscall_handler.get_syscall_trace_data<
               SyscallNo::kWriteAddressNonceConfig>()) {
     try {
-      trace_data->success().nonce_config = nonce_config;
+      trace_data->nonce_config = nonce_config;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
             SyscallNo::kWriteAddressNonceConfig, e.what());
@@ -212,7 +212,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
       auto add_perm =
           [&](const generated::GasPermissionConfig *perm) {
             if (perm) {
-              trace_data->success().permissions.push_back(
+              trace_data->permissions.push_back(
                   FFIHelperType<generated::GasPermissionConfig>::to_cpp(
                       *perm));
             }
@@ -239,7 +239,7 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetAuthClaimCount>()) {
     try {
-      trace_data->success().count = output_count;
+      trace_data->output.success().count = output_count;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaimCount,
             e.what());
@@ -263,8 +263,8 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetAuthClaim>()) {
     try {
-      trace_data->success().index = input_index;
-      trace_data->success().auth_claim = claim;
+      trace_data->index = input_index;
+      trace_data->output.success().auth_claim = claim;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaim,
             e.what());

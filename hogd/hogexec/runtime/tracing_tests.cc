@@ -81,9 +81,9 @@ TEST_F(TracingTest, Sha256Repeated)
     gas_remaining = trace->system_calls[i].gas_remaining_at_end;
     ASSERT_EQ(trace->system_calls[i].body.syscall_number(), SyscallNo::kSHA256);
     auto const &trace_call = trace->system_calls[i].body.sha256();
-    ASSERT_EQ(trace_call.error(), SyscallErrorCode::kSyscallErrorCodeNone);
-    ASSERT_EQ(trace_call.success().input, data);
-    ASSERT_EQ(trace_call.success().output, sha256(data));
+    ASSERT_EQ(trace_call.output.error(), SyscallErrorCode::kSyscallErrorCodeNone);
+    ASSERT_EQ(trace_call.input, data);
+    ASSERT_EQ(trace_call.output.success().hash, sha256(data));
     ASSERT_EQ(trace->system_calls[i].status.error(),
               HostFnErrorCode::kHostNoneOrRecoverable);
     ASSERT_EQ(trace->system_calls[i].status.syscall_return_code(),

@@ -137,7 +137,7 @@ public:
     try {
       auto* out = &get<std::to_underlying(Syscall) + 1>(
           invocation_frame_trace_->system_calls.back().body);
-      out->error(SyscallErrorCode::kSyscallErrorCodeNone);
+      out->output.error(SyscallErrorCode::kSyscallErrorCodeNone);
       return out;
     } catch (const std::exception &e) {
       panic("Failed to get syscall trace data for {}: {}", Syscall, e.what());

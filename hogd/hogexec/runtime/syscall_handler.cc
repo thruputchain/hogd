@@ -458,7 +458,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
     auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
     CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
     try {
-      invoke_body.invoke().success().child_trace = std::move(*child_trace);
+      invoke_body.invoke().output.success().child_trace = std::move(*child_trace);
     } catch (...) {
       panic("impossible");
     }
@@ -530,6 +530,16 @@ SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
     }
     else {
       status_field.error(status.error().code());
+    }
+
+    // If the syscall returned an error, set the per-syscall output error code
+    if (status.has_value() &&
+        status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      x23::union_visit_arm(
+          [&](auto &trace_struct) {
+            trace_struct.output.error(status.value());
+          },
+          invocation_frame_trace_->system_calls.back().body);
     }
   }
 }

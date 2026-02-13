@@ -44,10 +44,10 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
     try {
-      trace_data->success().key = input_key;
+      trace_data->key = input_key;
       auto const &bs = *status.value();
       auto const *data = reinterpret_cast<const uint8_t *>(bs.data());
-      trace_data->success().bytestring.append(data, data + bs.size());
+      trace_data->output.success().bytestring.append(data, data + bs.size());
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGet,
             e.what());
@@ -76,8 +76,8 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kBytestringGetLen>()) {
     try {
-      trace_data->success().key = input_key;
-      trace_data->success().length = output_length;
+      trace_data->key = input_key;
+      trace_data->output.success().length = output_length;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringGetLen,
             e.what());
@@ -109,12 +109,12 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kBytestringSet>()) {
     try {
-      trace_data->success().key = input_key;
+      trace_data->key = input_key;
       auto const *data =
           reinterpret_cast<const uint8_t *>(input_bytestring.data());
-      trace_data->success().bytestring.append(data,
+      trace_data->bytestring.append(data,
                                               data + input_bytestring.size());
-      trace_data->success().flags = input_flags;
+      trace_data->flags = input_flags;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kBytestringSet,
             e.what());

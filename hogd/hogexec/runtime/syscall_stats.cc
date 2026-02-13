@@ -29,9 +29,9 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
             syscall_handler.get_syscall_trace_data<
                 SyscallNo::kGetTransactionStatistics>()) {
       try {
-        trace_data->success().statistic =
+        trace_data->statistic =
             std::to_underlying(input_statistic);
-        trace_data->success().result = output_result;
+        trace_data->output.success().result = output_result;
       } catch (std::exception &e) {
         panic("Failed to trace syscall {}: {}",
               SyscallNo::kGetTransactionStatistics, e.what());

@@ -36,7 +36,7 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetMsgSender>()) {
     try {
-      trace_data->success().sender = output_sender;
+      trace_data->output.success().sender = output_sender;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetMsgSender,
             e.what());
@@ -54,7 +54,7 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCurrentAddress>()) {
     try {
-      trace_data->success().address = output_address;
+      trace_data->output.success().address = output_address;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCurrentAddress,
             e.what());
@@ -73,7 +73,7 @@ syscall_GetSourceTransactionHash_inner(
           syscall_handler.get_syscall_trace_data<
               SyscallNo::kGetSourceTransactionHash>()) {
     try {
-      trace_data->success().source_tx_hash = output_source_tx_hash;
+      trace_data->output.success().source_tx_hash = output_source_tx_hash;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}",
             SyscallNo::kGetSourceTransactionHash, e.what());
@@ -91,7 +91,7 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
     try {
-      trace_data->success().len = output_len;
+      trace_data->output.success().len = output_len;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldataLen,
             e.what());
@@ -117,7 +117,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
     try {
-      trace_data->success().calldata.append(calldata.data(),
+      trace_data->output.success().calldata.append(calldata.data(),
                                             calldata.data() + calldata.size());
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldata,
@@ -152,15 +152,15 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kInvoke>()) {
     try {
-      trace_data->success().address = input_address;
-      trace_data->success().entrypoint_id = input_entrypoint_id;
-      trace_data->success().gas_limit =
+      trace_data->address = input_address;
+      trace_data->entrypoint_id = input_entrypoint_id;
+      trace_data->gas_limit =
           std::min<GasAmount>(input_gas_limit, remaining_gas.gas_amount_);
       auto const *cd_data =
           reinterpret_cast<const uint8_t *>(input_calldata.data());
-      trace_data->success().calldata.append(cd_data,
+      trace_data->calldata.append(cd_data,
                                             cd_data + input_calldata.size());
-      trace_data->success().flags = input_flags;
+      trace_data->flags = input_flags;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kInvoke, e.what());
     }
@@ -182,14 +182,6 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     }
     else {
       output_return_buffer_len = 0;
-    }
-    if (auto *trace_data =
-            syscall_handler.get_syscall_trace_data<SyscallNo::kInvoke>()) {
-      try {
-        trace_data->success().return_buffer_len = output_return_buffer_len;
-      } catch (std::exception &e) {
-        panic("Failed to trace syscall {}: {}", SyscallNo::kInvoke, e.what());
-      }
     }
     return {*invoke_res, gas_amount};
   }
@@ -232,8 +224,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     try {
       auto const *data =
           reinterpret_cast<const uint8_t *>(input_buffer.data());
-      trace_data->success().buffer.append(data, data + input_buffer.size());
-      trace_data->success().revert_frame = input_revert_frame;
+      trace_data->buffer.append(data, data + input_buffer.size());
+      trace_data->revert_frame = input_revert_frame;
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kReturn, e.what());
     }
@@ -264,7 +256,7 @@ syscall_GetReturnedBuffer_inner(
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetReturnedBuffer>()) {
     try {
-      trace_data->success().buffer.append((*status)->data(),
+      trace_data->output.success().buffer.append((*status)->data(),
                                           (*status)->data() + (*status)->size());
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetReturnedBuffer,
@@ -276,7 +268,7 @@ syscall_GetReturnedBuffer_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_Exit_inner(SystemCallHandler &syscall_handler) noexcept
+syscall_Exit_inner() noexcept
 {
   return {HostFnError{HostFnErrorCode::kHostExit}, 0};
 }
