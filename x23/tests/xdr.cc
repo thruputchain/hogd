@@ -85,6 +85,12 @@ TEST(CompareStructs, BasicAssertions)
 
   MutualFrame mf1, mf2;
   EXPECT_EQ(mf1, mf2);
+
+  mf1.body.which(0);
+  mf2.body.which(0);
+  mf1.body.success().x = 1;
+  mf2.body.success().x = 2;
+  EXPECT_LT(mf1, mf2);
 }
 
 TEST(RoundTrip, BasicAssertions)
