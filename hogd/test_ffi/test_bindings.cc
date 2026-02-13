@@ -875,9 +875,9 @@ close_syscall_handler(void *syscall_handler)
 }
 
 struct ForeignRootInvokeResult
-root_invoke(void *syscall_handler, bool enable_tracing)
+root_invoke(void *syscall_handler, uint8_t enable_tracing)
 {
-  return hogd::root_invoke(syscall_handler, enable_tracing);
+  return hogd::root_invoke(syscall_handler, enable_tracing == 1);
 }
 
 struct ForeignTryCommitResult
