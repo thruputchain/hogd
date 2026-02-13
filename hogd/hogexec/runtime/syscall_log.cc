@@ -1,4 +1,5 @@
 #include "event.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
