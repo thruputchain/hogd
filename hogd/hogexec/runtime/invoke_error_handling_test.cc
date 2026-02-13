@@ -199,10 +199,8 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
   auto target_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler & /*unused*/,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             return {};
-           }}});
+           [](SystemCallHandler & /*unused*/, NativeRuntime & /*unused*/)
+               -> InvokeStatus<void> { return {}; }}});
 
   auto caller_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
@@ -263,8 +261,8 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              // High bits set
-             auto [r6, _g6] = handler.invoke(target_address, 0, UINT64_MAX, {},
-                                             0x7FFF'FFFF);
+             auto [r6, _g6] =
+                 handler.invoke(target_address, 0, UINT64_MAX, {}, 0x7FFF'FFFF);
              if (!r6.has_value() ||
                  r6.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
