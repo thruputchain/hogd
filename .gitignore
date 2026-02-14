@@ -24,6 +24,7 @@ Testing/**
 [._]*.sw[a-p]
 bcheck/**
 build/**
+build-pkg/**
 metrics_history
 perf.data
 perf.data.old
