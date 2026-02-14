@@ -513,6 +513,8 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                                  nomination.transactions_hash);
     co_await t_to_parallel_batch(cache.result_tx_nominations,
                                  nomination.transactions_nondeterministic_data);
+    co_await t_to_parallel_batch(cache.txs,
+                                 cache.nomination_result.nominated_block().txs);
   }
 
   for (x23::Async<void> &handle : finish_block_handles) {

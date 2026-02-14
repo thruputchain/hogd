@@ -1,5 +1,6 @@
 #include <chrono>
 #include <gtest/gtest.h>
+#include <set>
 #include <thread>
 
 #include "address_auth.hh"
@@ -8,6 +9,7 @@
 #include "discovery.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
@@ -98,6 +100,20 @@ TEST(Mempool, Nominate)
   DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+
+  {
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_EQ(parsed_txs.size(), 1UL);
+    EXPECT_EQ(parsed_txs[0], txs[0]);
+
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
+                            tx_hashes)());
+    EXPECT_EQ(tx_hashes.size(), 1UL);
+    EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+  }
 }
 
 TEST(Mempool, NominateBatch)
@@ -118,6 +134,29 @@ TEST(Mempool, NominateBatch)
   DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+
+  {
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_EQ(parsed_txs.size(), txs.size());
+    std::set<SignedTransaction> parsed_txs_set(parsed_txs.begin(),
+                                               parsed_txs.end());
+    std::set<SignedTransaction> txs_set(txs.begin(), txs.end());
+    EXPECT_EQ(parsed_txs_set, txs_set);
+
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
+                            tx_hashes)());
+    EXPECT_EQ(tx_hashes.size(), txs.size());
+    std::set<SignedTransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
+                                                         tx_hashes.end());
+    std::set<SignedTransactionHash> tx_hashes_set;
+    for (const SignedTransaction &tx : txs) {
+      EXPECT_TRUE(tx_hashes_set.insert(sha256(tx.tx)).second);
+    }
+    EXPECT_EQ(parsed_tx_hashes_set, tx_hashes_set);
+  }
 }
 
 TEST(Mempool, NominateEmpty)
@@ -132,6 +171,12 @@ TEST(Mempool, NominateEmpty)
   DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+
+  {
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_TRUE(parsed_txs.empty());
+  }
 }
 
 TEST(Mempool, NominateCommit)
@@ -153,6 +198,21 @@ TEST(Mempool, NominateCommit)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  {
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
+    EXPECT_EQ(parsed_txs.size(), 1UL);
+    EXPECT_EQ(parsed_txs[0], txs[0]);
+
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(
+        res_nominate.nominated_block().nomination.transactions_hash,
+        tx_hashes)());
+    EXPECT_EQ(tx_hashes.size(), 1UL);
+    EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+  }
 
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
@@ -685,7 +745,7 @@ TEST(Mempool, AuthChanged)
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  // Now check that the last tx is removed from the scheduler not nominated.
+  // Now check that the last tx is removed from the scheduler and not nominated.
   while (server.mempool_coord_rpc().auth_data_height() != 1) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
