@@ -77,9 +77,8 @@ main() // NOLINT(bugprone-exception-escape)
     std::println(stderr, "coroutine resumed with err={} (ETIMEDOUT={})", err,
                  ETIMEDOUT);
     if (err != ETIMEDOUT)
-      std::println(stderr,
-                   "DIAGNOSTIC: callback was NOT fired by abort() "
-                   "— something else resumed it first");
+      std::println(stderr, "DIAGNOSTIC: callback was NOT fired by abort() "
+                           "— something else resumed it first");
 
     cp.reset(fds[0]);
 

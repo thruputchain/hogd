@@ -244,7 +244,7 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
     FdState &f = it->second;
     if (f.callbacks[write])
       if (auto handle = std::exchange(f.callbacks[write].value, nullptr)
-                             .set_result_without_resuming(err))
+                            .set_result_without_resuming(err))
         h = {handle, f.callbacks[write].cpuhint};
   }
   if (h)
