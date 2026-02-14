@@ -98,6 +98,22 @@ TEST(Mempool, Nominate)
   DbTip db_tip = get_tip.db_tip();
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+
+  {
+    SignedTransactionBatch parsed_txs;
+    EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
+    EXPECT_EQ(parsed_txs.size(), 1UL);
+    EXPECT_EQ(parsed_txs[0], txs[0]);
+  }
+
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(
+        parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
+                            tx_hashes)());
+    EXPECT_EQ(tx_hashes.size(), 1UL);
+    EXPECT_EQ(tx_hashes[0], sha256(txs[0].tx));
+  }
 }
 
 TEST(Mempool, NominateBatch)
