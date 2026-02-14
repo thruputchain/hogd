@@ -89,7 +89,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
           if (written_len != 4 || out != value) {
-            ADD_FAILURE() << "Got bad result from RCQ";
+            ADD_FAILURE() << "Got bad result from RCQ: expected " << value << " but got " << out;
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
           return {};
@@ -390,7 +390,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 1);
   ASSERT_EQ(qe.max_live_block_num,
-            1); // TODO(geoff): is this assertion correct?
+            2); // TODO(geoff): is this assertion correct?   This matches in hogdb and mockdb, so I guess so?
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

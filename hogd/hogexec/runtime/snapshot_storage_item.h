@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep

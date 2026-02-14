@@ -125,6 +125,24 @@ NNIntItem::validate() const
 
 // RetrocausalQueueItem implementation
 
+RetrocausalQueueItem 
+RetrocausalQueueItem::make_fully_consumed_item(const SnapshotStorageItem &base_item, uint32_t retrocausally_consumed_count)
+{
+  RetrocausalQueueItem item(base_item);
+  if (base_item.type() == ItemViewType::kRetrocausalQueue) {
+    auto const& meta = base_item.retrocausal_queue_metadata();
+    item.queue_delta_.consume.emplace(
+      RetrocausalQueueConsumeDelta{
+        .past_block_consume = {
+          .max_fully_consumed_block_number = meta.max_live_block_num,
+          .partial_consumed_number = 0,
+        }
+      });
+  }
+  item.locally_consumed_index_ = retrocausally_consumed_count;
+  return item;
+}
+
 void
 RetrocausalQueueItem::construct_consume_delta()
 {

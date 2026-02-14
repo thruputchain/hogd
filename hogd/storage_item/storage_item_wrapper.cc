@@ -11,6 +11,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 
 namespace hogd {
@@ -78,9 +79,16 @@ StorageItemWrapper::NonnegativeIntWrapper::to_wire_item() const
 }
 
 WireStorageItem
-StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
+StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item() const
 {
-  return WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue);
+  auto const& meta = queue_.get_active_stats();
+  uint64_t active_size = meta.active_size;
+  auto out = WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue);
+  out.metadata() = RetrocausalQueueMetadata{
+    .max_live_block_num = queue_.get_current_block_number(),
+    .live_entries = active_size,
+  };
+  return out;
 }
 
 WireStorageItem

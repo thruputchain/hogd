@@ -1071,19 +1071,16 @@ retrocausal_queue_item_from_view(ItemView *item_view,
   // In this case, we need to load the base item from the snapshot and create a
   // new RCQItem.
   if (item_view->get<DeletedItem>()) {
-    // TODO(geoff): Fix, but this has to somehow account for the edge case of
-    // deleting the queue and re-creating it. In that scenario, we shouldn't be
-    // able to read queue entries from the snapshot queue. Correct behavior is
-    // to treat that scenario as a queue that consumes the entirety of the prior
-    // queue.
-    panic("This behavior is incorrect");
+
     UnmodifiedItem unmodified_item;
     assert(!unmodified_item.is_loaded());
     auto load_status = unmodified_item.load(snapshot_cache, addrkey);
     if (!load_status.has_value()) {
       return load_status.error();
     }
-    RetrocausalQueueItem new_item(unmodified_item.base_item());
+
+    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(unmodified_item.base_item(), 
+    item_view->get_retrocausally_consumed_count());
 
     auto set_status = item_view->set(new_item);
     if (!set_status.has_value()) {
@@ -1138,9 +1135,11 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (!queue_item.value().has_value()) {
     return queue_item.value().error();
   }
+  auto* queue_item_ptr = queue_item.value().value();
 
   auto entry =
-      queue_item.value().value()->get_next_item(execution_mode_data_, !peek);
+      queue_item_ptr->get_next_item(execution_mode_data_, !peek);
+  item_view->sync_retrocausally_consumed_count(*queue_item_ptr);
   if (!entry.has_value()) {
     return entry.error();
   }
