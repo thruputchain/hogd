@@ -41,6 +41,12 @@ endforeach()
 add_x23_test(poll_zombie)
 set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
 
+add_x23_test(abort_zombie)
+set_tests_properties(abort_zombie PROPERTIES TIMEOUT 10)
+
+add_x23_test(abort_live)
+set_tests_properties(abort_live PROPERTIES TIMEOUT 10)
+
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
 list(APPEND TEST_EXECUTABLES test_canary)

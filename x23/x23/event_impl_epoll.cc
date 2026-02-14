@@ -318,9 +318,11 @@ CoroPollImpl::poison(BorrowedFd fd)
 void
 CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
 {
-  if (WorkItem wi = getfd(fd.get())->callbacks_[write].exchange({}))
+  if (WorkItem wi = getfd(fd.get())->callbacks_[write].exchange({})) {
+    --numcoro_;
     if (CoroHandle h = wi->set_result_without_resuming(err))
       pool_.go({h, wi.cpuhint});
+  }
 }
 
 } // namespace x23::detail
