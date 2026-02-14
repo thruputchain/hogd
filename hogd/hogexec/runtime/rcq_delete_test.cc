@@ -207,6 +207,47 @@ protected:
           return {};
         });
 
+    // Test for DeleteSelfInsertedEntry
+    builder.add<SerializationFormat::kTxs>(
+        12,
+        [](SystemCallHandler &handler, uint32_t insert_a,
+           uint32_t consume_b) -> InvokeStatus<void> {
+          // insert() -> delete -> consume
+
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(insert_a),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to invoke insert";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          auto [r2, _g2] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(consume_b),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to invoke consume";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -280,6 +321,20 @@ TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
   wait_flag_2_ = true;
   wait_flag_2_.notify_all();
   t.join();
+
+  advance_block();
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
+{
+  insert(42);
+
+  invoke_method(12, uint32_t{99}, uint32_t{42});
 
   advance_block();
   auto queue = lookup_storage_item_from_db(get_queue_addrkey());
