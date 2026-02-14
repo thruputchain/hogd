@@ -71,6 +71,7 @@ AuthDataItem::count_active_keys() const
   for (size_t i = 0; i < kMaxSigners; ++i) {
     int base = (base_auth_data().public_keys[i] != nullptr) ? 1 : 0;
     if (pk_changes_[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       base = ((*pk_changes_[i]) != nullptr) ? 1 : 0;
     }
     active_keys += base;
