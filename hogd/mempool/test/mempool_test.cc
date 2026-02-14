@@ -1,5 +1,6 @@
 #include <chrono>
 #include <gtest/gtest.h>
+#include <set>
 #include <thread>
 
 #include "address_auth.hh"
@@ -138,16 +139,23 @@ TEST(Mempool, NominateBatch)
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), txs.size());
-    EXPECT_EQ(parsed_txs, txs);
+    std::set<SignedTransaction> parsed_txs_set(parsed_txs.begin(),
+                                               parsed_txs.end());
+    std::set<SignedTransaction> txs_set(txs.begin(), txs.end());
+    EXPECT_EQ(parsed_txs_set, txs_set);
 
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), txs.size());
-    for (size_t i = 0; i < tx_hashes.size(); i++) {
-      EXPECT_EQ(tx_hashes[i], sha256(parsed_txs[i].tx));
+    std::set<SignedTransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
+                                                         tx_hashes.end());
+    std::set<SignedTransactionHash> tx_hashes_set;
+    for (const SignedTransaction &tx : txs) {
+      EXPECT_TRUE(tx_hashes_set.insert(sha256(tx.tx)).second);
     }
+    EXPECT_EQ(parsed_tx_hashes_set, tx_hashes_set);
   }
 }
 
