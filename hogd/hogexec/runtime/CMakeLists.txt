@@ -106,6 +106,7 @@ add_library(runtime_test_objects OBJECT
   native_contract_test.cc
   nnint_add_test.cc
   nnint_get_test.cc
+  rcq_delete_test.cc
   rcq_test.cc
   read_only_test.cc
   reference_leak_test.cc
