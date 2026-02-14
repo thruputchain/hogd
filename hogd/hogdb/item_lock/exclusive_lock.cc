@@ -32,7 +32,6 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     return 0;
   }
   if (after->is_auth_data()) {
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto const &auth_data = after->to_auth_data();
     x23assert(auth_data.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
