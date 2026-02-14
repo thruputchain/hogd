@@ -5,6 +5,7 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/debug.h"
 #include <cassert>
 
 namespace hogd {
@@ -29,6 +30,11 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
   }
   if (after->is_deletion()) {
     return 0;
+  }
+  if (after->is_auth_data()) {
+    auto const &auth_data = after->to_auth_data();
+    x23assert(auth_data.has_value());
+    return ctx.cost_model->get_auth_data_cost(auth_data->count_active_keys());
   }
   panic("unimplemented");
 }

@@ -658,6 +658,45 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
   }
 }
 
+TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  AuthDataChangeArgs auth_data{};
+  auth_data.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_address_auth_data_addrkey(contract_addr),
+               make_auth_data_delta(auth_data),
+               std::to_underlying(
+                   StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+
+  auth_data.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
+  tx.add_delta(make_address_auth_data_addrkey(contract_addr),
+               make_auth_data_delta(auth_data),
+               std::to_underlying(
+                   StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+
+  ASSERT_TRUE(tx.pop_subtransactions(1).has_value());
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+  check_balance(contract_addr,
+                kInitialBalance - (cost_model_->get_auth_data_cost(1)));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectAuthDataTest,

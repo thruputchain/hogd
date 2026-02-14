@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -61,6 +62,20 @@ AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
   CHECK(base_auth_data() == auth_data_item.base_auth_data());
   return true;
+}
+
+size_t
+AuthDataItem::count_active_keys() const
+{
+  size_t active_keys = 0;
+  for (size_t i = 0; i < kMaxSigners; ++i) {
+    int base = (base_auth_data().public_keys[i] != nullptr) ? 1 : 0;
+    if (pk_changes_[i].has_value()) {
+      base = ((*pk_changes_[i]) != nullptr) ? 1 : 0;
+    }
+    active_keys += base;
+  }
+  return active_keys;
 }
 
 bool

@@ -388,6 +388,8 @@ public:
 
   AddressAuthData const &base_auth_data() const { return base_auth_data_; }
 
+  size_t count_active_keys() const;
+
 private:
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
   std::optional<NonceConfig> nonce_change_;
