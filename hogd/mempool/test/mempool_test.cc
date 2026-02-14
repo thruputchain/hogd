@@ -105,15 +105,13 @@ TEST(Mempool, Nominate)
     EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
-  }
 
-  {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
-    EXPECT_EQ(tx_hashes[0], sha256(txs[0].tx));
+    EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
   }
 }
 
@@ -141,16 +139,14 @@ TEST(Mempool, NominateBatch)
     EXPECT_TRUE(parallel_batch_to_t(res.nominated_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), txs.size());
     EXPECT_EQ(parsed_txs, txs);
-  }
 
-  {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.nominated_block().nomination.transactions_hash,
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), txs.size());
     for (size_t i = 0; i < tx_hashes.size(); i++) {
-      EXPECT_EQ(tx_hashes[i], sha256(txs[i].tx));
+      EXPECT_EQ(tx_hashes[i], sha256(parsed_txs[i].tx));
     }
   }
 }
@@ -201,15 +197,13 @@ TEST(Mempool, NominateCommit)
         parallel_batch_to_t(res_nominate.nominated_block().txs, parsed_txs)());
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
-  }
 
-  {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(
         res_nominate.nominated_block().nomination.transactions_hash,
         tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
-    EXPECT_EQ(tx_hashes[0], sha256(txs[0].tx));
+    EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
   }
 
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
