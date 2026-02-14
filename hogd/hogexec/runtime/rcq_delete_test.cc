@@ -248,6 +248,35 @@ protected:
           return {};
         });
 
+    // Test for DeleteAndRecreateRemovesPastBlocks
+    builder.add<SerializationFormat::kTxs>(
+        13,
+        [](SystemCallHandler &handler,
+           uint32_t insert_1) -> InvokeStatus<void> {
+          // delete -> insert()
+          auto [r1, _g1] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(insert_1),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to invoke insert";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -342,6 +371,26 @@ TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
   ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 0);
+}
+
+TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
+{
+  insert(42);
+  insert(99);
+
+  advance_block();
+
+  invoke_method(13, uint32_t{10});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 1);
+  ASSERT_EQ(qe.max_live_block_num,
+            1); // TODO(geoff): is this assertion correct?
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
