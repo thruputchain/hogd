@@ -39,9 +39,14 @@ public:
   void lock_reader()
   {
     while (true) {
+      // Respect the writer-waiting flag to prevent starvation of
+      // try_upgrade_to_writer_if_only_one().
+      if (writer_waiting_for_upgrade_.load(std::memory_order_relaxed)) {
+        cpu_relax();
+        continue;
+      }
       int64_t cur = lock_.load(std::memory_order_relaxed);
       if (cur == kWriterLocked) {
-        // The lock is currently held by a writer.
         cpu_relax();
         continue;
       }
