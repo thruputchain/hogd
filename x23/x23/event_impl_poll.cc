@@ -236,11 +236,16 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
   ThreadPool::Job h{};
   {
     auto ptr = state_.take();
-    auto &f = (*ptr)[fd.get()];
+    if (stop_requested())
+      return;
+    auto it = ptr->find(fd.get());
+    if (it == ptr->end())
+      return;
+    FdState &f = it->second;
     if (f.callbacks[write])
-      h = {std::exchange(f.callbacks[write], {})
-               ->set_result_without_resuming(err),
-           f.callbacks[write].cpuhint};
+      if (auto handle = std::exchange(f.callbacks[write].value, nullptr)
+                             .set_result_without_resuming(err))
+        h = {handle, f.callbacks[write].cpuhint};
   }
   if (h)
     pool_.go(h);
