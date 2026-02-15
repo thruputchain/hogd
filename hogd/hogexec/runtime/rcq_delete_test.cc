@@ -854,6 +854,29 @@ protected:
     ASSERT_EQ(res, ExecResult::ExecResultOK);
   }
 
+  template<x23::is_xdr_type... Args>
+  void invoke_method_fail_commit(Runtime::MethodID method, Args const &...args)
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = kContractAddress,
+                                   .entrypoint =
+                                       entrypoint_from_method_id(method),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = x23::serialize(args...)},
+                }},
+        *context_);
+
+    auto r = handler.root_invoke();
+    ASSERT_TRUE(r.is_root_success());
+    auto res = handler.try_commit_transaction();
+    ASSERT_NE(res, ExecResult::ExecResultOK);
+  }
+
+
   void insert(uint32_t value) { invoke_method(0, value); }
 
   void set_bytestring(Bytestring const &bytestring)
@@ -1220,6 +1243,30 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
   ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 0);
+}
+// Test that we only output the consume if entries are actually consumed.
+// Starts from nonempty queue, then deletes the item, then inserts a new item.
+// Then, another transaction should successfully be able to (retrocausally)
+// consume that item.
+TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
+{
+  insert(42);
+
+  advance_block();
+  // delete, then insert a new item
+  invoke_method(13, uint32_t{99});
+
+  // Consuming the preexisting item should fail
+  invoke_method_fail_commit(1, uint32_t{42});
+
+  advance_block();
+
+  // Verify the queue is now empty (item was consumed)
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 1);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
