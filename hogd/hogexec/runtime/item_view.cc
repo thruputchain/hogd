@@ -134,8 +134,9 @@ RetrocausalQueueItem::make_fully_consumed_item(
   item.locally_consumed_index_ = retrocausally_consumed_count;
 
   bool need_consume_delta =
-      (base_item.type() == ItemViewType::kRetrocausalQueue) ||
-      retrocausally_consumed_count > 0;
+      retrocausally_consumed_count > 0 ||
+      (base_item.type() == ItemViewType::kRetrocausalQueue &&
+       base_item.retrocausal_queue_metadata().live_entries > 0);
 
   if (need_consume_delta) {
     RetrocausalQueuePastBlockConsumeDelta past_consume = {

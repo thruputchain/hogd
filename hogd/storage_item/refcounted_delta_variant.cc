@@ -197,7 +197,8 @@ RetrocausalQueueArgs::to_item(
 
   RetrocausalQueuePastBlockConsumeDelta consume_delta = kEmptyConsume;
   if (past_consume_delta_) {
-    if (previous_item) { // NOLINT(bugprone-branch-clone)
+    if (previous_item &&
+        past_consume_delta_ != kEmptyConsume) { // NOLINT(bugprone-branch-clone)
       assert(previous_item->type() ==
              StorageItemType::kItemTypeRetrocausalQueue);
     }
@@ -330,8 +331,8 @@ RetrocausalQueueArgs::get_current_committed_stats(
     StorageItemWrapper const *base_item) const
 {
   auto past_stats = [&] {
-    if (base_item) {
-      assert(base_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
+    if (base_item &&
+        base_item->type() == StorageItemType::kItemTypeRetrocausalQueue) {
       auto const &queue = base_item->queue();
 
       if (past_consume_delta_) {

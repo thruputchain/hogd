@@ -120,6 +120,22 @@ protected:
           return {};
         });
 
+    builder.add<SerializationFormat::kTxs>(
+        3,
+        [](SystemCallHandler &handler,
+           Bytestring bytestring) -> InvokeStatus<void> {
+          // Write a bytestring
+          auto [res, _] = syscall_BytestringSet_inner(
+              handler, kStorageKey, std::as_bytes(std::span(bytestring)),
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set bytestring";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
+
     // Test for NoDoubleConsumeDeletedEntries:
     // Consume -> Delete -> Consume
 
@@ -840,6 +856,11 @@ protected:
 
   void insert(uint32_t value) { invoke_method(0, value); }
 
+  void set_bytestring(Bytestring const &bytestring)
+  {
+    invoke_method(3, bytestring);
+  }
+
   std::unique_ptr<RuntimeContext> context_;
 };
 
@@ -1084,6 +1105,32 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
   // Insert an item in a previous block so it becomes retrocausal
   insert(42);
 
+  // In this block: consume retrocausal, delete, create bytestring, delete,
+  // create nnint, delete, insert new item
+  invoke_method(23, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  // Verify only the inserted item remains
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 1);
+
+  // Verify that the one item left is the one inserted at the end
+  invoke_method(1, uint32_t{99});
+}
+
+// Start with a nonempty slot.  Consumes an item, then deletes,
+// then creates a bytestring, then deletes, then creates an nnint,
+// then deletes, then inserts an item.  Verify that at the next block there's
+// only the one item inserted at the end
+TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
+{
+  // Insert an item in a previous block
+  insert(42);
+
   advance_block();
 
   // In this block: consume retrocausal, delete, create bytestring, delete,
@@ -1101,6 +1148,78 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
 
   // Verify that the one item left is the one inserted at the end
   invoke_method(1, uint32_t{99});
+}
+
+// Test that we only output the consume if entries are actually consumed.
+// Starts from empty, then deletes the item, then inserts a new item.
+// Then, another transaction should successfully be able to (retrocausally)
+// consume that item.
+TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
+{
+  // Start from empty, delete (no-op), then insert a new item
+  invoke_method(13, uint32_t{42});
+
+  // Then retrocausally consume the item
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // Verify the queue is now empty (item was consumed)
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Test that we only output the consume if entries are actually consumed.
+// Starts from empty, then deletes the item, then inserts a new item.
+// Then, another transaction should successfully be able to (retrocausally)
+// consume that item.
+TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
+{
+  set_bytestring(make_bytestring("test"));
+  advance_block();
+  // delete, then insert a new item
+  invoke_method(13, uint32_t{42});
+
+  // Then retrocausally consume the item
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // Verify the queue is now empty (item was consumed)
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Test that we only output the consume if entries are actually consumed.
+// Starts from empty, then deletes the item, then inserts a new item.
+// Then, another transaction should successfully be able to (retrocausally)
+// consume that item.
+TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
+{
+  insert(42);
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+  // delete, then insert a new item
+  invoke_method(13, uint32_t{42});
+
+  // Then retrocausally consume the item
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // Verify the queue is now empty (item was consumed)
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
