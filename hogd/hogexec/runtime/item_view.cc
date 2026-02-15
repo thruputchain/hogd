@@ -4,7 +4,6 @@
 #include <optional>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
