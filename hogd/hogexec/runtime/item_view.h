@@ -5,9 +5,11 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -80,7 +82,9 @@ public:
     : base_item_(base_item)
   {}
 
-  static RetrocausalQueueItem make_fully_consumed_item(const SnapshotStorageItem &base_item, uint32_t retrocausally_consumed_count);
+  static RetrocausalQueueItem
+  make_fully_consumed_item(const SnapshotStorageItem &base_item,
+                           uint32_t retrocausally_consumed_count);
 
   StorageDelta get_delta() const
   {
@@ -268,15 +272,14 @@ public:
 
   std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet> get_delta() const;
 
+  void sync_retrocausally_consumed(RetrocausalQueueItem const &item)
+  {
+    retrocausally_consumed_count_ = item.get_retrocausally_consumed_count();
+  }
+
   uint32_t get_retrocausally_consumed_count() const
   {
     return retrocausally_consumed_count_;
-  }
-
-  void sync_retrocausally_consumed_count(RetrocausalQueueItem const &item)
-  {
-    x23assert(retrocausally_consumed_count_ <= item.get_retrocausally_consumed_count());
-    retrocausally_consumed_count_ = item.get_retrocausally_consumed_count();
   }
 
 private:
@@ -287,9 +290,12 @@ private:
   StorageDeltaFlagSet flags_ =
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone);
 
-  // There is a niche edge case, in which a contract deletes a queue and then recreates it.
-  // In this case we need to know how many entries were retrocausally consumed before the queue was deleted.
-  // Otherwise we could double consume an entry, i.e. before and after the queue was deleted.
+  // There is a niche edge case, in which a contract deletes a queue and then
+  // recreates it. In this case we need to know how which entries were
+  // retrocausally consumed before the queue was deleted. Otherwise we could
+  // double consume an entry, i.e. before and after the queue was deleted. We
+  // need the actual entries, not just the count, in order to construct the
+  // final delta, but we can fetch those from the snapshot storage item.
   uint32_t retrocausally_consumed_count_ = 0;
 };
 

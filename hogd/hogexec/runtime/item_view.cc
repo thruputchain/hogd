@@ -4,6 +4,7 @@
 #include <optional>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -125,21 +126,34 @@ NNIntItem::validate() const
 
 // RetrocausalQueueItem implementation
 
-RetrocausalQueueItem 
-RetrocausalQueueItem::make_fully_consumed_item(const SnapshotStorageItem &base_item, uint32_t retrocausally_consumed_count)
+RetrocausalQueueItem
+RetrocausalQueueItem::make_fully_consumed_item(
+    const SnapshotStorageItem &base_item, uint32_t retrocausally_consumed_count)
 {
   RetrocausalQueueItem item(base_item);
-  if (base_item.type() == ItemViewType::kRetrocausalQueue) {
-    auto const& meta = base_item.retrocausal_queue_metadata();
-    item.queue_delta_.consume.emplace(
-      RetrocausalQueueConsumeDelta{
-        .past_block_consume = {
-          .max_fully_consumed_block_number = meta.max_live_block_num,
-          .partial_consumed_number = 0,
-        }
-      });
-  }
   item.locally_consumed_index_ = retrocausally_consumed_count;
+
+  bool need_consume_delta =
+      (base_item.type() == ItemViewType::kRetrocausalQueue) ||
+      retrocausally_consumed_count > 0;
+
+  if (need_consume_delta) {
+    RetrocausalQueuePastBlockConsumeDelta past_consume = {
+        .max_fully_consumed_block_number = 0,
+        .partial_consumed_number = 0,
+    };
+    if (base_item.type() == ItemViewType::kRetrocausalQueue) {
+      auto const &meta = base_item.retrocausal_queue_metadata();
+      past_consume.max_fully_consumed_block_number = meta.max_live_block_num;
+    }
+    item.queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
+        .past_block_consume = past_consume,
+    });
+    item.queue_delta_.consume->current_block_consumed =
+        base_item.get_retrocausally_consumed_entries(
+            retrocausally_consumed_count);
+  }
+
   return item;
 }
 

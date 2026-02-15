@@ -81,12 +81,12 @@ StorageItemWrapper::NonnegativeIntWrapper::to_wire_item() const
 WireStorageItem
 StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item() const
 {
-  auto const& meta = queue_.get_active_stats();
+  auto const &meta = queue_.get_active_stats();
   uint64_t active_size = meta.active_size;
   auto out = WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue);
   out.metadata() = RetrocausalQueueMetadata{
-    .max_live_block_num = queue_.get_current_block_number(),
-    .live_entries = active_size,
+      .max_live_block_num = queue_.get_current_block_number(),
+      .live_entries = active_size,
   };
   return out;
 }

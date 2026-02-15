@@ -1079,8 +1079,9 @@ retrocausal_queue_item_from_view(ItemView *item_view,
       return load_status.error();
     }
 
-    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(unmodified_item.base_item(), 
-    item_view->get_retrocausally_consumed_count());
+    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(
+        unmodified_item.base_item(),
+        item_view->get_retrocausally_consumed_count());
 
     auto set_status = item_view->set(new_item);
     if (!set_status.has_value()) {
@@ -1135,11 +1136,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (!queue_item.value().has_value()) {
     return queue_item.value().error();
   }
-  auto* queue_item_ptr = queue_item.value().value();
+  auto *queue_item_ptr = queue_item.value().value();
 
-  auto entry =
-      queue_item_ptr->get_next_item(execution_mode_data_, !peek);
-  item_view->sync_retrocausally_consumed_count(*queue_item_ptr);
+  auto entry = queue_item_ptr->get_next_item(execution_mode_data_, !peek);
+  item_view->sync_retrocausally_consumed(*queue_item_ptr);
   if (!entry.has_value()) {
     return entry.error();
   }
