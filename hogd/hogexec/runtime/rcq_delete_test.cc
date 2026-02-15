@@ -814,6 +814,361 @@ protected:
           return {};
         });
 
+    // Method 24: peek_only(value) — peek and verify value matches
+    builder.add<SerializationFormat::kTxs>(
+        24,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          uint32_t peeked = 0;
+          RuntimeMemoryLength peek_len = 0;
+          auto [rp, _gp] = syscall_RetrocausalQueueConsume_inner(
+              handler, kStorageKey, true,
+              std::as_writable_bytes(std::span(&peeked, 1)), peek_len);
+          if (!rp.has_value() ||
+              rp.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to peek";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (peek_len != 4 || peeked != value) {
+            ADD_FAILURE() << "Peek: expected " << value << " but got "
+                          << peeked;
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
+
+    // Method 25: delete_and_fail — delete then return error to revert
+    builder.add<SerializationFormat::kTxs>(
+        25, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+          auto [r1, _g1] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        });
+
+    // Method 26: try_delete_revert_then_consume(expected_value)
+    // invoke(method 25, kInvokeFlagTryInvoke) -> consume(expected_value)
+    builder.add<SerializationFormat::kTxs>(
+        26,
+        [](SystemCallHandler &handler,
+           uint32_t expected_value) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 25, std::numeric_limits<GasAmount>::max(), {},
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke should have reported inner failure";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // queue should be intact after reverted delete
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(expected_value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume after reverted delete";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 27: peek_peek_consume_consume(peek_val, consume_a, consume_b)
+    builder.add<SerializationFormat::kTxs>(
+        27,
+        [](SystemCallHandler &handler, uint32_t peek_val, uint32_t consume_a,
+           uint32_t consume_b) -> InvokeStatus<void> {
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 24,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(peek_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed first peek";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 24,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(peek_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed second peek";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(consume_a),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume(a)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r4, _g4] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(consume_b),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r4.has_value() ||
+              r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume(b)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 29: insert_try_delete_revert_consume_consume(self_val,
+    // concurrent_val)
+    builder.add<SerializationFormat::kTxs>(
+        29,
+        [](SystemCallHandler &handler, uint32_t self_val,
+           uint32_t concurrent_val) -> InvokeStatus<void> {
+          // insert(self_val)
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(self_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert self entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // try_invoke delete (reverted via inner error)
+          auto [r2, _g2] = handler.invoke(
+              kContractAddress, 25, std::numeric_limits<GasAmount>::max(), {},
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r2.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke should have reported inner failure";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // consume(self_val) - self entries consumed first
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(self_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume self entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // consume(concurrent_val)
+          auto [r4, _g4] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(concurrent_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r4.has_value() ||
+              r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume concurrent entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 30: delete_insert_insert(val_a, val_b)
+    builder.add<SerializationFormat::kTxs>(
+        30,
+        [](SystemCallHandler &handler, uint32_t val_a,
+           uint32_t val_b) -> InvokeStatus<void> {
+          auto [r1, _g1] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(val_a),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert(a)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(val_b),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert(b)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 31: just_delete — only deletes, no error return
+    builder.add<SerializationFormat::kTxs>(
+        31, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+          auto [r1, _g1] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
+
+    // Method 32: try_invoke_delete_then_consume(expected_value)
+    // invoke(method 31, kInvokeFlagTryInvoke), expect conflict, consume
+    builder.add<SerializationFormat::kTxs>(
+        32,
+        [](SystemCallHandler &handler,
+           uint32_t expected_value) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 31, std::numeric_limits<GasAmount>::max(), {},
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          // Expect conflict when concurrent insert exists
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke delete should have conflicted";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // queue still intact
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(expected_value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume after conflicted delete";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 33: consume_delete_peek(old_val, peek_val)
+    builder.add<SerializationFormat::kTxs>(
+        33,
+        [](SystemCallHandler &handler, uint32_t old_val,
+           uint32_t peek_val) -> InvokeStatus<void> {
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(old_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume old entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r2, _g2] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 24,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(peek_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to peek after delete";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 28: consume_delete_insert_peek(old_val, new_val)
+    builder.add<SerializationFormat::kTxs>(
+        28,
+        [](SystemCallHandler &handler, uint32_t old_val,
+           uint32_t new_val) -> InvokeStatus<void> {
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(old_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume old entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r2, _g2] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(new_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert new entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r4, _g4] =
+              handler.invoke(kContractAddress, 24,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(new_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r4.has_value() ||
+              r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to peek new entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -1331,6 +1686,234 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
   ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 1);
+}
+
+// Peek returns the next entry without advancing the cursor.
+// A subsequent consume should return the same entry.
+TEST_P(RCQDeleteTest, PeekThenConsumeSameEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42);
+  invoke_method(24, uint32_t{42}); // peek verifies value
+  invoke_method(1, uint32_t{42});  // consume same entry
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Multiple peeks without intervening consume return the same entry,
+// confirming the cursor doesn't advance on peek.
+TEST_P(RCQDeleteTest, PeekTwiceReturnsSameEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42);
+  insert(99);
+  invoke_method(27, uint32_t{42}, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// After delete+recreate, peek should see entries from the new queue.
+// Verifies peek state is reset by delete.
+TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42);
+  invoke_method(28, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  // peek doesn't consume, so the self-inserted entry (99) is still live
+  ASSERT_EQ(qe.live_entries, 1);
+}
+
+// After delete+recreate with no self-insert, peek returns a concurrent entry
+// from the recreated queue.
+TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesConcurrentEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "1 extra entry";
+    return;
+  }
+  insert(42);
+  insert(99);
+  invoke_method(33, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  // peek doesn't consume, so the concurrent entry (99) is still live
+  ASSERT_EQ(qe.live_entries, 1);
+}
+
+// A delete inside a reverted try_invoke frame should leave the queue intact.
+// Entries remain consumable after the revert.
+TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "1 extra entry";
+    return;
+  }
+  insert(42);
+  invoke_method(26, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Same as RevertedDeletePreservesQueue but entries come from a past block.
+// Verifies reverting a delete works for committed entries.
+TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
+{
+  insert(42);
+
+  advance_block();
+
+  invoke_method(26, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Insert a self entry, then try_invoke a delete that reverts.
+// Both self-inserted and concurrent entries remain consumable.
+TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "2 extra entries";
+    return;
+  }
+  insert(99); // concurrent
+  invoke_method(29, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// A successful delete inside a try_invoke frame should fail to acquire locks
+// when a concurrent transaction has inserted into the same queue.
+// The delete is reverted due to conflict, and the entry remains consumable.
+TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "1 extra entry";
+    return;
+  }
+  insert(42); // concurrent insert creates conflicting lock
+  invoke_method(32, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// After delete+recreate, entries inserted in the same block should be
+// lexicographically sorted when consumed in a later block.
+TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
+{
+  // Block 1: insert entries
+  insert(5);
+  insert(1);
+  insert(3);
+
+  advance_block();
+
+  // Block 2: delete, insert new entries
+  invoke_method(30, uint32_t{4}, uint32_t{2});
+
+  advance_block();
+
+  // Block 3: consume first sorted entry
+  invoke_method(1, uint32_t{2});
+
+  advance_block();
+
+  // Block 4: consume second sorted entry
+  invoke_method(1, uint32_t{4});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Deleting a queue destroys ALL pending entries across multiple past blocks.
+TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
+{
+  // Block 1: insert(10)
+  insert(10);
+
+  advance_block();
+
+  // Block 2: insert(20)
+  insert(20);
+
+  advance_block();
+
+  // Block 3: delete, insert(30)
+  invoke_method(13, uint32_t{30});
+
+  advance_block();
+
+  // Block 4: consume(30) — 10 and 20 are gone
+  invoke_method(1, uint32_t{30});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
