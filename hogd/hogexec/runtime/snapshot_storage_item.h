@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -20,6 +21,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -100,6 +102,16 @@ public:
   }
 
   auto const &addrkey() const { return addrkey_; }
+
+  // We must have already loaded up to count retrocausally consumed entries from
+  // the db.
+  x23::Vec<QueueEntry> get_retrocausally_consumed_entries(uint32_t count) const
+  {
+    std::scoped_lock ul(rcq_mtx_);
+    CHECK(count <= concurrent_queue_entries_.size());
+    return x23::Vec<QueueEntry>(concurrent_queue_entries_.begin(),
+                                concurrent_queue_entries_.begin() + count);
+  }
 
 private:
 #ifdef NDEBUG

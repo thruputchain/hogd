@@ -5,8 +5,11 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -15,6 +18,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/debug.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -78,6 +82,10 @@ public:
     : base_item_(base_item)
   {}
 
+  static RetrocausalQueueItem
+  make_fully_consumed_item(const SnapshotStorageItem &base_item,
+                           uint32_t retrocausally_consumed_count);
+
   StorageDelta get_delta() const
   {
     StorageDelta delta =
@@ -93,6 +101,11 @@ public:
 
   void insert_entry(QueueEntry const &entry);
 
+  uint32_t get_retrocausally_consumed_count() const
+  {
+    return locally_consumed_index_;
+  }
+
 private:
   SystemStatus<const RetrocausalQueueBlock *>
   get_next_block(uint64_t search_start_index) const;
@@ -106,7 +119,9 @@ private:
   void construct_consume_delta();
 
   RetrocausalQueueDelta queue_delta_{};
+  // count of entries consumed that were inserted by this transaction
   uint32_t self_consumed_index_ = 0;
+  // count of retrocausally consumed entries from other transactions
   uint32_t locally_consumed_index_ = 0;
 
   const SnapshotStorageItem &base_item_;
@@ -257,6 +272,16 @@ public:
 
   std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet> get_delta() const;
 
+  void sync_retrocausally_consumed(RetrocausalQueueItem const &item)
+  {
+    retrocausally_consumed_count_ = item.get_retrocausally_consumed_count();
+  }
+
+  uint32_t get_retrocausally_consumed_count() const
+  {
+    return retrocausally_consumed_count_;
+  }
+
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
@@ -264,6 +289,14 @@ private:
       delta_args_;
   StorageDeltaFlagSet flags_ =
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone);
+
+  // There is a niche edge case, in which a contract deletes a queue and then
+  // recreates it. In this case we need to know how which entries were
+  // retrocausally consumed before the queue was deleted. Otherwise we could
+  // double consume an entry, i.e. before and after the queue was deleted. We
+  // need the actual entries, not just the count, in order to construct the
+  // final delta, but we can fetch those from the snapshot storage item.
+  uint32_t retrocausally_consumed_count_ = 0;
 };
 
 } // namespace hogd

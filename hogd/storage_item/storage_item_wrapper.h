@@ -100,7 +100,7 @@ private:
     // Note: The RCQ type is automatically fully serialized and transferred.
     // We merely send over the fact that an RCQ exists.
     // Other subsystems can then query individual blocks within the RCQ.
-    static WireStorageItem to_wire_item();
+    WireStorageItem to_wire_item() const;
     // Returns storage cost based on total queue size and block count
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
