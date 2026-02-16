@@ -32,20 +32,19 @@ make_bytestring_set(Bytestring const &string)
 }
 
 StorageDelta
-make_nnint128_set_add(int128_t set, int128_t add)
+make_nnint128_set_add(int128_xdr set, int128_xdr add)
 {
   StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  out.nnint() = NonnegativeInt128SetAddArgs{.set_value = to_xdr(set),
-                                            .add_value = to_xdr(add)};
+  out.nnint() = NonnegativeInt128SetAddArgs{.set_value = set, .add_value = add};
 
   return out;
 }
 
 StorageDelta
-make_nnint128_add(int128_t add)
+make_nnint128_add(int128_xdr add)
 {
   StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-  out.nnint_add() = to_xdr(add);
+  out.nnint_add() = add;
   return out;
 }
 
@@ -96,7 +95,8 @@ BytestringItem::validate() const
 SyscallStatus<void>
 NNIntItem::validate() const
 {
-  if (add_value_ >= 0) {
+  int128_t add_value = from_xdr(add_value_);
+  if (add_value >= 0) {
     // When add_value_ is nonnegative, the storage delta produced
     // by this item is always valid.
     return {};
@@ -105,15 +105,17 @@ NNIntItem::validate() const
     return {};
   }
 
-  if (base_value_.value() < 0) {
+  int128_t base_value = from_xdr(*base_value_);
+
+  if (base_value < 0) {
     // cannot subtract from a value that is already negative
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  if (base_value_.value() >= 0) {
+  if (base_value >= 0) {
     // base_value_ + add_value_ cannot overflow here,
     // because base_value_ and add_value_ have opposite signs
-    if (*base_value_ + add_value_ < 0) {
+    if (base_value + add_value < 0) {
       // This would be always rejected by the delta handling logic
       // in the storage server.
       return SyscallError{

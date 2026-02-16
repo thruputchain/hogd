@@ -52,8 +52,8 @@ public:
   SyscallStatus<void> validate() const;
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
-  std::optional<int128_t> base_value_;
-  int128_t add_value_;
+  std::optional<int128_xdr> base_value_;
+  int128_xdr add_value_;
 };
 
 // State of an item that is a token balance
