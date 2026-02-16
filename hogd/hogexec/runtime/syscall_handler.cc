@@ -21,6 +21,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/utilities.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
