@@ -97,6 +97,10 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
+  void reserve(size_t delta_count) {
+    current_subtransaction_batch_.reserve(delta_count);
+  }
+
   void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
                  StorageDeltaFlagSet flags)
   {

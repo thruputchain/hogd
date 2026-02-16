@@ -106,6 +106,7 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
+  db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size());
 
   for (auto const &[addrkey, item_view] : modified_items_) {
     auto [delta, flags] = item_view.get_delta();
