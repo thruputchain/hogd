@@ -163,13 +163,14 @@ RetrocausalQueueItem::make_fully_consumed_item(
 void
 RetrocausalQueueItem::construct_consume_delta()
 {
+  assert(base_item_);
   RetrocausalQueuePastBlockConsumeDelta past_consume = {
       .max_fully_consumed_block_number = 0,
       .partial_consumed_number = 0,
   };
 
-  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
-    past_consume = base_item_.retrocausal_queue_metadata().consume_state;
+  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    past_consume = base_item_->retrocausal_queue_metadata().consume_state;
   }
 
   queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
@@ -197,6 +198,7 @@ SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
+  assert(base_item_);
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -211,8 +213,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   else {
     // If we don't have a consume delta yet, then we're starting from
     // wherever things left off according to the snapshot.
-    if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
-      auto const &meta = base_item_.retrocausal_queue_metadata();
+    if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+      auto const &meta = base_item_->retrocausal_queue_metadata();
       block_index = meta.consume_state.max_fully_consumed_block_number + 1;
       partial_consume_quantity = meta.consume_state.partial_consumed_number;
     }
@@ -310,8 +312,9 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 SystemStatus<const RetrocausalQueueBlock *>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
-  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
-    return base_item_.get_next_rcq_block(search_start_index);
+  assert(base_item_);
+  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    return base_item_->get_next_rcq_block(search_start_index);
   }
   return nullptr;
 }
@@ -320,8 +323,9 @@ SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
+  assert(base_item_);
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-    auto out = base_item_.get_concurrent_rcq_entry(index);
+    auto out = base_item_->get_concurrent_rcq_entry(index);
     if (!out.has_value()) {
       return out.error();
     }
@@ -331,7 +335,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
 
     if (rcq_entry.get().has_value()) {
       // NOLINTBEGIN(bugprone-unchecked-optional-access)
-      proposal_data.log_queue_entry_observation(base_item_.addrkey(), index,
+      proposal_data.log_queue_entry_observation(base_item_->addrkey(), index,
                                                 {*rcq_entry.get()});
       // NOLINTEND(bugprone-unchecked-optional-access)
 
@@ -354,7 +358,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   }
   if (bit_res->get()) {
     auto res =
-        validation_data.consume_queue_entry_observation(base_item_.addrkey(),
+        validation_data.consume_queue_entry_observation(base_item_->addrkey(),
                                                         index);
     if (!res.has_value()) {
       return SystemError{SystemErrorCode::kSystemValidationFailure};

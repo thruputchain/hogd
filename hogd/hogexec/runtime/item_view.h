@@ -77,8 +77,14 @@ public:
 class RetrocausalQueueItem {
 public:
   RetrocausalQueueItem(const SnapshotStorageItem &base_item)
-    : base_item_(base_item)
+    : base_item_(&base_item)
   {}
+
+  RetrocausalQueueItem(RetrocausalQueueItem &&other) noexcept = default;
+  RetrocausalQueueItem &
+  operator=(RetrocausalQueueItem &&other) noexcept = default;
+  RetrocausalQueueItem(RetrocausalQueueItem const &other) = default;
+  RetrocausalQueueItem &operator=(RetrocausalQueueItem const &other) = default;
 
   static RetrocausalQueueItem
   make_fully_consumed_item(const SnapshotStorageItem &base_item,
@@ -122,7 +128,7 @@ private:
   // count of retrocausally consumed entries from other transactions
   uint32_t locally_consumed_index_ = 0;
 
-  const SnapshotStorageItem &base_item_;
+  const SnapshotStorageItem *base_item_;
 };
 
 class ReplayCacheItem {
@@ -130,6 +136,11 @@ public:
   ReplayCacheItem(Uniquifier consumed_uniquifier)
     : consumed_uniquifier_(consumed_uniquifier)
   {}
+
+  ReplayCacheItem(ReplayCacheItem &&other) noexcept = default;
+  ReplayCacheItem &operator=(ReplayCacheItem &&other) noexcept = default;
+  ReplayCacheItem(ReplayCacheItem const &other) = default;
+  ReplayCacheItem &operator=(ReplayCacheItem const &other) = default;
 
   StorageDelta get_delta() const;
   constexpr static SyscallStatus<void> validate() { return {}; }
@@ -151,9 +162,11 @@ public:
           std::make_unique<InternalAuthData>(*other.internal_auth_data_))
   {}
   AddressAuthDataItem(AddressAuthDataItem &&other) noexcept = default;
-  AddressAuthDataItem &operator=(AddressAuthDataItem const &other);
+
   AddressAuthDataItem &
   operator=(AddressAuthDataItem &&other) noexcept = default;
+  AddressAuthDataItem &operator=(AddressAuthDataItem const &other);
+
   StorageDelta get_delta() const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
@@ -196,6 +209,11 @@ class UnmodifiedItem {
 public:
   UnmodifiedItem() : base_item_(std::nullopt) {}
 
+  UnmodifiedItem(UnmodifiedItem &&other) noexcept = default;
+  UnmodifiedItem &operator=(UnmodifiedItem &&other) noexcept = default;
+  UnmodifiedItem(UnmodifiedItem const &other) = default;
+  UnmodifiedItem &operator=(UnmodifiedItem const &other) = default;
+
   constexpr static std::optional<StorageDelta> get_delta()
   {
     return std::nullopt;
@@ -225,6 +243,11 @@ private:
 class ItemView {
 public:
   ItemView() : delta_args_(UnmodifiedItem()) {}
+
+  ItemView(ItemView &&other) noexcept = default;
+  ItemView &operator=(ItemView &&other) noexcept = default;
+  ItemView(ItemView const &other) = default;
+  ItemView &operator=(ItemView const &other) = default;
 
   // Returns a pointer to the item view if it is of the given type,
   // otherwise returns nullptr.

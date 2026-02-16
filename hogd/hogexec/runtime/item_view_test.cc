@@ -102,7 +102,8 @@ TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
   ItemView proxy;
 
   ASSERT_FALSE(proxy.template get<NNIntItem>());
-  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(10)))));
+  EXPECT_TRUE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(10)))));
 
   const auto *get_res = proxy.template get<NNIntItem>();
 
@@ -118,13 +119,17 @@ TEST_F(ItemViewTest, NNIntSetAddValidation)
   ItemView proxy;
   ASSERT_FALSE(proxy.template get<NNIntItem>());
 
-  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-10)))));
-  EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-110)))));
-  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-100)))));
+  EXPECT_TRUE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-10)))));
+  EXPECT_FALSE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-110)))));
+  EXPECT_TRUE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-100)))));
 
   EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(1)))));
   EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(0)))));
-  EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(-1)))));
+  EXPECT_FALSE(
+      proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(-1)))));
 
   EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(0)))));
   EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(-1)))));

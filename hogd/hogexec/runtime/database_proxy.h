@@ -102,11 +102,13 @@ public:
     current_subtransaction_batch_.reserve(delta_count);
   }
 
-  void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
+  void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
-    current_subtransaction_batch_.push_back(FlaggedStorageDelta{
-        .addrkey = addrkey, .delta = delta, .flags = flags});
+    current_subtransaction_batch_.push_back(
+        FlaggedStorageDelta{.addrkey = std::move(addrkey),
+                            .delta = std::move(delta),
+                            .flags = flags});
   }
 
   SystemStatus<bool> try_push_current_subtransaction()
