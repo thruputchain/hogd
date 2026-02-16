@@ -4,6 +4,7 @@
 #include <cassert>
 #include <optional>
 #include <random>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -105,10 +106,8 @@ public:
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
-    current_subtransaction_batch_.push_back(
-        FlaggedStorageDelta{.addrkey = std::move(addrkey),
-                            .delta = std::move(delta),
-                            .flags = flags});
+    current_subtransaction_batch_.emplace_back(std::move(addrkey),
+                                               std::move(delta), flags);
   }
 
   SystemStatus<bool> try_push_current_subtransaction()
