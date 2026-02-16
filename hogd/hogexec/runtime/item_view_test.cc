@@ -107,8 +107,8 @@ TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
   const auto *get_res = proxy.template get<NNIntItem>();
 
   ASSERT_TRUE(get_res);
-  EXPECT_EQ(get_res->base_value_, 100);
-  EXPECT_EQ(get_res->add_value_, 10);
+  EXPECT_EQ(get_res->base_value_, to_xdr(int128_t(100)));
+  EXPECT_EQ(get_res->add_value_, to_xdr(int128_t(10)));
 
   EXPECT_FALSE(proxy.template get<BytestringItem>());
 }
