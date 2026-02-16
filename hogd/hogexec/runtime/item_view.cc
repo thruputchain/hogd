@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/item_view.h"
 
 #include <cassert>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -383,19 +384,33 @@ StorageDelta
 AddressAuthDataItem::get_delta() const
 {
   auto delta = StorageDelta(StorageDeltaType::kDeltaTypeAuthDataChange);
-  for (auto const &[key_index, new_key] : pk_changes_) {
+  assert(internal_auth_data_);
+  for (auto const &[key_index, new_key] : internal_auth_data_->pk_changes_) {
     delta.auth_data_change().auth_data_change_signers.push_back(
         AuthDataChangeSigner{.public_key_id = key_index,
                              .public_key = new_key});
   }
-  if (nonce_config_.has_value()) {
-    delta.auth_data_change().new_nonce_config = nonce_config_.value();
+  if (internal_auth_data_->nonce_config_.has_value()) {
+    delta.auth_data_change().new_nonce_config =
+        internal_auth_data_->nonce_config_.value();
   }
-  if (gas_permission_configs_.has_value()) {
+  if (internal_auth_data_->gas_permission_configs_.has_value()) {
     delta.auth_data_change().new_gas_config_change = GasConfigChange{
-        .new_gas_permission_configs = gas_permission_configs_.value()};
+        .new_gas_permission_configs =
+            internal_auth_data_->gas_permission_configs_.value()};
   }
   return delta;
+}
+
+AddressAuthDataItem &
+AddressAuthDataItem::operator=(AddressAuthDataItem const &other)
+{
+  if (this == &other) {
+    return *this;
+  }
+  internal_auth_data_ =
+      std::make_unique<InternalAuthData>(*other.internal_auth_data_);
+  return *this;
 }
 
 std::optional<ItemViewType>
