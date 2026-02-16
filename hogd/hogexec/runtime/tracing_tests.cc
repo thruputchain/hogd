@@ -2,6 +2,9 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <span>
+#include <unordered_map>
+#include <utility>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
@@ -14,12 +17,17 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
+#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -228,6 +236,312 @@ TEST_F(TracingTest, NoSyscallTest)
             SyscallErrorCode::kSyscallErrorCodeNoSyscall);
 
   ASSERT_EQ(trace->system_calls[2].body.syscall_number(), SyscallNo::kReturn);
+}
+
+TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
+{
+  auto contract_0_addr = make_contract_address(0);
+  auto target_addr = make_contract_address(1); // No deployment
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [&](SystemCallHandler &handler,
+               NativeRuntime &runtime) -> InvokeStatus<void> {
+             handler.start_syscall_trace(SyscallNo::kInvoke,
+                                         runtime.get_available_gas());
+
+             auto [r, gas] = handler.invoke(target_addr, 0,
+                                            runtime.get_available_gas(), {}, 0);
+
+             handler.finish_syscall_trace(r, runtime.get_available_gas());
+
+             if (!r.has_value() ||
+                 r.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0_xdr = make_native_contract(0);
+  write_contract(contract_0_xdr);
+  write_deployment(contract_0_addr, contract_0_xdr);
+  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = contract_0_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      *runtime_context);
+  handler.enable_tracing();
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  // Root frame should be contract 0
+  ASSERT_EQ(trace->invocation.invoked_address, contract_0_addr);
+
+  // Root frame should have terminated with Return (caller handled the error)
+  ASSERT_EQ(trace->status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+
+  // Find the Invoke syscall in the root frame
+  const SyscallTrace *invoke_syscall = nullptr;
+  for (auto const &sc : trace->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kInvoke) {
+      invoke_syscall = &sc;
+      break;
+    }
+  }
+  ASSERT_NE(invoke_syscall, nullptr);
+
+  // Invoke should have returned kSyscallErrorCodeInvalidSyscallInput
+  ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  // No child trace — invoke returned before start_frame
+  auto const &invoke_trace = invoke_syscall->body.invoke();
+  ASSERT_EQ(invoke_trace.outputs, nullptr);
+}
+
+TEST_F(TracingTest, NestedInvokeDeterministicError)
+{
+  auto caller_addr = make_contract_address(0);
+  auto callee_addr = make_contract_address(1);
+
+  // Callee contract: method 0 returns a deterministic error
+  auto callee_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler & /*unused*/,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }}});
+
+  // Caller contract: method 0 invokes callee method 0 with manual tracing
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [&](SystemCallHandler &handler,
+               NativeRuntime &runtime) -> InvokeStatus<void> {
+             handler.start_syscall_trace(SyscallNo::kInvoke,
+                                         runtime.get_available_gas());
+
+             auto [r, gas] = handler.invoke(callee_addr, 0,
+                                            runtime.get_available_gas(), {}, 0);
+
+             handler.finish_syscall_trace(r, runtime.get_available_gas());
+
+             if (!r.has_value() ||
+                 r.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+               ADD_FAILURE() << "Expected kSyscallErrorCodeDeterministicWasm";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(callee_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  auto callee_xdr = make_native_contract(1);
+  write_contract(caller_xdr);
+  write_contract(callee_xdr);
+  write_deployment(caller_addr, caller_xdr);
+  write_deployment(callee_addr, callee_xdr);
+  setup_grant_storage_token(caller_addr, 1'000'000'000);
+  setup_grant_storage_token(callee_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = caller_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      *runtime_context);
+  handler.enable_tracing();
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  // Root frame should have terminated with Return (caller handled error)
+  ASSERT_EQ(trace->status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+
+  // Find the Invoke syscall in the root frame
+  const SyscallTrace *invoke_syscall = nullptr;
+  for (auto const &sc : trace->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kInvoke) {
+      invoke_syscall = &sc;
+      break;
+    }
+  }
+  ASSERT_NE(invoke_syscall, nullptr);
+
+  // Invoke should report kSyscallErrorCodeDeterministicWasm
+  ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+
+  // Should have a child trace
+  auto const &invoke_trace = invoke_syscall->body.invoke();
+  ASSERT_NE(invoke_trace.outputs, nullptr);
+  ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
+
+  auto const &child_trace = *invoke_trace.outputs->child_trace;
+
+  // Child frame should be the callee contract
+  ASSERT_EQ(child_trace.invocation.invoked_address, callee_addr);
+
+  // Child trace shows Return (native contracts use the default frame output,
+  // because set_frame_return is only called by WASM return/abort syscalls)
+  ASSERT_EQ(child_trace.status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+}
+
+TEST_F(TracingTest, TryInvokeLockAcquireFailure)
+{
+  ContractAddress contract_addr = make_contract_address(0);
+
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            // Method 0: write calldata to storage key "test"
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               auto key = make_storage_key("test");
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(calldata)),
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "Failed to set bytestring";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+            // Method 1: try_invoke method 0 with manual trace entries
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               handler.start_syscall_trace(SyscallNo::kInvoke,
+                                           runtime.get_available_gas());
+
+               Calldata args = {'t', 'e', 's', 't'};
+               auto [r, gas] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+
+               handler.finish_syscall_trace(r, runtime.get_available_gas());
+
+               // Handle try_invoke result — return success regardless
+               return {};
+             }}});
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(contract_addr, contract_xdr);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Tx 1: invoke method 1 (try_invoke writes to "test", acquires lock)
+  auto handler1 = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      *context);
+
+  auto res1 = handler1.root_invoke();
+  ASSERT_TRUE(res1.is_root_success());
+  // Don't commit — keeps the exclusive lock held
+
+  // Tx 2: invoke method 1 with tracing (try_invoke fails due to lock)
+  auto handler2 = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      *context);
+  handler2.enable_tracing();
+
+  auto res2 = handler2.root_invoke();
+  ASSERT_TRUE(res2.is_root_success());
+
+  auto const *trace = handler2.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  // Root frame should be contract 0
+  ASSERT_EQ(trace->invocation.invoked_address, contract_addr);
+
+  // Root frame should have terminated with Return (caller handled try_invoke
+  // failure)
+  ASSERT_EQ(trace->status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+
+  // Find the Invoke syscall in the root frame
+  const SyscallTrace *invoke_syscall = nullptr;
+  for (auto const &sc : trace->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kInvoke) {
+      invoke_syscall = &sc;
+      break;
+    }
+  }
+  ASSERT_NE(invoke_syscall, nullptr);
+
+  // Invoke should report kSyscallErrorCodeDeterministicWasm (lock failure
+  // converted the child result to kInvokeDeterministic)
+  ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
+
+  // Should have a child trace
+  auto const &invoke_trace = invoke_syscall->body.invoke();
+  ASSERT_NE(invoke_trace.outputs, nullptr);
+  ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
+
+  auto const &child_trace = *invoke_trace.outputs->child_trace;
+
+  // Child should be the same contract at address 0
+  ASSERT_EQ(child_trace.invocation.invoked_address, contract_addr);
+
+  // Child trace shows Return — the child's deterministic execution succeeded,
+  // but the trace status was captured in finish_frame before the lock
+  // acquisition check converted the frame result to kInvokeDeterministic
+  ASSERT_EQ(child_trace.status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
 }
 
 } // namespace hogd
