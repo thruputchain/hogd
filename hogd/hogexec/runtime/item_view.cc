@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/item_view.h"
 
 #include <cassert>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -31,20 +32,19 @@ make_bytestring_set(Bytestring const &string)
 }
 
 StorageDelta
-make_nnint128_set_add(int128_t set, int128_t add)
+make_nnint128_set_add(int128_xdr set, int128_xdr add)
 {
   StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  out.nnint() = NonnegativeInt128SetAddArgs{.set_value = to_xdr(set),
-                                            .add_value = to_xdr(add)};
+  out.nnint() = NonnegativeInt128SetAddArgs{.set_value = set, .add_value = add};
 
   return out;
 }
 
 StorageDelta
-make_nnint128_add(int128_t add)
+make_nnint128_add(int128_xdr add)
 {
   StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-  out.nnint_add() = to_xdr(add);
+  out.nnint_add() = add;
   return out;
 }
 
@@ -95,7 +95,8 @@ BytestringItem::validate() const
 SyscallStatus<void>
 NNIntItem::validate() const
 {
-  if (add_value_ >= 0) {
+  int128_t add_value = from_xdr(add_value_);
+  if (add_value >= 0) {
     // When add_value_ is nonnegative, the storage delta produced
     // by this item is always valid.
     return {};
@@ -104,15 +105,17 @@ NNIntItem::validate() const
     return {};
   }
 
-  if (base_value_.value() < 0) {
+  int128_t base_value = from_xdr(*base_value_);
+
+  if (base_value < 0) {
     // cannot subtract from a value that is already negative
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  if (base_value_.value() >= 0) {
+  if (base_value >= 0) {
     // base_value_ + add_value_ cannot overflow here,
     // because base_value_ and add_value_ have opposite signs
-    if (*base_value_ + add_value_ < 0) {
+    if (base_value + add_value < 0) {
       // This would be always rejected by the delta handling logic
       // in the storage server.
       return SyscallError{
@@ -160,13 +163,14 @@ RetrocausalQueueItem::make_fully_consumed_item(
 void
 RetrocausalQueueItem::construct_consume_delta()
 {
+  assert(base_item_);
   RetrocausalQueuePastBlockConsumeDelta past_consume = {
       .max_fully_consumed_block_number = 0,
       .partial_consumed_number = 0,
   };
 
-  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
-    past_consume = base_item_.retrocausal_queue_metadata().consume_state;
+  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    past_consume = base_item_->retrocausal_queue_metadata().consume_state;
   }
 
   queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
@@ -194,6 +198,7 @@ SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
+  assert(base_item_);
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -208,8 +213,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   else {
     // If we don't have a consume delta yet, then we're starting from
     // wherever things left off according to the snapshot.
-    if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
-      auto const &meta = base_item_.retrocausal_queue_metadata();
+    if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+      auto const &meta = base_item_->retrocausal_queue_metadata();
       block_index = meta.consume_state.max_fully_consumed_block_number + 1;
       partial_consume_quantity = meta.consume_state.partial_consumed_number;
     }
@@ -307,8 +312,9 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 SystemStatus<const RetrocausalQueueBlock *>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
-  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
-    return base_item_.get_next_rcq_block(search_start_index);
+  assert(base_item_);
+  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    return base_item_->get_next_rcq_block(search_start_index);
   }
   return nullptr;
 }
@@ -317,8 +323,9 @@ SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
+  assert(base_item_);
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-    auto out = base_item_.get_concurrent_rcq_entry(index);
+    auto out = base_item_->get_concurrent_rcq_entry(index);
     if (!out.has_value()) {
       return out.error();
     }
@@ -328,7 +335,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
 
     if (rcq_entry.get().has_value()) {
       // NOLINTBEGIN(bugprone-unchecked-optional-access)
-      proposal_data.log_queue_entry_observation(base_item_.addrkey(), index,
+      proposal_data.log_queue_entry_observation(base_item_->addrkey(), index,
                                                 {*rcq_entry.get()});
       // NOLINTEND(bugprone-unchecked-optional-access)
 
@@ -351,7 +358,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   }
   if (bit_res->get()) {
     auto res =
-        validation_data.consume_queue_entry_observation(base_item_.addrkey(),
+        validation_data.consume_queue_entry_observation(base_item_->addrkey(),
                                                         index);
     if (!res.has_value()) {
       return SystemError{SystemErrorCode::kSystemValidationFailure};
@@ -383,19 +390,33 @@ StorageDelta
 AddressAuthDataItem::get_delta() const
 {
   auto delta = StorageDelta(StorageDeltaType::kDeltaTypeAuthDataChange);
-  for (auto const &[key_index, new_key] : pk_changes_) {
+  assert(internal_auth_data_);
+  for (auto const &[key_index, new_key] : internal_auth_data_->pk_changes_) {
     delta.auth_data_change().auth_data_change_signers.push_back(
         AuthDataChangeSigner{.public_key_id = key_index,
                              .public_key = new_key});
   }
-  if (nonce_config_.has_value()) {
-    delta.auth_data_change().new_nonce_config = nonce_config_.value();
+  if (internal_auth_data_->nonce_config_.has_value()) {
+    delta.auth_data_change().new_nonce_config =
+        internal_auth_data_->nonce_config_.value();
   }
-  if (gas_permission_configs_.has_value()) {
+  if (internal_auth_data_->gas_permission_configs_.has_value()) {
     delta.auth_data_change().new_gas_config_change = GasConfigChange{
-        .new_gas_permission_configs = gas_permission_configs_.value()};
+        .new_gas_permission_configs =
+            internal_auth_data_->gas_permission_configs_.value()};
   }
   return delta;
+}
+
+AddressAuthDataItem &
+AddressAuthDataItem::operator=(AddressAuthDataItem const &other)
+{
+  if (this == &other) {
+    return *this;
+  }
+  internal_auth_data_ =
+      std::make_unique<InternalAuthData>(*other.internal_auth_data_);
+  return *this;
 }
 
 std::optional<ItemViewType>

@@ -1,15 +1,14 @@
 #pragma once
 
 #include <cassert>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -18,7 +17,6 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/debug.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -54,8 +52,8 @@ public:
   SyscallStatus<void> validate() const;
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
-  std::optional<int128_t> base_value_;
-  int128_t add_value_;
+  std::optional<int128_xdr> base_value_;
+  int128_xdr add_value_;
 };
 
 // State of an item that is a token balance
@@ -79,8 +77,14 @@ public:
 class RetrocausalQueueItem {
 public:
   RetrocausalQueueItem(const SnapshotStorageItem &base_item)
-    : base_item_(base_item)
+    : base_item_(&base_item)
   {}
+
+  RetrocausalQueueItem(RetrocausalQueueItem &&other) noexcept = default;
+  RetrocausalQueueItem &
+  operator=(RetrocausalQueueItem &&other) noexcept = default;
+  RetrocausalQueueItem(RetrocausalQueueItem const &other) = default;
+  RetrocausalQueueItem &operator=(RetrocausalQueueItem const &other) = default;
 
   static RetrocausalQueueItem
   make_fully_consumed_item(const SnapshotStorageItem &base_item,
@@ -124,7 +128,7 @@ private:
   // count of retrocausally consumed entries from other transactions
   uint32_t locally_consumed_index_ = 0;
 
-  const SnapshotStorageItem &base_item_;
+  const SnapshotStorageItem *base_item_;
 };
 
 class ReplayCacheItem {
@@ -132,6 +136,11 @@ public:
   ReplayCacheItem(Uniquifier consumed_uniquifier)
     : consumed_uniquifier_(consumed_uniquifier)
   {}
+
+  ReplayCacheItem(ReplayCacheItem &&other) noexcept = default;
+  ReplayCacheItem &operator=(ReplayCacheItem &&other) noexcept = default;
+  ReplayCacheItem(ReplayCacheItem const &other) = default;
+  ReplayCacheItem &operator=(ReplayCacheItem const &other) = default;
 
   StorageDelta get_delta() const;
   constexpr static SyscallStatus<void> validate() { return {}; }
@@ -144,31 +153,52 @@ private:
 
 class AddressAuthDataItem {
 public:
+  AddressAuthDataItem()
+    : internal_auth_data_(std::make_unique<InternalAuthData>())
+  {}
+
+  AddressAuthDataItem(AddressAuthDataItem const &other)
+    : internal_auth_data_(
+          std::make_unique<InternalAuthData>(*other.internal_auth_data_))
+  {}
+  AddressAuthDataItem(AddressAuthDataItem &&other) noexcept = default;
+
+  AddressAuthDataItem &
+  operator=(AddressAuthDataItem &&other) noexcept = default;
+  AddressAuthDataItem &operator=(AddressAuthDataItem const &other);
+
   StorageDelta get_delta() const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
 
   void change_public_key(uint32_t key_index, PublicKeyConfigOpt new_key)
   {
-    pk_changes_[key_index] = std::move(new_key);
+    assert(internal_auth_data_);
+    internal_auth_data_->pk_changes_[key_index] = std::move(new_key);
   }
 
   void set_nonce_config(NonceConfig const &nonce_config)
   {
-    nonce_config_ = nonce_config;
+    assert(internal_auth_data_);
+    internal_auth_data_->nonce_config_ = nonce_config;
   }
 
   void set_gas_permission_configs(
       x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
   {
-    gas_permission_configs_ = std::move(gas_permission_configs);
+    assert(internal_auth_data_);
+    internal_auth_data_->gas_permission_configs_ =
+        std::move(gas_permission_configs);
   }
 
 private:
-  std::unordered_map<uint32_t, PublicKeyConfigOpt> pk_changes_;
-  std::optional<NonceConfig> nonce_config_;
-  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
-      gas_permission_configs_;
+  struct InternalAuthData {
+    std::unordered_map<uint32_t, PublicKeyConfigOpt> pk_changes_;
+    std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
+        gas_permission_configs_;
+    std::optional<NonceConfig> nonce_config_;
+  };
+  std::unique_ptr<InternalAuthData> internal_auth_data_;
 };
 
 // Represent state of an ItemView that has not been modified during
@@ -178,6 +208,11 @@ private:
 class UnmodifiedItem {
 public:
   UnmodifiedItem() : base_item_(std::nullopt) {}
+
+  UnmodifiedItem(UnmodifiedItem &&other) noexcept = default;
+  UnmodifiedItem &operator=(UnmodifiedItem &&other) noexcept = default;
+  UnmodifiedItem(UnmodifiedItem const &other) = default;
+  UnmodifiedItem &operator=(UnmodifiedItem const &other) = default;
 
   constexpr static std::optional<StorageDelta> get_delta()
   {
@@ -208,6 +243,11 @@ private:
 class ItemView {
 public:
   ItemView() : delta_args_(UnmodifiedItem()) {}
+
+  ItemView(ItemView &&other) noexcept = default;
+  ItemView &operator=(ItemView &&other) noexcept = default;
+  ItemView(ItemView const &other) = default;
+  ItemView &operator=(ItemView const &other) = default;
 
   // Returns a pointer to the item view if it is of the given type,
   // otherwise returns nullptr.

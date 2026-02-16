@@ -52,8 +52,7 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 
   // transfer modified items from child frame to current frame
   for (auto &[addr, item] : frame.modified_items_) {
-    modified_items_.erase(addr);
-    modified_items_.emplace(addr, std::move(item));
+    modified_items_.insert_or_assign(addr, std::move(item));
   }
 
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
@@ -106,11 +105,12 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
+  db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size());
 
   for (auto const &[addrkey, item_view] : modified_items_) {
     auto [delta, flags] = item_view.get_delta();
     if (delta) {
-      db_proxy.add_delta(addrkey, *delta, flags);
+      db_proxy.add_delta(addrkey, std::move(*delta), flags);
     }
   }
 
@@ -118,8 +118,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
     AddressAndKey addrkey = {
         .address = addr,
         .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
-    StorageDelta delta = make_deployed_contract_delta(deployment);
-    db_proxy.add_delta(addrkey, delta,
+    db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
                        std::to_underlying(
                            StorageDeltaFlags::kStorageDeltaFlagNone));
   }

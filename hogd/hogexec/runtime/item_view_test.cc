@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
@@ -101,13 +102,14 @@ TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
   ItemView proxy;
 
   ASSERT_FALSE(proxy.template get<NNIntItem>());
-  EXPECT_TRUE(proxy.set(NNIntItem(100, 10)));
+  EXPECT_TRUE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(10)))));
 
   const auto *get_res = proxy.template get<NNIntItem>();
 
   ASSERT_TRUE(get_res);
-  EXPECT_EQ(get_res->base_value_, 100);
-  EXPECT_EQ(get_res->add_value_, 10);
+  EXPECT_EQ(get_res->base_value_, to_xdr(int128_t(100)));
+  EXPECT_EQ(get_res->add_value_, to_xdr(int128_t(10)));
 
   EXPECT_FALSE(proxy.template get<BytestringItem>());
 }
@@ -117,16 +119,20 @@ TEST_F(ItemViewTest, NNIntSetAddValidation)
   ItemView proxy;
   ASSERT_FALSE(proxy.template get<NNIntItem>());
 
-  EXPECT_TRUE(proxy.set(NNIntItem(100, -10)));
-  EXPECT_FALSE(proxy.set(NNIntItem(100, -110)));
-  EXPECT_TRUE(proxy.set(NNIntItem(100, -100)));
+  EXPECT_TRUE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-10)))));
+  EXPECT_FALSE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-110)))));
+  EXPECT_TRUE(
+      proxy.set(NNIntItem(to_xdr(int128_t(100)), to_xdr(int128_t(-100)))));
 
-  EXPECT_TRUE(proxy.set(NNIntItem(-10, 1)));
-  EXPECT_TRUE(proxy.set(NNIntItem(-10, 0)));
-  EXPECT_FALSE(proxy.set(NNIntItem(-10, -1)));
+  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(1)))));
+  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(0)))));
+  EXPECT_FALSE(
+      proxy.set(NNIntItem(to_xdr(int128_t(-10)), to_xdr(int128_t(-1)))));
 
-  EXPECT_TRUE(proxy.set(NNIntItem(0, 0)));
-  EXPECT_FALSE(proxy.set(NNIntItem(0, -1)));
+  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(0)))));
+  EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(-1)))));
 }
 
 TEST_F(ItemViewTest, RCQRead)

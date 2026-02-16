@@ -21,6 +21,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/utilities.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -918,12 +919,13 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 
   if (auto const *nnint_item = item_view->get<NNIntItem>()) {
     if (nnint_item->base_value_.has_value()) {
-      return {std::make_pair(*nnint_item->base_value_, nnint_item->add_value_)};
+      return {std::make_pair(from_xdr(*nnint_item->base_value_),
+                             from_xdr(nnint_item->add_value_))};
     }
     // If we're not loading from the snapshot, we can return nullopt for the
     // base value.
     if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, nnint_item->add_value_)};
+      return {std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_))};
     }
 
     auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
@@ -939,10 +941,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     // database. Hence we default to 0 if the snapshot value is not an NNInt.
     auto snapshot_type = snapshot_value.value()->type();
     if (!snapshot_type || snapshot_type.value() != ItemViewType::kNNInt) {
-      return std::make_pair(0, nnint_item->add_value_);
+      return std::make_pair(0, from_xdr(nnint_item->add_value_));
     }
     return {std::make_pair(snapshot_value.value()->nnint(),
-                           nnint_item->add_value_)};
+                           from_xdr(nnint_item->add_value_))};
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -1009,8 +1011,12 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  return item_view->set(NNIntItem{.base_value_ = set_value,
-                                  .add_value_ = add_value},
+  return item_view->set(NNIntItem{.base_value_ =
+                                      set_value.has_value()
+                                          ? std::optional<int128_xdr>(
+                                                to_xdr(*set_value))
+                                          : std::nullopt,
+                                  .add_value_ = to_xdr(add_value)},
                         input_flags);
 }
 
@@ -1184,7 +1190,7 @@ SystemCallHandler::get_native_token_balance(
 
   auto base = [&] -> SystemStatus<int128_t> {
     if (balance_item->base_value_.has_value()) {
-      return *balance_item->base_value_;
+      return from_xdr(*balance_item->base_value_);
     }
     auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
     if (!snapshot_value.has_value()) {
@@ -1201,11 +1207,11 @@ SystemCallHandler::get_native_token_balance(
   if (!base.has_value()) {
     return base.error();
   }
-  if (integer_add_overflow(*base, balance_item->add_value_)) {
+  if (integer_add_overflow(*base, from_xdr(balance_item->add_value_))) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  int128_t balance = *base + balance_item->add_value_;
+  int128_t balance = *base + from_xdr(balance_item->add_value_);
   assert(balance >= 0);
   return balance;
 }
@@ -1225,7 +1231,7 @@ SystemCallHandler::modify_native_token_balance(
   assert(item_view);
 
   if (auto const *balance_item = item_view->get<NativeTokenBalanceItem>()) {
-    auto current_add = balance_item->add_value_;
+    auto current_add = from_xdr(balance_item->add_value_);
     if (integer_add_overflow(current_add, transfer_amount)) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
@@ -1233,12 +1239,13 @@ SystemCallHandler::modify_native_token_balance(
     auto new_add = current_add + transfer_amount;
     return item_view->set(NativeTokenBalanceItem(
         NNIntItem{.base_value_ = balance_item->base_value_,
-                  .add_value_ = new_add}));
+                  .add_value_ = to_xdr(new_add)}));
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  return item_view->set(NativeTokenBalanceItem(
-      NNIntItem{.base_value_ = std::nullopt, .add_value_ = transfer_amount}));
+  return item_view->set(
+      NativeTokenBalanceItem(NNIntItem{.base_value_ = std::nullopt,
+                                       .add_value_ = to_xdr(transfer_amount)}));
 }
 
 // == Authentication syscalls ==

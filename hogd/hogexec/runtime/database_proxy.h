@@ -4,6 +4,7 @@
 #include <cassert>
 #include <optional>
 #include <random>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -97,11 +98,16 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
-  void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
+  void reserve(size_t delta_count)
+  {
+    current_subtransaction_batch_.reserve(delta_count);
+  }
+
+  void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
-    current_subtransaction_batch_.push_back(FlaggedStorageDelta{
-        .addrkey = addrkey, .delta = delta, .flags = flags});
+    current_subtransaction_batch_.emplace_back(std::move(addrkey),
+                                               std::move(delta), flags);
   }
 
   SystemStatus<bool> try_push_current_subtransaction()
