@@ -1169,6 +1169,334 @@ protected:
           return {};
         });
 
+    // Method 34: insert_and_fail(value) — insert then error (for inner frame
+    // revert)
+    builder.add<SerializationFormat::kTxs>(
+        34,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert in insert_and_fail";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        });
+
+    // Method 35: consume_and_fail(value) — consume then error (for inner frame
+    // revert)
+    builder.add<SerializationFormat::kTxs>(
+        35,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume in consume_and_fail";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        });
+
+    // Method 36: inner_insert_revert_then_consume_empty(value)
+    builder.add<SerializationFormat::kTxs>(
+        36,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(value),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke should have reported inner failure";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // queue should be empty after reverted insert
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 2,
+                             std::numeric_limits<GasAmount>::max(), {},
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume_empty after reverted insert";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 37: inner_insert_revert_then_insert_consume(revert_val, real_val)
+    builder.add<SerializationFormat::kTxs>(
+        37,
+        [](SystemCallHandler &handler, uint32_t revert_val,
+           uint32_t real_val) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(revert_val),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // successful insert
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(real_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert real_val";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // only real_val should be consumable
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(real_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume real_val";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 38: inner_consume_revert_then_consume(value)
+    builder.add<SerializationFormat::kTxs>(
+        38,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(value),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke should have reported inner failure";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // entry should still be available after reverted consume
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume after reverted consume";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 39: inner_consume_revert_then_peek(value)
+    builder.add<SerializationFormat::kTxs>(
+        39,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(value),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke should have reported inner failure";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // entry should still be visible via peek
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 24,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to peek after reverted consume";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 40: inner_consume_revert_twice_then_consume(value)
+    builder.add<SerializationFormat::kTxs>(
+        40,
+        [](SystemCallHandler &handler, uint32_t value) -> InvokeStatus<void> {
+          // first reverted consume
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(value),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume (1st)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE()
+                << "try_invoke should have reported inner failure (1st)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // second reverted consume
+          auto [r2, _g2] = handler.invoke(
+              kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(value),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r2.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume (2nd)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE()
+                << "try_invoke should have reported inner failure (2nd)";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // entry should still be available
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(value),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume after two reverted consumes";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 41:
+    // inner_consume_insert_revert_then_consume_and_empty(consume_val,
+    // insert_val)
+    builder.add<SerializationFormat::kTxs>(
+        41,
+        [](SystemCallHandler &handler, uint32_t consume_val,
+           uint32_t insert_val) -> InvokeStatus<void> {
+          // try_invoke: consume + insert, both reverted
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 42, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(consume_val, insert_val),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume+insert";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke should have reported inner failure";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // original entry still available
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(consume_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume original entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // reverted insert should be gone
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 2,
+                             std::numeric_limits<GasAmount>::max(), {},
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume_empty after reverted insert";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
+    // Method 42: consume_insert_and_fail(consume_val, insert_val) — consume
+    // then insert then error (for inner frame revert)
+    builder.add<SerializationFormat::kTxs>(
+        42,
+        [](SystemCallHandler &handler, uint32_t consume_val,
+           uint32_t insert_val) -> InvokeStatus<void> {
+          auto [r1, _g1] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(consume_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume in consume_insert_and_fail";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 0,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(insert_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to insert in consume_insert_and_fail";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        });
+
+    // Method 43: inner_insert_revert_then_consume(revert_val, concurrent_val)
+    builder.add<SerializationFormat::kTxs>(
+        43,
+        [](SystemCallHandler &handler, uint32_t revert_val,
+           uint32_t concurrent_val) -> InvokeStatus<void> {
+          auto [r1, _g1] = handler.invoke(
+              kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(revert_val),
+              std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          // consume concurrent entry (unaffected by reverted insert)
+          auto [r2, _g2] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(concurrent_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume concurrent entry";
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -1906,6 +2234,188 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 
   // Block 4: consume(30) — 10 and 20 are gone
   invoke_method(1, uint32_t{30});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// A failed inner invoke that inserts an entry should leave no trace — the
+// queue should remain empty.
+TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  invoke_method(36, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  if (!queue.has_value()) {
+    return; // queue was never created, trivially passes
+  }
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// After a reverted inner insert, a subsequent successful insert should work
+// normally. Only the successful entry is consumable.
+TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  invoke_method(37, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// A reverted inner insert does not affect concurrent entries from other
+// transactions.
+TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(99); // concurrent
+  invoke_method(43, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// A reverted inner insert does not affect entries from past blocks.
+TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(99);
+
+  advance_block();
+
+  invoke_method(43, uint32_t{42}, uint32_t{99});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// A failed inner invoke that consumes an entry should leave the entry
+// available for a subsequent consume.
+TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42); // concurrent
+  invoke_method(38, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// Same as RevertedConsumePreservesEntry but the entry comes from a past block.
+TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42);
+
+  advance_block();
+
+  invoke_method(38, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// After a reverted inner consume, peek should still see the entry.
+TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42); // concurrent
+  invoke_method(39, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 1); // peek doesn't consume
+}
+
+// An entry survives multiple consecutive reverted inner consume attempts.
+TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42); // concurrent
+  invoke_method(40, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &qe = queue->metadata();
+  ASSERT_EQ(qe.live_entries, 0);
+}
+
+// A failed inner invoke that both consumes AND inserts should revert both: the
+// original entry is available, the inserted entry is gone.
+TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Skipping HogDB";
+    return;
+  }
+  insert(42); // concurrent
+  invoke_method(41, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
