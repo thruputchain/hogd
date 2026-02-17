@@ -3,6 +3,10 @@ name: Release test_ffi Library (Dry Run)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   dry-run:
     uses: ./.github/workflows/release_test_ffi.yml
