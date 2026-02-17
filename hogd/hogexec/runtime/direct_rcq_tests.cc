@@ -105,9 +105,6 @@ TEST_F(DirectRCQTests, ConcurrentInsert)
 
 TEST_F(DirectRCQTests, ConcurrentConsume)
 {
-  GTEST_SKIP() << "Pending TODO at retrocausal_queue_lock.cc line 77";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -182,9 +179,6 @@ TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed)
 
 TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed2)
 {
-  GTEST_SKIP() << "Pending TODO at retrocausal_queue_lock.cc line 77";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
