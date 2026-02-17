@@ -536,8 +536,9 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   ASSERT_EQ(child_trace.invocation.invoked_address, contract_addr);
 
   // Child trace shows Return — the child's deterministic execution succeeded,
-  // but the trace status was captured in finish_frame before the lock
-  // acquisition check converted the frame result to kInvokeDeterministic
+  // but the trace status is reported as the child's execution result, before
+  // the lock acquisition check fails and converts the frame result to
+  // kInvokeDeterministic
   ASSERT_EQ(child_trace.status.status_code(),
             InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
 }
