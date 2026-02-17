@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'test-ffi-v*'
+  workflow_call:
+    inputs:
+      dry_run:
+        description: 'Perform a dry run (build artifacts only, no release)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -233,6 +240,7 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   create-release:
+    if: ${{ !inputs.dry_run }}
     needs: [build-linux-x86_64, build-macos-arm64]
     runs-on: ubuntu-latest
     permissions:
