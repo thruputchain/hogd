@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <cstdint>
 #include <format>
 #include <future>
 #include <optional>
@@ -14,7 +15,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
-#include "port.hh"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -22,7 +22,8 @@ namespace hogd {
 namespace {
 
 int
-hogexec_init(const std::string &coordinator_addr, int nthreads)
+hogexec_init(const std::string &coordinator_addr, int nthreads,
+             uint16_t mempool_port)
 {
   x23::HostPort host_port;
   if (!host_port.parse(coordinator_addr)) {
@@ -39,9 +40,10 @@ hogexec_init(const std::string &coordinator_addr, int nthreads)
       host_port_to_sockaddr(coordinator_host, coordinator_port);
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
-  CHECK_EQ(executor.start(hostname, kExecutorMempoolServerPort,
-                          coordinator_sockaddr),
-           uint16_t{kExecutorMempoolServerPort});
+  uint16_t actual_mempool_port =
+      executor.start(hostname, mempool_port, coordinator_sockaddr);
+  CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
+  info("PORT hogexec.mempool={}", actual_mempool_port);
 
   // block forever
   info("hogexec initialization complete.");
@@ -59,8 +61,22 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("usage: {} coordinator_ip:port [-n <nthreads>]", argv[0]);
+  std::println(
+      "usage: {} --coordinator-addr <host:port> [--nthreads <nthreads>] "
+      "[--mempool-port <port>]",
+      argv[0]);
   exit(EXIT_FAILURE);
+}
+
+uint16_t
+parse_port(const std::string &value)
+{
+  size_t pos = 0;
+  unsigned long port = std::stoul(value, &pos, 10);
+  if (pos != value.size() || port > 65535) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
+  }
+  return static_cast<uint16_t>(port);
 }
 
 } // namespace
@@ -73,29 +89,45 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogexec!");
 
-  if (argc < 2) {
-    usage(argv);
-  }
-
+  std::string coord_address;
   std::optional<int> nthreads;
+  uint16_t mempool_port = 0;
 
-  int opt;
-  // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc - 1, argv + 1, "n:")) != -1) {
-    switch (opt) {
-    case 'n':
-      nthreads = std::stoi(optarg);
-      break;
-    default:
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--coordinator-addr" && i + 1 < argc) {
+      coord_address = argv[++i];
+      continue;
+    }
+    if (arg == "--nthreads" && i + 1 < argc) {
+      nthreads = std::stoi(argv[++i]);
+      continue;
+    }
+    if (arg == "--mempool-port" && i + 1 < argc) {
+      mempool_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "-n" && i + 1 < argc) {
+      nthreads = std::stoi(argv[++i]);
+      continue;
+    }
+    if (arg == "-p" && i + 1 < argc) {
+      mempool_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "-h" || arg == "--help") {
       usage(argv);
     }
+    usage(argv);
   }
-  // NOLINTEND(misc-include-cleaner)
 
   if (!nthreads) {
     nthreads = hogd::available_parallelism();
   }
 
-  const std::string coord_address = argv[1];
-  return hogd::hogexec_init(coord_address, *nthreads);
+  if (coord_address.empty()) {
+    usage(argv);
+  }
+
+  return hogd::hogexec_init(coord_address, *nthreads, mempool_port);
 }

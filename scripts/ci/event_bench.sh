@@ -24,7 +24,7 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 11111 clear_work_dir
 
 echo 'launch event server'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 11111 start hogd/event/event_exec hog10:8095 $WORK_DIR/
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 11111 start hogd/event/event_exec --mempool-addr hog10:8095 --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $(./$BUILD_DIR/hogd/utils/get_port kEventIndexerServerPort)
 
 echo 'make sure event server is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 11111 expect_running

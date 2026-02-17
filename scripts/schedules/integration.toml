@@ -33,7 +33,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-./release/hogd/loadgen/loadgen_server -p 44400
+./release/hogd/loadgen/loadgen_server --port 44400
 server_pid=$!
 
 ./scripts/wait-port localhost 44400
@@ -138,7 +138,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-./release/hogd/mempool/mempool_exec 1 3 # number of db servers, number of exec servers
+./release/hogd/mempool/mempool_exec --num-db-shards 1 --num-exec-shards 3 --db-port 8072 --event-port 8073 --executor-port 8071 --auth-port 8074 --coordinator-port 8070 # number of db servers, number of exec servers
 server_pid=$!
 
 # Wait for mempool (ports 8070-8073).
@@ -196,7 +196,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-./release/hogd/hogdb/hogdb ./hogdb.data 10000000000 hog9:8072 # mempool addr
+./release/hogd/hogdb/hogdb --db-path ./hogdb.data --ram-bytes 10000000000 --coordinator-addr hog9:8072 --executor-port 8080 --mempool-port 8081 --auth-port 8082 # mempool addr
 server_pid=$!
 
 # Wait for hogdb (ports 8080-8081).
@@ -246,7 +246,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-./release/hogd/hogexec/hogexec hog9:8072 -n 1024
+./release/hogd/hogexec/hogexec --coordinator-addr hog9:8072 --nthreads 1024 --mempool-port 8040
 server_pid=$!
 
 # Wait for hogexec (port 8040).
@@ -303,7 +303,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-./release/hogd/event/event_exec hog9:8073 ./event
+./release/hogd/event/event_exec --mempool-addr hog9:8073 --work-dir ./event --executor-port 8090 --mempool-port 8091 --indexer-port 8092
 server_pid=$!
 
 # Wait for event (ports 8090-8091).

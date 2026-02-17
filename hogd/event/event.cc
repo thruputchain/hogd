@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <future>
@@ -16,7 +17,6 @@
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
-#include "port.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/sockio.h"
@@ -45,7 +45,8 @@ connect_to_event_sched_server(std::string const &address)
 
 int
 event_init(const std::string &mempool_address,
-           const std::string &work_directory)
+           const std::string &work_directory, uint16_t exec_port,
+           uint16_t indexer_port, uint16_t mempool_port)
 {
   // Start the event servers.
   EventRPCContext ctx(work_directory);
@@ -53,12 +54,15 @@ event_init(const std::string &mempool_address,
   EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
 
-  CHECK_EQ(exec_server.start_server(kEventExecutorServerPort),
-           uint16_t{kEventExecutorServerPort});
-  CHECK_EQ(indexer_server.start_server(kEventIndexerServerPort),
-           uint16_t{kEventIndexerServerPort});
-  CHECK_EQ(mempool_server.start_server(kEventMempoolServerPort),
-           uint16_t{kEventMempoolServerPort});
+  uint16_t actual_exec_port = exec_server.start_server(exec_port);
+  uint16_t actual_indexer_port = indexer_server.start_server(indexer_port);
+  uint16_t actual_mempool_port = mempool_server.start_server(mempool_port);
+  CHECK(actual_exec_port == exec_port || exec_port == 0);
+  CHECK(actual_indexer_port == indexer_port || indexer_port == 0);
+  CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
+  info("PORT event.exec={}", actual_exec_port);
+  info("PORT event.indexer={}", actual_indexer_port);
+  info("PORT event.mempool={}", actual_mempool_port);
 
   // Register with the mempool.
   x23::HostPort host_port;
@@ -67,8 +71,8 @@ event_init(const std::string &mempool_address,
         std::format("Invalid mempool address: {}", mempool_address));
   }
   auto client = connect_to_event_sched_server(mempool_address);
-  std::string address_for_exec = create_address(kEventExecutorServerPort);
-  std::string address_for_mempool = create_address(kEventMempoolServerPort);
+  std::string address_for_exec = create_address(actual_exec_port);
+  std::string address_for_mempool = create_address(actual_mempool_port);
   EventCard card{.protocol = version::kHogdProtocol(),
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
@@ -88,6 +92,32 @@ event_init(const std::string &mempool_address,
 
 } // namespace hogd
 
+namespace {
+
+[[noreturn]] void
+usage(char *argv[])
+{
+  std::println(
+      "usage: {} --mempool-addr <host:port> --work-dir <path> "
+      "[--executor-port <port>] [--indexer-port <port>] "
+      "[--mempool-port <port>]",
+      argv[0]);
+  exit(EXIT_FAILURE);
+}
+
+uint16_t
+parse_port(const std::string &value)
+{
+  size_t pos = 0;
+  unsigned long port = std::stoul(value, &pos, 10);
+  if (pos != value.size() || port > 65535) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
+  }
+  return static_cast<uint16_t>(port);
+}
+
+} // namespace
+
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
@@ -95,14 +125,42 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (ret)
     return ret;
 
-  if (argc != 3) {
-    std::println("usage: <mempool_server_address> <work_directory>");
-    return EXIT_FAILURE;
+  std::string mempool_address;
+  std::string work_directory;
+  uint16_t exec_port = 0;
+  uint16_t indexer_port = 0;
+  uint16_t mempool_port = 0;
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--mempool-addr" && i + 1 < argc) {
+      mempool_address = argv[++i];
+      continue;
+    }
+    if (arg == "--work-dir" && i + 1 < argc) {
+      work_directory = argv[++i];
+      continue;
+    }
+    if (arg == "--executor-port" && i + 1 < argc) {
+      exec_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--indexer-port" && i + 1 < argc) {
+      indexer_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--mempool-port" && i + 1 < argc) {
+      mempool_port = parse_port(argv[++i]);
+      continue;
+    }
+    usage(argv);
+  }
+
+  if (mempool_address.empty() || work_directory.empty()) {
+    usage(argv);
   }
 
   hogd::info("starting event server!");
-
-  std::string mempool_address = argv[1];
-  std::string work_directory = argv[2];
-  return hogd::event_init(mempool_address, work_directory);
+  return hogd::event_init(mempool_address, work_directory, exec_port,
+                          indexer_port, mempool_port);
 }

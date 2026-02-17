@@ -200,24 +200,24 @@ wait_port() {
 }
 
 echo "Start loadgen..."
-remote_launch "$loadgen_server" "$LOADGEN_BINARY" -p 11222
+remote_launch "$loadgen_server" "$LOADGEN_BINARY" --port 11222
 wait_port "$loadgen_server" 11222
 
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" "$mempool_server":8071 -n 1024
+  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$mempool_server":8071 --nthreads 1024 --mempool-port 8040
 done
 
 # Start event.
 echo "Start event..."
 remote_launch "$event_server" "$EVENT_BINARY" \
-  "$mempool_server":8073 "$logdir/event"
+  --mempool-addr "$mempool_server":8073 --work-dir "$logdir/event" --executor-port 8090 --mempool-port 8091 --indexer-port 8092
 
 # Start indexer.
 echo "Start indexer..."
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  "$event_server":8092 "$logdir/indexer"
+  --event-addr "$event_server":8092 --db-path "$logdir/indexer" --event-port 8060 --block-explorer-port 8061
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -225,18 +225,19 @@ for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
   ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   remote_launch "$s" "$HOGDB_BINARY" \
-    "$logdir/hogdb.data" 10000000000 "$mempool_server":8072
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --coordinator-addr "$mempool_server":8072 --executor-port 8080 --mempool-port 8081 --auth-port 8082
 done
 
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
-  "$mempool_server":8074
+  --mempool-addr "$mempool_server":8074 --db-port 8050 --mempool-port 8051
 
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
-  ${#hogdb_servers[@]} ${#hogexec_servers[@]}
+  --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
+  --db-port 8072 --event-port 8073 --executor-port 8071 --auth-port 8074 --coordinator-port 8070
 sleep 1
 
 # Launch chuckd.

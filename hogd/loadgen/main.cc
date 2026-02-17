@@ -12,7 +12,7 @@
 
 namespace {
 
-constexpr uint16_t kDefaultLoadgenPort = 8080;
+constexpr uint16_t kDefaultLoadgenPort = 0;
 
 [[noreturn]] void
 usage(const char *progname, int exit_code = EXIT_FAILURE)
@@ -47,8 +47,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'p':
       try {
         int parsed_port = std::stoi(optarg);
-        if (parsed_port <= 0 || parsed_port > 65535) {
-          std::println(stderr, "Error: Port must be between 1 and 65535");
+        if (parsed_port < 0 || parsed_port > 65535) {
+          std::println(stderr, "Error: Port must be between 0 and 65535");
           return EXIT_FAILURE;
         }
         port = static_cast<uint16_t>(parsed_port);
