@@ -408,11 +408,6 @@ SystemCallHandler::invoke(ContractAddress const &address,
     flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
   }
 
-  InvokeResult cumulative_result = {
-      .result_ = InvokeStatus<void>{},
-      .gas_consumed_ = 0,
-  };
-
   Invocation invocation = {.invoked_address = address,
                            .entrypoint = entrypoint_from_method_id(method),
                            .gas_limit = gas_limit,
@@ -432,15 +427,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
 
   start_frame(invocation, flags);
 
-  cumulative_result += runtime.value()->invoke(method, gas_limit);
-
-  // Collect storage deltas BEFORE finish_frame destroys the frame
-  if (invocation_frame_trace_) {
-    invocation_frame_stack_.get_active_frame().collect_storage_deltas(
-        invocation_frame_trace_->storage_writes);
-    invocation_frame_trace_->status =
-        invocation_frame_stack_.get_active_frame().get_frame_output();
-  }
+  InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
   auto finish_status = finish_frame(cumulative_result.result_);
   if (!finish_status.has_value()) {
@@ -497,6 +484,19 @@ SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags)
 SystemStatus<std::pair<InvokeResult, bool>>
 SystemCallHandler::finish_frame(InvokeStatus<void> result)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (!result.has_value()) {
+    invocation_frame_stack_.get_active_frame().set_frame_return(
+        InvocationFrameOutput(
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault));
+  }
+
+  if (invocation_frame_trace_) {
+    invocation_frame_stack_.get_active_frame().collect_storage_deltas(
+        invocation_frame_trace_->storage_writes);
+    invocation_frame_trace_->status =
+        invocation_frame_stack_.get_active_frame().get_frame_output();
+  }
   return invocation_frame_stack_.finish_frame(result, execution_mode_data_);
 }
 

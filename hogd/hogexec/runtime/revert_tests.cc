@@ -286,6 +286,101 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   auto data_item2_opt = lookup_storage_item_from_db(data_addrkey2);
   ASSERT_FALSE(data_item2_opt.has_value());
 }
+
+TEST_P(RevertTest, GetReturnBufferOnFault)
+{
+  // Native contract with two methods.  The first immediately returns a fault.
+  // The second calls the first, then tries to get the return buffer.
+  // Test should check that the second method fails to get the return buffer.
+
+  // Contract address
+  ContractAddress contract_addr = make_contract_address(3);
+
+  // Deploy contract with two methods:
+  // 0: Immediately returns a fault
+  // 1: Calls method 0, then tries to get the return buffer
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler & /*unused*/,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             // Return a fault immediately
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Call method 0, which will fault
+             auto [r0, _g0] = handler.invoke(handler.get_current_address(), 0,
+                                             runtime.get_available_gas(), {},
+                                             std::to_underlying(
+                                                 InvokeFlag::kInvokeFlagNone));
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Method 0 should have faulted
+             if (r0.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+               ADD_FAILURE() << "GetReturnBufferOnFault: Expected method 0 to "
+                                "return kSyscallErrorCodeDeterministicWasm";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             ReturnBuffer buffer;
+             RuntimeMemoryLength written_len = 0;
+
+             auto [res, _gas] = syscall_GetReturnedBuffer_inner(
+                 handler, std::as_writable_bytes(std::span(buffer)),
+                 written_len);
+             if (!res.has_value()) {
+               ADD_FAILURE()
+                   << "GetReturnBufferOnFault: Failed to get return buffer";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (res.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+               ADD_FAILURE() << "GetReturnBufferOnFault: Expected "
+                                "kSyscallErrorCodeFrameReverted, got: "
+                             << static_cast<int32_t>(res.value());
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  // Deploy contract and grant storage tokens
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Invoke method 1
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(1),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *runtime_context);
+
+  // Execute the transaction - it should succeed
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  // Commit the transaction - it should succeed
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  advance_block();
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RevertTest,

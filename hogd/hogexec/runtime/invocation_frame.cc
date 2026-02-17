@@ -177,6 +177,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       .gas_consumed_ = 0,
   };
 
+  [[maybe_unused]] bool try_invoke_failed = false;
+
   // handle the try_invoke data
   assert(!frame_stack_.empty());
   if (frame_stack_.back().is_try_invoke()) {
@@ -210,6 +212,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       // If the frame locks were not acquired successfully, then we mark
       // the entire frame as failing.
       if (!acq_success) {
+        try_invoke_failed = true;
         // TODO(geoff): perhaps add additional gas consumption
         frame_result = InvokeResult{
             .result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic},
@@ -231,6 +234,9 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   bool manually_reverted = frame_stack_.back().should_revert();
 
   if (frame_result.should_frame_revert()) {
+    assert(try_invoke_failed ||
+           frame_stack_.back().get_frame_output().status_code() ==
+               InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
