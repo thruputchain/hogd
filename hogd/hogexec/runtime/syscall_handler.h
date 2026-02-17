@@ -74,12 +74,11 @@ public:
 
   // Constructor for test harness, mock infrastructure
   SystemCallHandler(StorageSnapshotCache &snapshot_cache,
-    PerTransactionDatabaseProxy db_proxy,
-    PerTransactionEventServerProxy event_server_proxy,
-    ExecutionModeCtor execution_mode_ctor,
-    RuntimeContext &runtime_context,
-    AuthClaimData auth_claims,
-    SHA256Hash source_tx_hash);
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context, AuthClaimData auth_claims,
+                    SHA256Hash source_tx_hash);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -116,14 +115,12 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
-  InvokeResult
-  root_invoke();
+  InvokeResult root_invoke();
 
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
   // and from the SDK FFI bindings
-  void
-  start_frame(Invocation invocation, InvokeFlagSet flags);
+  void start_frame(Invocation invocation, InvokeFlagSet flags);
   SystemStatus<std::pair<InvokeResult, bool>>
   finish_frame(InvokeStatus<void> result);
 

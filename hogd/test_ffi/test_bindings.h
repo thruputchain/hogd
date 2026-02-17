@@ -173,17 +173,19 @@ struct FFISerializedInvocation {
   uint32_t len;
 };
 
-struct OpenSyscallHandlerResult 
+struct OpenSyscallHandlerResult
 open_mocked_syscall_handler(void *db, void *rc,
-  struct FFISerializedAuthClaimData auth_claim_data,
-  const uint8_t source_tx_hash[32]);
+                            struct FFISerializedAuthClaimData auth_claim_data,
+                            const uint8_t source_tx_hash[32]);
 
-enum TestFFIErrorCode open_mock_invocation_frame(void *syscall_handler,
-  struct FFISerializedInvocation invocation,
-  uint32_t invoke_flags);
+enum TestFFIErrorCode
+open_mock_invocation_frame(void *syscall_handler,
+                           struct FFISerializedInvocation invocation,
+                           uint32_t invoke_flags);
 
-enum TestFFIErrorCode finish_mock_invocation_frame(void *syscall_handler,
-  struct FFISerializedInvocation invocation);
+enum TestFFIErrorCode
+finish_mock_invocation_frame(void *syscall_handler,
+                             struct FFISerializedInvocation invocation);
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
