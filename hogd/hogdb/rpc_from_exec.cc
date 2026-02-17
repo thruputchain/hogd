@@ -356,14 +356,19 @@ HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
 
   auto entry_res =
       btx->get().get_concurrent_rcq_entry(make_item_key(addrkey), index);
-  if (!entry_res) {
+  if (!entry_res.has_value()) {
     return ExpectedQueueEntry(to_rpc_error(entry_res.error()));
   }
 
+  auto &maybe_entry = entry_res.value();
+
   ExpectedQueueEntry ret;
-  ret.error(RPCError::kRPCNone);
-  if (entry_res->has_value()) {
-    ret.queue_entry() = **entry_res;
+  if (maybe_entry) {
+    ret.error(RPCError::kRPCNone);
+    ret.queue_entry() = *maybe_entry;
+  }
+  else {
+    ret.error(RPCError::kRPCNotFound);
   }
   return ret;
 }
