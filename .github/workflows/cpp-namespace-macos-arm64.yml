@@ -90,6 +90,15 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
       
+      - name: Use CommandLineTools SDK
+        run: |
+          # Homebrew LLVM is incompatible with some Xcode SDK versions (e.g. 26.1.1).
+          # Force usage of the CommandLineTools SDK which works reliably.
+          if [ -d /Library/Developer/CommandLineTools ]; then
+            sudo xcode-select -s /Library/Developer/CommandLineTools
+            echo "Switched to CommandLineTools SDK: $(xcrun --show-sdk-path)"
+          fi
+
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
