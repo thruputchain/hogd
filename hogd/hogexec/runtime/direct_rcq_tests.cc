@@ -280,9 +280,6 @@ TEST_F(DirectRCQTests, ConsumeExclusiveLock)
 
 TEST_F(DirectRCQTests, RevertFromExclusiveLock)
 {
-  GTEST_SKIP() << "Pending TODO at exclusive_lock.cc line 33";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
