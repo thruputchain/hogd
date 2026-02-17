@@ -133,6 +133,35 @@ SystemCallHandler::SystemCallHandler(
     snapshot_cache_(snapshot_cache)
 {}
 
+SystemCallHandler::SystemCallHandler(StorageSnapshotCache &snapshot_cache,
+                                     PerTransactionDatabaseProxy db_proxy,
+                                     PerTransactionEventServerProxy event_server_proxy,
+                                     ExecutionModeCtor execution_mode_ctor,
+                                     RuntimeContext &runtime_context,
+                                     AuthClaimData auth_claims,
+                                     SHA256Hash source_tx_hash)
+  : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
+    event_server_proxy_(std::move(event_server_proxy)),
+    invocation_frame_stack_(
+        [this](InvocationFrame &&last_frame) {
+          commit_last_call_frame_success(std::move(last_frame));
+        },
+        db_proxy_),
+    source_tx_hash_(source_tx_hash), 
+    auth_claims_(std::move(auth_claims)),
+    newly_created_contracts_(),
+    execution_mode_data_(
+        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
+          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
+            return ProposalModeData{};
+          }
+          return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                                   std::get<ValidationModeCtor>(
+                                       execution_mode_ctor)};
+        }(std::move(execution_mode_ctor))),
+    snapshot_cache_(snapshot_cache)
+{}
+
 void
 SystemCallHandler::perform_initial_validation()
 {
@@ -174,7 +203,7 @@ SystemCallHandler::check_final_validation_data()
 }
 
 InvokeResult
-SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
+SystemCallHandler::root_invoke()
 {
   perform_initial_validation();
   // if validation fails, cumulative_invoke_result_ is set to the appropriate
@@ -183,12 +212,7 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
     return cumulative_invoke_result_;
   }
 
-  if (invocation.has_value()) {
-    if (root_invocation_.has_value()) {
-      panic("two root invocations provided");
-    }
-    root_invocation_ = std::move(invocation);
-  }
+  // root_invocation_ is nullopt only in the test harness
   CHECK(root_invocation_.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto const &root_invocation = root_invocation_.value();
@@ -388,25 +412,26 @@ SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags)
 {
-  if (!validate_flags<InvokeFlag::kInvokeFlagTryInvoke,
-                      InvokeFlag::kInvokeFlagReadOnly>(flags)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
-  }
 
-  auto runtime = resolve_runtime(address);
-  if (!runtime) {
-    trace("SystemError: resolving runtime for address: {}, error {}",
-          x23::show(address), runtime.error());
-    return std::pair{runtime.error().to_host_fn_error(), 0};
-  }
-  if (!runtime.value()) {
-    trace("Failed to instantiate runtime for address: {}", x23::show(address));
-    return std::pair{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
-  }
-
-  if (!invocation_frame_stack_.empty() && is_read_only()) {
-    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
-  }
+    if (!validate_flags<InvokeFlag::kInvokeFlagTryInvoke,
+                        InvokeFlag::kInvokeFlagReadOnly>(flags)) {
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    }
+    if (!invocation_frame_stack_.empty() && is_read_only()) {
+      flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
+    }
+    
+      auto runtime = resolve_runtime(address);
+      if (!runtime) {
+        trace("SystemError: resolving runtime for address: {}, error {}",
+              x23::show(address), runtime.error());
+        return std::pair{runtime.error().to_host_fn_error(), 0};
+      }
+      if (!runtime.value()) {
+        trace("Failed to instantiate runtime for address: {}", x23::show(address));
+        return std::pair{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+      }
+    
 
   Invocation invocation = {.invoked_address = address,
                            .entrypoint = entrypoint_from_method_id(method),
