@@ -2134,10 +2134,16 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
   advance_block();
 
   auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  if (GetParam() == TestDB::kHogDB) {
+    // On HogDB, metadata is removed when live_entries drops to 0.
+    ASSERT_FALSE(queue.has_value());
+  }
+  else {
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+    auto const &qe = queue->metadata();
+    ASSERT_EQ(qe.live_entries, 0);
+  }
 }
 
 // Insert a self entry, then try_invoke a delete that reverts.
@@ -2208,10 +2214,16 @@ TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
   advance_block();
 
   auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  if (GetParam() == TestDB::kHogDB) {
+    // On HogDB, metadata is removed when live_entries drops to 0.
+    ASSERT_FALSE(queue.has_value());
+  }
+  else {
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+    auto const &qe = queue->metadata();
+    ASSERT_EQ(qe.live_entries, 0);
+  }
 }
 
 // Deleting a queue destroys ALL pending entries across multiple past blocks.
@@ -2238,10 +2250,16 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
   advance_block();
 
   auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  if (GetParam() == TestDB::kHogDB) {
+    // On HogDB, metadata is removed when live_entries drops to 0.
+    ASSERT_FALSE(queue.has_value());
+  }
+  else {
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+    auto const &qe = queue->metadata();
+    ASSERT_EQ(qe.live_entries, 0);
+  }
 }
 
 // A failed inner invoke that inserts an entry should leave no trace — the
