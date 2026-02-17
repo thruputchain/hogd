@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "auth_claim.hh"
 #include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -9,6 +10,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/cleanup.h"
 
 namespace hogd {
@@ -19,19 +21,33 @@ SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
   : identifier_(db.allocate_identifier()), db_(db),
     handler_(stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *context)
+             *context),
+     is_mocked_handler_(false)
 
+{}
+
+SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
+                                             DBContext &db,
+                                             AuthClaimData const &auth_claim_data,
+                                             SHA256Hash const &source_tx_hash)
+: identifier_(db.allocate_identifier()), db_(db),
+  handler_(db.get_snapshot(), db.get_new_db_proxy(identifier_),
+  db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
+  *context, auth_claim_data, source_tx_hash),
+  is_mocked_handler_(true)
 {}
 
 ForeignRootInvokeResult
 SyscallHandlerContext::root_invoke()
 {
-  if (!push_context()) {
-    return ForeignRootInvokeResult{
-        .result =
-            ForeignInvokeResult{.panic = std::to_underlying(
+  constexpr auto kTestHarnessFailure = ForeignRootInvokeResult{.result = ForeignInvokeResult{.panic = std::to_underlying(
                                     InvokeErrorCode::kInvokeUnrecoverable)},
-        .gas_consumed = 0};
+                                   .gas_consumed = 0};
+  if (is_mocked_handler_) {
+    return kTestHarnessFailure;
+  }
+  if (!push_context()) {
+    return kTestHarnessFailure;
   }
   x23::Defer _([this]() { pop_context(); });
 

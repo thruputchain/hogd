@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -25,6 +26,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -35,6 +37,11 @@ class SyscallHandlerContext {
 public:
   SyscallHandlerContext(MockRuntimeContext *context,
                         SignedTransaction const &stx, DBContext &db);
+  
+   SyscallHandlerContext(MockRuntimeContext *context,
+                          DBContext &db, 
+                        AuthClaimData const &auth_claim_data,
+                        SHA256Hash const &source_tx_hash);
 
   ~SyscallHandlerContext()
   {
@@ -119,6 +126,7 @@ private:
   SystemCallHandler handler_;
   std::vector<MockRuntime *> mock_runtime_stack_;
   bool transaction_committed_or_aborted_ = false;
+  bool is_mocked_handler_;
 };
 
 constexpr ForeignHostFnResult

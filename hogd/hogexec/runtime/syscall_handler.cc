@@ -157,7 +157,8 @@ SystemCallHandler::SystemCallHandler(
                                        execution_mode_ctor)};
         }(std::move(execution_mode_ctor))),
     snapshot_cache_(snapshot_cache)
-{}
+{
+}
 
 void
 SystemCallHandler::perform_initial_validation()
@@ -409,7 +410,6 @@ SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags)
 {
-
   if (!validate_flags<InvokeFlag::kInvokeFlagTryInvoke,
                       InvokeFlag::kInvokeFlagReadOnly>(flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
