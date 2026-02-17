@@ -413,10 +413,8 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   // Child frame should be the callee contract
   ASSERT_EQ(child_trace.invocation.invoked_address, callee_addr);
 
-  // Child trace shows Return (native contracts use the default frame output,
-  // because set_frame_return is only called by WASM return/abort syscalls)
   ASSERT_EQ(child_trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
 }
 
 TEST_F(TracingTest, TryInvokeLockAcquireFailure)
