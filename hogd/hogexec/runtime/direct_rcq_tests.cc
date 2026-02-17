@@ -221,9 +221,6 @@ TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed2)
 
 TEST_F(DirectRCQTests, ConsumeExclusiveLock)
 {
-  GTEST_SKIP() << "Pending TODO at exclusive_lock.cc line 33";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -274,7 +271,6 @@ TEST_F(DirectRCQTests, ConsumeExclusiveLock)
 
   auto entry2 = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 1);
-  ASSERT_TRUE(entry2.has_value());
   ASSERT_FALSE(entry2.has_value());
 }
 
