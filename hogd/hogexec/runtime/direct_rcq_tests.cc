@@ -326,9 +326,6 @@ TEST_F(DirectRCQTests, RevertFromExclusiveLock)
 
 TEST_F(DirectRCQTests, OverwrittenDeltasNotMadeVisible)
 {
-  GTEST_SKIP() << "RCQ entry made visible from a write that is overwritten";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -358,9 +355,6 @@ TEST_F(DirectRCQTests, OverwrittenDeltasNotMadeVisible)
 
 TEST_F(DirectRCQTests, ChangeTypeAndOverwriteInsert)
 {
-  GTEST_SKIP() << "RCQ entry made visible from a write that is overwritten";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -390,9 +384,6 @@ TEST_F(DirectRCQTests, ChangeTypeAndOverwriteInsert)
 
 TEST_F(DirectRCQTests, InsertConflictsWithDelete)
 {
-  GTEST_SKIP() << "RCQ entry made visible from tx that doesn't succeed";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -420,9 +411,6 @@ TEST_F(DirectRCQTests, InsertConflictsWithDelete)
 // check the conflict in the other order from InsertConflictsWithDelete
 TEST_F(DirectRCQTests, InsertConflictsWithDelete2)
 {
-  GTEST_SKIP() << "RCQ entry made visible early";
-  return;
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   auto tx2 = make_new_per_tx_db_proxy();
