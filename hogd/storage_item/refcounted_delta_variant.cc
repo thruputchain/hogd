@@ -320,7 +320,13 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
       return 0;
     }
     if (base_item) {
-      return std::max<int128_t>(0, base_item->storage_cost(current_model) -
+      // The inserter must cover any gap between the base item's stored cost
+      // and kBaseItemCost. For a non-empty RCQ base (cost >= kBaseItemCost)
+      // or a non-RCQ base (e.g. bytestring, also >= kBaseItemCost), this is
+      // 0. For an empty RCQ base (cost 0 after c5b933fc), this is
+      // kBaseItemCost — the transition from "no metadata" to "metadata
+      // exists" must be paid for by the inserter.
+      return std::max<int128_t>(0, current_model->kBaseItemCost -
                                        base_item->storage_cost());
     }
     return current_model->kBaseItemCost;
