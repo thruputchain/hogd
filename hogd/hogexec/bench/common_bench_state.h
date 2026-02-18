@@ -150,8 +150,8 @@ private:
 
     event_server_handle_->ci_client.start_server(
         "hogd/event/event_exec",
-        {std::format("{}:{}", hostname, event_server_port),
-         std::format("{}", work_dir.work_dir())});
+        {"--mempool-addr", std::format("{}:{}", hostname, event_server_port),
+         "--work-dir", std::format("{}", work_dir.work_dir())});
 
     return mock_sched_event_server_->impl()->await_event_card();
   }

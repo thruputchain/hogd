@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cassert>
 #include <map>
 #include <memory>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "retrocausal_queue.hh"
 
@@ -74,6 +76,19 @@ public:
 
   uint64_t get_current_block_number() const { return current_block_number_; }
 
+  RetrocausalQueuePastBlockConsumeDelta get_consume_state() const
+  {
+    return consume_state_;
+  }
+
+  uint64_t get_max_live_block_num() const { return current_block_number_; }
+
+  uint64_t get_live_entries() const
+  {
+    CHECK(total_size_ >= consumed_size_);
+    return static_cast<uint64_t>(total_size_ - consumed_size_);
+  }
+
   // stats of the queue in its current state
   RetrocausalQueueStats get_active_stats() const;
   // stats of the queue in a hypothetical state _after_ delta is
@@ -96,6 +111,9 @@ private:
 
   std::map<uint64_t, std::shared_ptr<const BlockState>> blocks_;
   uint64_t current_block_number_;
+
+  RetrocausalQueuePastBlockConsumeDelta consume_state_ = {
+      .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
 
   // Total number of entries that have ever been inserted into the queue.
   int64_t total_size_;

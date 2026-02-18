@@ -501,7 +501,9 @@ ItemLock::get_concurrent_entry(uint32_t index) const
           return lock.get()->get_concurrent_entry(index);
         }
         else {
-          error("get_concurrent_entry called on non-retrocausal queue lock");
+          // Lock is in exclusive/deletion/other state (e.g. after a delete
+          // that was followed by RCQ operations in the same tx). No concurrent
+          // entries exist in this lock.
           return std::nullopt;
         }
       },

@@ -2,11 +2,13 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
@@ -17,7 +19,6 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/hogdb/rpc_from_auth.h"
-#include "port.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 
@@ -68,7 +69,8 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
-           const std::string *coordinator_addr)
+           const std::string *coordinator_addr, uint16_t exec_port,
+           uint16_t mempool_port, uint16_t auth_port)
 {
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
@@ -132,28 +134,32 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
-  CHECK_EQ(exec_server.start_server(kDbExecutorServerPort),
-           uint16_t{kDbExecutorServerPort});
+  const uint16_t actual_exec_port = exec_server.start_server(exec_port);
+  CHECK(actual_exec_port == exec_port || exec_port == 0);
+  info("PORT hogdb.exec={}", actual_exec_port);
 
   // start the mempool server.
   info("starting mempool server.");
   HogDBSchedServer mempool_server(ctx);
-  CHECK_EQ(mempool_server.start_server(kDbMempoolServerPort),
-           uint16_t{kDbMempoolServerPort});
+  const uint16_t actual_mempool_port =
+      mempool_server.start_server(mempool_port);
+  CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
+  info("PORT hogdb.mempool={}", actual_mempool_port);
 
   // start the auth server.
   info("starting auth server.");
   HogDBAuthServer auth_server(ctx);
-  CHECK_EQ(auth_server.start_server(kDbAuthServerPort),
-           uint16_t{kDbAuthServerPort});
+  const uint16_t actual_auth_port = auth_server.start_server(auth_port);
+  CHECK(actual_auth_port == auth_port || auth_port == 0);
+  info("PORT hogdb.auth={}", actual_auth_port);
 
   if (coordinator_addr) {
     auto const &client = ctx.get_sched_db_client();
     assert(client);
 
-    const std::string exec_address = create_address(kDbExecutorServerPort);
-    const std::string sched_address = create_address(kDbMempoolServerPort);
-    const std::string auth_address = create_address(kDbAuthServerPort);
+    const std::string exec_address = create_address(actual_exec_port);
+    const std::string sched_address = create_address(actual_mempool_port);
+    const std::string auth_address = create_address(actual_auth_port);
     ShardCard card{.protocol = version::kHogdProtocol(),
                    .upid = {},
                    .block_height = 0,
@@ -175,6 +181,31 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
 } // namespace hogd
 
+namespace {
+
+[[noreturn]] void
+usage(char *argv[])
+{
+  std::println("usage: {} --db-path <path> --ram-bytes <bytes> "
+               "[--coordinator-addr <host:port>] [--executor-port <port>] "
+               "[--mempool-port <port>] [--auth-port <port>]",
+               argv[0]);
+  exit(EXIT_FAILURE);
+}
+
+uint16_t
+parse_port(const std::string &value)
+{
+  size_t pos = 0;
+  uint64_t port = std::stoul(value, &pos, 10);
+  if (pos != value.size() || port > 65535) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
+  }
+  return static_cast<uint16_t>(port);
+}
+
+} // namespace
+
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
@@ -183,17 +214,49 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogdb!");
 
-  if (argc < 3 || argc >= 5) {
-    std::println("usage: db_path ram_bytes [coordinator_ip:port]");
-    return EXIT_FAILURE;
+  std::string path;
+  std::string coordinator_addr_raw;
+  std::optional<size_t> ram_bytes;
+  uint16_t exec_port = 0;
+  uint16_t mempool_port = 0;
+  uint16_t auth_port = 0;
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--db-path" && i + 1 < argc) {
+      path = argv[++i];
+      continue;
+    }
+    if (arg == "--ram-bytes" && i + 1 < argc) {
+      ram_bytes = std::stoul(argv[++i], nullptr, 0);
+      continue;
+    }
+    if (arg == "--coordinator-addr" && i + 1 < argc) {
+      coordinator_addr_raw = argv[++i];
+      continue;
+    }
+    if (arg == "--executor-port" && i + 1 < argc) {
+      exec_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--mempool-port" && i + 1 < argc) {
+      mempool_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--auth-port" && i + 1 < argc) {
+      auth_port = parse_port(argv[++i]);
+      continue;
+    }
+    usage(argv);
   }
 
-  std::string path = argv[1];
-  size_t ram_bytes = std::stoul(argv[2], nullptr, 0);
+  if (path.empty() || !ram_bytes.has_value()) {
+    usage(argv);
+  }
 
-  const std::string coordinator_addr_raw = (argc < 4) ? "" : argv[3];
   const std::string *coordinator_addr =
-      (argc < 4) ? nullptr : &coordinator_addr_raw;
+      coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
-  return hogd::hogdb_init(path, ram_bytes, coordinator_addr);
+  return hogd::hogdb_init(path, *ram_bytes, coordinator_addr, exec_port,
+                          mempool_port, auth_port);
 };

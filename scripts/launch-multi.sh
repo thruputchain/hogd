@@ -28,6 +28,28 @@ EXPORT_REGEX='^X23'
 
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
+export LOADGEN_PORT=11222
+
+export AUTH_DB_PORT=8050
+export AUTH_MEMPOOL_PORT=8051
+
+export INDEXER_EVENT_PORT=8060
+export INDEXER_BLOCK_EXPLORER_PORT=8061
+
+export MEMPOOL_COORDINATOR_PORT=8070
+export MEMPOOL_EXECUTOR_PORT=8071
+export MEMPOOL_DB_PORT=8072
+export MEMPOOL_EVENT_PORT=8073
+export MEMPOOL_AUTH_PORT=8074
+
+export DB_EXECUTOR_PORT=8080
+export DB_MEMPOOL_PORT=8081
+export DB_AUTH_PORT=8082
+
+export EVENT_EXECUTOR_PORT=8090
+export EVENT_MEMPOOL_PORT=8091
+export EVENT_INDEXER_PORT=8092
+
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
 CHUCKD_BINARY=${HOGD_BUILD_DIR}/chuckd.dev
@@ -200,24 +222,24 @@ wait_port() {
 }
 
 echo "Start loadgen..."
-remote_launch "$loadgen_server" "$LOADGEN_BINARY" -p 11222
-wait_port "$loadgen_server" 11222
+remote_launch "$loadgen_server" "$LOADGEN_BINARY" --port $LOADGEN_PORT
+wait_port "$loadgen_server" $LOADGEN_PORT
 
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" "$mempool_server":8071 -n 1024
+  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$mempool_server":$MEMPOOL_EXECUTOR_PORT --nthreads 1024 --mempool-port 8040
 done
 
 # Start event.
 echo "Start event..."
 remote_launch "$event_server" "$EVENT_BINARY" \
-  "$mempool_server":8073 "$logdir/event"
+  --mempool-addr "$mempool_server":$MEMPOOL_EVENT_PORT --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT
 
 # Start indexer.
 echo "Start indexer..."
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  "$event_server":8092 "$logdir/indexer"
+  --event-addr "$event_server":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -225,18 +247,19 @@ for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
   ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   remote_launch "$s" "$HOGDB_BINARY" \
-    "$logdir/hogdb.data" 10000000000 "$mempool_server":8072
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --coordinator-addr "$mempool_server":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
 done
 
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
-  "$mempool_server":8074
+  --mempool-addr "$mempool_server":$MEMPOOL_AUTH_PORT --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
 
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
-  ${#hogdb_servers[@]} ${#hogexec_servers[@]}
+  --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
+  --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
 sleep 1
 
 # Launch chuckd.
@@ -258,8 +281,8 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --storage-dir "$logdir"/chuckd-storage \
   --out-addr :50000 \
   --wallet-addr :40000 \
-  --loadgen-addr "$loadgen_server":11222 \
-  --sched-addr "$mempool_server":8070 \
+  --loadgen-addr "$loadgen_server":$LOADGEN_PORT \
+  --sched-addr "$mempool_server":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path "$logdir"/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
   --scp-control-addr 127.0.0.1:4400 \
@@ -271,33 +294,34 @@ for s in "${hogexec_servers[@]}"; do
 done
 
 # Wait for event (ports 8090-8092).
-wait_port "$event_server" 8090
-wait_port "$event_server" 8091
-wait_port "$event_server" 8092
+wait_port "$event_server" $EVENT_EXECUTOR_PORT
+wait_port "$event_server" $EVENT_MEMPOOL_PORT
+wait_port "$event_server" $EVENT_INDEXER_PORT
 
 # Wait for indexer (ports 8060-8061).
-wait_port "$indexer_server" 8060
-wait_port "$indexer_server" 8061
+wait_port "$indexer_server" $INDEXER_EVENT_PORT
+wait_port "$indexer_server" $INDEXER_BLOCK_EXPLORER_PORT
 
 # Wait for hogdb (ports 8080-8082).
 for s in "${hogdb_servers[@]}"; do
-  wait_port "$s" 8080
-  wait_port "$s" 8081
-  wait_port "$s" 8082
+  wait_port "$s" $DB_EXECUTOR_PORT
+  wait_port "$s" $DB_MEMPOOL_PORT
+  wait_port "$s" $DB_AUTH_PORT
 done
 
 # Wait for auth (ports 8050-8051).
-wait_port "$auth_server" 8050
-wait_port "$auth_server" 8051
+wait_port "$auth_server" $AUTH_DB_PORT
+wait_port "$auth_server" $AUTH_MEMPOOL_PORT
 
 # Wait for chuckd (port 7888).
 wait_port hog3 7888
 
 # Wait for mempool (ports 8070-8073).
-wait_port "$mempool_server" 8070
-wait_port "$mempool_server" 8071
-wait_port "$mempool_server" 8072
-wait_port "$mempool_server" 8073
+wait_port "$mempool_server" $MEMPOOL_COORDINATOR_PORT
+wait_port "$mempool_server" $MEMPOOL_EXECUTOR_PORT
+wait_port "$mempool_server" $MEMPOOL_DB_PORT
+wait_port "$mempool_server" $MEMPOOL_EVENT_PORT
+wait_port "$mempool_server" $MEMPOOL_AUTH_PORT
 
 echo "Done with launch."
 

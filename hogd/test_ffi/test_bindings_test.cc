@@ -185,8 +185,14 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
 
   auto result = root_invoke(syscall_handler, 0);
-  EXPECT_EQ(result.result.panic,
-            std::to_underlying(InvokeErrorCode::kInvokeNone));
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
 
   // Events not available until next block
 
@@ -555,6 +561,310 @@ TEST(TestBindingsTest, CostModelRoundtrip)
                    x23::BufView{cost_result.data.data, cost_result.data.len});
 
   EXPECT_EQ(custom_model, roundtripped);
+}
+
+namespace {
+// Test mock contract that does a Revert
+// does not use the foreign context
+ForeignInvokeResult
+mock_contract_revert(void * /*unused*/, uint64_t method_number)
+{
+  if (method_number != 0x1234) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  ReturnBuffer return_buffer = {0, 1, 2, 3};
+  context->to_handler().set_return_buffer(std::move(return_buffer), true);
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+}
+} // namespace
+
+TEST(TestBindingsTest, MockContractRevertTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_revert, nullptr),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto serialized_stx = x23::serialize(stx);
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+  EXPECT_EQ(output.abort_buffer().size(), 4);
+  EXPECT_EQ(output.abort_buffer()[0], 0);
+  EXPECT_EQ(output.abort_buffer()[1], 1);
+  EXPECT_EQ(output.abort_buffer()[2], 2);
+  EXPECT_EQ(output.abort_buffer()[3], 3);
+}
+
+namespace {
+// Test mock contract that does a Return
+// does not use the foreign context
+ForeignInvokeResult
+mock_contract_return(void * /*unused*/, uint64_t method_number)
+{
+  if (method_number != 0x1234) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  ReturnBuffer return_buffer = {0, 1, 2, 3};
+  context->to_handler().set_return_buffer(std::move(return_buffer), false);
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+}
+} // namespace
+
+TEST(TestBindingsTest, MockContractReturnTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_return, nullptr),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto serialized_stx = x23::serialize(stx);
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.return_buffer().size(), 4);
+  EXPECT_EQ(output.return_buffer()[0], 0);
+  EXPECT_EQ(output.return_buffer()[1], 1);
+  EXPECT_EQ(output.return_buffer()[2], 2);
+  EXPECT_EQ(output.return_buffer()[3], 3);
+}
+
+namespace {
+// Test mock contract that does a fault
+// does not use the foreign context
+ForeignInvokeResult
+mock_contract_fault(void * /*unused*/, uint64_t method_number)
+{
+  if (method_number != 0x1234) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeDeterministic)};
+}
+} // namespace
+
+TEST(TestBindingsTest, MockContractFaultTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_fault, nullptr),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto serialized_stx = x23::serialize(stx);
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+}
+
+namespace {
+// Test mock contract that does a fault
+// does not use the foreign context
+ForeignInvokeResult
+mock_contract_out_of_gas(void * /*unused*/, uint64_t method_number)
+{
+  if (method_number != 0x1234) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeOutOfGas)};
+}
+} // namespace
+
+TEST(TestBindingsTest, MockContractOutOfGasTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_out_of_gas, nullptr),
+            kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto serialized_stx = x23::serialize(stx);
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
 }
 
 } // namespace hogd

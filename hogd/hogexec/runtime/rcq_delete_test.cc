@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -1566,36 +1567,48 @@ protected:
     invoke_method(3, bytestring);
   }
 
+  testing::AssertionResult check_rcq_empty()
+  {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+    if (GetParam() == TestDB::kHogDB) {
+      // On HogDB, metadata is removed when live_entries drops to 0.
+      if (queue.has_value()) {
+        return testing::AssertionFailure() << "Queue has live entries";
+      }
+      return testing::AssertionSuccess();
+    }
+
+    if (!queue.has_value()) {
+      return testing::AssertionFailure() << "No queue found";
+    }
+    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+      return testing::AssertionFailure() << "Queue has wrong type";
+    }
+    auto const &qe = queue->metadata();
+    if (qe.live_entries != 0) {
+      return testing::AssertionFailure() << "Queue has live entries";
+    }
+    return testing::AssertionSuccess();
+  }
+
   std::unique_ptr<RuntimeContext> context_;
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "This test for some reason leaves 2 entries in the queue";
-    return;
-  }
   insert(42);
   insert(99);
   invoke_method(10, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
   // TODO(geoff): assertion on qe.max_live_block_num
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "This test deadlocks in HogDB";
-    return;
-  }
   std::thread t([&] { invoke_method(11, uint32_t{42}); });
 
   wait_flag_1_.wait(false);
@@ -1607,30 +1620,20 @@ TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
   t.join();
 
   advance_block();
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "This test leaves an extra entry live in the queue";
-    return;
-  }
   insert(42);
 
   // insert -> delete -> consume
   invoke_method(12, uint32_t{99}, uint32_t{42});
 
   advance_block();
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
@@ -1658,10 +1661,6 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 // Exposes the bug where current_block_consumed lost entries across delete.
 TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "This test leaves three extra entries live in the queue";
-    return;
-  }
   insert(42);
   insert(99);
   insert(77);
@@ -1669,21 +1668,13 @@ TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Consume entry from past block, delete queue, insert new entry,
 // consume concurrent entry.
 TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "2 extra entries";
-    return;
-  }
   // Block 1: insert entries that become past block entries
   insert(42);
 
@@ -1695,61 +1686,38 @@ TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
   // Past block entry (42) consumed via make_fully_consumed_item,
   // self insert (10) consumed, concurrent (99) consumed.
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Insert and consume a self entry, delete, insert and consume another self.
 // Verifies self entries before delete are discarded correctly.
 TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   invoke_method(15, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Insert a self entry, delete, then consume a concurrent entry.
 // Verifies self insert is gone, concurrent is consumed.
 TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   insert(42);
   invoke_method(12, uint32_t{99}, uint32_t{42});
 
   advance_block();
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Delete queue, then try to consume. Should get no entry.
 // Insert is in previous block so no concurrent entries are available.
 TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "\"block_tx.cc:182] hogexec bug\"";
-    return;
-  }
   insert(42);
 
   advance_block();
@@ -1758,30 +1726,18 @@ TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Consume (nothing available) -> delete -> consume (nothing available).
 // Both should return no entry. retrocausally_consumed_count_ should remain 0.
 TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "\"block_tx.cc:182] hogexec bug\"";
-    return;
-  }
   invoke_method(18);
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Multiple delete-recreate cycles: consume(a) -> delete -> consume(b) -> delete
@@ -1789,10 +1745,6 @@ TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 // multiple cycles.
 TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "3 extra entries";
-    return;
-  }
   insert(42);
   insert(99);
   insert(77);
@@ -1800,33 +1752,21 @@ TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Two delete-recreate cycles without consumes in between,
 // then consume a concurrent entry at the end.
 TEST_P(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "2 extra entries";
-    return;
-  }
   insert(42);
   invoke_method(20, uint32_t{10}, uint32_t{20}, uint32_t{42});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
   // Self entry 10 destroyed by second delete, self entry 20 consumed,
   // concurrent 42 consumed.
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Peek at concurrent entry, delete, consume. Since peek doesn't advance
@@ -1834,20 +1774,12 @@ TEST_P(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
 // consume should return the same entry (index 0).
 TEST_P(RCQDeleteTest, PeekDeleteConsume)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   insert(42);
   invoke_method(21, uint32_t{42});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Start with an empty slot.  Consumes a retrocausal item, then deletes,
@@ -1856,10 +1788,6 @@ TEST_P(RCQDeleteTest, PeekDeleteConsume)
 // only the one item inserted at the end
 TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "2 extra entries";
-    return;
-  }
   // Insert an item in a previous block so it becomes retrocausal
   insert(42);
 
@@ -1914,10 +1842,6 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
 // consume that item.
 TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   // Start from empty, delete (no-op), then insert a new item
   invoke_method(13, uint32_t{42});
 
@@ -1927,11 +1851,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
   advance_block();
 
   // Verify the queue is now empty (item was consumed)
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Test that we only output the consume if entries are actually consumed.
@@ -1940,10 +1860,6 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 // consume that item.
 TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "not clear what happens in hogdb here";
-    return;
-  }
   set_bytestring(make_bytestring("test"));
   advance_block();
   // delete, then insert a new item
@@ -1955,11 +1871,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
   advance_block();
 
   // Verify the queue is now empty (item was consumed)
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Test that we only output the consume if entries are actually consumed.
@@ -1968,10 +1880,6 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
 // consume that item.
 TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "tx fails and 2 extra entries";
-    return;
-  }
   insert(42);
   invoke_method(1, uint32_t{42});
 
@@ -1985,11 +1893,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
   advance_block();
 
   // Verify the queue is now empty (item was consumed)
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 // Test that we only output the consume if entries are actually consumed.
 // Starts from nonempty queue, then deletes the item, then inserts a new item.
@@ -2020,52 +1924,32 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
 // A subsequent consume should return the same entry.
 TEST_P(RCQDeleteTest, PeekThenConsumeSameEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42);
   invoke_method(24, uint32_t{42}); // peek verifies value
   invoke_method(1, uint32_t{42});  // consume same entry
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Multiple peeks without intervening consume return the same entry,
 // confirming the cursor doesn't advance on peek.
 TEST_P(RCQDeleteTest, PeekTwiceReturnsSameEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42);
   insert(99);
   invoke_method(27, uint32_t{42}, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // After delete+recreate, peek should see entries from the new queue.
 // Verifies peek state is reset by delete.
 TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42);
   invoke_method(28, uint32_t{42}, uint32_t{99});
 
@@ -2083,10 +1967,6 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
 // from the recreated queue.
 TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesConcurrentEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   insert(42);
   insert(99);
   invoke_method(33, uint32_t{42}, uint32_t{99});
@@ -2105,20 +1985,12 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesConcurrentEntry)
 // Entries remain consumable after the revert.
 TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   insert(42);
   invoke_method(26, uint32_t{42});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Same as RevertedDeletePreservesQueue but entries come from a past block.
@@ -2133,31 +2005,19 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Insert a self entry, then try_invoke a delete that reverts.
 // Both self-inserted and concurrent entries remain consumable.
 TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "2 extra entries";
-    return;
-  }
   insert(99); // concurrent
   invoke_method(29, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // A successful delete inside a try_invoke frame should fail to acquire locks
@@ -2165,20 +2025,12 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 // The delete is reverted due to conflict, and the entry remains consumable.
 TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "1 extra entry";
-    return;
-  }
   insert(42); // concurrent insert creates conflicting lock
   invoke_method(32, uint32_t{42});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // After delete+recreate, entries inserted in the same block should be
@@ -2207,11 +2059,7 @@ TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Deleting a queue destroys ALL pending entries across multiple past blocks.
@@ -2237,21 +2085,13 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // A failed inner invoke that inserts an entry should leave no trace — the
 // queue should remain empty.
 TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   invoke_method(36, uint32_t{42});
 
   advance_block();
@@ -2260,57 +2100,34 @@ TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
   if (!queue.has_value()) {
     return; // queue was never created, trivially passes
   }
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
 }
 
 // After a reverted inner insert, a subsequent successful insert should work
 // normally. Only the successful entry is consumable.
 TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   invoke_method(37, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // A reverted inner insert does not affect concurrent entries from other
 // transactions.
 TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(99); // concurrent
   invoke_method(43, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // A reverted inner insert does not affect entries from past blocks.
 TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(99);
 
   advance_block();
@@ -2319,40 +2136,24 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // A failed inner invoke that consumes an entry should leave the entry
 // available for a subsequent consume.
 TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42); // concurrent
   invoke_method(38, uint32_t{42});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Same as RevertedConsumePreservesEntry but the entry comes from a past block.
 TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42);
 
   advance_block();
@@ -2361,20 +2162,12 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // After a reverted inner consume, peek should still see the entry.
 TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42); // concurrent
   invoke_method(39, uint32_t{42});
 
@@ -2390,40 +2183,81 @@ TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 // An entry survives multiple consecutive reverted inner consume attempts.
 TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42); // concurrent
   invoke_method(40, uint32_t{42});
 
   advance_block();
 
-  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-  ASSERT_TRUE(queue.has_value());
-  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // A failed inner invoke that both consumes AND inserts should revert both: the
 // original entry is available, the inserted entry is gone.
 TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Skipping HogDB";
-    return;
-  }
   insert(42); // concurrent
   invoke_method(41, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Insert into an RCQ, commit it to the DAO, then purely delete it in a
+// separate block. This exercises DeletionLock::write_committed_change removing
+// an RCQ trie entry — the trie type must match kRetrocausalQueue used by
+// RetrocausalQueueLock, not some other value.
+TEST_P(RCQDeleteTest, PureDeleteOfCommittedRCQ)
+{
+  // Block 1: insert an entry so the RCQ is written to the DAO
+  insert(42);
+  advance_block();
+
   auto queue = lookup_storage_item_from_db(get_queue_addrkey());
   ASSERT_TRUE(queue.has_value());
   ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
-  auto const &qe = queue->metadata();
-  ASSERT_EQ(qe.live_entries, 0);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+
+  // Block 2: pure delete (method 31) — no other RCQ operations
+  invoke_method(31);
+  advance_block();
+
+  // Item should be gone from the DAO
+  auto after = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_FALSE(after.has_value());
+}
+
+// Stores a bytestring containing serialized RetrocausalQueueMetadata with
+// inflated live_entries/max_live_block_num. Then deletes it and inserts into an
+// RCQ at the same key. Verifies the system doesn't inherit the bogus metadata
+// from the bytestring payload -- the RCQ should be treated as fresh.
+TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
+{
+  // Construct a RetrocausalQueueMetadata with non-zero fields
+  RetrocausalQueueMetadata bogus_meta{};
+  bogus_meta.live_entries = 9999;
+  bogus_meta.max_live_block_num = 42;
+  bogus_meta.consume_state.max_fully_consumed_block_number = 10;
+  bogus_meta.consume_state.partial_consumed_number = 5;
+
+  // Serialize it and store as a bytestring
+  auto buf = x23::serialize(bogus_meta);
+  Bytestring bs(buf.begin(), buf.end());
+  set_bytestring(bs);
+  advance_block();
+
+  // Delete the bytestring, then insert into RCQ at the same key
+  invoke_method(13, uint32_t{42});
+
+  // Another tx retrocausally consumes the entry
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // The queue should be empty: one insert, one consume, net zero.
+  // If the bogus metadata leaked through, we'd see 9999+ live entries or
+  // a conservation invariant failure.
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -191,6 +191,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         auto acq_res = frame_stack_.back().try_acquire_frame_locks(db_proxy_);
         if (!acq_res.has_value()) {
+          frame_stack_.pop_back();
           return acq_res.error();
         }
         acq_success = acq_res.value();
@@ -204,6 +205,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         auto res = std::get<ValidationModeData>(execution_mode_data)
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
+          frame_stack_.pop_back();
           return SystemError{SystemErrorCode::kSystemValidationFailure};
         }
         acq_success = res.value().get();
@@ -227,6 +229,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       frame_stack_.back().should_revert()) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
+      frame_stack_.pop_back();
       return st.error();
     }
   }

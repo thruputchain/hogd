@@ -225,6 +225,8 @@ public:
     return AddressAndKey{.address = get_active_frame().address(), .key = key};
   }
 
+  size_t size() const { return frame_stack_.size(); }
+
 private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;

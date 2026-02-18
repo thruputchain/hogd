@@ -363,13 +363,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   ASSERT_EQ(from_xdr(nnint_item), 42);
 }
 
-TEST_P(DeleteRecreateTest, DISABLED_DeleteRecreateRetrocausalQueue)
+TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "Skipping test for HogDB due to retrocausal queue not supported";
-    return;
-  }
   // A native contract with the following methods:
   // 0: Consumes from a storage key, expecting it to be empty. Then inserts an
   // item into that same hardcoded storage key. 1: Deletes the storage key. 2:

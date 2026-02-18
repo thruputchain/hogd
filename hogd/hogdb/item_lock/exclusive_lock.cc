@@ -37,6 +37,15 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return ctx.cost_model->get_auth_data_cost(auth_data->count_active_keys());
   }
+  if (after->is_retrocausal_queue()) {
+    auto rcq = after->to_retrocausal_queue();
+    assert(rcq.has_value());
+    size_t entries = rcq->delta().insert.added_entries.size();
+    if (entries == 0) {
+      return 0;
+    }
+    return ctx.cost_model->get_retrocausal_queue_cost(entries, 1);
+  }
   panic("unimplemented");
 }
 // NOLINTEND(readability-convert-member-functions-to-static)

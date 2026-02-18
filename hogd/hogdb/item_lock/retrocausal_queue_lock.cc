@@ -14,11 +14,13 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "retrocausal_queue.hh"
+#include "storage_item.hh"
 #include "x23/serialize.h"
 #include "x23/testlock.h"
 #include "x23/vec.h"
@@ -44,9 +46,13 @@ RetrocausalQueueLock::get_meta(const LockContext *ctx) const
   CHECK(ctx != nullptr);
   auto r = ctx->dao->read_retrocausal_queue_metadata(ctx->key);
   if (!r) {
-    if (r.error() == HogDBError{HogDBCode::kNotFound}) {
+    if (r.error() == HogDBError{HogDBCode::kNotFound} ||
+        r.error() == HogDBError{HogDBCode::kTypeMismatch}) {
       trace("RCQ metadata not found for {}; creating new zero metadata.",
             ctx->key);
+      if (r.error() == HogDBError{HogDBCode::kTypeMismatch}) {
+        base_was_different_type_ = true;
+      }
       meta_cell_ = RetrocausalQueueMetadata{};
       meta = &*meta_cell_;
       meta_.store(meta, std::memory_order_release);
@@ -69,9 +75,25 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   if (!after) {
     // Undo the changes from before.
     CHECK(before != nullptr);
-    // TODO(stutsman): IMPLEMENT ME
-    panic("unimplemented");
-    return HogDBError{HogDBCode::kInternal};
+    auto const &delta = before->delta();
+
+    if (delta.consume) {
+      consumed_.store(false, std::memory_order_relaxed);
+    }
+
+    const size_t entries_to_unreserve = delta.insert.added_entries.size();
+    if (entries_to_unreserve > 0) {
+      reserved_entry_count_.fetch_sub(entries_to_unreserve,
+                                      std::memory_order_relaxed);
+    }
+
+    auto r = get_meta(&ctx);
+    if (!r.has_value()) {
+      return r.error();
+    }
+    auto &meta = **r;
+    return ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries,
+                                                      live_block_count(meta));
   }
 
   // This is either a new change or a modification to an existing change.
@@ -91,9 +113,9 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
                               before->delta().insert.added_entries.size()));
 
   // Check strict single-consumer constraint
+  const bool this_tx_already_consumed =
+      (before != nullptr && before->delta().consume != nullptr);
   if (delta.consume) {
-    const bool this_tx_already_consumed =
-        (before != nullptr && before->delta().consume != nullptr);
     if (consumed_.load(std::memory_order_relaxed) &&
         !this_tx_already_consumed) {
       // We must abort to maintain MPSC semantics. If this tx has not consumed
@@ -103,10 +125,16 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       return HogDBError{HogDBCode::kConflict};
     }
 
-    bool expected = false;
-    if (!consumed_.compare_exchange_strong(expected, true)) {
-      return HogDBError{HogDBCode::kConflict};
+    if (!this_tx_already_consumed) {
+      bool expected = false;
+      if (!consumed_.compare_exchange_strong(expected, true)) {
+        return HogDBError{HogDBCode::kConflict};
+      }
     }
+  }
+  else if (this_tx_already_consumed) {
+    // Update removed the consume.
+    consumed_.store(false, std::memory_order_relaxed);
   }
 
   auto r = get_meta(&ctx);
@@ -121,9 +149,26 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   CHECK(meta.max_live_block_num >=
         meta.consume_state.max_fully_consumed_block_number);
 
-  // TODO(stutsman): kConflict if there are too many insertions to put in a
-  // single RCQ block or make it so that the queue can grow by more than one
-  // block per block.
+  // Reserve space in the RCQ block that will be generated. If there are too
+  // many inserts in the same block, abort.
+  const size_t new_entries_count = delta.insert.added_entries.size();
+  const size_t previous_entries_count =
+      (before != nullptr) ? before->delta().insert.added_entries.size() : 0;
+  CHECK(new_entries_count >= previous_entries_count);
+  const size_t additional_entries = new_entries_count - previous_entries_count;
+
+  if (additional_entries > 0) {
+    const size_t reserved_before =
+        reserved_entry_count_.fetch_add(additional_entries,
+                                        std::memory_order_relaxed);
+
+    if (reserved_before + additional_entries >
+        kRetrocausalQueueBlockEntriesMaxLen) {
+      reserved_entry_count_.fetch_sub(additional_entries,
+                                      std::memory_order_relaxed);
+      return HogDBError{HogDBCode::kConflict};
+    }
+  }
 
   if (delta.consume) {
     // Now that we know this transaction will commit, we need to do one more
@@ -163,7 +208,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       consumed_entries += new_consume.partial_consumed_number;
     }
 
-    consumed_past_entries_ = consumed_entries;
+    after->consumed_past_entries_ = consumed_entries;
   }
 
   // Compute number of blocks added by this transaction. 0 if no inserts,
@@ -245,7 +290,11 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     consume_delta_ = *delta.consume;
   }
 
-  const int64_t element_delta = elements_added - consumed_past_entries_;
+  int64_t element_delta =
+      static_cast<int64_t>(elements_added) - change.consumed_past_entries_;
+  if (delta.consume) {
+    element_delta -= delta.consume->current_block_consumed.size();
+  }
   committed_element_count_delta_ += element_delta;
 
   const int128_t cost_after = calculate_cost();
@@ -319,13 +368,40 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
 
   updated_metadata.live_entries += committed_element_count_delta_;
 
-  CHECK(ctx.dao->write_retrocausal_queue_metadata(ctx.key, updated_metadata)
-            .has_value());
-
-  x23::Vec<uint8_t> buf = x23::serialize(updated_metadata);
-  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
-                                                  std::as_bytes(std::span(buf)))
-            .has_value());
+  if (updated_metadata.live_entries == 0) {
+    // Remove the item from the DAO and trie if it actually existed in the
+    // snapshot. This includes two cases:
+    // (1) base_metadata.live_entries > 0: an existing RCQ was fully consumed.
+    // (2) base_was_different_type_: the key held a different type (e.g.
+    //     bytestring) that was deleted and replaced with an RCQ in the same
+    //     block. The old item must be removed even though no RCQ metadata
+    //     existed.
+    if (base_metadata.live_entries > 0) {
+      CHECK(ctx.dao->remove_retrocausal_queue_metadata(ctx.key).has_value());
+      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
+                                                        kRetrocausalQueue)
+                .has_value());
+    }
+    else if (base_was_different_type_) {
+      // The key held a different type (e.g. bytestring) that was deleted and
+      // replaced with an RCQ in the same block. Look up the actual type to
+      // remove the correct trie entry.
+      auto type_ret = ctx.dao->get_item_type(ctx.key);
+      CHECK(type_ret.has_value());
+      CHECK(ctx.dao->remove_item(ctx.key).has_value());
+      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
+                                                        type_ret.value())
+                .has_value());
+    }
+  }
+  else {
+    CHECK(ctx.dao->write_retrocausal_queue_metadata(ctx.key, updated_metadata)
+              .has_value());
+    x23::Vec<uint8_t> buf = x23::serialize(updated_metadata);
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(
+              trie, ctx.key, kRetrocausalQueue, std::as_bytes(std::span(buf)))
+              .has_value());
+  }
 
   return {};
 }

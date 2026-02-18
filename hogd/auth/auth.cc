@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <future>
@@ -13,10 +14,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
-#include "port.hh"
 #include "sched_db.hh"
 #include "x23/sockio.h"
 
@@ -25,7 +27,8 @@ namespace hogd {
 namespace {
 
 int
-auth_init(const std::string &mempool_address)
+auth_init(const std::string &mempool_address, uint16_t db_port,
+          uint16_t mempool_port)
 {
   x23::HostPort host_port;
   if (!host_port.parse(mempool_address)) {
@@ -36,41 +39,45 @@ auth_init(const std::string &mempool_address)
   sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
 
+  RpcServer<AuthDBRpc> auth_db_rpc;
+  auth_db_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  const uint16_t actual_db_port = auth_db_rpc.start_server(db_port);
+  CHECK(actual_db_port == db_port || db_port == 0);
+  info("PORT auth.db={}", actual_db_port);
+
+  RpcServer<AuthMempoolRpc> auth_mempool_rpc;
+  auth_mempool_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  const uint16_t actual_mempool_port =
+      auth_mempool_rpc.start_server(mempool_port);
+  CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
+  info("PORT auth.mempool={}", actual_mempool_port);
+
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
 
   const std::string auth_db_address =
-      std::format("{}:{}", hostname, kAuthDbServerPort);
+      std::format("{}:{}", hostname, actual_db_port);
   const std::string auth_mempool_address =
-      std::format("{}:{}", hostname, kAuthMempoolServerPort);
+      std::format("{}:{}", hostname, actual_mempool_port);
 
   AuthCard auth_card{.protocol = version::kHogdProtocol(),
                      .upid = {},
                      .address_for_db = auth_db_address.c_str(),
                      .address_for_mempool = auth_mempool_address.c_str()};
-
   IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(auth_card)();
   if (intro.shards().empty()) {
     throw std::runtime_error("No db shards registered with mempool");
   }
-
   ShardCard &shard = intro.shards()[0];
   const std::string address_for_auth = shard.address_for_auth.c_str();
   dbauth_client_t dbauth_client = make_dbauth_client(address_for_auth)();
-
   AuthServer auth_server(std::move(dbauth_client));
-  auth_server.set_mempool_client(std::move(mempool_client));
-  AuthRpcServers rpc_servers(auth_server);
-  {
-    auto [auth_db_server_port, auth_mempool_server_port] =
-        rpc_servers.start_servers(kAuthDbServerPort, kAuthMempoolServerPort);
-    CHECK_EQ(auth_db_server_port, static_cast<uint16_t>(kAuthDbServerPort));
-    CHECK_EQ(auth_mempool_server_port,
-             static_cast<uint16_t>(kAuthMempoolServerPort));
-  }
 
-  auth_server.subscribe_to_auth_data_changes(
-      rpc_servers.make_auth_card(hostname))();
+  auth_server.set_mempool_client(std::move(mempool_client));
+  auth_db_rpc->impl()->set_auth_server(auth_server);
+  auth_mempool_rpc->impl()->set_auth_server(auth_server);
+
+  auth_server.subscribe_to_auth_data_changes(auth_card)();
 
   info("auth server initialization complete.");
   std::promise<void>().get_future().wait();
@@ -81,6 +88,30 @@ auth_init(const std::string &mempool_address)
 
 } // namespace hogd
 
+namespace {
+
+[[noreturn]] void
+usage(char *argv[])
+{
+  std::println("usage: {} --mempool-addr <host:port> [--db-port <port>] "
+               "[--mempool-port <port>]",
+               argv[0]);
+  exit(EXIT_FAILURE);
+}
+
+uint16_t
+parse_port(const std::string &value)
+{
+  size_t pos = 0;
+  uint64_t port = std::stoul(value, &pos, 10);
+  if (pos != value.size() || port > 65535) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
+  }
+  return static_cast<uint16_t>(port);
+}
+
+} // namespace
+
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
@@ -90,11 +121,30 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
   hogd::info("starting auth server!");
 
-  if (argc != 2) {
-    std::println("usage: {} mempool_host:port", argv[0]);
-    return EXIT_FAILURE;
+  std::string mempool_address;
+  uint16_t db_port = 0;
+  uint16_t mempool_port = 0;
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--mempool-addr" && i + 1 < argc) {
+      mempool_address = argv[++i];
+      continue;
+    }
+    if (arg == "--db-port" && i + 1 < argc) {
+      db_port = parse_port(argv[++i]);
+      continue;
+    }
+    if (arg == "--mempool-port" && i + 1 < argc) {
+      mempool_port = parse_port(argv[++i]);
+      continue;
+    }
+    usage(argv);
   }
 
-  const std::string mempool_address = argv[1];
-  return hogd::auth_init(mempool_address);
+  if (mempool_address.empty()) {
+    usage(argv);
+  }
+
+  return hogd::auth_init(mempool_address, db_port, mempool_port);
 }

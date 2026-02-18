@@ -20,7 +20,6 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
@@ -32,6 +31,8 @@
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/ffi_data_buffer.h"
+#include "hogd/test_ffi/ffi_error.h"
 #include "hogd/test_ffi/logger.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
@@ -65,18 +66,6 @@ constexpr FFIResultType
 make_ffi_result_type(TestFFIErrorCode ffi_error_code)
 {
   return {.ffi_error_code = ffi_error_code};
-}
-
-// error("message {}", e.what()); can throw an allocation failure;
-// This function works around that issue.
-void
-log_error(std::format_string<const char *> message, std::exception const &e)
-{
-  try {
-    error(message, e.what());
-  } catch (...) {
-    error("Failed to print error message!");
-  }
 }
 
 ThreadsafeLogger *global_logger = nullptr;
@@ -136,23 +125,6 @@ make_new_db(const uint8_t *serialized_cost_model,
   }
 }
 
-constexpr FFIDataBuffer kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
-
-std::expected<FFIDataBuffer, TestFFIErrorCode>
-make_new_data_buffer(uint32_t len) noexcept
-{
-  if (len == 0) {
-    return FFIDataBuffer{.data = nullptr, .len = 0};
-  }
-  try {
-    auto *data = new uint8_t[len];
-    return FFIDataBuffer{.data = data, .len = len};
-  } catch (std::exception const &e) {
-    log_error("error allocating data buffer: {}", e);
-    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
-  }
-}
-
 GetCostModelResult
 get_cost_model(void *db) noexcept
 {
@@ -178,16 +150,6 @@ get_cost_model(void *db) noexcept
     return {.data = kNullBuffer,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
-}
-
-TestFFIErrorCode
-free_ffi_data_buffer_impl(FFIDataBuffer buffer) noexcept
-{
-  if (buffer.data == nullptr && buffer.len != 0) {
-    return kTestFFIErrorCodeInvalidPointer;
-  }
-  delete[] buffer.data;
-  return kTestFFIErrorCodeNone;
 }
 
 TestFFIErrorCode
@@ -376,15 +338,18 @@ close_syscall_handler(void *syscall_handler) noexcept
 }
 
 constexpr ForeignRootInvokeResult kUnrecoverableError = {
-    .result = {.panic =
-                   std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)},
-    .gas_consumed = 0};
+    .serialized_output = kNullBuffer,
+    .gas_consumed = 0,
+    .serialized_trace = kNullBuffer,
+    .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
 
 std::string
 format_foreign_root_invoke_result(const ForeignRootInvokeResult &result)
 {
-  return std::format("result={{.panic={}}}, gas_consumed={}, ffi_error_code={}",
-                     result.result.panic, result.gas_consumed,
+  return std::format("serialized_output=[{}], gas_consumed={}, "
+                     "serialized_trace=[{}], ffi_error_code={}",
+                     result.serialized_output, result.gas_consumed,
+                     result.serialized_trace,
                      std::to_underlying(result.ffi_error_code));
 }
 
@@ -993,7 +958,7 @@ verify_signed_transaction_auth_from_db(void *db,
 TestFFIErrorCode
 free_ffi_data_buffer(struct FFIDataBuffer buffer)
 {
-  return hogd::free_ffi_data_buffer_impl(buffer);
+  return hogd::free_ffi_data_buffer(buffer);
 }
 
 #ifdef __cplusplus

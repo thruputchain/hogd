@@ -52,7 +52,7 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
 }
 
 void
