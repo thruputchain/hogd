@@ -11,7 +11,6 @@
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
