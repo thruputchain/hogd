@@ -22,7 +22,6 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "x23/serialize.h"
-#include "x23/testlock.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -37,7 +36,7 @@ RetrocausalQueueLock::get_meta(const LockContext *ctx) const
     return meta;
   }
 
-  std::unique_lock<x23::TestLock> lock(meta_init_mtx_);
+  std::unique_lock<std::mutex> lock(meta_init_mtx_);
   meta = meta_.load(std::memory_order_acquire);
   if (meta) {
     return meta;
@@ -236,8 +235,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
                                     const change_type &change,
                                     const StorageCostModel *cost_model)
 {
-  // TODO(stutsman) This will need to be lock free.
-  std::unique_lock<x23::TestLock> lock(mtx_);
+  std::unique_lock<std::mutex> lock(mtx_);
 
   auto r = get_meta(nullptr);
   CHECK(r.has_value());
@@ -409,7 +407,6 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
 std::optional<QueueEntry>
 RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 {
-  // TODO(stutsman) This will need to be lock free.
   std::lock_guard lock(mtx_);
 
   if (index < added_entries_.size()) {
