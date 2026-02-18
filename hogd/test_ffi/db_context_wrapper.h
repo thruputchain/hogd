@@ -95,7 +95,8 @@ private:
   HogdbWrapper hogdb_wrapper_;
 
   std::unique_ptr<AuthServer> auth_server_;
-  std::unique_ptr<AuthRpcServers> auth_rpc_servers_;
+  RpcServer<AuthDBRpc> auth_db_server_;
+  RpcServer<AuthMempoolRpc> auth_mempool_server_;
 
   db_sched_client_t db_sched_client_;
 

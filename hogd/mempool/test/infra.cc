@@ -60,11 +60,17 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
   db_auth_server_->start_server(/*port=*/0);
 
+  // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
   dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
   auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
-  auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_server_);
-  auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
+
+  auth_db_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  auth_mempool_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  auth_db_server_.start_server(/*port=*/0);
+  auth_mempool_server_.start_server(/*port=*/0);
+  auth_db_server_->impl()->set_auth_server(*auth_server_);
+  auth_mempool_server_->impl()->set_auth_server(*auth_server_);
 
   // Start the event RPC servers.
   event_sched_server_.start_server(/*port=*/0);

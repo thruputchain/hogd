@@ -288,7 +288,13 @@ private:
   {
     sched_auth_client_t client =
         create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())();
-    AuthCard auth_card = auth_rpc_->make_auth_card(kAddress);
+    AuthCard auth_card = {
+        .protocol = version::kHogdProtocol(),
+        .upid = {},
+        .address_for_db =
+            make_address(kAddress, auth_db_server_.port()).c_str(),
+        .address_for_mempool =
+            make_address(kAddress, auth_mempool_server_.port()).c_str()};
     client.mempoolauth_intro_auth(auth_card)();
     auth_server_->set_mempool_client(std::move(client));
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
@@ -354,7 +360,8 @@ private:
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 
   std::unique_ptr<AuthServer> auth_server_;
-  std::unique_ptr<AuthRpcServers> auth_rpc_;
+  RpcServer<AuthDBRpc> auth_db_server_;
+  RpcServer<AuthMempoolRpc> auth_mempool_server_;
 };
 
 } // namespace hogd
