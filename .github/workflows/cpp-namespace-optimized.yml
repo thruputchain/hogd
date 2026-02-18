@@ -77,6 +77,9 @@ jobs:
       - name: Format Check
         run: ./scripts/format.sh -c
 
+      - name: Protocol Check
+        run : ./scripts/check-protocol.sh
+
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
