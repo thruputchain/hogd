@@ -549,11 +549,8 @@ TEST_P(RCQTest, ConcurrentPartialConsume)
   ASSERT_TRUE(consume({10}));
 }
 
-TEST_P(RCQTest, DISABLED_ConsumeReturnsStorageCost)
+TEST_P(RCQTest, ConsumeReturnsStorageCost)
 {
-  // TODO(stutsman): This should hold, but I think it fails because empty queues
-  // don't currently clean up their metadata block.
-
   const int128_t hogs = 1'000'000'000;
   setup_grant_storage_token(contract_address_, hogs);
 
