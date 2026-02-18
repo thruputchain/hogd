@@ -409,8 +409,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hogdb/hogdb",
-      {"--work-dir", work_dir_str, "10000000000", "--coordinator-addr",
-       std::format("{}:{}", hostname, sched_db_port)});
+      {"--work-dir", work_dir_str, "--ram-bytes", "10000000000",
+       "--coordinator-addr", std::format("{}:{}", hostname, sched_db_port)});
   server_idx++;
 
   for (; server_idx < server_addrs.size(); server_idx++) {
