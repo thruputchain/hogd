@@ -19,7 +19,8 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
 {
   std::println(stderr, "Usage: {} [--port <port>] [--help]", progname);
   std::println(stderr, "Options:");
-  std::println(stderr, "  --port <port>  Port number to listen on (default: {})",
+  std::println(stderr,
+               "  --port <port>  Port number to listen on (default: {})",
                kDefaultLoadgenPort);
   std::println(stderr, "  --help         Show this help message");
   exit(exit_code);
