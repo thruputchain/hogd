@@ -179,8 +179,9 @@ BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
 {
   auto *lock = item_locks_.get(key);
   if (!lock) {
-    error("hogexec bug: do not ask for concurrent rcq entry if rcq unlocked");
-    return HogDBError{HogDBCode::kInternal};
+    // Key was deleted and recreated as an RCQ in the same tx, or the lock
+    // doesn't exist yet. A freshly-created queue has no concurrent entries.
+    return std::nullopt;
   }
   return lock->get_concurrent_entry(index);
 }
