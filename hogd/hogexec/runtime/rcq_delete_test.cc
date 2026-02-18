@@ -23,6 +23,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -2201,6 +2202,63 @@ TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 
   advance_block();
 
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Insert into an RCQ, commit it to the DAO, then purely delete it in a
+// separate block. This exercises DeletionLock::write_committed_change removing
+// an RCQ trie entry — the trie type must match kRetrocausalQueue used by
+// RetrocausalQueueLock, not some other value.
+TEST_P(RCQDeleteTest, PureDeleteOfCommittedRCQ)
+{
+  // Block 1: insert an entry so the RCQ is written to the DAO
+  insert(42);
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+
+  // Block 2: pure delete (method 31) — no other RCQ operations
+  invoke_method(31);
+  advance_block();
+
+  // Item should be gone from the DAO
+  auto after = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_FALSE(after.has_value());
+}
+
+// Stores a bytestring containing serialized RetrocausalQueueMetadata with
+// inflated live_entries/max_live_block_num. Then deletes it and inserts into an
+// RCQ at the same key. Verifies the system doesn't inherit the bogus metadata
+// from the bytestring payload -- the RCQ should be treated as fresh.
+TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
+{
+  // Construct a RetrocausalQueueMetadata with non-zero fields
+  RetrocausalQueueMetadata bogus_meta{};
+  bogus_meta.live_entries = 9999;
+  bogus_meta.max_live_block_num = 42;
+  bogus_meta.consume_state.max_fully_consumed_block_number = 10;
+  bogus_meta.consume_state.partial_consumed_number = 5;
+
+  // Serialize it and store as a bytestring
+  auto buf = x23::serialize(bogus_meta);
+  Bytestring bs(buf.begin(), buf.end());
+  set_bytestring(bs);
+  advance_block();
+
+  // Delete the bytestring, then insert into RCQ at the same key
+  invoke_method(13, uint32_t{42});
+
+  // Another tx retrocausally consumes the entry
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // The queue should be empty: one insert, one consume, net zero.
+  // If the bogus metadata leaked through, we'd see 9999+ live entries or
+  // a conservation invariant failure.
   ASSERT_TRUE(check_rcq_empty());
 }
 

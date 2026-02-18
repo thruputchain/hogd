@@ -377,7 +377,8 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     //     existed.
     if (base_metadata.live_entries > 0) {
       CHECK(ctx.dao->remove_retrocausal_queue_metadata(ctx.key).has_value());
-      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key, 0)
+      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
+                                                        kRetrocausalQueue)
                 .has_value());
     }
     else if (base_was_different_type_) {
@@ -388,7 +389,7 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
       CHECK(type_ret.has_value());
       CHECK(ctx.dao->remove_item(ctx.key).has_value());
       CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
-                                                         type_ret.value())
+                                                        type_ret.value())
                 .has_value());
     }
   }
@@ -396,10 +397,9 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     CHECK(ctx.dao->write_retrocausal_queue_metadata(ctx.key, updated_metadata)
               .has_value());
     x23::Vec<uint8_t> buf = x23::serialize(updated_metadata);
-    CHECK(
-        MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
-                                                  std::as_bytes(std::span(buf)))
-            .has_value());
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(
+              trie, ctx.key, kRetrocausalQueue, std::as_bytes(std::span(buf)))
+              .has_value());
   }
 
   return {};
