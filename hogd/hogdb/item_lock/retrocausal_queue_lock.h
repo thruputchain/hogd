@@ -50,6 +50,12 @@ private:
   mutable std::optional<RetrocausalQueueMetadata> meta_cell_;
   mutable x23::TestLock meta_init_mtx_;
 
+  // Set to true when get_meta() encounters a kTypeMismatch error, indicating
+  // the key exists in the DAO as a different type (e.g. bytestring). Used by
+  // write_committed_change to know it must remove the old item even when no
+  // RCQ metadata existed in the snapshot.
+  mutable bool base_was_different_type_{false};
+
   // Used in try_atomic_change_lock to ensure MPSC semantics;
   // ensures no two transactions both lock a consume in the same block.
   std::atomic<bool> consumed_{false};

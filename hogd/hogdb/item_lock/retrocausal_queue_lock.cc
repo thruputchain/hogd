@@ -45,9 +45,13 @@ RetrocausalQueueLock::get_meta(const LockContext *ctx) const
   CHECK(ctx != nullptr);
   auto r = ctx->dao->read_retrocausal_queue_metadata(ctx->key);
   if (!r) {
-    if (r.error() == HogDBError{HogDBCode::kNotFound}) {
+    if (r.error() == HogDBError{HogDBCode::kNotFound} ||
+        r.error() == HogDBError{HogDBCode::kTypeMismatch}) {
       trace("RCQ metadata not found for {}; creating new zero metadata.",
             ctx->key);
+      if (r.error() == HogDBError{HogDBCode::kTypeMismatch}) {
+        base_was_different_type_ = true;
+      }
       meta_cell_ = RetrocausalQueueMetadata{};
       meta = &*meta_cell_;
       meta_.store(meta, std::memory_order_release);
@@ -364,13 +368,27 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
   updated_metadata.live_entries += committed_element_count_delta_;
 
   if (updated_metadata.live_entries == 0) {
-    // Only remove metadata from the DAO and trie if it actually existed in the
-    // snapshot. base_metadata.live_entries == 0 means get_meta() created fresh
-    // zero metadata (kNotFound), so there's nothing to remove. This happens
-    // when a new queue's inserts and consumes net to zero in the same block.
+    // Remove the item from the DAO and trie if it actually existed in the
+    // snapshot. This includes two cases:
+    // (1) base_metadata.live_entries > 0: an existing RCQ was fully consumed.
+    // (2) base_was_different_type_: the key held a different type (e.g.
+    //     bytestring) that was deleted and replaced with an RCQ in the same
+    //     block. The old item must be removed even though no RCQ metadata
+    //     existed.
     if (base_metadata.live_entries > 0) {
       CHECK(ctx.dao->remove_retrocausal_queue_metadata(ctx.key).has_value());
       CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key, 0)
+                .has_value());
+    }
+    else if (base_was_different_type_) {
+      // The key held a different type (e.g. bytestring) that was deleted and
+      // replaced with an RCQ in the same block. Look up the actual type to
+      // remove the correct trie entry.
+      auto type_ret = ctx.dao->get_item_type(ctx.key);
+      CHECK(type_ret.has_value());
+      CHECK(ctx.dao->remove_item(ctx.key).has_value());
+      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
+                                                         type_ret.value())
                 .has_value());
     }
   }
