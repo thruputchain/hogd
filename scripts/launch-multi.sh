@@ -223,7 +223,6 @@ wait_port() {
 
 echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" --port $LOADGEN_PORT
-echo "now wait"
 wait_port "$loadgen_server" $LOADGEN_PORT
 
 # Start hogexec.
