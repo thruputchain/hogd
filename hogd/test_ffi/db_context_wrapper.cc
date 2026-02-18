@@ -43,20 +43,20 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   auth_server_ =
       std::make_unique<AuthServer>(make_dbauth_client(auth_port), 16);
   auth_db_server_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
-  auth_db_server_->impl()->set_auth_server(auth_server_);
+  auth_db_server_->impl()->set_auth_server(*auth_server_);
   auth_db_server_.start_server(/*port=*/0);
   auth_mempool_server_->max_message_size_ =
       hogd::LoadgenRpc::kRpcMaxMessageSize;
-  auth_mempool_server_->impl()->set_auth_server(auth_server_);
+  auth_mempool_server_->impl()->set_auth_server(*auth_server_);
   auth_mempool_server_.start_server(/*port=*/0);
 
-  AuthCard auth_card = {
-      .protocol = version::kHogdProtocol(),
-      .upid = {},
-      .address_for_db =
-          make_address("localhost", auth_db_server_.port()).c_str(),
-      .address_for_mempool =
-          make_address("localhost", auth_mempool_server_.port()).c_str()};
+  AuthCard auth_card = {.protocol = version::kHogdProtocol(),
+                        .upid = {},
+                        .address_for_db =
+                            x23::HostPort{"localhost", auth_db_server_.port()},
+                        .address_for_mempool =
+                            x23::HostPort{"localhost",
+                                          auth_mempool_server_.port()}};
   auth_server_->subscribe_to_auth_data_changes(auth_card)();
 
   auto res =
