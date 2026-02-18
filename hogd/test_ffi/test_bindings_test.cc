@@ -187,6 +187,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -629,6 +630,7 @@ TEST(TestBindingsTest, MockContractRevertTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -708,6 +710,7 @@ TEST(TestBindingsTest, MockContractReturnTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -784,6 +787,7 @@ TEST(TestBindingsTest, MockContractFaultTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -855,6 +859,7 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
