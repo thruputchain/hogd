@@ -11,7 +11,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -20,11 +19,9 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
-#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
