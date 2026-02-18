@@ -312,6 +312,13 @@ public:
                              ProposalModeCtor{}, runtime_context);
   }
 
+  // keeps a reference to the storage snapshot cache to avoid invalidating it
+  // when the block is advanced
+  std::shared_ptr<StorageSnapshotCache> get_storage_snapshot_cache() const
+  {
+    return storage_snapshot_cache_;
+  }
+
   std::optional<WireStorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
@@ -621,7 +628,7 @@ private:
   // TODO(geoff): replace with proper event server connection
   EventServerWrapper event_server_wrapper_;
 
-  std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
+  std::shared_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
   std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
   std::unique_ptr<Logger> previous_logger_ = nullptr;
