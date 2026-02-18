@@ -61,10 +61,10 @@ runs:
       run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} expect_running
       shell: bash
     - name: launch event
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/event/event_exec hog10:${{ env.MEMPOOL_EVENT_PORT }} ${{ inputs.work-dir }}/
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/event/event_exec --mempool-addr hog10:${{ env.MEMPOOL_EVENT_PORT }} --work-dir ${{ inputs.work-dir }}/
       shell: bash
     - name: launch hogdb
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} start hogd/hogdb/hogdb ${{ inputs.work-dir }}/ 10000000000 hog10:${{ env.MEMPOOL_DB_PORT }}
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} start hogd/hogdb/hogdb --db-path ${{ inputs.work-dir }}/ --ram-bytes 10000000000 --coordinator-addr hog10:${{ env.MEMPOOL_DB_PORT }}
       shell: bash
     - name: make sure procs are running
       run: |

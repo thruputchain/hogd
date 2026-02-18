@@ -409,7 +409,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hogdb/hogdb",
-      {"--work-dir", work_dir_str, "--ram-bytes", "10000000000",
+      {"--db-path", work_dir_str, "--ram-bytes", "10000000000",
        "--coordinator-addr", std::format("{}:{}", hostname, sched_db_port)});
   server_idx++;
 
