@@ -1,4 +1,3 @@
-#include "gtest/gtest.h"
 #include <atomic>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -1578,19 +1577,18 @@ protected:
       }
       return testing::AssertionSuccess();
     }
-    else {
-      if (!queue.has_value()) {
-        return testing::AssertionFailure() << "No queue found";
-      }
-      if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
-        return testing::AssertionFailure() << "Queue has wrong type";
-      }
-      auto const &qe = queue->metadata();
-      if (qe.live_entries != 0) {
-        return testing::AssertionFailure() << "Queue has live entries";
-      }
-      return testing::AssertionSuccess();
+
+    if (!queue.has_value()) {
+      return testing::AssertionFailure() << "No queue found";
     }
+    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+      return testing::AssertionFailure() << "Queue has wrong type";
+    }
+    auto const &qe = queue->metadata();
+    if (qe.live_entries != 0) {
+      return testing::AssertionFailure() << "Queue has live entries";
+    }
+    return testing::AssertionSuccess();
   }
 
   std::unique_ptr<RuntimeContext> context_;
