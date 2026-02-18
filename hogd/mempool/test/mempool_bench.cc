@@ -11,15 +11,16 @@
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/loadgen.h"
 #include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/x23/async.h"
-#include "x23/x23/vec.h"
 
 namespace hogd {
 
