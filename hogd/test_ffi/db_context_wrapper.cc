@@ -50,15 +50,17 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   auth_mempool_server_->impl()->set_auth_server(*auth_server_);
   auth_mempool_server_.start_server(/*port=*/0);
 
-  AuthCard auth_card = {
-      .protocol = version::kHogdProtocol(),
-      .upid = {},
-      .address_for_db =
-          x23::HostPort{"localhost", auth_db_server_.port()}.show().c_str(),
-      .address_for_mempool =
-          x23::HostPort{"localhost",
-                        auth_mempool_server_.port().show().c_str()}};
-  auth_server_->subscribe_to_auth_data_changes(auth_card)();
+  {
+    x23::BoundedStr address_for_db =
+        x23::HostPort{"localhost", auth_db_server_.port()}.show();
+    x23::BoundedStr address_for_mempool =
+        x23::HostPort{"localhost", auth_mempool_server_.port()}.show();
+    AuthCard auth_card = {.protocol = version::kHogdProtocol(),
+                          .upid = {},
+                          .address_for_db = address_for_db.c_str(),
+                          .address_for_mempool = address_for_mempool.c_str()};
+    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+  }
 
   auto res =
       db_sched_client_.dbsched_load_genesis_configuration(GenesisConfiguration{
