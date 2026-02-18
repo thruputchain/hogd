@@ -75,7 +75,7 @@ jobs:
         run: ./scripts/fetch.sh
 
       - name: Protocol Fetch
-        run: git submodule update --init --recursive groundhog-go
+        run: git submodule update --init --recursive groundhog-go protocol
 
       - name: Format Check
         run: ./scripts/format.sh -c
