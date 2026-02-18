@@ -396,7 +396,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/event/event_exec",
-      {std::format("{}:{}", hostname, sched_event_port), work_dir_str});
+      {"--mempool-addr", std::format("{}:{}", hostname, sched_event_port),
+       "--work-dir", work_dir_str});
   server_idx++;
 
   EventCard event_card = sched_event_test->impl()->await_event_card();
@@ -407,14 +408,16 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   control_server_handles[server_idx].ci_client.start_server(
-      "hogd/hogdb/hogdb", {work_dir_str, "10000000000",
-                           std::format("{}:{}", hostname, sched_db_port)});
+      "hogd/hogdb/hogdb",
+      {"--work-dir", work_dir_str, "10000000000", "--coordinator-addr",
+       std::format("{}:{}", hostname, sched_db_port)});
   server_idx++;
 
   for (; server_idx < server_addrs.size(); server_idx++) {
     control_server_handles[server_idx].ci_client.start_server(
         "hogd/hogexec/hogexec",
-        {std::format("{}:{}", hostname, sched_exec_port), "-n", "1024"});
+        {"--coordinator-addr", std::format("{}:{}", hostname, sched_exec_port),
+         "-n", "1024"});
   }
 
   auto db_cards = sched_db_test->impl()->await_shard_cards(1);
