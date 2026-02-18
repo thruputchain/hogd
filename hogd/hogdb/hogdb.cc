@@ -197,7 +197,7 @@ uint16_t
 parse_port(const std::string &value)
 {
   size_t pos = 0;
-  unsigned long port = std::stoul(value, &pos, 10);
+  uint64_t port = std::stoul(value, &pos, 10);
   if (pos != value.size() || port > 65535) {
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }

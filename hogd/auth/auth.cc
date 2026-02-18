@@ -14,8 +14,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "sched_db.hh"
 #include "x23/sockio.h"
@@ -101,7 +103,7 @@ uint16_t
 parse_port(const std::string &value)
 {
   size_t pos = 0;
-  unsigned long port = std::stoul(value, &pos, 10);
+  uint64_t port = std::stoul(value, &pos, 10);
   if (pos != value.size() || port > 65535) {
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
