@@ -2,6 +2,7 @@
 
 #include <span>
 
+#include <vector>
 #include <x23/serialize.h>
 #include <x23/serialize_cxs.h>
 #include <x23/utility.h>
@@ -79,6 +80,35 @@ TEST(Deserialize, CxsReservedHeaderVariousBytes)
     EXPECT_THROW(x23::deserialize_cxs(&ival, sp), x23::XdrException)
         << "byte " << int(byte) << " should be rejected for int";
   }
+}
+
+TEST(Deserialize, OpaqueVectorTooLarge)
+{
+  x23::Vec<uint8_t, 5> vec;
+
+  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x09};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7, 8});
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+}
+
+TEST(Deserialize, VectorTooLarge)
+{
+  x23::Vec<uint32_t, 2> vec;
+
+  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x03};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+}
+
+TEST(Deserialize, CxsVectorTooLarge)
+{
+  x23::Vec<uint32_t, 2> vec;
+
+  // CXS uses little-endian size prefix
+  std::vector<uint8_t> input = {0x03, 0x00, 0x00, 0x00};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
+  std::span<const uint8_t> sp(input);
+  EXPECT_THROW(x23::deserialize_cxs(&vec, sp), x23::CxsBadInput);
 }
 
 } // namespace x23

@@ -464,6 +464,10 @@ template<is_xdr_cat<XdrCategory::kVec> X> struct CxsSerializer<X> {
   {
     uint32_t size;
     CxsSerializer<uint32_t>::load(data, size);
+    if (size > X::max_size()) [[unlikely]]
+      throw CxsBadInput("length {} exceeds maximum deserializing {}", size,
+                        xdr_type_name<X>());
+    value.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     value.reserve(
         std::min<std::uint32_t>(size,
