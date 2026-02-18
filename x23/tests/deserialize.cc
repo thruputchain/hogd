@@ -93,9 +93,10 @@ TEST(Deserialize, OpaqueVectorTooLarge)
 
 TEST(Deserialize, VectorTooLarge)
 {
-  x23::Vec<uint32_t, 2> vec;
+  x23::Vec<uint32_t, 1> vec;
 
-  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x03};
+  // valid encoding for a vector of length 2
+  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x02};
   input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
   EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
 }
