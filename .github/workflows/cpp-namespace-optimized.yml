@@ -79,7 +79,7 @@ jobs:
 
       - name: Protocol Check
         run : |
-          git submodule update --init --recursive
+          git submodule update --init --recursive groundhog-go
           ./scripts/check-protocol.sh
 
       - name: Print Log Download Instructions
