@@ -186,9 +186,8 @@ open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            uint32_t invoke_flags);
 
-enum TestFFIErrorCode
-finish_mock_invocation_frame(void *syscall_handler,
-                             uint32_t invoke_error_code);
+enum TestFFIErrorCode finish_mock_invocation_frame(void *syscall_handler,
+                                                   uint32_t invoke_error_code);
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 

@@ -37,9 +37,8 @@ class SyscallHandlerContext {
 public:
   SyscallHandlerContext(MockRuntimeContext *context,
                         SignedTransaction const &stx, DBContext &db);
-  
-   SyscallHandlerContext(MockRuntimeContext *context,
-                          DBContext &db, 
+
+  SyscallHandlerContext(MockRuntimeContext *context, DBContext &db,
                         AuthClaimData const &auth_claim_data,
                         SHA256Hash const &source_tx_hash);
 

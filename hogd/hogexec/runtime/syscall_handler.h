@@ -122,9 +122,14 @@ public:
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
   // and from the SDK FFI bindings
-  void start_frame(Invocation invocation, InvokeFlagSet flags);
-  SystemStatus<std::pair<InvokeResult, bool>>
-  finish_frame(InvokeStatus<void> result);
+  //
+  // Returns the parent trace, if any, which should be stashed and restored in
+  // finish_frame
+  std::unique_ptr<InvocationFrameTrace>
+  start_frame(Invocation invocation, InvokeFlagSet flags) noexcept;
+  SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
+      InvokeStatus<void> result,
+      std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;
@@ -133,6 +138,8 @@ public:
                            GasAmount current_gas_remaining);
   void finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
                             GasAmount gas_remaining_at_end);
+
+  bool last_frame_finished() const noexcept { return last_frame_finished_; }
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {

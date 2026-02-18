@@ -157,8 +157,7 @@ SystemCallHandler::SystemCallHandler(
                                        execution_mode_ctor)};
         }(std::move(execution_mode_ctor))),
     snapshot_cache_(snapshot_cache)
-{
-}
+{}
 
 void
 SystemCallHandler::perform_initial_validation()
@@ -447,52 +446,20 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  // Stash parent trace for nested calls, create child trace
-  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace;
-  if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
-    stashed_parent_trace = std::move(invocation_frame_trace_);
-    try {
-      invocation_frame_trace_ =
-          x23::Ptr<InvocationFrameTrace>(new InvocationFrameTrace());
-    } catch (std::exception &e) {
-      panic("Failed to create new invocation frame trace: {}", e.what());
-    }
-  }
-
-  start_frame(invocation, flags);
+  auto stashed_parent_trace = start_frame(invocation, flags);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
-  auto finish_status = finish_frame(cumulative_result.result_);
+  auto finish_status =
+      finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
-    // Restore parent trace on error path
-    if (stashed_parent_trace) {
-      invocation_frame_trace_ = std::move(stashed_parent_trace);
-    }
     return {finish_status.error().to_host_fn_error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
-
-  // Restore parent trace and attach child
-  if (stashed_parent_trace) {
-    auto child_trace = std::move(invocation_frame_trace_);
-    invocation_frame_trace_ = std::move(stashed_parent_trace);
-    // Attach child_trace to parent's last syscall (the Invoke entry)
-    assert(!invocation_frame_trace_->system_calls.empty());
-    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
-    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
-    try {
-      auto &out = invoke_body.invoke();
-      out.outputs.emplace(SyscallInvokeOutputs());
-      out.outputs->child_trace = std::move(*child_trace);
-    } catch (...) {
-      panic("impossible");
-    }
-  }
 
   auto out = cumulative_result.to_host_fn_result();
   if (out.first.has_value() &&
@@ -505,18 +472,35 @@ SystemCallHandler::invoke(ContractAddress const &address,
   return out;
 }
 
-void
-SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags)
+std::unique_ptr<InvocationFrameTrace>
+SystemCallHandler::start_frame(Invocation invocation,
+                               InvokeFlagSet flags) noexcept
 {
-  if (invocation_frame_trace_) {
-    invocation_frame_trace_->invocation = invocation;
+  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
+  if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
+    stashed_parent_trace = std::move(invocation_frame_trace_);
+    try {
+      invocation_frame_trace_ = std::make_unique<InvocationFrameTrace>();
+    } catch (std::exception &e) {
+      panic("Failed to create new invocation frame trace: {}", e.what());
+    }
+  }
+  try {
+    if (invocation_frame_trace_) {
+      invocation_frame_trace_->invocation = invocation;
+    }
+  } catch (std::exception &e) {
+    panic("Failed to set invocation: {}", e.what());
   }
   invocation_frame_stack_.start_frame(invocation.invoked_address,
                                       std::move(invocation.calldata), flags);
+  return stashed_parent_trace;
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>
-SystemCallHandler::finish_frame(InvokeStatus<void> result)
+SystemCallHandler::finish_frame(
+    InvokeStatus<void> result,
+    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept
 {
   assert(!invocation_frame_stack_.empty());
   assert(!last_frame_finished_);
@@ -531,6 +515,23 @@ SystemCallHandler::finish_frame(InvokeStatus<void> result)
         invocation_frame_trace_->storage_writes);
     invocation_frame_trace_->status =
         invocation_frame_stack_.get_active_frame().get_frame_output();
+  }
+
+  // Restore parent trace and attach child
+  if (stashed_parent_trace) {
+    auto child_trace = std::move(invocation_frame_trace_);
+    invocation_frame_trace_ = std::move(stashed_parent_trace);
+    // Attach child_trace to parent's last syscall (the Invoke entry)
+    assert(!invocation_frame_trace_->system_calls.empty());
+    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
+    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
+    try {
+      auto &out = invoke_body.invoke();
+      out.outputs.emplace(SyscallInvokeOutputs());
+      out.outputs->child_trace = std::move(*child_trace);
+    } catch (std::exception &e) {
+      panic("Failed to attach child trace to parent: {}", e.what());
+    }
   }
 
   [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();

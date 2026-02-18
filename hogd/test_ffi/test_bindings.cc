@@ -279,14 +279,15 @@ open_syscall_handler(void *db, void *rc,
 
 OpenSyscallHandlerResult
 open_mocked_syscall_handler(void *db, void *rc,
-                      struct FFISerializedAuthClaimData auth_claim_data,
-                      const uint8_t source_tx_hash[32]) noexcept
+                            struct FFISerializedAuthClaimData auth_claim_data,
+                            const uint8_t source_tx_hash[32]) noexcept
 {
   constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
       kTestFFIErrorCodeInvalidPointer);
-  ffi_trace(
-      "FFI: open_mocked_syscall_handler(db={}, rc={}, auth_claim_data=(data={}, len={}), source_tx_hash={})",
-      db, rc, static_cast<const void *>(auth_claim_data.data), auth_claim_data.len, static_cast<const void *>(source_tx_hash));
+  ffi_trace("FFI: open_mocked_syscall_handler(db={}, rc={}, "
+            "auth_claim_data=(data={}, len={}), source_tx_hash={})",
+            db, rc, static_cast<const void *>(auth_claim_data.data),
+            auth_claim_data.len, static_cast<const void *>(source_tx_hash));
 
   if (!db) {
     return kNullptrError;
@@ -305,11 +306,13 @@ open_mocked_syscall_handler(void *db, void *rc,
   }
   try {
     hogd::AuthClaimData auth_claim_data_xdr;
-    x23::deserialize(&auth_claim_data_xdr, x23::BufView{auth_claim_data.data, auth_claim_data.len});
+    x23::deserialize(&auth_claim_data_xdr,
+                     x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
     auto *out = static_cast<void *>(
-        new SyscallHandlerContext(runtime_context->get(), *db_context, auth_claim_data_xdr, source_hash));
+        new SyscallHandlerContext(runtime_context->get(), *db_context,
+                                  auth_claim_data_xdr, source_hash));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrBadInput const &e) {
     log_error("error deserializing signed transaction: {}", e);
@@ -321,7 +324,6 @@ open_mocked_syscall_handler(void *db, void *rc,
         kTestFFIErrorCodeUnrecoverableError);
   }
 }
-
 
 TestFFIErrorCode
 close_syscall_handler(void *syscall_handler) noexcept
@@ -875,10 +877,11 @@ open_syscall_handler(void *db, void *rc,
 
 OpenSyscallHandlerResult
 open_mocked_syscall_handler(void *db, void *rc,
-                      struct FFISerializedAuthClaimData auth_claim_data,
-                      const uint8_t source_tx_hash[32])
+                            struct FFISerializedAuthClaimData auth_claim_data,
+                            const uint8_t source_tx_hash[32])
 {
-  return hogd::open_mocked_syscall_handler(db, rc, auth_claim_data, source_tx_hash);
+  return hogd::open_mocked_syscall_handler(db, rc, auth_claim_data,
+                                           source_tx_hash);
 }
 
 TestFFIErrorCode
