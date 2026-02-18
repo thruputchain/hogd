@@ -1,9 +1,9 @@
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <future>
-#include <stdexcept>
 #include <print>
+#include <stdexcept>
 #include <string>
 
 #include "hogd/base/log.h"
@@ -85,10 +85,9 @@ namespace {
 [[noreturn]] void
 usage(char *argv[])
 {
-  std::println(
-      "usage: {} --event-addr <host:port> --db-path <path> "
-      "[--event-port <port>] [--block-explorer-port <port>]",
-      argv[0]);
+  std::println("usage: {} --event-addr <host:port> --db-path <path> "
+               "[--event-port <port>] [--block-explorer-port <port>]",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 

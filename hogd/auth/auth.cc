@@ -1,5 +1,5 @@
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
@@ -37,18 +37,32 @@ auth_init(const std::string &mempool_address, uint16_t db_port,
   sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true)();
 
+  RpcServer<AuthDBRpc> auth_db_rpc;
+  auth_db_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  const uint16_t actual_db_port = auth_db_rpc.start_server(db_port);
+  CHECK(actual_db_port == db_port || db_port == 0);
+  info("PORT auth.db={}", actual_db_port);
+
+  RpcServer<AuthMempoolRpc> auth_mempool_rpc;
+  auth_mempool_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
+  const uint16_t actual_mempool_port =
+      auth_mempool_rpc.start_server(mempool_port);
+  CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
+  info("PORT auth.mempool={}", actual_mempool_port);
+
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
 
-  const std::string pre_intro_db_address = std::format("{}:{}", hostname, db_port);
-  const std::string pre_intro_mempool_address =
-      std::format("{}:{}", hostname, mempool_port);
-  AuthCard pre_intro_card{.protocol = version::kHogdProtocol(),
-                          .upid = {},
-                          .address_for_db = pre_intro_db_address.c_str(),
-                          .address_for_mempool =
-                              pre_intro_mempool_address.c_str()};
-  IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(pre_intro_card)();
+  const std::string auth_db_address =
+      std::format("{}:{}", hostname, actual_db_port);
+  const std::string auth_mempool_address =
+      std::format("{}:{}", hostname, actual_mempool_port);
+
+  AuthCard auth_card{.protocol = version::kHogdProtocol(),
+                     .upid = {},
+                     .address_for_db = auth_db_address.c_str(),
+                     .address_for_mempool = auth_mempool_address.c_str()};
+  IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(auth_card)();
   if (intro.shards().empty()) {
     throw std::runtime_error("No db shards registered with mempool");
   }
@@ -58,24 +72,10 @@ auth_init(const std::string &mempool_address, uint16_t db_port,
   AuthServer auth_server(std::move(dbauth_client));
 
   auth_server.set_mempool_client(std::move(mempool_client));
-  AuthRpcServers rpc_servers(auth_server);
-  auto [auth_db_server_port, auth_mempool_server_port] =
-      rpc_servers.start_servers(db_port, mempool_port);
-  CHECK(auth_db_server_port == db_port || db_port == 0);
-  CHECK(auth_mempool_server_port == mempool_port || mempool_port == 0);
-  info("PORT auth.db={}", auth_db_server_port);
-  info("PORT auth.mempool={}", auth_mempool_server_port);
+  auth_db_rpc->set_auth_server(auth_server);
+  auth_mempool_rpc->set_auth_server(auth_server);
 
-  // Re-introduce using the actual bound ports so mempool registration
-  // reflects runtime-selected port values.
-  IntroAuthResult updated_intro =
-      mempool_client.mempoolauth_intro_auth(rpc_servers.make_auth_card(hostname))();
-  if (updated_intro.outcome() != IntroAuthOutcome::kSuccess) {
-    throw std::runtime_error("Failed to register auth with mempool");
-  }
-
-  auth_server.subscribe_to_auth_data_changes(
-      rpc_servers.make_auth_card(hostname))();
+  auth_server.subscribe_to_auth_data_changes(auth_card)();
 
   info("auth server initialization complete.");
   std::promise<void>().get_future().wait();
@@ -91,10 +91,9 @@ namespace {
 [[noreturn]] void
 usage(char *argv[])
 {
-  std::println(
-      "usage: {} --mempool-addr <host:port> [--db-port <port>] "
-      "[--mempool-port <port>]",
-      argv[0]);
+  std::println("usage: {} --mempool-addr <host:port> [--db-port <port>] "
+               "[--mempool-port <port>]",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 

@@ -8,11 +8,11 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <optional>
 #include <utility>
 
 // XDR headers
@@ -141,7 +141,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the mempool server.
   info("starting mempool server.");
   HogDBSchedServer mempool_server(ctx);
-  const uint16_t actual_mempool_port = mempool_server.start_server(mempool_port);
+  const uint16_t actual_mempool_port =
+      mempool_server.start_server(mempool_port);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT hogdb.mempool={}", actual_mempool_port);
 
@@ -185,11 +186,10 @@ namespace {
 [[noreturn]] void
 usage(char *argv[])
 {
-  std::println(
-      "usage: {} --db-path <path> --ram-bytes <bytes> "
-      "[--coordinator-addr <host:port>] [--executor-port <port>] "
-      "[--mempool-port <port>] [--auth-port <port>]",
-      argv[0]);
+  std::println("usage: {} --db-path <path> --ram-bytes <bytes> "
+               "[--coordinator-addr <host:port>] [--executor-port <port>] "
+               "[--mempool-port <port>] [--auth-port <port>]",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 
@@ -254,9 +254,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  const std::string *coordinator_addr = coordinator_addr_raw.empty()
-                                            ? nullptr
-                                            : &coordinator_addr_raw;
+  const std::string *coordinator_addr =
+      coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hogdb_init(path, *ram_bytes, coordinator_addr, exec_port,
                           mempool_port, auth_port);

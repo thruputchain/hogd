@@ -323,6 +323,7 @@ gettid()
 #define CHECK_GE(val1, val2) LOG_INTERNAL_CHECK(>=, >, val1, val2)
 #define CHECK_CONST_PTR(val1) CHECK_NE(static_cast<const void *>(val1), nullptr)
 #define CHECK_PTR(val1) CHECK_NE(static_cast<void *>(val1), nullptr)
+#define CHECK_NULL(val1) CHECK_EQ(static_cast<void *>(val1), nullptr)
 #define CHECK(val1) CHECK_NE(val1, 0)
 
 #ifdef NDEBUG
@@ -334,6 +335,7 @@ gettid()
 #define DCHECK_GT(val1, val2)
 #define DCHECK_GE(val1, val2)
 #define DCHECK_PTR(val1)
+#define DCHECK_NULL(val1)
 #define DCHECK(val1)
 
 #else // NDEBUG
@@ -345,6 +347,7 @@ gettid()
 #define DCHECK_GT(val1, val2) CHECK_GT(val1, val2)
 #define DCHECK_GE(val1, val2) CHECK_GE(val1, val2)
 #define DCHECK_PTR(val1) CHECK_PTR(val1)
+#define DCHECK_NULL(val1) CHECK_NULL(val1)
 #define DCHECK(val1) CHECK(val1)
 
 #endif // NDEBUG

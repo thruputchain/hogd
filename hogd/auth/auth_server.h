@@ -99,22 +99,33 @@ private:
 class AuthDBRpc {
 public:
   using rpc_service = AuthDB1;
-  explicit AuthDBRpc(AuthServer &auth_server) : auth_server_(auth_server) {}
+
+  AuthDBRpc() = default;
+
+  void set_auth_server(AuthServer &auth_server)
+  {
+    CHECK_NULL(auth_server_);
+    auth_server_ = &auth_server;
+  }
 
   x23::Async<void> authdb_forward_key_changes(BlockHeight height,
                                               KeyChangeBatch key_changes)
   {
-    return auth_server_.register_auth_data_updates(height,
-                                                   std::move(key_changes));
+    CHECK_PTR(auth_server_);
+
+    return auth_server_->register_auth_data_updates(height,
+                                                    std::move(key_changes));
   }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card)
   {
-    return auth_server_.subscribe_to_auth_data_changes(std::move(card));
+    CHECK_PTR(auth_server_);
+
+    return auth_server_->subscribe_to_auth_data_changes(std::move(card));
   }
 
 private:
-  AuthServer &auth_server_;
+  AuthServer *auth_server_ = nullptr;
 };
 
 static_assert(is_AuthDB1<AuthDBRpc *, x23::Async>);
@@ -122,62 +133,37 @@ static_assert(is_AuthDB1<AuthDBRpc *, x23::Async>);
 class AuthMempoolRpc {
 public:
   using rpc_service = AuthMempool1;
-  explicit AuthMempoolRpc(AuthServer &auth_server) : auth_server_(auth_server)
-  {}
+
+  AuthMempoolRpc() = default;
+
+  void set_auth_server(AuthServer &auth_server)
+  {
+    CHECK_NULL(auth_server_);
+    auth_server_ = &auth_server;
+  }
 
   x23::Async<AuthErrorCodeBatch>
   authmempool_verify_transactions(BlockHeight height,
                                   SignedTransactionBatch txs)
   {
+    CHECK_PTR(auth_server_);
+
     x23::span<const SignedTransaction> txs_span(txs.begin(), txs.end());
-    co_return co_await auth_server_.verify_transactions(
+    co_return co_await auth_server_->verify_transactions(
         height, txs_span, /*max_parallelism=*/available_parallelism());
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
                                                      SignedTransactionBatch txs)
   {
-    return auth_server_.verify_batch(height, std::move(txs));
+    CHECK_PTR(auth_server_);
+
+    return auth_server_->verify_batch(height, std::move(txs));
   }
 
 private:
-  AuthServer &auth_server_;
+  AuthServer *auth_server_ = nullptr;
 };
 static_assert(is_AuthMempool1<AuthMempoolRpc *, x23::Async>);
-
-class AuthRpcServers {
-public:
-  explicit AuthRpcServers(AuthServer &auth_server)
-    : auth_db_rpc_(auth_server), auth_mempool_rpc_(auth_server)
-  {
-    auth_db_rpc_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
-    auth_mempool_rpc_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
-  }
-
-  std::pair<uint16_t, uint16_t> start_servers(uint16_t port_for_db,
-                                              uint16_t port_for_mempool)
-  {
-    return {auth_db_rpc_.start_server(port_for_db),
-            auth_mempool_rpc_.start_server(port_for_mempool)};
-  }
-
-  AuthCard make_auth_card(std::string hostname = "")
-  {
-    if (hostname.empty()) {
-      CHECK_EQ(get_hostname(hostname), 0);
-    }
-    return {
-        .protocol = version::kHogdProtocol(),
-        .upid = {},
-        .address_for_db =
-            std::format("{}:{}", hostname, auth_db_rpc_.port()).c_str(),
-        .address_for_mempool =
-            std::format("{}:{}", hostname, auth_mempool_rpc_.port()).c_str()};
-  }
-
-private:
-  RpcServer<AuthDBRpc> auth_db_rpc_;
-  RpcServer<AuthMempoolRpc> auth_mempool_rpc_;
-};
 
 } // namespace hogd

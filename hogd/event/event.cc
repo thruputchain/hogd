@@ -97,11 +97,10 @@ namespace {
 [[noreturn]] void
 usage(char *argv[])
 {
-  std::println(
-      "usage: {} --mempool-addr <host:port> --work-dir <path> "
-      "[--executor-port <port>] [--indexer-port <port>] "
-      "[--mempool-port <port>]",
-      argv[0]);
+  std::println("usage: {} --mempool-addr <host:port> --work-dir <path> "
+               "[--executor-port <port>] [--indexer-port <port>] "
+               "[--mempool-port <port>]",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 
