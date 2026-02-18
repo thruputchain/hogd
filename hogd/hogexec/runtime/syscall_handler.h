@@ -109,6 +109,8 @@ public:
   // Must only be called once per transaction.
   InvokeResult
   root_invoke(std::optional<Invocation> root_invocation = std::nullopt);
+  // can only be called after root_invoke()
+  InvocationFrameOutput get_root_invocation_output() const;
 
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
@@ -316,6 +318,7 @@ private:
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
+  bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
   bool two_phase_commit_failed_{false};
 
