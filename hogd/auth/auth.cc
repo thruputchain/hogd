@@ -72,8 +72,8 @@ auth_init(const std::string &mempool_address, uint16_t db_port,
   AuthServer auth_server(std::move(dbauth_client));
 
   auth_server.set_mempool_client(std::move(mempool_client));
-  auth_db_rpc->set_auth_server(auth_server);
-  auth_mempool_rpc->set_auth_server(auth_server);
+  auth_db_rpc->impl()->set_auth_server(auth_server);
+  auth_mempool_rpc->impl()->set_auth_server(auth_server);
 
   auth_server.subscribe_to_auth_data_changes(auth_card)();
 
