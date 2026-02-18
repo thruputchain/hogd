@@ -48,7 +48,7 @@ private:
   // Contains consume_state (head), max_live_block_num (tail), live_entries.
   mutable std::atomic<RetrocausalQueueMetadata *> meta_;
   mutable std::optional<RetrocausalQueueMetadata> meta_cell_;
-  mutable x23::TestLock meta_init_mtx_;
+  mutable std::mutex meta_init_mtx_;
 
   // Set to true when get_meta() encounters a kTypeMismatch error, indicating
   // the key exists in the DAO as a different type (e.g. bytestring). Used by
@@ -75,7 +75,7 @@ private:
   // in commit_change.
   ssize_t committed_element_count_delta_{0};
 
-  mutable x23::TestLock mtx_;
+  mutable std::mutex mtx_;
 };
 
 static_assert(item_lock<RetrocausalQueueLock>);
