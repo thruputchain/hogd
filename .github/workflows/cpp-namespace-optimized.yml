@@ -74,8 +74,14 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
+      - name: Protocol Fetch
+        run: git submodule update --init --recursive groundhog-go protocol
+
       - name: Format Check
         run: ./scripts/format.sh -c
+
+      - name: Protocol Check
+        run : ./scripts/check-protocol.sh
 
       - name: Print Log Download Instructions
         if: always()

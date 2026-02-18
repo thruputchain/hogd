@@ -65,8 +65,15 @@ if ! ${SCRIPT_DIR}/format.sh -c; then
 fi
 printf "Format checking passed.\n"
 
+printf "${COLOR}\nSTEP 2: Check protocol\n${NC}"
+if ! ${SCRIPT_DIR}/check-protocol.sh -c; then
+  printf "protocol check failed! protocols do not match.\n"
+  exit 1
+fi
+printf "Protocol check passed.\n"
+
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  printf "${COLOR}Waiting for Step 2 (gcc debug) build to finish...\n${NC}"
+  printf "${COLOR}Waiting for Step 3 (gcc debug) build to finish...\n${NC}"
   wait $GCC_DEBUG_BUILD_PID
   GCC_DEBUG_STATUS=$?
   if [ $GCC_DEBUG_STATUS -ne 0 ]; then
@@ -80,7 +87,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     exit 1
   fi
 else
-  printf "${COLOR}STEP 2: Check build (gcc)\n${NC}"
+  printf "${COLOR}STEP 3: Check build (gcc)\n${NC}"
   if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}"; then
     printf "build failed!\n"
     cat "${GCC_ERRORS_LOG}"
@@ -88,14 +95,14 @@ else
   fi
 fi
 
-printf "${COLOR}\nSTEP 3: Check tests (gcc)\n${NC}"
+printf "${COLOR}\nSTEP 4: Check tests (gcc)\n${NC}"
 if ! ctest --test-dir ${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
   printf "tests failed!\n"
   exit 1
 fi
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  printf "${COLOR}Waiting for Step 4 (llvm) build to finish...\n${NC}"
+  printf "${COLOR}Waiting for Step 5 (llvm) build to finish...\n${NC}"
   wait $LLVM_BUILD_PID
   LLVM_STATUS=$?
   if [ $LLVM_STATUS -ne 0 ]; then
@@ -108,7 +115,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "===== end llvm errors =====\n\n"
     exit 1
   fi
-  printf "${COLOR}Step 4 (llvm) build finished\n${NC}"
+  printf "${COLOR}Step 5 (llvm) build finished\n${NC}"
 
   if [ "$SKIP_TIDY" = "no" ]; then
     printf "${COLOR}STEP 6: Check linter\n${NC}"
@@ -117,7 +124,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     TIDY_PID=$!
   fi
 else
-  printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
+  printf "${COLOR}STEP 4: Check build (llvm)\n${NC}"
   if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}"; then
     printf "build failed!\n"
     printf "\n===== llvm errors =====\n"
@@ -127,7 +134,7 @@ else
   fi
 fi
 
-printf "${COLOR}\nSTEP 5: Check tests (llvm)\n${NC}"
+printf "${COLOR}\nSTEP 6: Check tests (llvm)\n${NC}"
 if ! ctest --test-dir ${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
   printf "tests failed!\n"
   exit 1
@@ -153,9 +160,9 @@ if [ "$SKIP_TIDY" = "no" ]; then
       printf "\n===== end filtered tidy log =====\n\n"
       exit 1
     fi
-    printf "${COLOR}Step 6 (tidy) finished\n${NC}"
+    printf "${COLOR}Step 7 (tidy) finished\n${NC}"
   else
-    printf "${COLOR}\nSTEP 6: Check linter\n${NC}"
+    printf "${COLOR}\nSTEP 7: Check linter\n${NC}"
     if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
       printf "linter failed!\n"
       exit 1
@@ -164,7 +171,7 @@ if [ "$SKIP_TIDY" = "no" ]; then
 fi
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  printf "${COLOR}Waiting for Step 7 (gcc_release) build to finish...\n${NC}"
+  printf "${COLOR}Waiting for Step 8 (gcc_release) build to finish...\n${NC}"
   wait $GCC_RELEASE_BUILD_PID
   GCC_RELEASE_STATUS=$?
   if [ $GCC_RELEASE_STATUS -ne 0 ]; then
@@ -177,9 +184,9 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "===== end gcc_release errors =====\n\n"
     exit 1
   fi
-  printf "${COLOR}Step 7 (gcc_release) build finished\n${NC}"
+  printf "${COLOR}Step 8 (gcc_release) build finished\n${NC}"
 else
-  printf "${COLOR}\nSTEP 7: Check release build (gcc)\n${NC}"
+  printf "${COLOR}\nSTEP 8: Check release build (gcc)\n${NC}"
   if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG}"; then
     printf "build failed!\n"
     printf "\n===== gcc_release errors =====\n"
@@ -194,7 +201,7 @@ if [ -z ${EXTRA+x} ]; then
   exit 0
 fi
 
-printf "${COLOR}\nSTEP 8: Check tsan\n${NC}"
+printf "${COLOR}\nSTEP 9: Check tsan\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_tsan -t Debug -c clang -f "-Werror -fsanitize=thread"; then
   printf "tsan build failed!\n"
   exit 1
@@ -204,7 +211,7 @@ if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure; th
   exit 1
 fi
 
-printf "${COLOR}\nSTEP 9: Check asan\n${NC}"
+printf "${COLOR}\nSTEP 10: Check asan\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_asan -t Debug -c clang -f "-Werror -fsanitize=address"; then
   printf "asan build failed!\n"
   exit 1
@@ -215,7 +222,7 @@ if ! ASAN_OPTIONS=alloc_dealloc_mismatch=0 ctest --test-dir ${ROOT_DIR}/${BUILD_
   exit 1
 fi
 
-printf "${COLOR}\nSTEP 10: Check ubsan\n${NC}"
+printf "${COLOR}\nSTEP 11: Check ubsan\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_ubsan -t Debug -c clang -f "-Werror -fsanitize=undefined"; then
   printf "ubsan build failed!\n"
   exit 1
