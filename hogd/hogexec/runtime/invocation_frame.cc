@@ -11,6 +11,7 @@
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -227,6 +228,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       frame_stack_.back().should_revert()) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
+      frame_stack_.pop_back();
       return st.error();
     }
   }

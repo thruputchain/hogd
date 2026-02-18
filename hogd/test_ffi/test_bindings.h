@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 5
+#define TEST_FFI_VERSION_MINOR 6
 #define TEST_FFI_VERSION_PATCH 0
 
 enum TestFFIErrorCode {
@@ -49,7 +49,10 @@ struct ForeignInvokeResult {
 // FFI-safe type corresponding to the result of a root invocation.
 // I.e. InvokeStatus<int32_t> plus the gas consumed.
 struct ForeignRootInvokeResult {
-  struct ForeignInvokeResult result;
+
+  // Serialization of InvocationFrameOutpput
+  struct FFIDataBuffer serialized_output;
+
   uint64_t gas_consumed;
 
   struct FFIDataBuffer serialized_trace;

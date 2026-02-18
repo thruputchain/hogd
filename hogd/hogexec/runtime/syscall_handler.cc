@@ -207,6 +207,8 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
 
+  assert(invocation_frame_stack_.empty());
+
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
@@ -219,6 +221,17 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
   }
 
   return cumulative_invoke_result_;
+}
+
+InvocationFrameOutput
+SystemCallHandler::get_root_invocation_output() const
+{
+  assert(last_frame_finished_);
+  if (!last_frame_.has_value()) {
+    return InvocationFrameOutput(
+        InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  }
+  return last_frame_.value().get_frame_output();
 }
 
 InvokeStatus<void>
@@ -485,6 +498,7 @@ SystemStatus<std::pair<InvokeResult, bool>>
 SystemCallHandler::finish_frame(InvokeStatus<void> result)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!last_frame_finished_);
   if (!result.has_value()) {
     invocation_frame_stack_.get_active_frame().set_frame_return(
         InvocationFrameOutput(
@@ -497,7 +511,15 @@ SystemCallHandler::finish_frame(InvokeStatus<void> result)
     invocation_frame_trace_->status =
         invocation_frame_stack_.get_active_frame().get_frame_output();
   }
-  return invocation_frame_stack_.finish_frame(result, execution_mode_data_);
+
+  [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
+  auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_);
+  size_t stack_size_after = invocation_frame_stack_.size();
+  assert(stack_size_after == stack_size - 1);
+  if (stack_size_after == 0) {
+    last_frame_finished_ = true;
+  }
+  return res;
 }
 
 void
