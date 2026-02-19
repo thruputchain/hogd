@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -26,6 +27,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -64,6 +66,9 @@ public:
   SyscallHandlerContext &operator=(SystemCallHandler &&) = delete;
 
   ForeignRootInvokeResult root_invoke();
+
+  TestFFIErrorCode start_mock_invocation_frame(Invocation const& invocation, uint32_t invoke_flags);
+  std::expected<InvocationFrameOutput, TestFFIErrorCode> finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
   static SyscallHandlerContext *get_context() { return current_context_; }
 
@@ -124,6 +129,7 @@ private:
 
   SystemCallHandler handler_;
   std::vector<MockRuntime *> mock_runtime_stack_;
+  std::vector<std::unique_ptr<InvocationFrameTrace>> invocation_frame_trace_stack_;
   bool transaction_committed_or_aborted_ = false;
   bool is_mocked_handler_;
 };

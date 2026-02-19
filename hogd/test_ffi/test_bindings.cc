@@ -20,6 +20,7 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
@@ -392,6 +393,56 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
     log_error("unhandled error during root_invoke: {}", e);
     return kUnrecoverableError;
   }
+}
+
+TestFFIErrorCode
+open_mock_invocation_frame(void *syscall_handler,
+                           struct FFISerializedInvocation invocation,
+                           uint32_t invoke_flags) noexcept{
+  ffi_trace("FFI: open_mock_invocation_frame(syscall_handler={}, invocation={}, invoke_flags={}) -> ()",
+            syscall_handler, static_cast<const void *>(invocation.data), invoke_flags);
+
+  if (!syscall_handler) {
+    error("open_mock_invocation_frame error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  Invocation invocation_xdr;
+  try {
+    x23::deserialize(&invocation_xdr, x23::BufView{invocation.data, invocation.len});
+  } catch (x23::XdrBadInput const &e) {
+    log_error("error deserializing invocation: {}", e);
+    return kTestFFIErrorCodeDeserializeError;
+  } catch (std::exception const &e) {
+    log_error("error during open_mock_invocation_frame: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
+  auto res = context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
+  if (res != kTestFFIErrorCodeNone) {
+    error("failed to start mock invocation frame: {}", std::to_underlying(res));
+  }
+  return res;
+}
+
+TestFFIErrorCode
+finish_mock_invocation_frame(void *syscall_handler,
+                           int32_t invoke_error_code) noexcept{
+  ffi_trace("FFI: finish_mock_invocation_frame(syscall_handler={}, invoke_error_code={}) -> ()",
+            syscall_handler, invoke_error_code);
+
+  if (!syscall_handler) {
+    error("open_mock_invocation_frame error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  auto res = context->finish_mock_invocation_frame(static_cast<InvokeErrorCode>(invoke_error_code));
+  if (res != kTestFFIErrorCodeNone) {
+    error("failed to start mock invocation frame: {}", std::to_underlying(res));
+  }
+  return res;
 }
 
 std::string
@@ -890,6 +941,20 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 {
   return hogd::setup_grant_contract_storage_tokens(db, contract_addr, tokens);
 }
+
+TestFFIErrorCode
+open_mock_invocation_frame(void *syscall_handler,
+                           struct FFISerializedInvocation invocation,
+                           uint32_t invoke_flags) {
+  return hogd::open_mock_invocation_frame(syscall_handler, invocation, invoke_flags);
+  }
+
+TestFFIErrorCode finish_mock_invocation_frame(void *syscall_handler,
+                                                   int32_t invoke_error_code)
+{
+  return hogd::finish_mock_invocation_frame(syscall_handler, invoke_error_code);
+}
+
 
 TestFFIErrorCode
 close_syscall_handler(void *syscall_handler)

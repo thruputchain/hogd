@@ -116,8 +116,6 @@ public:
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
   InvokeResult root_invoke();
-  // can only be called after root_invoke()
-  InvocationFrameOutput get_root_invocation_output() const;
 
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
@@ -130,6 +128,8 @@ public:
   SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
+
+  InvocationFrameOutput get_most_recent_frame_output() const;
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;

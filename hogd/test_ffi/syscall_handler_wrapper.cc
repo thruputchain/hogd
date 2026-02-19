@@ -3,15 +3,20 @@
 #include "auth_claim.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include <memory>
+#include <utility>
 
 namespace hogd {
 
@@ -65,7 +70,7 @@ SyscallHandlerContext::root_invoke()
       res.result_.error().code() == InvokeErrorCode::kInvokeDeterministic ||
       res.result_.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
 
-    auto root_invocation_output = handler_.get_root_invocation_output();
+    auto root_invocation_output = handler_.get_most_recent_frame_output();
     auto serialized_output =
         serialize_to_ffi_data_buffer(root_invocation_output);
     if (!serialized_output.has_value()) {
@@ -107,5 +112,61 @@ SyscallHandlerContext::root_invoke()
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 }
+
+TestFFIErrorCode 
+SyscallHandlerContext::start_mock_invocation_frame(Invocation const& invocation, uint32_t invoke_flags)
+{
+  if (!is_mocked_handler_)
+  {
+    error("unrecoverable: start_mock_invocation_frame called on non-mocked handler");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
+  if (handler_.last_frame_finished())
+  {
+    error("unrecoverable: start_mock_invocation_frame called after last frame finished");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+  
+  auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags);
+  if (stashed_parent_trace) {
+    invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
+  }
+  return kTestFFIErrorCodeNone;
+}
+
+std::expected<InvocationFrameOutput, TestFFIErrorCode> 
+SyscallHandlerContext::finish_mock_invocation_frame(InvokeErrorCode invoke_error_code)
+{
+  if (!is_mocked_handler_)
+  {
+    error("unrecoverable: finish_mock_invocation_frame called on non-mocked handler");
+    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  }
+
+  if (handler_.last_frame_finished())
+  {
+    error("unrecoverable: finish_mock_invocation_frame called after last frame finished");
+    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  }
+
+  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
+  if (!invocation_frame_trace_stack_.empty())
+  {
+    stashed_parent_trace = std::move(invocation_frame_trace_stack_.back());
+    invocation_frame_trace_stack_.pop_back();
+  }
+
+  InvokeStatus<void> result = (invoke_error_code == InvokeErrorCode::kInvokeNone) ? InvokeStatus<void>{} : InvokeError{invoke_error_code};
+  
+  auto res = handler_.finish_frame(result, std::move(stashed_parent_trace));
+  if (!res.has_value()) {
+    error("unrecoverable: finish_mock_invocation_frame failed: {}", res.error());
+    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  }
+
+  
+}
+
 
 } // namespace hogd

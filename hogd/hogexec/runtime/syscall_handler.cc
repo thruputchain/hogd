@@ -245,14 +245,21 @@ SystemCallHandler::root_invoke()
 }
 
 InvocationFrameOutput
-SystemCallHandler::get_root_invocation_output() const
+SystemCallHandler::get_most_recent_frame_output() const
 {
-  assert(last_frame_finished_);
-  if (!last_frame_.has_value()) {
-    return InvocationFrameOutput(
-        InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+
+    if (!last_frame_.has_value()) {
+      return InvocationFrameOutput(
+          InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+    }
+    return last_frame_.value().get_frame_output();
   }
-  return last_frame_.value().get_frame_output();
+
+  assert(!invocation_frame_stack_.empty());
+  assert(invocation_frame_stack_.get_active_frame().child_return_output_.has_value());
+  return invocation_frame_stack_.get_active_frame().child_return_output_.value();
 }
 
 InvokeStatus<void>
@@ -476,6 +483,7 @@ std::unique_ptr<InvocationFrameTrace>
 SystemCallHandler::start_frame(Invocation invocation,
                                InvokeFlagSet flags) noexcept
 {
+  assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_);
@@ -623,7 +631,7 @@ SystemCallHandler::get_return_buffer() const
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
     return &top_frame.child_return_output_.value().abort_buffer();
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
   error("Unrecoverable; Invalid invocation frame status code: {}",
         top_frame.child_return_output_.value().status_code());
