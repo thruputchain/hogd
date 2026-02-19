@@ -338,10 +338,11 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              if (res.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               ADD_FAILURE() << "GetReturnBufferOnFault: Expected "
-                                "kSyscallErrorCodeFrameReverted, got: "
-                             << static_cast<int32_t>(res.value());
+                 SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable) {
+               ADD_FAILURE()
+                   << "GetReturnBufferOnFault: Expected "
+                      "kSyscallErrorCodeNoReturnBufferAvailable, got: "
+                   << static_cast<int32_t>(res.value());
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

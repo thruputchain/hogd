@@ -1652,7 +1652,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   ASSERT_NE(invoke_trace.outputs, nullptr);
   ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
 
-  // The child trace is contract C's frame
+  // The child trace is contract B's frame
   auto const &b_trace = *invoke_trace.outputs->child_trace;
   EXPECT_EQ(b_trace.invocation.invoked_address, addr_b);
   ASSERT_GE(b_trace.system_calls.size(), 1U);
