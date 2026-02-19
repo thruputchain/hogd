@@ -424,8 +424,20 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 x23::Async<void>
 MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_lock_wait = 0.0;
+  double stage_schedule_loop = 0.0;
+  double stage_await_batches = 0.0;
+
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
+  record_stage(stage_lock_wait);
 
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(kNumSchedulerIterations);
@@ -464,11 +476,18 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
                                 cache.transaction_nomination_chunks[i],
                                 ret_span));
   }
+  record_stage(stage_schedule_loop);
 
   for (size_t i = 0; i < handles.size(); i++) {
     co_await handles[i];
     cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
   }
+  record_stage(stage_await_batches);
+
+  info("schedule() stages: lock_wait={:.6f}, schedule_loop={:.6f}, "
+       "await_batches={:.6f}, total={:.6f}, handles={}, tx_hashes={}",
+       stage_lock_wait, stage_schedule_loop, stage_await_batches,
+       timer.elapsed(), handles.size(), cache.tx_hashes.size());
 
   co_return;
 }
@@ -492,6 +511,17 @@ x23::Async<void>
 MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                                                PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_spawn_finish_calls = 0.0;
+  double stage_serialize_nomination = 0.0;
+  double stage_await_finish_calls = 0.0;
+
   // Gracefully shut down executor work and send the nomination chunks
   // (including the final block hash) back to the coordinator.
   x23::Vec<x23::Async<void>> finish_block_handles;
@@ -499,6 +529,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     finish_block_handles.push_back(
         finish_block(cache.block_id, /*executor_idx=*/i));
   }
+  record_stage(stage_spawn_finish_calls);
 
   {
     Nomination &nomination =
@@ -516,10 +547,18 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     co_await t_to_parallel_batch(cache.txs,
                                  cache.nomination_result.nominated_block().txs);
   }
+  record_stage(stage_serialize_nomination);
 
   for (x23::Async<void> &handle : finish_block_handles) {
     co_await handle;
   }
+  record_stage(stage_await_finish_calls);
+
+  info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
+       "serialize_nomination={:.6f}, await_finish_calls={:.6f}, "
+       "total={:.6f}, finish_handles={}",
+       stage_spawn_finish_calls, stage_serialize_nomination,
+       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
   co_return;
 }
 
