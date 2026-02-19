@@ -58,14 +58,11 @@ TEST_F(ReturnFaultTestWasmTest, InvokeRunTest)
 {
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation = client_.make_invocation<"run_test">(UINT64_MAX),
+      Transaction{.invocation = client_.make_invocation<"run_test">(UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}}},
+                                 .nonce = nonce_++}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
