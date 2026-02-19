@@ -120,21 +120,20 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return;
   }(context.get());
 
-  auto indexers_handle =
-      context.get().send_events_to_indexers(block_height, indexers_);
   auto out_hash = context.get().get_root_hash();
   record_stage(stage_prepare_context_and_async);
 
   co_await file_wait;
   record_stage(stage_wait_file_write);
-  co_await indexers_handle;
-  record_stage(stage_wait_indexers);
 
   co_await context.get().finish_file(out_hash);
   if (it->second.initiate_shutdown()) {
     gc_context_internal(it, g);
   }
   record_stage(stage_finish_file_and_gc);
+
+  co_await context.get().send_events_to_indexers(block_height, indexers_);
+  record_stage(stage_wait_indexers);
 
   info("close_block() stages: wait_executors_closed={:.6f}, "
        "wait_lock={:.6f}, prepare_context_and_async={:.6f}, "
