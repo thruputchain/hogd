@@ -1856,8 +1856,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
       .gas_limit = 10'000'000,
       .calldata = {},
   };
-  ASSERT_EQ(open_frame(handler.syscall_handler, inv_a),
-            kTestFFIErrorCodeNone);
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_a), kTestFFIErrorCodeNone);
 
   // At root frame A: get_msg_sender() should return root error
   auto sender_a =
@@ -1876,8 +1875,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
       .gas_limit = 5'000'000,
       .calldata = {},
   };
-  ASSERT_EQ(open_frame(handler.syscall_handler, inv_b),
-            kTestFFIErrorCodeNone);
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_b), kTestFFIErrorCodeNone);
 
   // Inside B: msg_sender should be A, current_address should be B
   auto sender_b =
@@ -1898,9 +1896,8 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 
   {
     InvocationFrameOutput b_output;
-    x23::deserialize(&b_output,
-                     x23::BufView{finish_b.serialized_output.data,
-                                  finish_b.serialized_output.len});
+    x23::deserialize(&b_output, x23::BufView{finish_b.serialized_output.data,
+                                             finish_b.serialized_output.len});
     EXPECT_EQ(b_output.status_code(),
               InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
   }
@@ -1912,8 +1909,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
       .gas_limit = 3'000'000,
       .calldata = {},
   };
-  ASSERT_EQ(open_frame(handler.syscall_handler, inv_c),
-            kTestFFIErrorCodeNone);
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_c), kTestFFIErrorCodeNone);
 
   // Inside C: msg_sender should be A, current_address should be C
   auto sender_c =
@@ -1934,9 +1930,8 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 
   {
     InvocationFrameOutput c_output;
-    x23::deserialize(&c_output,
-                     x23::BufView{finish_c.serialized_output.data,
-                                  finish_c.serialized_output.len});
+    x23::deserialize(&c_output, x23::BufView{finish_c.serialized_output.data,
+                                             finish_c.serialized_output.len});
     EXPECT_EQ(c_output.status_code(),
               InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
   }
@@ -1951,9 +1946,8 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 
   {
     InvocationFrameOutput a_output;
-    x23::deserialize(&a_output,
-                     x23::BufView{finish_a.serialized_output.data,
-                                  finish_a.serialized_output.len});
+    x23::deserialize(&a_output, x23::BufView{finish_a.serialized_output.data,
+                                             finish_a.serialized_output.len});
     EXPECT_EQ(a_output.status_code(),
               InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
   }
@@ -1961,8 +1955,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   // Verify the trace
   ASSERT_NE(finish_a.serialized_trace.data, nullptr);
   ASSERT_GT(finish_a.serialized_trace.len, 0U);
-  x23::Defer da_trace(
-      [&] { free_ffi_data_buffer(finish_a.serialized_trace); });
+  x23::Defer da_trace([&] { free_ffi_data_buffer(finish_a.serialized_trace); });
 
   InvocationFrameTrace trace;
   x23::deserialize(&trace, x23::BufView{finish_a.serialized_trace.data,

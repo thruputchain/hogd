@@ -260,8 +260,8 @@ SystemCallHandler::get_most_recent_frame_output() const
   assert(!invocation_frame_stack_.empty());
   assert(invocation_frame_stack_.get_active_frame()
              .child_return_output_.has_value());
-  return invocation_frame_stack_.get_active_frame()
-      .child_return_output_.value();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return *invocation_frame_stack_.get_active_frame().child_return_output_;
 }
 
 InvokeStatus<void>
