@@ -560,6 +560,21 @@ x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_precheck = 0.0;
+  double stage_wait_transfers = 0.0;
+  double stage_wait_auth_data = 0.0;
+  double stage_initialize_overlap = 0.0;
+  double stage_schedule_remaining = 0.0;
+  double stage_process_outcomes = 0.0;
+  double stage_add_failed_txs = 0.0;
+  double stage_finish_nominating = 0.0;
+  double stage_finalize_result = 0.0;
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
   // NOLINTNEXTLINE(modernize-use-auto):
@@ -584,13 +599,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  record_stage(stage_precheck);
 
   // Wait for hogdb to notify us of all HOG transfers that occurred in the
   // previous block. These transfer affect account balances, which in turn
   // affects scheduling priorities for accounts, so we need to wait for this
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
+  record_stage(stage_wait_transfers);
   co_await wait_for_auth_data(db_tip.height);
+  record_stage(stage_wait_auth_data);
 
   nominated_block_cache_.block_id = generate_block_id();
   // We place the block txs and tx hashes into these vectors. We mark these
@@ -646,19 +664,24 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  record_stage(stage_initialize_overlap);
 
   // Schedule the block and send the txs to the executors.
   co_await schedule(nominated_block_cache_);
+  record_stage(stage_schedule_remaining);
   info("schedule() gave us {} txs, scheduler size is {}",
        nominated_block_cache_.tx_hashes.size(), scheduler_->size());
 
   // Process the transaction outcomes.
   process_tx_outcomes(nominated_block_cache_);
+  record_stage(stage_process_outcomes);
   if (!nominated_block_cache_.failed_txs.empty()) {
     co_await scheduler_->add_txs(nominated_block_cache_.failed_txs);
   }
+  record_stage(stage_add_failed_txs);
 
   co_await finish_nominating_block(db_tip, nominated_block_cache_);
+  record_stage(stage_finish_nominating);
 
   // We set [nominated_block_cache_.nomination_result.outcome()] to
   // [SchedulerNominationOutcome::SchedulerNominationOK] above. See the comments
@@ -672,8 +695,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                   .nomination.block_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
-  info("nominate() took {}, num tx hashes {}, num tx nominations {}",
-       timer.elapsed(), nominated_block_cache_.result_tx_hashes.size(),
+  record_stage(stage_finalize_result);
+  info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
+       "wait_auth_data={:.6f}, initialize_overlap={:.6f}, "
+       "schedule_remaining={:.6f}, process_outcomes={:.6f}, "
+       "add_failed_txs={:.6f}, finish_nominating={:.6f}, "
+       "finalize_result={:.6f}, total={:.6f}, num tx hashes {}, "
+       "num tx nominations {}",
+       stage_precheck, stage_wait_transfers, stage_wait_auth_data,
+       stage_initialize_overlap, stage_schedule_remaining,
+       stage_process_outcomes, stage_add_failed_txs, stage_finish_nominating,
+       stage_finalize_result, timer.elapsed(),
+       nominated_block_cache_.result_tx_hashes.size(),
        nominated_block_cache_.result_tx_nominations.size());
   last_ = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
