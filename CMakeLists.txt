@@ -137,6 +137,14 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
 enable_testing()
 include(GoogleTest)
 
+# When enabled, test commands are prefixed with a wrapper that captures gdb
+# backtraces on timeout (instead of ctest's silent SIGKILL).
+option(CRASHDUMP_ON_TIMEOUT
+  "Wrap test commands with gdb-backtrace-on-timeout for diagnostics" OFF)
+if(CRASHDUMP_ON_TIMEOUT)
+  set(CRASHDUMP_WRAPPER "${CMAKE_SOURCE_DIR}/scripts/ci-crashdump-wrapper.sh")
+endif()
+
 # Note: One can extract the include directory from the gtest library
 # with the following snippet:
 #add_library(gtest_headers INTERFACE)
@@ -266,4 +274,14 @@ add_subdirectory(built_contracts)
 # Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
 add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
+
+# Set after externals so try_compile/try_run checks are unaffected.
+# CMAKE_CROSSCOMPILING_EMULATOR initializes CROSSCOMPILING_EMULATOR on new
+# targets, which gtest_discover_tests uses to prefix test commands.
+if(CRASHDUMP_ON_TIMEOUT)
+  message(STATUS "CRASHDUMP_ON_TIMEOUT: wrapping hogd tests with ${CRASHDUMP_WRAPPER}")
+  set(CMAKE_CROSSCOMPILING ON)
+  set(CMAKE_CROSSCOMPILING_EMULATOR "${CRASHDUMP_WRAPPER}")
+endif()
+
 add_subdirectory(hogd)
