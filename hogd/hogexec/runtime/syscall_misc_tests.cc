@@ -63,7 +63,6 @@ protected:
 
 TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
 {
-  // Invoke the run_test method
   auto handler = make_new_system_call_handler(
       Transaction{.invocation = client_.make_invocation<
                       "test_get_return_before_return_buffer_set">(UINT64_MAX),
@@ -77,7 +76,6 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
 
 TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
 {
-  // Invoke the run_test method
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<"test_get_return_after_fault">(
