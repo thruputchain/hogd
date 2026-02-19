@@ -558,6 +558,11 @@ void
 SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
                                        GasAmount current_gas_remaining)
 {
+  if (!is_running()) {
+    warn("start_syscall_trace: no frame running, skipping trace");
+    return;
+  }
+
   if (invocation_frame_trace_) {
     invocation_frame_trace_->system_calls.push_back(SyscallTrace{
         .gas_remaining_at_start = current_gas_remaining,
@@ -575,6 +580,11 @@ void
 SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
                                         GasAmount gas_remaining_at_end)
 {
+  if (!is_running()) {
+    warn("finish_syscall_trace: no frame running, skipping trace");
+    return;
+  }
+
   if (invocation_frame_trace_) {
     assert(!invocation_frame_trace_->system_calls.empty());
     // field is uninitialized

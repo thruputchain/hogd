@@ -17,12 +17,15 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "storage_cost.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
@@ -938,6 +941,35 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
 
 namespace {
 
+// std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+// syscall_Invoke_inner(SystemCallHandler &syscall_handler,
+//   WrappedGasAmount remaining_gas,
+//   const ContractAddress &input_address,
+//   uint64_t input_entrypoint_id, GasAmount input_gas_limit,
+//   std::span<const std::byte> input_calldata,
+//   InvokeFlagSet input_flags,
+//   RuntimeMemoryLength &output_return_buffer_len) noexcept
+
+HostFnStatus<SyscallErrorCode>
+test_ffi_invoke(const ContractAddress &input_address,
+                uint64_t input_entrypoint_id, GasAmount input_gas_limit,
+                Calldata const &input_calldata, InvokeFlagSet input_flags,
+                RuntimeMemoryLength &output_return_buffer_len)
+{
+  auto result = mock_syscall_entrypoint(
+      std::to_underlying(SyscallNo::kInvoke),
+      reinterpret_cast<uint64_t>(input_address.data()), input_entrypoint_id,
+      input_gas_limit, reinterpret_cast<uint64_t>(input_calldata.data()),
+      input_calldata.size(), input_flags,
+      reinterpret_cast<uint64_t>(&output_return_buffer_len));
+
+  if (result.panic !=
+      std::to_underlying(HostFnErrorCode::kHostNoneOrRecoverable))
+    return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
+
+  return static_cast<SyscallErrorCode>(result.result_code);
+}
+
 // Helper: set up a mocked syscall handler and return it
 OpenSyscallHandlerResult
 make_mocked_handler(void *db, void *rc)
@@ -1116,15 +1148,14 @@ mock_contract_nested_invoke(void *ctx, uint64_t /*method_number*/)
   }
 
   Calldata calldata;
-  auto method = sdk_method_id(entrypoint_from_method_id(0x1234));
-  auto [res, gas] =
-      context->to_handler().invoke(data->target, method, UINT64_MAX, calldata,
-                                   InvokeFlagSet{});
-  if (!res.has_value()) {
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(data->target, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  if (!res.has_value() ||
+      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
     return ForeignInvokeResult{
         .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
   }
-
   return ForeignInvokeResult{
       .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
 }
@@ -1170,12 +1201,13 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
 
   // Invoke the contract from within the mock frame
   Calldata calldata;
-  auto [invoke_res, gas] =
-      SyscallHandlerContext::get_context()->to_handler().invoke(
-          contract_addr, sdk_method_id(entrypoint_from_method_id(0x1234)),
-          UINT64_MAX, calldata, InvokeFlagSet{});
-  EXPECT_TRUE(invoke_res.has_value());
-  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  RuntimeMemoryLength output_return_buffer_len = 0;
+
+  auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
   EXPECT_TRUE(check_data.sender_check_passed)
       << "get_msg_sender() should return the mock frame's address";
@@ -1228,12 +1260,11 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
             kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  auto [invoke_res, gas] =
-      SyscallHandlerContext::get_context()->to_handler().invoke(
-          contract_addr, sdk_method_id(entrypoint_from_method_id(0x1234)),
-          UINT64_MAX, calldata, InvokeFlagSet{});
-  EXPECT_TRUE(invoke_res.has_value());
-  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
   EXPECT_TRUE(check_data.check_passed)
       << "get_current_address() should match the contract's deployment address";
@@ -1336,12 +1367,11 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
 
   // Invoke contract B from the mock frame (A -> B -> C)
   Calldata calldata;
-  auto [invoke_res, gas] =
-      SyscallHandlerContext::get_context()->to_handler().invoke(
-          addr_b, sdk_method_id(entrypoint_from_method_id(0x1234)), UINT64_MAX,
-          calldata, InvokeFlagSet{});
-  EXPECT_TRUE(invoke_res.has_value());
-  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Verify contract C saw B as sender and C as self
   EXPECT_TRUE(inner_check.sender_check_passed)
@@ -1390,12 +1420,11 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
 
   // Create specific calldata
   Calldata calldata = {0x01, 0x02, 0x03, 0xFF};
-  auto [invoke_res, gas] =
-      SyscallHandlerContext::get_context()->to_handler().invoke(
-          contract_addr, sdk_method_id(entrypoint_from_method_id(0x1234)),
-          UINT64_MAX, calldata, InvokeFlagSet{});
-  EXPECT_TRUE(invoke_res.has_value());
-  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Verify the calldata was received correctly
   ASSERT_EQ(check_data.received_calldata.size(), 4);
@@ -1442,12 +1471,11 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
             kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  auto [invoke_res, gas] =
-      SyscallHandlerContext::get_context()->to_handler().invoke(
-          contract_addr, sdk_method_id(entrypoint_from_method_id(0x1234)),
-          UINT64_MAX, calldata, InvokeFlagSet{});
-  EXPECT_TRUE(invoke_res.has_value());
-  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
   // Check the return buffer is accessible from the parent frame
   auto return_buf_status =
@@ -1501,12 +1529,11 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
             kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  auto [invoke_res, gas] =
-      SyscallHandlerContext::get_context()->to_handler().invoke(
-          contract_addr, sdk_method_id(entrypoint_from_method_id(0x1234)),
-          UINT64_MAX, calldata, InvokeFlagSet{});
-  EXPECT_TRUE(invoke_res.has_value());
-  EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeFrameReverted);
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeFrameReverted);
 
   // The abort buffer should be accessible as a return buffer
   auto return_buf_status =
@@ -1534,6 +1561,268 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
                                          finish_res.serialized_output.len});
   EXPECT_EQ(output.status_code(),
             InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+}
+
+// Verify that tracing works with nested invokes in mock frames.
+// Enable tracing, open mock frame at A, invoke B which invokes C,
+// and verify the trace contains the expected structure.
+TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // Deploy contract C (innermost) at address {2} — checks caller/self
+  CallerCheckData inner_check;
+  auto addr_c = deploy_mock_contract(db, rc, 1, mock_contract_check_caller,
+                                     &inner_check, ContractAddress{2});
+
+  // Deploy contract B (middle) at address {1} — invokes contract C
+  NestedInvokeData nested_data{.target = addr_c, .inner_check = &inner_check};
+  auto addr_b = deploy_mock_contract(db, rc, 2, mock_contract_nested_invoke,
+                                     &nested_data, ContractAddress{1});
+
+  inner_check.expected_sender = addr_b;
+  inner_check.expected_self = addr_c;
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  // Enable tracing before opening any frame
+  auto *ctx = static_cast<SyscallHandlerContext *>(handler.syscall_handler);
+  ctx->to_handler().enable_tracing();
+
+  ContractAddress frame_addr{0xAA};
+  Invocation invocation = {
+      .invoked_address = frame_addr,
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 10'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+
+  Calldata calldata;
+  RuntimeMemoryLength output_return_buffer_len = 0;
+  auto res = test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, output_return_buffer_len);
+  EXPECT_TRUE(res.has_value());
+  EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
+
+  EXPECT_TRUE(inner_check.sender_check_passed);
+  EXPECT_TRUE(inner_check.self_check_passed);
+
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+  // Verify trace is present
+  ASSERT_NE(finish_res.serialized_trace.data, nullptr);
+  ASSERT_GT(finish_res.serialized_trace.len, 0U);
+  x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
+
+  InvocationFrameTrace trace;
+  x23::deserialize(&trace, x23::BufView{finish_res.serialized_trace.data,
+                                        finish_res.serialized_trace.len});
+
+  // The trace invocation should match what we opened
+  EXPECT_EQ(trace.invocation.invoked_address, frame_addr);
+
+  // There should be at least one syscall (the invoke from the mock frame)
+  ASSERT_GE(trace.system_calls.size(), 1U);
+
+  // The first syscall should be an Invoke
+  auto const &first_syscall = trace.system_calls[0];
+  EXPECT_EQ(first_syscall.body.syscall_number(), SyscallNo::kInvoke);
+
+  // The first syscall is the kInvoke from start_mock_invocation_frame,
+  // which records the first nested invocation's address.
+  auto const &invoke_trace = first_syscall.body.invoke();
+  EXPECT_EQ(invoke_trace.inputs.address, addr_b);
+
+  // The invoke should have outputs with a child trace (contract B's trace)
+  ASSERT_NE(invoke_trace.outputs, nullptr);
+  ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
+
+  // The child trace is contract C's frame
+  auto const &b_trace = *invoke_trace.outputs->child_trace;
+  EXPECT_EQ(b_trace.invocation.invoked_address, addr_b);
+  ASSERT_GE(b_trace.system_calls.size(), 1U);
+
+  // Contract B's first syscall should be its invoke of contract C
+  auto const &b_first_syscall = b_trace.system_calls[0];
+  EXPECT_EQ(b_first_syscall.body.syscall_number(), SyscallNo::kInvoke);
+
+  auto const &b_invoke_trace = b_first_syscall.body.invoke();
+  EXPECT_EQ(b_invoke_trace.inputs.address, addr_c);
+
+  // Contract C's trace should exist as the grandchild
+  ASSERT_NE(b_invoke_trace.outputs, nullptr);
+  ASSERT_NE(b_invoke_trace.outputs->child_trace, nullptr);
+  auto const &c_trace = *b_invoke_trace.outputs->child_trace;
+  EXPECT_EQ(c_trace.invocation.invoked_address, addr_c);
+
+  // The frame output should be Return
+  EXPECT_EQ(trace.status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+}
+
+// Test opening and closing mock frames with different error codes
+// and verifying the InvocationFrameOutput is correct.
+TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // Test kInvokeNone -> Return with empty return buffer
+  {
+    auto handler = make_mocked_handler(db, rc);
+    ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+    x23::Defer dh([&] { close_syscall_handler(handler.syscall_handler); });
+
+    Invocation invocation = {
+        .invoked_address = ContractAddress{1},
+        .entrypoint = entrypoint_from_method_id(0x1234),
+        .gas_limit = 1'000'000,
+        .calldata = {},
+    };
+    ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+              kTestFFIErrorCodeNone);
+
+    auto finish_res =
+        finish_mock_invocation_frame(handler.syscall_handler,
+                                     std::to_underlying(
+                                         InvokeErrorCode::kInvokeNone));
+    ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+    x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+    InvocationFrameOutput output;
+    x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                           finish_res.serialized_output.len});
+    EXPECT_EQ(output.status_code(),
+              InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    EXPECT_EQ(output.return_buffer().size(), 0);
+  }
+
+  // Test kInvokeDeterministic -> Fault
+  {
+    auto handler = make_mocked_handler(db, rc);
+    ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+    x23::Defer dh([&] { close_syscall_handler(handler.syscall_handler); });
+
+    Invocation invocation = {
+        .invoked_address = ContractAddress{2},
+        .entrypoint = entrypoint_from_method_id(0x1234),
+        .gas_limit = 1'000'000,
+        .calldata = {},
+    };
+    ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+              kTestFFIErrorCodeNone);
+
+    auto finish_res = finish_mock_invocation_frame(
+        handler.syscall_handler,
+        std::to_underlying(InvokeErrorCode::kInvokeDeterministic));
+    ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+    x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+    InvocationFrameOutput output;
+    x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                           finish_res.serialized_output.len});
+    EXPECT_EQ(output.status_code(),
+              InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  }
+
+  // Test kInvokeOutOfGas -> Fault
+  {
+    auto handler = make_mocked_handler(db, rc);
+    ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+    x23::Defer dh([&] { close_syscall_handler(handler.syscall_handler); });
+
+    Invocation invocation = {
+        .invoked_address = ContractAddress{3},
+        .entrypoint = entrypoint_from_method_id(0x1234),
+        .gas_limit = 1'000'000,
+        .calldata = {},
+    };
+    ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+              kTestFFIErrorCodeNone);
+
+    auto finish_res =
+        finish_mock_invocation_frame(handler.syscall_handler,
+                                     std::to_underlying(
+                                         InvokeErrorCode::kInvokeOutOfGas));
+    ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+    x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+    InvocationFrameOutput output;
+    x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                           finish_res.serialized_output.len});
+    EXPECT_EQ(output.status_code(),
+              InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  }
+}
+
+// Test that calling set_return_buffer with revert=true inside a mock frame
+// produces an Abort status with the correct abort buffer.
+TEST(TestBindingsTest, MockFrameManualRevertTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  ContractAddress frame_addr{0xFF};
+  Invocation invocation = {
+      .invoked_address = frame_addr,
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 1'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+
+  // Manually call set_return_buffer with revert=true
+  ReturnBuffer revert_buf = {0xCA, 0xFE, 0xBA, 0xBE};
+  SyscallHandlerContext::get_context()->to_handler().set_return_buffer(
+      std::move(revert_buf), /*revert_frame=*/true);
+
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                         finish_res.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+  ASSERT_EQ(output.abort_buffer().size(), 4);
+  EXPECT_EQ(output.abort_buffer()[0], 0xCA);
+  EXPECT_EQ(output.abort_buffer()[1], 0xFE);
+  EXPECT_EQ(output.abort_buffer()[2], 0xBA);
+  EXPECT_EQ(output.abort_buffer()[3], 0xBE);
 }
 
 } // namespace hogd

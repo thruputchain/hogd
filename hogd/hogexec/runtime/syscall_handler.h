@@ -140,6 +140,7 @@ public:
                             GasAmount gas_remaining_at_end);
 
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
+  bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {

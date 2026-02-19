@@ -134,16 +134,18 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     current_gas = runtime->get_available_gas();
   }
 
-  handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
-  if (auto *invoke_trace =
-          handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
-    invoke_trace->inputs = SyscallInvokeInputs{
-        .address = invocation.invoked_address,
-        .entrypoint_id = sdk_method_id(invocation.entrypoint),
-        .gas_limit = invocation.gas_limit,
-        .calldata = invocation.calldata,
-        .flags = invoke_flags,
-    };
+  if (handler_.is_running()) {
+    handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
+    if (auto *invoke_trace =
+            handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
+      invoke_trace->inputs = SyscallInvokeInputs{
+          .address = invocation.invoked_address,
+          .entrypoint_id = sdk_method_id(invocation.entrypoint),
+          .gas_limit = invocation.gas_limit,
+          .calldata = invocation.calldata,
+          .flags = invoke_flags,
+      };
+    }
   }
 
   auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags);
@@ -212,8 +214,10 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     gas_remaining = runtime->get_available_gas();
   }
 
-  handler_.finish_syscall_trace(result.to_host_fn_result().first,
-                                gas_remaining);
+  if (handler_.is_running()) {
+    handler_.finish_syscall_trace(result.to_host_fn_result().first,
+                                  gas_remaining);
+  }
 
   auto frame_output = handler_.get_most_recent_frame_output();
 
