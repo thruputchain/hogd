@@ -36,8 +36,7 @@ namespace {
 
 StorageKeyContractData
 calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
-                      ContractEntrypointID entrypoint,
-                      Calldata const&  calldata)
+                      ContractEntrypointID entrypoint, Calldata const &calldata)
 {
   // Create the key data: "Initial Deployment" || hash || nonce || entrypoint ||
   // calldata

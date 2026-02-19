@@ -415,8 +415,9 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   // Create a buffer larger than kMaxReturnBufferLen (1024)
   std::array<std::byte, 1025> oversized_buffer{};
 
-  auto [status, gas] = syscall_Return_inner(
-      handler, std::span<const std::byte>(oversized_buffer), false);
+  auto [status, gas] =
+      syscall_Return_inner(handler,
+                           std::span<const std::byte>(oversized_buffer), false);
 
   // The syscall should fail with kHostExit
   ASSERT_FALSE(status.has_value());
@@ -442,8 +443,9 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
   std::array<std::byte, 10> valid_buffer{};
 
-  auto [status, gas] = syscall_Return_inner(
-      handler, std::span<const std::byte>(valid_buffer), false);
+  auto [status, gas] =
+      syscall_Return_inner(handler, std::span<const std::byte>(valid_buffer),
+                           false);
 
   // The syscall should succeed with kHostReturn
   ASSERT_FALSE(status.has_value());
