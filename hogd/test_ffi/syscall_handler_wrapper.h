@@ -112,8 +112,9 @@ public:
 
   Runtime *get_mock_runtime()
   {
-    assert(get_context() == this);
-    assert(!mock_runtime_stack_.empty());
+    if (mock_runtime_stack_.empty()) {
+      return nullptr;
+    }
     return mock_runtime_stack_.back();
   }
 
@@ -195,7 +196,7 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
   }
 
   auto *mock_runtime = handler->get_mock_runtime();
-  assert(mock_runtime != nullptr);
+  CHECK(mock_runtime != nullptr);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context

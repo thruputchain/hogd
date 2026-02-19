@@ -122,19 +122,27 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
+  // Push context if this is the first mock frame
+  if (get_context() == nullptr) {
+    if (!push_context()) {
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+  }
+
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
-  if (auto const* runtime = get_mock_runtime()) {
+  if (auto const *runtime = get_mock_runtime()) {
     current_gas = runtime->get_available_gas();
   }
 
   handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
-  if (auto *invoke_trace = handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
+  if (auto *invoke_trace =
+          handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
     invoke_trace->inputs = SyscallInvokeInputs{
-      .address = invocation.invoked_address,
-      .entrypoint_id = sdk_method_id(invocation.entrypoint),
-      .gas_limit = invocation.gas_limit,
-      .calldata = invocation.calldata,
-      .flags = invoke_flags,
+        .address = invocation.invoked_address,
+        .entrypoint_id = sdk_method_id(invocation.entrypoint),
+        .gas_limit = invocation.gas_limit,
+        .calldata = invocation.calldata,
+        .flags = invoke_flags,
     };
   }
 
@@ -166,9 +174,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // convert InvokeErrorCode to InvokeStatus<void>
   InvokeStatus<void> status_code =
-  (invoke_error_code == InvokeErrorCode::kInvokeNone)
-      ? InvokeStatus<void>{}
-      : InvokeError{invoke_error_code};
+      (invoke_error_code == InvokeErrorCode::kInvokeNone)
+          ? InvokeStatus<void>{}
+          : InvokeError{invoke_error_code};
 
   // get the runtime and gas consumed by the invocation
   auto *runtime = pop_mock_runtime();
@@ -178,8 +186,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   uint64_t consumed_gas = empty_runtime->get_consumed_gas();
   x23::Defer _([runtime]() { delete runtime; });
 
-  auto result = InvokeResult{.result_=status_code, .gas_consumed_=consumed_gas};
-  
+  auto result =
+      InvokeResult{.result_ = status_code, .gas_consumed_ = consumed_gas};
+
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (!invocation_frame_trace_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_stack_.back());
@@ -187,7 +196,8 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   }
 
   // finish the frame
-  auto res = handler_.finish_frame(result.result_, std::move(stashed_parent_trace));
+  auto res =
+      handler_.finish_frame(result.result_, std::move(stashed_parent_trace));
   if (!res.has_value()) {
     error("unrecoverable: finish_mock_invocation_frame failed: {}",
           res.error());
@@ -197,12 +207,13 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   result += frame_result;
 
   GasAmount gas_remaining = std::numeric_limits<GasAmount>::max();
-  if (auto* runtime = get_mock_runtime()) {
+  if (auto *runtime = get_mock_runtime()) {
     auto _ = runtime->consume_gas(consumed_gas);
     gas_remaining = runtime->get_available_gas();
   }
 
-  handler_.finish_syscall_trace(result.to_host_fn_result().first, gas_remaining);
+  handler_.finish_syscall_trace(result.to_host_fn_result().first,
+                                gas_remaining);
 
   auto frame_output = handler_.get_most_recent_frame_output();
 
@@ -219,6 +230,11 @@ SyscallHandlerContext::finish_mock_invocation_frame(
       return kMakeFFIError(s.error());
     }
     serialized_trace = s.value();
+  }
+
+  // Pop context if the mock runtime stack is now empty (last frame finished)
+  if (mock_runtime_stack_.empty()) {
+    pop_context();
   }
 
   return ForeignTracedInvokeResult{
