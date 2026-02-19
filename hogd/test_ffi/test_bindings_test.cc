@@ -1825,4 +1825,184 @@ TEST(TestBindingsTest, MockFrameManualRevertTest)
   EXPECT_EQ(output.abort_buffer()[3], 0xBE);
 }
 
+// Test nested open_mock_invocation_frame calls: A { B {} C {} }
+// Verify the trace structure reflects the correct nesting and that
+// get_msg_sender() / get_current_address() work correctly at each level.
+TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  auto *ctx = static_cast<SyscallHandlerContext *>(handler.syscall_handler);
+  ctx->to_handler().enable_tracing();
+
+  ContractAddress addr_a{0x0A};
+  ContractAddress addr_b{0x0B};
+  ContractAddress addr_c{0x0C};
+
+  // Open frame A (root)
+  Invocation inv_a = {
+      .invoked_address = addr_a,
+      .entrypoint = entrypoint_from_method_id(0x1111),
+      .gas_limit = 10'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_a),
+            kTestFFIErrorCodeNone);
+
+  // At root frame A: get_msg_sender() should return root error
+  auto sender_a =
+      SyscallHandlerContext::get_context()->to_handler().get_msg_sender();
+  EXPECT_FALSE(sender_a.has_value());
+  EXPECT_EQ(sender_a.error().code(),
+            SyscallErrorCode::kSyscallErrorCodeIsRootTransaction);
+  EXPECT_EQ(
+      SyscallHandlerContext::get_context()->to_handler().get_current_address(),
+      addr_a);
+
+  // Open frame B (child of A)
+  Invocation inv_b = {
+      .invoked_address = addr_b,
+      .entrypoint = entrypoint_from_method_id(0x2222),
+      .gas_limit = 5'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_b),
+            kTestFFIErrorCodeNone);
+
+  // Inside B: msg_sender should be A, current_address should be B
+  auto sender_b =
+      SyscallHandlerContext::get_context()->to_handler().get_msg_sender();
+  ASSERT_TRUE(sender_b.has_value());
+  EXPECT_EQ(*sender_b, addr_a);
+  EXPECT_EQ(
+      SyscallHandlerContext::get_context()->to_handler().get_current_address(),
+      addr_b);
+
+  // Close frame B with success
+  auto finish_b =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer db_out([&] { free_ffi_data_buffer(finish_b.serialized_output); });
+
+  {
+    InvocationFrameOutput b_output;
+    x23::deserialize(&b_output,
+                     x23::BufView{finish_b.serialized_output.data,
+                                  finish_b.serialized_output.len});
+    EXPECT_EQ(b_output.status_code(),
+              InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  }
+
+  // Open frame C (another child of A, after B)
+  Invocation inv_c = {
+      .invoked_address = addr_c,
+      .entrypoint = entrypoint_from_method_id(0x3333),
+      .gas_limit = 3'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_c),
+            kTestFFIErrorCodeNone);
+
+  // Inside C: msg_sender should be A, current_address should be C
+  auto sender_c =
+      SyscallHandlerContext::get_context()->to_handler().get_msg_sender();
+  ASSERT_TRUE(sender_c.has_value());
+  EXPECT_EQ(*sender_c, addr_a);
+  EXPECT_EQ(
+      SyscallHandlerContext::get_context()->to_handler().get_current_address(),
+      addr_c);
+
+  // Close frame C with a deterministic error (Fault)
+  auto finish_c =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeDeterministic));
+  ASSERT_EQ(finish_c.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer dc_out([&] { free_ffi_data_buffer(finish_c.serialized_output); });
+
+  {
+    InvocationFrameOutput c_output;
+    x23::deserialize(&c_output,
+                     x23::BufView{finish_c.serialized_output.data,
+                                  finish_c.serialized_output.len});
+    EXPECT_EQ(c_output.status_code(),
+              InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  }
+
+  // Close frame A with success
+  auto finish_a =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  ASSERT_EQ(finish_a.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer da_out([&] { free_ffi_data_buffer(finish_a.serialized_output); });
+
+  {
+    InvocationFrameOutput a_output;
+    x23::deserialize(&a_output,
+                     x23::BufView{finish_a.serialized_output.data,
+                                  finish_a.serialized_output.len});
+    EXPECT_EQ(a_output.status_code(),
+              InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  }
+
+  // Verify the trace
+  ASSERT_NE(finish_a.serialized_trace.data, nullptr);
+  ASSERT_GT(finish_a.serialized_trace.len, 0U);
+  x23::Defer da_trace(
+      [&] { free_ffi_data_buffer(finish_a.serialized_trace); });
+
+  InvocationFrameTrace trace;
+  x23::deserialize(&trace, x23::BufView{finish_a.serialized_trace.data,
+                                        finish_a.serialized_trace.len});
+
+  // A's trace
+  EXPECT_EQ(trace.invocation.invoked_address, addr_a);
+  EXPECT_EQ(trace.status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+
+  // A should have 2 syscall entries: one for B and one for C
+  ASSERT_EQ(trace.system_calls.size(), 2U);
+
+  // First syscall: invoke B
+  auto const &sc_b = trace.system_calls[0];
+  EXPECT_EQ(sc_b.body.syscall_number(), SyscallNo::kInvoke);
+  auto const &sc_b_invoke = sc_b.body.invoke();
+  EXPECT_EQ(sc_b_invoke.inputs.address, addr_b);
+  ASSERT_NE(sc_b_invoke.outputs, nullptr);
+  ASSERT_NE(sc_b_invoke.outputs->child_trace, nullptr);
+
+  auto const &b_trace = *sc_b_invoke.outputs->child_trace;
+  EXPECT_EQ(b_trace.invocation.invoked_address, addr_b);
+  EXPECT_EQ(b_trace.status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(b_trace.system_calls.size(), 0U);
+
+  // Second syscall: invoke C
+  auto const &sc_c = trace.system_calls[1];
+  EXPECT_EQ(sc_c.body.syscall_number(), SyscallNo::kInvoke);
+  auto const &sc_c_invoke = sc_c.body.invoke();
+  EXPECT_EQ(sc_c_invoke.inputs.address, addr_c);
+  ASSERT_NE(sc_c_invoke.outputs, nullptr);
+  ASSERT_NE(sc_c_invoke.outputs->child_trace, nullptr);
+
+  auto const &c_trace = *sc_c_invoke.outputs->child_trace;
+  EXPECT_EQ(c_trace.invocation.invoked_address, addr_c);
+  EXPECT_EQ(c_trace.status.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  EXPECT_EQ(c_trace.system_calls.size(), 0U);
+}
+
 } // namespace hogd
