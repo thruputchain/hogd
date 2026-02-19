@@ -349,7 +349,8 @@ EventBlockContext::await_all_executors_closed()
 
 x23::Async<void>
 EventBlockContext::send_events_to_indexers(
-    BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
+    x23::CoroGuard &&cg, BlockHeight block_height,
+    std::vector<indexer_event_client_t> &indexers)
 {
   TxEventLogBatch full_event_log;
   {

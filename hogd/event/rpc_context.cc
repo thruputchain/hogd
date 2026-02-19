@@ -128,11 +128,12 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
   co_await context.get().finish_file(out_hash);
   if (it->second.initiate_shutdown()) {
-    gc_context_internal(it, g);
+    gc_context_internal(it);
   }
   record_stage(stage_finish_file_and_gc);
 
-  co_await context.get().send_events_to_indexers(block_height, indexers_);
+  co_await context.get().send_events_to_indexers(std::move(g), block_height,
+                                                 indexers_);
   record_stage(stage_wait_indexers);
 
   info("close_block() stages: wait_executors_closed={:.6f}, "
@@ -161,7 +162,7 @@ EventRPCContext::abandon_block(BlockID block_id)
   co_await context.get().await_abandon();
 
   if (context.initiate_shutdown()) {
-    gc_context_internal(it, g);
+    gc_context_internal(it);
   }
   co_return EventStatus<void>();
 }
@@ -174,13 +175,12 @@ EventRPCContext::gc_context(BlockID block_id)
 
   auto it = event_block_contexts_.find(block_id);
   assert(it != event_block_contexts_.end());
-  gc_context_internal(it, g);
+  gc_context_internal(it);
 }
 
 void
 EventRPCContext::gc_context_internal(
-    std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it,
-    x23::CoroGuard const & /*unused*/)
+    std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it)
 {
   // the block must already have been shutdown by this point,
   // and should have no outstanding references
