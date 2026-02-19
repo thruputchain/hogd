@@ -1893,6 +1893,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
                                        InvokeErrorCode::kInvokeNone));
   ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer db_out([&] { free_ffi_data_buffer(finish_b.serialized_output); });
+  x23::Defer db_trace([&] { free_ffi_data_buffer(finish_b.serialized_trace); });
 
   {
     InvocationFrameOutput b_output;
@@ -1927,6 +1928,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
                                        InvokeErrorCode::kInvokeDeterministic));
   ASSERT_EQ(finish_c.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer dc_out([&] { free_ffi_data_buffer(finish_c.serialized_output); });
+  x23::Defer dc_trace([&] { free_ffi_data_buffer(finish_c.serialized_trace); });
 
   {
     InvocationFrameOutput c_output;

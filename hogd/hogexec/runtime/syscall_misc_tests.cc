@@ -2,8 +2,8 @@
 
 // Miscellaneous end to end tests on syscall behavior,
 // implemented within a wasm contract.
-// These tests are just wrappers around the tests in the syscall_misc_tests contract.
-
+// These tests are just wrappers around the tests in the syscall_misc_tests
+// contract.
 
 #include <cstddef>
 #include <cstdint>
@@ -23,7 +23,7 @@
 namespace hogd {
 
 class SyscallMiscTests : public ::testing::Test,
-                                public NativeContractTestFramework {
+                         public NativeContractTestFramework {
 public:
   SyscallMiscTests()
     : NativeContractTestFramework(
@@ -53,7 +53,8 @@ protected:
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
 
   ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client_ =
-      ContractTraitClient<syscall_misc_tests::SyscallMiscTests>(kContractAddress);
+      ContractTraitClient<syscall_misc_tests::SyscallMiscTests>(
+          kContractAddress);
 
   std::unique_ptr<RuntimeContext> runtime_context_;
 
@@ -67,7 +68,8 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
       SignedTransaction{
           .tx =
               Transaction{
-                  .invocation = client_.make_invocation<"test_get_return_before_return_buffer_set">(UINT64_MAX),
+                  .invocation = client_.make_invocation<
+                      "test_get_return_before_return_buffer_set">(UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -83,7 +85,9 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
       SignedTransaction{
           .tx =
               Transaction{
-                  .invocation = client_.make_invocation<"test_get_return_after_fault">(UINT64_MAX),
+                  .invocation =
+                      client_.make_invocation<"test_get_return_after_fault">(
+                          UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
