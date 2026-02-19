@@ -65,15 +65,12 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
 {
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation = client_.make_invocation<
+      Transaction{.invocation = client_.make_invocation<
                       "test_get_return_before_return_buffer_set">(UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}}},
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
@@ -82,16 +79,13 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
 {
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
+      Transaction{.invocation =
                       client_.make_invocation<"test_get_return_after_fault">(
                           UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}}},
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
