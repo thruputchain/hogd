@@ -2,6 +2,7 @@
 
 #include <span>
 
+#include <vector>
 #include <x23/serialize.h>
 #include <x23/serialize_cxs.h>
 #include <x23/utility.h>
@@ -11,6 +12,7 @@
 
 namespace x23 {
 
+// NOLINTBEGIN(modernize-type-traits)
 TEST(Deserialize, Vector)
 {
   x23::Vec<TxEventLog, 0xffffffff> vec;
@@ -74,11 +76,50 @@ TEST(Deserialize, CxsReservedHeaderVariousBytes)
     std::span<const uint8_t> sp(input, sizeof(input));
     uint64_t uval = 0;
     EXPECT_THROW(x23::deserialize_cxs(&uval, sp), x23::XdrException)
-        << "byte " << int(byte) << " should be rejected for uint";
+        << "byte " << static_cast<int>(byte) << " should be rejected for uint";
     int64_t ival = 0;
     EXPECT_THROW(x23::deserialize_cxs(&ival, sp), x23::XdrException)
-        << "byte " << int(byte) << " should be rejected for int";
+        << "byte " << static_cast<int>(byte) << " should be rejected for int";
   }
 }
+
+TEST(Deserialize, OpaqueVectorTooLarge)
+{
+  x23::Vec<uint8_t, 5> vec;
+
+  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x09};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7, 8});
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+
+  x23::Vec<uint8_t, 4> vec2;
+
+  std::vector<uint8_t> input2 = {0x00, 0x00, 0x00, 0x08};
+  input2.insert(input2.end(), {0, 1, 2, 3, 4, 5, 6, 7});
+  EXPECT_THROW(deserialize(&vec2, BufView(input2)), x23::XdrBadInput);
+}
+
+TEST(Deserialize, VectorTooLarge)
+{
+  x23::Vec<uint32_t, 1> vec;
+
+  // valid encoding for a vector of length 2
+  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x02};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
+  // LengthError not BadInput: see comment at serialize.h line 724
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrLengthError);
+}
+
+TEST(Deserialize, CxsVectorTooLarge)
+{
+  x23::Vec<uint32_t, 2> vec;
+
+  // CXS uses little-endian size prefix
+  std::vector<uint8_t> input = {0x03, 0x00, 0x00, 0x00};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
+  std::span<const uint8_t> sp(input);
+  EXPECT_THROW(x23::deserialize_cxs(&vec, sp), x23::CxsBadInput);
+}
+
+// NOLINTEND(modernize-type-traits)
 
 } // namespace x23

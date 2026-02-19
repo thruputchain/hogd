@@ -135,7 +135,7 @@ public:
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{});
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
   }
 
   template<HostFnErrorCode Code> void run_gas_limit_supercedes_test()
@@ -169,7 +169,7 @@ public:
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{});
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
   }
 };
 

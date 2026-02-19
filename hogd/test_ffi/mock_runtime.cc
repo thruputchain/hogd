@@ -4,7 +4,6 @@
 #include <memory>
 #include <string_view>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -33,7 +32,8 @@ MockRuntime::invoke_internal(std::string_view method_name)
   assert(context != nullptr);
   context->push_mock_runtime(this);
   auto res = backing_contract_.invoke(method_name);
-  context->pop_mock_runtime();
+  auto *runtime = context->pop_mock_runtime();
+  assert(runtime == this);
   return res;
 }
 

@@ -17,8 +17,10 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
@@ -276,6 +278,54 @@ open_syscall_handler(void *db, void *rc,
   }
 }
 
+OpenSyscallHandlerResult
+open_mocked_syscall_handler(void *db, void *rc,
+                            struct FFISerializedAuthClaimData auth_claim_data,
+                            const uint8_t source_tx_hash[32]) noexcept
+{
+  constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
+      kTestFFIErrorCodeInvalidPointer);
+  ffi_trace("FFI: open_mocked_syscall_handler(db={}, rc={}, "
+            "auth_claim_data=(data={}, len={}), source_tx_hash={})",
+            db, rc, static_cast<const void *>(auth_claim_data.data),
+            auth_claim_data.len, static_cast<const void *>(source_tx_hash));
+
+  if (!db) {
+    return kNullptrError;
+  }
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!rc) {
+    return kNullptrError;
+  }
+  auto *runtime_context =
+      reinterpret_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(rc);
+
+  CHECK(runtime_context->get() != nullptr);
+
+  if (!auth_claim_data.data || !source_tx_hash) {
+    return kNullptrError;
+  }
+  try {
+    hogd::AuthClaimData auth_claim_data_xdr;
+    x23::deserialize(&auth_claim_data_xdr,
+                     x23::BufView{auth_claim_data.data, auth_claim_data.len});
+    SHA256Hash source_hash{};
+    std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
+    auto *out = static_cast<void *>(
+        new SyscallHandlerContext(runtime_context->get(), *db_context,
+                                  auth_claim_data_xdr, source_hash));
+    return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (x23::XdrBadInput const &e) {
+    log_error("error deserializing signed transaction: {}", e);
+    return make_ffi_result_type<OpenSyscallHandlerResult>(
+        kTestFFIErrorCodeDeserializeError);
+  } catch (std::exception const &e) {
+    log_error("error creating syscall handler context: {}", e);
+    return make_ffi_result_type<OpenSyscallHandlerResult>(
+        kTestFFIErrorCodeUnrecoverableError);
+  }
+}
+
 TestFFIErrorCode
 close_syscall_handler(void *syscall_handler) noexcept
 {
@@ -290,14 +340,14 @@ close_syscall_handler(void *syscall_handler) noexcept
   }
 }
 
-constexpr ForeignRootInvokeResult kUnrecoverableError = {
+constexpr ForeignTracedInvokeResult kUnrecoverableError = {
     .serialized_output = kNullBuffer,
     .gas_consumed = 0,
     .serialized_trace = kNullBuffer,
     .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
 
 std::string
-format_foreign_root_invoke_result(const ForeignRootInvokeResult &result)
+format_foreign_traced_invoke_result(const ForeignTracedInvokeResult &result)
 {
   return std::format("serialized_output=[{}], gas_consumed={}, "
                      "serialized_trace=[{}], ffi_error_code={}",
@@ -306,12 +356,12 @@ format_foreign_root_invoke_result(const ForeignRootInvokeResult &result)
                      std::to_underlying(result.ffi_error_code));
 }
 
-ForeignRootInvokeResult
+ForeignTracedInvokeResult
 root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 {
   if (!syscall_handler) {
     error("root_invoke error: no syscall handler!");
-    return make_ffi_result_type<ForeignRootInvokeResult>(
+    return make_ffi_result_type<ForeignTracedInvokeResult>(
         kTestFFIErrorCodeInvalidPointer);
   }
 
@@ -328,7 +378,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
         auto buffer = make_new_data_buffer(serialized_trace.size());
         if (!buffer.has_value()) {
           error("failed to allocate memory for serialized trace!");
-          return make_ffi_result_type<ForeignRootInvokeResult>(
+          return make_ffi_result_type<ForeignTracedInvokeResult>(
               kTestFFIErrorCodeUnrecoverableError);
         }
         std::memcpy(buffer.value().data, serialized_trace.data(),
@@ -337,12 +387,66 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
       }
     }
     ffi_trace("FFI: root_invoke(syscall_handler={}) -> ({})", syscall_handler,
-              format_foreign_root_invoke_result(res));
+              format_foreign_traced_invoke_result(res));
     return res;
   } catch (std::exception const &e) {
     log_error("unhandled error during root_invoke: {}", e);
     return kUnrecoverableError;
   }
+}
+
+TestFFIErrorCode
+open_mock_invocation_frame(void *syscall_handler,
+                           struct FFISerializedInvocation invocation,
+                           int32_t invoke_flags) noexcept
+{
+  ffi_trace("FFI: open_mock_invocation_frame(syscall_handler={}, "
+            "invocation={}, invoke_flags={}) -> ()",
+            syscall_handler, static_cast<const void *>(invocation.data),
+            invoke_flags);
+
+  if (!syscall_handler) {
+    error("open_mock_invocation_frame error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  Invocation invocation_xdr;
+  try {
+    x23::deserialize(&invocation_xdr,
+                     x23::BufView{invocation.data, invocation.len});
+  } catch (x23::XdrBadInput const &e) {
+    log_error("error deserializing invocation: {}", e);
+    return kTestFFIErrorCodeDeserializeError;
+  } catch (std::exception const &e) {
+    log_error("error during open_mock_invocation_frame: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+
+  auto res = context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
+  if (res != kTestFFIErrorCodeNone) {
+    error("failed to start mock invocation frame: {}", std::to_underlying(res));
+  }
+  return res;
+}
+
+ForeignTracedInvokeResult
+finish_mock_invocation_frame(void *syscall_handler,
+                             int32_t invoke_error_code) noexcept
+{
+  ffi_trace("FFI: finish_mock_invocation_frame(syscall_handler={}, "
+            "invoke_error_code={}) -> ()",
+            syscall_handler, invoke_error_code);
+
+  if (!syscall_handler) {
+    error("finish_mock_invocation_frame error: no syscall handler!");
+    return make_ffi_result_type<ForeignTracedInvokeResult>(
+        kTestFFIErrorCodeInvalidPointer);
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  return context->finish_mock_invocation_frame(
+      static_cast<InvokeErrorCode>(invoke_error_code));
 }
 
 std::string
@@ -826,6 +930,15 @@ open_syscall_handler(void *db, void *rc,
   return hogd::open_syscall_handler(db, rc, signed_tx);
 }
 
+OpenSyscallHandlerResult
+open_mocked_syscall_handler(void *db, void *rc,
+                            struct FFISerializedAuthClaimData auth_claim_data,
+                            const uint8_t source_tx_hash[32])
+{
+  return hogd::open_mocked_syscall_handler(db, rc, auth_claim_data,
+                                           source_tx_hash);
+}
+
 TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens)
@@ -834,12 +947,27 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 }
 
 TestFFIErrorCode
+open_mock_invocation_frame(void *syscall_handler,
+                           struct FFISerializedInvocation invocation,
+                           int32_t invoke_flags)
+{
+  return hogd::open_mock_invocation_frame(syscall_handler, invocation,
+                                          invoke_flags);
+}
+
+ForeignTracedInvokeResult
+finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code)
+{
+  return hogd::finish_mock_invocation_frame(syscall_handler, invoke_error_code);
+}
+
+TestFFIErrorCode
 close_syscall_handler(void *syscall_handler)
 {
   return hogd::close_syscall_handler(syscall_handler);
 }
 
-struct ForeignRootInvokeResult
+struct ForeignTracedInvokeResult
 root_invoke(void *syscall_handler, uint8_t enable_tracing)
 {
   return hogd::root_invoke(syscall_handler, enable_tracing == 1);

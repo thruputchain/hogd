@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 6
+#define TEST_FFI_VERSION_MINOR 7
 #define TEST_FFI_VERSION_PATCH 0
 
 enum TestFFIErrorCode {
@@ -46,10 +46,9 @@ struct ForeignInvokeResult {
                  // to an InvokeStatus<void>{}
 };
 
-// FFI-safe type corresponding to the result of a root invocation.
-// I.e. InvokeStatus<int32_t> plus the gas consumed.
-struct ForeignRootInvokeResult {
-
+// FFI-safe type corresponding to the result of an invocation.
+// InvocationFrameOutput, gas consumed, and trace(optional)
+struct ForeignTracedInvokeResult {
   // Serialization of InvocationFrameOutpput
   struct FFIDataBuffer serialized_output;
 
@@ -166,6 +165,29 @@ struct OpenSyscallHandlerResult
 open_syscall_handler(void *db, void *rc,
                      struct FFISerializedSignedTransaction signed_tx);
 
+struct FFISerializedAuthClaimData {
+  const uint8_t *data;
+  uint32_t len;
+};
+
+struct FFISerializedInvocation {
+  const uint8_t *data;
+  uint32_t len;
+};
+
+struct OpenSyscallHandlerResult
+open_mocked_syscall_handler(void *db, void *rc,
+                            struct FFISerializedAuthClaimData auth_claim_data,
+                            const uint8_t source_tx_hash[32]);
+
+enum TestFFIErrorCode
+open_mock_invocation_frame(void *syscall_handler,
+                           struct FFISerializedInvocation invocation,
+                           int32_t invoke_flags);
+
+struct ForeignTracedInvokeResult
+finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);
+
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
 // Get the event log for the current transaction.
@@ -187,8 +209,8 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg5, uint64_t arg6,
                                                    uint64_t arg7);
 
-struct ForeignRootInvokeResult root_invoke(void *syscall_handler,
-                                           uint8_t enable_tracing);
+struct ForeignTracedInvokeResult root_invoke(void *syscall_handler,
+                                             uint8_t enable_tracing);
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 

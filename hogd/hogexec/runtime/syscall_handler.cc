@@ -133,6 +133,32 @@ SystemCallHandler::SystemCallHandler(
     snapshot_cache_(snapshot_cache)
 {}
 
+SystemCallHandler::SystemCallHandler(
+    StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
+    PerTransactionEventServerProxy event_server_proxy,
+    ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context,
+    AuthClaimData auth_claims, SHA256Hash source_tx_hash)
+  : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
+    event_server_proxy_(std::move(event_server_proxy)),
+    invocation_frame_stack_(
+        [this](InvocationFrame &&last_frame) {
+          commit_last_call_frame_success(std::move(last_frame));
+        },
+        db_proxy_),
+    source_tx_hash_(source_tx_hash), auth_claims_(std::move(auth_claims)),
+    newly_created_contracts_(),
+    execution_mode_data_(
+        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
+          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
+            return ProposalModeData{};
+          }
+          return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                                   std::get<ValidationModeCtor>(
+                                       execution_mode_ctor)};
+        }(std::move(execution_mode_ctor))),
+    snapshot_cache_(snapshot_cache)
+{}
+
 void
 SystemCallHandler::perform_initial_validation()
 {
@@ -174,7 +200,7 @@ SystemCallHandler::check_final_validation_data()
 }
 
 InvokeResult
-SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
+SystemCallHandler::root_invoke()
 {
   perform_initial_validation();
   // if validation fails, cumulative_invoke_result_ is set to the appropriate
@@ -183,12 +209,7 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
     return cumulative_invoke_result_;
   }
 
-  if (invocation.has_value()) {
-    if (root_invocation_.has_value()) {
-      panic("two root invocations provided");
-    }
-    root_invocation_ = std::move(invocation);
-  }
+  // root_invocation_ is nullopt only in the test harness
   CHECK(root_invocation_.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto const &root_invocation = root_invocation_.value();
@@ -224,14 +245,23 @@ SystemCallHandler::root_invoke(std::optional<Invocation> invocation)
 }
 
 InvocationFrameOutput
-SystemCallHandler::get_root_invocation_output() const
+SystemCallHandler::get_most_recent_frame_output() const
 {
-  assert(last_frame_finished_);
-  if (!last_frame_.has_value()) {
-    return InvocationFrameOutput(
-        InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+
+    if (!last_frame_.has_value()) {
+      return InvocationFrameOutput(
+          InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+    }
+    return last_frame_.value().get_frame_output();
   }
-  return last_frame_.value().get_frame_output();
+
+  assert(!invocation_frame_stack_.empty());
+  assert(invocation_frame_stack_.get_active_frame()
+             .child_return_output_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return *invocation_frame_stack_.get_active_frame().child_return_output_;
 }
 
 InvokeStatus<void>
@@ -405,6 +435,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
                       InvokeFlag::kInvokeFlagReadOnly>(flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
+  if (!invocation_frame_stack_.empty() && is_read_only()) {
+    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
+  }
 
   auto runtime = resolve_runtime(address);
   if (!runtime) {
@@ -417,61 +450,25 @@ SystemCallHandler::invoke(ContractAddress const &address,
     return std::pair{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 
-  if (!invocation_frame_stack_.empty() && is_read_only()) {
-    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
-  }
-
   Invocation invocation = {.invoked_address = address,
                            .entrypoint = entrypoint_from_method_id(method),
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  // Stash parent trace for nested calls, create child trace
-  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace;
-  if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
-    stashed_parent_trace = std::move(invocation_frame_trace_);
-    try {
-      invocation_frame_trace_ =
-          x23::Ptr<InvocationFrameTrace>(new InvocationFrameTrace());
-    } catch (std::exception &e) {
-      panic("Failed to create new invocation frame trace: {}", e.what());
-    }
-  }
-
-  start_frame(invocation, flags);
+  auto stashed_parent_trace = start_frame(invocation, flags);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
-  auto finish_status = finish_frame(cumulative_result.result_);
+  auto finish_status =
+      finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
-    // Restore parent trace on error path
-    if (stashed_parent_trace) {
-      invocation_frame_trace_ = std::move(stashed_parent_trace);
-    }
     return {finish_status.error().to_host_fn_error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
-
-  // Restore parent trace and attach child
-  if (stashed_parent_trace) {
-    auto child_trace = std::move(invocation_frame_trace_);
-    invocation_frame_trace_ = std::move(stashed_parent_trace);
-    // Attach child_trace to parent's last syscall (the Invoke entry)
-    assert(!invocation_frame_trace_->system_calls.empty());
-    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
-    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
-    try {
-      auto &out = invoke_body.invoke();
-      out.outputs.emplace(SyscallInvokeOutputs());
-      out.outputs->child_trace = std::move(*child_trace);
-    } catch (...) {
-      panic("impossible");
-    }
-  }
 
   auto out = cumulative_result.to_host_fn_result();
   if (out.first.has_value() &&
@@ -484,18 +481,36 @@ SystemCallHandler::invoke(ContractAddress const &address,
   return out;
 }
 
-void
-SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags)
+std::unique_ptr<InvocationFrameTrace>
+SystemCallHandler::start_frame(Invocation invocation,
+                               InvokeFlagSet flags) noexcept
 {
-  if (invocation_frame_trace_) {
-    invocation_frame_trace_->invocation = invocation;
+  assert(!last_frame_finished_);
+  std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
+  if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
+    stashed_parent_trace = std::move(invocation_frame_trace_);
+    try {
+      invocation_frame_trace_ = std::make_unique<InvocationFrameTrace>();
+    } catch (std::exception &e) {
+      panic("Failed to create new invocation frame trace: {}", e.what());
+    }
+  }
+  try {
+    if (invocation_frame_trace_) {
+      invocation_frame_trace_->invocation = invocation;
+    }
+  } catch (std::exception &e) {
+    panic("Failed to set invocation: {}", e.what());
   }
   invocation_frame_stack_.start_frame(invocation.invoked_address,
                                       std::move(invocation.calldata), flags);
+  return stashed_parent_trace;
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>
-SystemCallHandler::finish_frame(InvokeStatus<void> result)
+SystemCallHandler::finish_frame(
+    InvokeStatus<void> result,
+    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept
 {
   assert(!invocation_frame_stack_.empty());
   assert(!last_frame_finished_);
@@ -512,6 +527,23 @@ SystemCallHandler::finish_frame(InvokeStatus<void> result)
         invocation_frame_stack_.get_active_frame().get_frame_output();
   }
 
+  // Restore parent trace and attach child
+  if (stashed_parent_trace) {
+    auto child_trace = std::move(invocation_frame_trace_);
+    invocation_frame_trace_ = std::move(stashed_parent_trace);
+    // Attach child_trace to parent's last syscall (the Invoke entry)
+    assert(!invocation_frame_trace_->system_calls.empty());
+    auto &invoke_body = invocation_frame_trace_->system_calls.back().body;
+    CHECK(invoke_body.syscall_number() == SyscallNo::kInvoke);
+    try {
+      auto &out = invoke_body.invoke();
+      out.outputs.emplace(SyscallInvokeOutputs());
+      out.outputs->child_trace = std::move(*child_trace);
+    } catch (std::exception &e) {
+      panic("Failed to attach child trace to parent: {}", e.what());
+    }
+  }
+
   [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
   auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_);
   size_t stack_size_after = invocation_frame_stack_.size();
@@ -526,6 +558,11 @@ void
 SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
                                        GasAmount current_gas_remaining)
 {
+  if (!is_running()) {
+    warn("start_syscall_trace: no frame running, skipping trace");
+    return;
+  }
+
   if (invocation_frame_trace_) {
     invocation_frame_trace_->system_calls.push_back(SyscallTrace{
         .gas_remaining_at_start = current_gas_remaining,
@@ -543,6 +580,11 @@ void
 SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
                                         GasAmount gas_remaining_at_end)
 {
+  if (!is_running()) {
+    warn("finish_syscall_trace: no frame running, skipping trace");
+    return;
+  }
+
   if (invocation_frame_trace_) {
     assert(!invocation_frame_trace_->system_calls.empty());
     // field is uninitialized
@@ -601,7 +643,8 @@ SystemCallHandler::get_return_buffer() const
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
     return &top_frame.child_return_output_.value().abort_buffer();
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
   error("Unrecoverable; Invalid invocation frame status code: {}",
         top_frame.child_return_output_.value().status_code());

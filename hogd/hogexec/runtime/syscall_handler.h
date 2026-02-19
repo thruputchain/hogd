@@ -72,6 +72,14 @@ public:
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context);
 
+  // Constructor for test harness, mock infrastructure
+  SystemCallHandler(StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context, AuthClaimData auth_claims,
+                    SHA256Hash source_tx_hash);
+
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
   SystemCallHandler &operator=(SystemCallHandler &&ll) = delete;
@@ -107,17 +115,21 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
-  InvokeResult
-  root_invoke(std::optional<Invocation> root_invocation = std::nullopt);
-  // can only be called after root_invoke()
-  InvocationFrameOutput get_root_invocation_output() const;
+  InvokeResult root_invoke();
 
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
   // and from the SDK FFI bindings
-  void start_frame(Invocation invocation, InvokeFlagSet flags);
-  SystemStatus<std::pair<InvokeResult, bool>>
-  finish_frame(InvokeStatus<void> result);
+  //
+  // Returns the parent trace, if any, which should be stashed and restored in
+  // finish_frame
+  std::unique_ptr<InvocationFrameTrace>
+  start_frame(Invocation invocation, InvokeFlagSet flags) noexcept;
+  SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
+      InvokeStatus<void> result,
+      std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
+
+  InvocationFrameOutput get_most_recent_frame_output() const;
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;
@@ -126,6 +138,9 @@ public:
                            GasAmount current_gas_remaining);
   void finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
                             GasAmount gas_remaining_at_end);
+
+  bool last_frame_finished() const noexcept { return last_frame_finished_; }
+  bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
