@@ -1498,6 +1498,104 @@ protected:
           return {};
         });
 
+    // Method 44: delete_queue_create_bytestring_delete_bytestring_consume
+    // (concurrent_val)
+    // Delete queue -> create bytestring -> delete bytestring -> consume
+    builder.add<SerializationFormat::kTxs>(
+        44,
+        [](SystemCallHandler &handler,
+           uint32_t concurrent_val) -> InvokeStatus<void> {
+          // delete queue
+          auto [r1, _g1] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          // create bytestring
+          Bytestring bytestring =
+              NativeContractTestFramework::make_bytestring("test");
+          auto [r2, _g2] = syscall_BytestringSet_inner(
+              handler, kStorageKey, std::as_bytes(std::span(bytestring)),
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to create bytestring";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          // delete bytestring
+          auto [r3, _g3] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete bytestring";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          // consume concurrent entry
+          auto [r4, _g4] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(concurrent_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r4.has_value() ||
+              r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume concurrent entry";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          return {};
+        });
+
+    // Method 45: delete_queue_create_bytestring_consume(concurrent_val)
+    // Delete queue -> create bytestring -> consume (without deleting
+    // bytestring)
+    builder.add<SerializationFormat::kTxs>(
+        45,
+        [](SystemCallHandler &handler,
+           uint32_t concurrent_val) -> InvokeStatus<void> {
+          // delete queue
+          auto [r1, _g1] = syscall_DeleteObject_inner(
+              handler, kStorageKey,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          // create bytestring
+          Bytestring bytestring =
+              NativeContractTestFramework::make_bytestring("test");
+          auto [r2, _g2] = syscall_BytestringSet_inner(
+              handler, kStorageKey, std::as_bytes(std::span(bytestring)),
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to create bytestring";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          // consume concurrent entry (without deleting bytestring)
+          auto [r3, _g3] =
+              handler.invoke(kContractAddress, 1,
+                             std::numeric_limits<GasAmount>::max(),
+                             x23::serialize(concurrent_val),
+                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume concurrent entry";
+            return InvokeError{InvokeErrorCode::kInvokeNone};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -1834,6 +1932,52 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
 
   // Verify that the one item left is the one inserted at the end
   invoke_method(1, uint32_t{99});
+}
+
+// Start with a nonempty queue. Delete the item, create a bytestring,
+// delete the bytestring, then consume from the queue. A concurrent tx has
+// inserted a retrocausal item into the queue.
+TEST_P(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
+{
+  // Insert an item in a previous block so queue is nonempty
+  insert(42);
+
+  advance_block();
+
+  // Concurrent tx inserts a retrocausal item
+  insert(99);
+
+  // In this block: delete queue, create bytestring, delete bytestring,
+  // consume concurrent retrocausal item
+  invoke_method(44, uint32_t{99});
+
+  advance_block();
+
+  // Verify the concurrent item was consumed
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Start with a nonempty queue. Delete the item, create a bytestring,
+// then consume from the queue (without deleting the bytestring). A concurrent
+// tx has inserted a retrocausal item into the queue.
+TEST_P(RCQDeleteTest, DeleteCreateBytestringConsume)
+{
+  // Insert an item in a previous block so queue is nonempty
+  insert(42);
+
+  advance_block();
+
+  // Concurrent tx inserts a retrocausal item
+  insert(99);
+
+  // In this block: delete queue, create bytestring, consume concurrent
+  // retrocausal item (without deleting bytestring)
+  invoke_method(45, uint32_t{99});
+
+  advance_block();
+
+  // Verify the concurrent item was consumed
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Test that we only output the consume if entries are actually consumed.
