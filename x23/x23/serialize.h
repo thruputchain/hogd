@@ -721,9 +721,12 @@ struct Deserializer
   template<bool Safe, is_xdr_cat<XdrCategory::kVec> X> void go(X &x)
   {
     size_t size = get32<Safe>();
-    if (size > X::max_size()) [[unlikely]]
-      raise("length {} exceeds maximum deserializing {}", size,
-            xdr_type_name<X>());
+    // TODO(geoff): the following code would standardize behavior on bad input vecs
+    // as throwing XdrBadInput, instead of the current behavior (throw XdrLengthError).
+    // Before making this change (an extra if statement), do a proper set of end to end benchmarks
+    // if (size > X::max_size()) [[unlikely]]
+    //   raise("length {} exceeds maximum deserializing {}", size,
+    //         xdr_type_name<X>());
     x.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     x.reserve(

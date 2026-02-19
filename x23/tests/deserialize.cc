@@ -89,6 +89,12 @@ TEST(Deserialize, OpaqueVectorTooLarge)
   std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x09};
   input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7, 8});
   EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+
+  x23::Vec<uint8_t, 4> vec2;
+
+  std::vector<uint8_t> input = {0x00, 0x00, 0x00, 0x08};
+  input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
+  EXPECT_THROW(deserialize(&vec2, BufView(input)), x23::XdrBadInput);
 }
 
 TEST(Deserialize, VectorTooLarge)
