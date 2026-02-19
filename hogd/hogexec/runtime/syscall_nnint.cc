@@ -10,6 +10,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"

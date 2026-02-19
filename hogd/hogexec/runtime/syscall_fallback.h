@@ -10,7 +10,6 @@
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "types.hh"
 
 namespace hogd {
 
