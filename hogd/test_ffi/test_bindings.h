@@ -46,10 +46,9 @@ struct ForeignInvokeResult {
                  // to an InvokeStatus<void>{}
 };
 
-// FFI-safe type corresponding to the result of a root invocation.
-// I.e. InvokeStatus<int32_t> plus the gas consumed.
-struct ForeignRootInvokeResult {
-
+// FFI-safe type corresponding to the result of an invocation.
+// InvocationFrameOutput, gas consumed, and trace(optional)
+struct ForeignTracedInvokeResult {
   // Serialization of InvocationFrameOutpput
   struct FFIDataBuffer serialized_output;
 
@@ -186,8 +185,8 @@ open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            uint32_t invoke_flags);
 
-enum TestFFIErrorCode finish_mock_invocation_frame(void *syscall_handler,
-                                                   int32_t invoke_error_code);
+struct ForeignTracedInvokeResult
+finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
@@ -210,8 +209,8 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg5, uint64_t arg6,
                                                    uint64_t arg7);
 
-struct ForeignRootInvokeResult root_invoke(void *syscall_handler,
-                                           uint8_t enable_tracing);
+struct ForeignTracedInvokeResult root_invoke(void *syscall_handler,
+                                             uint8_t enable_tracing);
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 

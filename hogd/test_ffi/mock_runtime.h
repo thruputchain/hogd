@@ -1,20 +1,20 @@
 #pragma once
 
 #include <cstddef>
-#include <exception>
 #include <map>
 #include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
 
-#include "address_auth.hh"
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "transaction.hh"
 
 namespace hogd {
 
@@ -95,13 +95,58 @@ public:
     gas_remaining_ = gas;
   }
 
-  std::span<std::byte> get_memory() noexcept override { std::terminate(); }
+  std::span<std::byte> get_memory() noexcept override
+  {
+    panic("unreachable: MockRuntime::get_memory called");
+  }
 
 private:
   InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
   MockContract backing_contract_;
   uint64_t gas_remaining_ = 0;
+};
+
+class EmptyRuntime : public Runtime {
+public:
+  EmptyRuntime(Invocation const &invocation)
+    : Runtime(std::make_unique<HostCallContext>())
+  {
+    gas_remaining_ = invocation.gas_limit;
+    initial_gas_ = invocation.gas_limit;
+  }
+
+  ~EmptyRuntime() override = default;
+
+  [[nodiscard]] uint64_t get_available_gas() const noexcept override
+  {
+    return gas_remaining_;
+  }
+
+  void set_available_gas(uint64_t gas) noexcept override
+  {
+    gas_remaining_ = gas;
+  }
+
+  uint64_t get_consumed_gas() const noexcept
+  {
+    assert(gas_remaining_ <= initial_gas_);
+    return initial_gas_ - gas_remaining_;
+  }
+
+  std::span<std::byte> get_memory() noexcept override
+  {
+    panic("unreachable: EmptyRuntime::get_memory called");
+  }
+
+private:
+  InvokeStatus<void> invoke_internal(std::string_view /*unused*/) override
+  {
+    panic("unreachable: EmptyRuntime::invoke_internal called");
+  }
+
+  uint64_t gas_remaining_ = 0;
+  uint64_t initial_gas_ = 0;
 };
 
 } // namespace hogd

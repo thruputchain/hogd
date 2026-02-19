@@ -58,6 +58,7 @@ public:
         }
       }
     }
+    CHECK(mock_runtime_stack_.empty());
   }
 
   SyscallHandlerContext(SyscallHandlerContext const &) = delete;
@@ -65,10 +66,12 @@ public:
   SyscallHandlerContext(SyscallHandlerContext &&) = delete;
   SyscallHandlerContext &operator=(SystemCallHandler &&) = delete;
 
-  ForeignRootInvokeResult root_invoke();
+  ForeignTracedInvokeResult root_invoke();
 
-  TestFFIErrorCode start_mock_invocation_frame(Invocation const& invocation, uint32_t invoke_flags);
-  std::expected<InvocationFrameOutput, TestFFIErrorCode> finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
+  TestFFIErrorCode start_mock_invocation_frame(Invocation const &invocation,
+                                               uint32_t invoke_flags);
+  ForeignTracedInvokeResult
+  finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
   static SyscallHandlerContext *get_context() { return current_context_; }
 
@@ -76,6 +79,8 @@ public:
   bool push_context()
   {
     if (get_context() != nullptr) {
+      error("push_context error: threadlocal SyscallHandlerContext already "
+            "exists");
       return false;
     }
 
@@ -92,20 +97,20 @@ public:
     assert(mock_runtime_stack_.empty());
   }
 
-  void push_mock_runtime(MockRuntime *runtime)
+  void push_mock_runtime(Runtime *runtime)
   {
-    assert(get_context() == this);
     mock_runtime_stack_.push_back(runtime);
   }
 
-  void pop_mock_runtime()
+  Runtime *pop_mock_runtime()
   {
-    assert(get_context() == this);
     assert(!mock_runtime_stack_.empty());
+    auto *runtime = mock_runtime_stack_.back();
     mock_runtime_stack_.pop_back();
+    return runtime;
   }
 
-  MockRuntime *get_mock_runtime()
+  Runtime *get_mock_runtime()
   {
     assert(get_context() == this);
     assert(!mock_runtime_stack_.empty());
@@ -122,14 +127,26 @@ public:
   void mark_committed_or_aborted() { transaction_committed_or_aborted_ = true; }
 
 private:
+  constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
+  constexpr static auto kMakeFFIError =
+      [](TestFFIErrorCode code) -> ForeignTracedInvokeResult {
+    return {
+        .serialized_output = kNullBuffer,
+        .gas_consumed = 0,
+        .serialized_trace = kNullBuffer,
+        .ffi_error_code = code,
+    };
+  };
+
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
 
   SystemCallHandler handler_;
-  std::vector<MockRuntime *> mock_runtime_stack_;
-  std::vector<std::unique_ptr<InvocationFrameTrace>> invocation_frame_trace_stack_;
+  std::vector<Runtime *> mock_runtime_stack_;
+  std::vector<std::unique_ptr<InvocationFrameTrace>>
+      invocation_frame_trace_stack_;
   bool transaction_committed_or_aborted_ = false;
   bool is_mocked_handler_;
 };

@@ -258,8 +258,10 @@ SystemCallHandler::get_most_recent_frame_output() const
   }
 
   assert(!invocation_frame_stack_.empty());
-  assert(invocation_frame_stack_.get_active_frame().child_return_output_.has_value());
-  return invocation_frame_stack_.get_active_frame().child_return_output_.value();
+  assert(invocation_frame_stack_.get_active_frame()
+             .child_return_output_.has_value());
+  return invocation_frame_stack_.get_active_frame()
+      .child_return_output_.value();
 }
 
 InvokeStatus<void>
@@ -631,7 +633,8 @@ SystemCallHandler::get_return_buffer() const
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
     return &top_frame.child_return_output_.value().abort_buffer();
   case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
   error("Unrecoverable; Invalid invocation frame status code: {}",
         top_frame.child_return_output_.value().status_code());

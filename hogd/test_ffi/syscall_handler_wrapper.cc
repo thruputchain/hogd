@@ -15,6 +15,7 @@
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include <expected>
 #include <memory>
 #include <utility>
 
@@ -41,20 +42,9 @@ SyscallHandlerContext::SyscallHandlerContext(
     is_mocked_handler_(true)
 {}
 
-ForeignRootInvokeResult
+ForeignTracedInvokeResult
 SyscallHandlerContext::root_invoke()
 {
-  constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
-  constexpr static auto kMakeFFIError =
-      [](TestFFIErrorCode code) -> ForeignRootInvokeResult {
-    return {
-        .serialized_output = kNullBuffer,
-        .gas_consumed = 0,
-        .serialized_trace = kNullBuffer,
-        .ffi_error_code = code,
-    };
-  };
-
   if (is_mocked_handler_) {
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
@@ -86,7 +76,7 @@ SyscallHandlerContext::root_invoke()
       serialized_trace = s.value();
     }
 
-    return ForeignRootInvokeResult{
+    return ForeignTracedInvokeResult{
         .serialized_output = serialized_output.value(),
         .gas_consumed = res.gas_consumed_,
         .serialized_trace = serialized_trace,
@@ -113,60 +103,95 @@ SyscallHandlerContext::root_invoke()
   }
 }
 
-TestFFIErrorCode 
-SyscallHandlerContext::start_mock_invocation_frame(Invocation const& invocation, uint32_t invoke_flags)
+TestFFIErrorCode
+SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
+                                                   uint32_t invoke_flags)
 {
-  if (!is_mocked_handler_)
-  {
-    error("unrecoverable: start_mock_invocation_frame called on non-mocked handler");
+  if (!is_mocked_handler_) {
+    error("unrecoverable: start_mock_invocation_frame called on non-mocked "
+          "handler");
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  if (handler_.last_frame_finished())
-  {
-    error("unrecoverable: start_mock_invocation_frame called after last frame finished");
+  if (handler_.last_frame_finished()) {
+    error("unrecoverable: start_mock_invocation_frame called after last frame "
+          "finished");
     return kTestFFIErrorCodeUnrecoverableError;
   }
-  
+
   auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags);
   if (stashed_parent_trace) {
     invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
   }
+
+  push_mock_runtime(new EmptyRuntime(invocation));
   return kTestFFIErrorCodeNone;
 }
 
-std::expected<InvocationFrameOutput, TestFFIErrorCode> 
-SyscallHandlerContext::finish_mock_invocation_frame(InvokeErrorCode invoke_error_code)
+ForeignTracedInvokeResult
+SyscallHandlerContext::finish_mock_invocation_frame(
+    InvokeErrorCode invoke_error_code)
 {
-  if (!is_mocked_handler_)
-  {
-    error("unrecoverable: finish_mock_invocation_frame called on non-mocked handler");
-    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  if (!is_mocked_handler_) {
+    error("unrecoverable: finish_mock_invocation_frame called on non-mocked "
+          "handler");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
-  if (handler_.last_frame_finished())
-  {
-    error("unrecoverable: finish_mock_invocation_frame called after last frame finished");
-    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+  if (handler_.last_frame_finished()) {
+    error("unrecoverable: finish_mock_invocation_frame called after last frame "
+          "finished");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
-  if (!invocation_frame_trace_stack_.empty())
-  {
+  if (!invocation_frame_trace_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_stack_.back());
     invocation_frame_trace_stack_.pop_back();
   }
 
-  InvokeStatus<void> result = (invoke_error_code == InvokeErrorCode::kInvokeNone) ? InvokeStatus<void>{} : InvokeError{invoke_error_code};
-  
+  InvokeStatus<void> result =
+      (invoke_error_code == InvokeErrorCode::kInvokeNone)
+          ? InvokeStatus<void>{}
+          : InvokeError{invoke_error_code};
+
   auto res = handler_.finish_frame(result, std::move(stashed_parent_trace));
   if (!res.has_value()) {
-    error("unrecoverable: finish_mock_invocation_frame failed: {}", res.error());
-    return std::unexpected(kTestFFIErrorCodeUnrecoverableError);
+    error("unrecoverable: finish_mock_invocation_frame failed: {}",
+          res.error());
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
 
-  
-}
+  auto *runtime = pop_mock_runtime();
+  CHECK(runtime != nullptr);
+  auto *empty_runtime = dynamic_cast<EmptyRuntime *>(runtime);
+  CHECK(empty_runtime != nullptr);
+  uint64_t consumed_gas = empty_runtime->get_consumed_gas();
+  x23::Defer _([runtime]() { delete runtime; });
 
+  auto frame_output = handler_.get_most_recent_frame_output();
+
+  auto serialized_output = serialize_to_ffi_data_buffer(frame_output);
+  if (!serialized_output.has_value()) {
+    return kMakeFFIError(serialized_output.error());
+  }
+
+  FFIDataBuffer serialized_trace = kNullBuffer;
+  auto const *trace = handler_.get_trace();
+  if (trace) {
+    auto s = serialize_to_ffi_data_buffer(*trace);
+    if (!s.has_value()) {
+      return kMakeFFIError(s.error());
+    }
+    serialized_trace = s.value();
+  }
+
+  return ForeignTracedInvokeResult{
+      .serialized_output = serialized_output.value(),
+      .gas_consumed = consumed_gas,
+      .serialized_trace = serialized_trace,
+      .ffi_error_code = kTestFFIErrorCodeNone,
+  };
+}
 
 } // namespace hogd

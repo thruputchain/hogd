@@ -867,4 +867,70 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
             InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
 }
 
+TEST(TestBindingsTest, ManualOpenCloseFrameTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  AuthClaimData auth_claim_data = {};
+  auto serialized_auth_claim_data = x23::serialize(auth_claim_data);
+  FFISerializedAuthClaimData ffi_auth_claim_data = {
+      .data = serialized_auth_claim_data.data(),
+      .len = static_cast<uint32_t>(serialized_auth_claim_data.size()),
+  };
+
+  SHA256Hash source_tx_hash{};
+
+  auto handler = open_mocked_syscall_handler(db, rc, ffi_auth_claim_data,
+                                             source_tx_hash.data());
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  // can't root invoke on a mocked handler
+
+  auto result = root_invoke(handler.syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+
+  Invocation invocation = {
+      .invoked_address =
+          ContractAddress{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 10000,
+      .calldata = {},
+  };
+  auto serialized_invocation = x23::serialize(invocation);
+  FFISerializedInvocation ffi_invocation = {
+      .data = serialized_invocation.data(),
+      .len = static_cast<uint32_t>(serialized_invocation.size()),
+  };
+  auto open_res =
+      open_mock_invocation_frame(handler.syscall_handler, ffi_invocation, 0);
+  EXPECT_EQ(open_res, kTestFFIErrorCodeNone);
+
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_NE(finish_res.serialized_output.data, nullptr);
+  x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                         finish_res.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.return_buffer().size(), 0);
+  EXPECT_EQ(finish_res.gas_consumed, 0);
+  EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
+  EXPECT_EQ(finish_res.serialized_trace.len, 0);
+
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+}
+
 } // namespace hogd
