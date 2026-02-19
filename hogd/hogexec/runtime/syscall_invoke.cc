@@ -196,6 +196,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   // returns an error.
   if (input_buffer.size() > kMaxReturnBufferLen) {
     return {HostFnError{HostFnErrorCode::kHostExit},
+            // TODO(geoff): this is a fucked conversion lmao
             static_cast<int32_t>(
                 SyscallErrorCode::kSyscallErrorCodeDeterministicWasm)};
   }
