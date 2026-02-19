@@ -398,7 +398,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           uint32_t invoke_flags) noexcept
+                           int32_t invoke_flags) noexcept
 {
   ffi_trace("FFI: open_mock_invocation_frame(syscall_handler={}, "
             "invocation={}, invoke_flags={}) -> ()",
@@ -949,7 +949,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           uint32_t invoke_flags)
+                           int32_t invoke_flags)
 {
   return hogd::open_mock_invocation_frame(syscall_handler, invocation,
                                           invoke_flags);

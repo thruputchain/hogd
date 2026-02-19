@@ -183,7 +183,7 @@ open_mocked_syscall_handler(void *db, void *rc,
 enum TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           uint32_t invoke_flags);
+                           int32_t invoke_flags);
 
 struct ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);

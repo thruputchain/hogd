@@ -69,7 +69,7 @@ public:
   ForeignTracedInvokeResult root_invoke();
 
   TestFFIErrorCode start_mock_invocation_frame(Invocation const &invocation,
-                                               uint32_t invoke_flags);
+                                               InvokeFlagSet invoke_flags);
   ForeignTracedInvokeResult
   finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
