@@ -22,7 +22,7 @@ namespace hogd {
 
 // Computes the SHA256 hash of the input buffer and returns the gas cost
 // Returns: Status code and gas cost for the operation
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_SHA256_inner(SystemCallHandler &handler,
                      std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash) noexcept
@@ -40,29 +40,29 @@ syscall_SHA256_inner(SystemCallHandler &handler,
     }
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          SHA256HashCost(input_buffer.size())};
+          WrappedGasAmount{SHA256HashCost(input_buffer.size())}};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
                            std::span<const std::byte> input_buffer,
                            bool input_reset) noexcept
 {
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
-    return {r.error().code(), 0};
+    return {r.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
                              SHA256Hash &output_output) noexcept
 {
   auto r = handler.sha256_finalize(input_index);
   if (!r.has_value()) {
-    return {r.error().code(), 0};
+    return {r.error().code(), WrappedGasAmount{0}};
   }
   output_output = r.value();
   if (auto *trace_data =
@@ -75,13 +75,13 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 // Verifies a cryptographic signature against a message using the provided
 // public key
 // Returns: Status code indicating if verification succeeded and gas cost
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_VerifySignature_inner(int32_t input_scheme,
                               std::span<const std::byte> input_signature,
                               std::span<const std::byte> input_public_key,
@@ -94,17 +94,20 @@ syscall_VerifySignature_inner(int32_t input_scheme,
   case CryptographicScheme::Ed25519:
     if (input_public_key.size() != sizeof(Ed25519PublicKey) ||
         input_signature.size() != sizeof(Ed25519Signature)) {
-      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+              WrappedGasAmount{0}};
     }
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {
       trace("Signature verification failed");
-      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+              WrappedGasAmount{0}};
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
   default:
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 }
 

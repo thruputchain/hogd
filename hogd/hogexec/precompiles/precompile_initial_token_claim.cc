@@ -37,7 +37,7 @@ namespace {
 StorageKeyContractData
 calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
                       ContractEntrypointID entrypoint,
-                      std::span<const std::uint8_t> calldata)
+                      Calldata const&  calldata)
 {
   // Create the key data: "Initial Deployment" || hash || nonce || entrypoint ||
   // calldata
@@ -119,7 +119,7 @@ make_native_initial_token_claim_contract()
 
         // Create storage key: sha256("Initial Deployment" || hash || nonce ||
         // entrypoint || calldata)
-        auto contract_data_key =
+        StorageKeyContractData contract_data_key =
             calculate_storage_key(hash, nonce, entrypoint, calldata);
 
         auto allocation = load_allocation(handler, contract_data_key);

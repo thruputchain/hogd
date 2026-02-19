@@ -17,7 +17,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
                                        WrappedGasAmount remaining_gas,
                                        TransactionStatistic input_statistic,
@@ -25,7 +25,7 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
 {
   switch (input_statistic) {
   case TransactionStatistic::kTxStatGasRemaining:
-    output_result = remaining_gas.gas_amount_;
+    output_result = remaining_gas.get();
     if (auto *trace_data = syscall_handler.get_syscall_trace_data<
                            SyscallNo::kGetTransactionStatistics>()) {
       try {
@@ -36,9 +36,10 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
               SyscallNo::kGetTransactionStatistics, e.what());
       }
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
   default:
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 };
 
