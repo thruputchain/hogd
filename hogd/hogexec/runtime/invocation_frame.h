@@ -45,8 +45,8 @@ public:
   ContractAddress const &address() const { return address_; }
   Calldata const &calldata() const { return calldata_; }
 
-  // The value of the last _child_ call frame's returned string.
-  // Set to nullopt on failed calls, or before any child call happens.
+  // The value of the last _child_ call frame's return value.
+  // Set to nullopt before any child call happens.
   std::optional<InvocationFrameOutput> child_return_output_ = std::nullopt;
 
   // merge child invocation frame into self

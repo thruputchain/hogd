@@ -13,7 +13,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/syscall_fallback.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"

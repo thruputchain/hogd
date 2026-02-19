@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -22,8 +24,11 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -34,6 +39,10 @@ class SyscallHandlerContext {
 public:
   SyscallHandlerContext(MockRuntimeContext *context,
                         SignedTransaction const &stx, DBContext &db);
+
+  SyscallHandlerContext(MockRuntimeContext *context, DBContext &db,
+                        AuthClaimData const &auth_claim_data,
+                        SHA256Hash const &source_tx_hash);
 
   ~SyscallHandlerContext()
   {
@@ -49,6 +58,7 @@ public:
         }
       }
     }
+    CHECK(mock_runtime_stack_.empty());
   }
 
   SyscallHandlerContext(SyscallHandlerContext const &) = delete;
@@ -56,7 +66,12 @@ public:
   SyscallHandlerContext(SyscallHandlerContext &&) = delete;
   SyscallHandlerContext &operator=(SystemCallHandler &&) = delete;
 
-  ForeignRootInvokeResult root_invoke();
+  ForeignTracedInvokeResult root_invoke();
+
+  TestFFIErrorCode start_mock_invocation_frame(Invocation const &invocation,
+                                               InvokeFlagSet invoke_flags);
+  ForeignTracedInvokeResult
+  finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
   static SyscallHandlerContext *get_context() { return current_context_; }
 
@@ -64,6 +79,8 @@ public:
   bool push_context()
   {
     if (get_context() != nullptr) {
+      error("push_context error: threadlocal SyscallHandlerContext already "
+            "exists");
       return false;
     }
 
@@ -80,23 +97,24 @@ public:
     assert(mock_runtime_stack_.empty());
   }
 
-  void push_mock_runtime(MockRuntime *runtime)
+  void push_mock_runtime(Runtime *runtime)
   {
-    assert(get_context() == this);
     mock_runtime_stack_.push_back(runtime);
   }
 
-  void pop_mock_runtime()
+  Runtime *pop_mock_runtime()
   {
-    assert(get_context() == this);
     assert(!mock_runtime_stack_.empty());
+    auto *runtime = mock_runtime_stack_.back();
     mock_runtime_stack_.pop_back();
+    return runtime;
   }
 
-  MockRuntime *get_mock_runtime()
+  Runtime *get_mock_runtime()
   {
-    assert(get_context() == this);
-    assert(!mock_runtime_stack_.empty());
+    if (mock_runtime_stack_.empty()) {
+      return nullptr;
+    }
     return mock_runtime_stack_.back();
   }
 
@@ -110,14 +128,28 @@ public:
   void mark_committed_or_aborted() { transaction_committed_or_aborted_ = true; }
 
 private:
+  constexpr static auto kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
+  constexpr static auto kMakeFFIError =
+      [](TestFFIErrorCode code) -> ForeignTracedInvokeResult {
+    return {
+        .serialized_output = kNullBuffer,
+        .gas_consumed = 0,
+        .serialized_trace = kNullBuffer,
+        .ffi_error_code = code,
+    };
+  };
+
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
 
   SystemCallHandler handler_;
-  std::vector<MockRuntime *> mock_runtime_stack_;
+  std::vector<Runtime *> mock_runtime_stack_;
+  std::vector<std::unique_ptr<InvocationFrameTrace>>
+      invocation_frame_trace_stack_;
   bool transaction_committed_or_aborted_ = false;
+  bool is_mocked_handler_;
 };
 
 constexpr ForeignHostFnResult
@@ -164,7 +196,7 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
   }
 
   auto *mock_runtime = handler->get_mock_runtime();
-  assert(mock_runtime != nullptr);
+  CHECK(mock_runtime != nullptr);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
