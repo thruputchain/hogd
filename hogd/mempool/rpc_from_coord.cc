@@ -471,10 +471,14 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
     x23::span<SignedTransaction> txs_span(cache.txs.begin() + num_scheduled,
                                           cache.txs.end());
     num_scheduled = cache.tx_hashes.size();
-    handles.push_back(
-        propose_batch_in_chunks(cache.block_id, txs_span,
-                                cache.transaction_nomination_chunks[i],
-                                ret_span));
+    {
+      ElapsedTimer timer;
+      handles.push_back(
+          propose_batch_in_chunks(cache.block_id, txs_span,
+                                  cache.transaction_nomination_chunks[i],
+                                  ret_span));
+      info("schedule() propose_batch_in_chunks() took {}", timer.elapsed());
+    }
   }
   record_stage(stage_schedule_loop);
 
