@@ -1536,9 +1536,4 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
             InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
 }
 
-// Note: MockFrameEventTest is not implemented here because mock frames
-// bypass root_invoke(), so try_commit_transaction() is not supported.
-// Event logging within mock frames can be tested via the root_invoke path
-// (see MockContractCreateEventTest).
-
 } // namespace hogd
