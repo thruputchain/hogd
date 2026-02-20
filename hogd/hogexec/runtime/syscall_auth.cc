@@ -1,7 +1,5 @@
 
-#include "auth_claim.hh"
-#include "ffi_enums.hh"
-#include "hogd/hogexec/runtime/ffi_helpers.h"
+
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -12,10 +10,14 @@
 #include <utility>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/rust/contract_types/bindings.h"
 #include "syscall.hh"
 #include "syscall_error.hh"

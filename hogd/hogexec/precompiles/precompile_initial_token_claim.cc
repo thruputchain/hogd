@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -113,7 +112,7 @@ make_native_initial_token_claim_contract()
   builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
       [](SystemCallHandler &handler, NativeRuntime & /*unused*/,
          SHA256Hash hash, SHA256Hash nonce, ContractEntrypointID entrypoint,
-         x23::Vec<uint8_t, 4294967295> calldata) -> InvokeStatus<void> {
+         Calldata const &calldata) -> InvokeStatus<void> {
         trace("initial token claim claim_initial_tokens");
 
         // Create storage key: sha256("Initial Deployment" || hash || nonce ||
