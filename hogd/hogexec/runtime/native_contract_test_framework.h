@@ -574,6 +574,13 @@ public:
         db_wrapper_);
   }
 
+  // Only valid when test_db == kHogDB. Returns the underlying HogDB DAO
+  // for direct storage inspection in tests.
+  HogDBDAO &get_hogdb_dao()
+  {
+    return std::get<HogdbWrapper>(db_wrapper_).get_db();
+  }
+
 private:
   void write_deployment(ContractAddress const &addr,
                         DeployedContractHash const &deployment,

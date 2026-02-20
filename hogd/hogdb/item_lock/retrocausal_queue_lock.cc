@@ -375,6 +375,14 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     //     block. The old item must be removed even though no RCQ metadata
     //     existed.
     if (base_metadata.live_entries > 0) {
+      // Clean up all past blocks before removing metadata.
+      uint64_t start_block =
+          base_metadata.consume_state.max_fully_consumed_block_number + 1;
+      for (uint64_t b = start_block; b <= base_metadata.max_live_block_num;
+           ++b) {
+        CHECK(ctx.dao->remove_retrocausal_queue_block(ctx.key, b).has_value());
+      }
+
       CHECK(ctx.dao->remove_retrocausal_queue_metadata(ctx.key).has_value());
       CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
                                                         kRetrocausalQueue)
@@ -413,6 +421,45 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
     return added_entries_[index];
   }
   return std::nullopt;
+}
+
+HogDBStatus<void>
+RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx)
+{
+  assert(ctx.dao);
+
+  // Read the RCQ metadata to find all blocks that need cleanup
+  auto meta_ret = ctx.dao->read_retrocausal_queue_metadata(ctx.key);
+  if (!meta_ret.has_value()) {
+    // If metadata doesn't exist, it's a no-op (deleting non-existent RCQ)
+    if (meta_ret.error() == HogDBCode::kNotFound) {
+      return {};
+    }
+    return meta_ret.error();
+  }
+
+  auto const &meta = meta_ret.value();
+
+  // Remove all unconsumed blocks from the DAO.
+  // Note: Blocks are not in the merkle trie, only the metadata is.
+  // TODO(stutsman): This is a severe bug that will be fixed in a coming patch.
+  uint64_t start_block = meta.consume_state.max_fully_consumed_block_number + 1;
+  for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
+    auto block_remove = ctx.dao->remove_retrocausal_queue_block(ctx.key, b);
+    if (!block_remove.has_value()) {
+      return block_remove.error();
+    }
+  }
+
+  // Remove the metadata from the DAO.
+  // Note: The caller is responsible for removing the metadata from the merkle
+  // trie, as this method doesn't have access to the trie parameter.
+  auto meta_remove = ctx.dao->remove_retrocausal_queue_metadata(ctx.key);
+  if (!meta_remove.has_value()) {
+    return meta_remove.error();
+  }
+
+  return {};
 }
 
 } // namespace hogd

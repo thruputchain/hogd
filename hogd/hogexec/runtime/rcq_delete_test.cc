@@ -13,6 +13,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -2447,6 +2448,116 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   // The queue should be empty: one insert, one consume, net zero.
   // If the bogus metadata leaked through, we'd see 9999+ live entries or
   // a conservation invariant failure.
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Verifies that when an RCQ with entries in past (committed) blocks is
+// purely deleted, the underlying block records in the DAO are also removed.
+// This catches a storage leak where DeletionLock::write_committed_change only
+// removes the metadata record but leaves orphaned block records behind.
+TEST_P(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "Block record check requires HogDB DAO access";
+  }
+
+  // Block 1: insert an entry
+  insert(10);
+
+  advance_block();
+
+  // Block 2: insert another entry (creates a second past block)
+  insert(20);
+
+  advance_block();
+
+  // Sanity: the RCQ exists with 2 entries across 2 blocks.
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 2);
+
+  // Get DAO access to check block records directly.
+  auto &dao = get_hogdb_dao();
+  auto item_key = make_item_key(get_queue_addrkey());
+
+  // Verify blocks exist before delete.
+  auto block1 = dao.read_retrocausal_queue_block(item_key, 1);
+  ASSERT_TRUE(block1.has_value()) << "Block 1 should exist before delete";
+  auto block2 = dao.read_retrocausal_queue_block(item_key, 2);
+  ASSERT_TRUE(block2.has_value()) << "Block 2 should exist before delete";
+
+  // Block 3: pure delete (no insert, no consume)
+  invoke_method(31);
+
+  advance_block();
+
+  // Metadata should be gone.
+  auto after = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_FALSE(after.has_value()) << "RCQ metadata should be removed";
+
+  // Block records should also be gone.
+  auto block1_after = dao.read_retrocausal_queue_block(item_key, 1);
+  EXPECT_FALSE(block1_after.has_value())
+      << "Block 1 should be removed after pure delete (storage leak)";
+  auto block2_after = dao.read_retrocausal_queue_block(item_key, 2);
+  EXPECT_FALSE(block2_after.has_value())
+      << "Block 2 should be removed after pure delete (storage leak)";
+}
+
+// Delete an RCQ with multiple past blocks, then in a later block re-insert.
+// The new queue should contain only the newly inserted entry — none of the
+// old entries should survive.
+TEST_P(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
+{
+  // Block 1: insert entries that become past block entries
+  insert(10);
+  insert(20);
+
+  advance_block();
+
+  // Block 2: insert another entry (second past block)
+  insert(30);
+
+  advance_block();
+
+  // Sanity: 3 entries across 2 past blocks
+  {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+    ASSERT_EQ(queue->metadata().live_entries, 3);
+  }
+
+  // Block 3: pure delete
+  invoke_method(31);
+
+  advance_block();
+
+  // Item should be gone
+  {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+    ASSERT_FALSE(queue.has_value()) << "RCQ should be removed after delete";
+  }
+
+  // Block 4: fresh insert into the same key
+  insert(99);
+
+  advance_block();
+
+  // The queue should exist with exactly 1 entry — the newly inserted one.
+  {
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+    ASSERT_EQ(queue->metadata().live_entries, 1);
+  }
+
+  // Consume the entry to verify it's the new one (99), not an old one.
+  invoke_method(1, uint32_t{99});
+
+  advance_block();
+
   ASSERT_TRUE(check_rcq_empty());
 }
 
