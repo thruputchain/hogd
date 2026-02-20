@@ -89,6 +89,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   record_stage(stage_deserialize_batch);
 
   x23::CoroGuard cg;
+  co_await cg(commit_lock_);
   record_stage(stage_wait_commit_lock);
 
   AuthErrorCodeBatch auth_ret =
