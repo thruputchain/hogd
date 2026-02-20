@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -8,11 +9,52 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 
 namespace hogd {
+
+// Validate and convert a uint64_t to a narrower integral type.
+// Returns std::nullopt if the input is not a valid encoding of the target type:
+// - Unsigned types narrower than uint64_t reject upper-bit overflow.
+// - Signed types narrower than int64_t require sign-extended encoding.
+// - 64-bit types accept all bit patterns.
+template<std::integral T> requires (sizeof(T) <= 8)
+constexpr std::optional<T>
+narrow_int_checked(uint64_t input)
+{
+  if constexpr (std::is_signed_v<T>) {
+    constexpr auto kNumBits = sizeof(T) * 8;
+
+    if constexpr (kNumBits < 64) {
+      constexpr uint64_t kLowBitsMask = (uint64_t{1} << kNumBits) - 1;
+      constexpr uint64_t kUpperBitsMask = ~kLowBitsMask;
+      constexpr uint64_t kSignBit = uint64_t{1} << (kNumBits - 1);
+
+      auto upper_bits = input & kUpperBitsMask;
+      bool sign_set = (input & kSignBit) != 0;
+
+      if ((!sign_set && upper_bits != 0) ||
+          (sign_set && upper_bits != kUpperBitsMask)) {
+        return std::nullopt;
+      }
+    }
+
+    using unsigned_t = std::make_unsigned_t<T>;
+    auto narrowed = static_cast<unsigned_t>(input);
+    return std::bit_cast<T>(narrowed);
+  }
+  else {
+    if constexpr (sizeof(T) < sizeof(uint64_t)) {
+      if (input > std::numeric_limits<T>::max()) {
+        return std::nullopt;
+      }
+    }
+    return static_cast<T>(input);
+  }
+}
 
 // Templates detailing how syscall arguments are parsed from contract memory
 // into typesafe objects to pass to inner syscalls.
@@ -69,27 +111,21 @@ template<> struct SyscallArgParams<bool> {
   }
 };
 
-// Unsigned integer types narrower than uint64_t should not silently truncate.
-template<std::unsigned_integral T>
-requires (sizeof(T) < sizeof(uint64_t) && !std::same_as<T, bool>)
+// Integer types that fit in a single uint64 syscall argument.
+// Delegates to narrow_int_checked for range validation.
+template<std::integral T> requires (sizeof(T) <= 8 && !std::same_as<T, bool>)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
   constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
                                           uint64_t input)
   {
-    if (input > std::numeric_limits<T>::max()) {
-      return std::nullopt;
-    }
-    return static_cast<T>(input);
+    return narrow_int_checked<T>(input);
   }
 
   constexpr static std::optional<T> parse_mock(uint64_t input)
   {
-    if (input > std::numeric_limits<T>::max()) {
-      return std::nullopt;
-    }
-    return static_cast<T>(input);
+    return narrow_int_checked<T>(input);
   }
   constexpr static bool validate(std::optional<T> value)
   {
@@ -103,27 +139,6 @@ struct SyscallArgParams<T> {
   }
 };
 
-// Primitive type syscall input
-// For items that can be passed directly within one of the uint64 syscall
-// arguments, and not as a memory offset.
-template<std::integral T>
-requires ((sizeof(T) <= 8) &&
-          // NOLINTNEXTLINE(readability-simplify-boolean-expr)
-          !(std::unsigned_integral<T> && sizeof(T) < sizeof(uint64_t)) &&
-          !std::same_as<T, bool>)
-struct SyscallArgParams<T> {
-  constexpr static size_t kNumInputs = 1;
-
-  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
-  {
-    return input;
-  }
-
-  constexpr static T parse_mock(uint64_t input) { return input; }
-  constexpr static bool validate(T /*unused*/) { return true; }
-  constexpr static T deref(T value) { return value; }
-};
-
 // primitive type enum values
 template<typename T> requires (std::is_enum_v<T> && sizeof(T) <= 8)
 struct SyscallArgParams<T> {
@@ -133,20 +148,11 @@ struct SyscallArgParams<T> {
 
   constexpr static std::optional<T> parse_impl(uint64_t input)
   {
-    if constexpr (std::is_signed_v<underlying_t>) {
-      auto signed_input = static_cast<int64_t>(input);
-      if (signed_input > std::numeric_limits<underlying_t>::max() ||
-          signed_input < std::numeric_limits<underlying_t>::min()) {
-        return std::nullopt;
-      }
+    auto result = narrow_int_checked<underlying_t>(input);
+    if (!result.has_value()) {
+      return std::nullopt;
     }
-    else if constexpr (sizeof(underlying_t) < sizeof(uint64_t)) {
-      if (input > std::numeric_limits<underlying_t>::max()) {
-        return std::nullopt;
-      }
-    }
-
-    return static_cast<T>(static_cast<underlying_t>(input));
+    return static_cast<T>(*result);
   }
 
   constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
@@ -319,36 +325,55 @@ struct SyscallArgParams<T &> {
 };
 
 // Optional trivially copyable input types.
-// The difference between this and the non-optional case
-// is that validation always succeeds, but the syscall itself
-// might be passed a nullptr (and must check against that).
-// Some syscalls use that optional check to provide default
-// parameters if a parameter is not supplied by a contract.
+// Uses UINT64_MAX as an explicit null sentinel. Other offsets must resolve
+// to in-bounds memory or argument validation fails.
+// Some syscalls use nullptr to indicate an optional parameter is omitted.
 template<typename T> requires std::is_trivially_copyable_v<T>
 struct SyscallArgParams<const T *> {
+  struct OptionalInputParseResult {
+    bool is_valid = false;
+    std::optional<T> value = std::nullopt;
+  };
+
   constexpr static size_t kNumInputs = 1;
-  constexpr static std::optional<T> parse(std::span<std::byte> contract_memory,
-                                          uint64_t offset)
+  constexpr static OptionalInputParseResult
+  parse(std::span<std::byte> contract_memory, uint64_t offset)
   {
-    return check_user_argument<const T>(contract_memory, offset);
+    // 0 can be a valid pointer in wasm. As such, optional inputs use
+    // UINT64_MAX as the explicit null sentinel.
+    if (offset == std::numeric_limits<uint64_t>::max()) {
+      return {.is_valid = true, .value = std::nullopt};
+    }
+
+    auto value = check_user_argument<const T>(contract_memory, offset);
+    if (!value.has_value()) {
+      return {.is_valid = false, .value = std::nullopt};
+    }
+
+    return {.is_valid = true, .value = std::move(value)};
   }
 
-  constexpr static std::optional<T> parse_mock(uint64_t offset)
+  constexpr static OptionalInputParseResult parse_mock(uint64_t offset)
   {
     // 0 can be a valid pointer in wasm.  As such, the optional input types in
     // the sdk use UINT64_MAX as the nullptr (in the case of a None input),
     // instead of 0.
     if (offset == std::numeric_limits<uint64_t>::max()) {
-      return std::nullopt;
+      return {.is_valid = true, .value = std::nullopt};
     }
-    return check_user_argument_mock<const T>(offset);
+
+    return {.is_valid = true,
+            .value = check_user_argument_mock<const T>(offset)};
   }
 
-  constexpr static bool validate(std::optional<T> /*unused*/) { return true; }
-
-  constexpr static const T *deref(std::optional<T> &value)
+  constexpr static bool validate(OptionalInputParseResult const &arg)
   {
-    return value.has_value() ? &(*value) : nullptr;
+    return arg.is_valid;
+  }
+
+  constexpr static const T *deref(OptionalInputParseResult &value)
+  {
+    return value.value.has_value() ? &(*value.value) : nullptr;
   }
 };
 

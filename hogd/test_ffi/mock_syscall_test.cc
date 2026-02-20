@@ -1,8 +1,8 @@
-#include <array>
-#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <span>
@@ -14,6 +14,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -24,7 +25,6 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 namespace hogd {
 
