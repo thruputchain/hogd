@@ -119,8 +119,8 @@ public:
   // Returns true if all executors closed normally, false if block was abandoned
   x23::Async<bool> await_all_executors_closed();
 
-  x23::Async<void>
-  send_events_to_indexers(BlockHeight block_height,
+  x23::Detached
+  send_events_to_indexers(x23::CoroGuard &&cg, BlockHeight block_height,
                           std::vector<indexer_event_client_t> &indexers);
 
 private:

@@ -30,7 +30,7 @@ namespace hogd {
 
 namespace {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 int_type_test(uint32_t inp_1, int128_t const &inp_128,
               int128_t inp_128_by_value, uint32_t &out_1, uint64_t &out_2,
               int128_t &out_128) noexcept
@@ -42,10 +42,11 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
   out_1 = 10;
   out_2 = UINT64_MAX;
   out_128 = int128_t{out_1} + int128_t{out_2};
-  return {{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable}, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
+          WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 span_type_test(std::span<const std::byte> span_in,
                std::span<std::byte> span_out) noexcept
 {
@@ -60,13 +61,14 @@ span_type_test(std::span<const std::byte> span_in,
   span_out[2] = std::byte{3};
   span_out[3] = std::byte{4};
 
-  return {{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist}, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+          WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 no_return_test() noexcept
 {
-  return {{SyscallErrorCode::kSyscallErrorCodeNone}, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 // just used to instantiate the mock contract

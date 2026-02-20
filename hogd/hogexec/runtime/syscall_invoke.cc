@@ -23,13 +23,13 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
                            ContractAddress &output_sender) noexcept
 {
   auto status = syscall_handler.get_msg_sender();
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().code(), WrappedGasAmount{0}};
   }
 
   output_sender = *status;
@@ -43,10 +43,10 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
                                 ContractAddress &output_address) noexcept
 {
@@ -62,10 +62,10 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetSourceTransactionHash_inner(
     SystemCallHandler &syscall_handler,
     SHA256Hash &output_source_tx_hash) noexcept
@@ -82,10 +82,10 @@ syscall_GetSourceTransactionHash_inner(
             SyscallNo::kGetSourceTransactionHash, e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len) noexcept
 {
@@ -101,10 +101,10 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           std::span<std::byte> output_buffer,
                           RuntimeMemoryLength &output_written_len) noexcept
@@ -127,10 +127,10 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
@@ -144,7 +144,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     calldata.resize_uninitialized(input_calldata.size());
   } catch (std::exception &e) {
     error("unrecoverable: failed to resize calldata: {}", e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
+    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
+            WrappedGasAmount{0}};
   }
   if (!input_calldata.empty()) {
     std::memcpy(calldata.data(),
@@ -155,7 +156,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
-                                                 remaining_gas.gas_amount_),
+                                                 remaining_gas.get()),
                              calldata, input_flags);
 
   // invocation returned successfully
@@ -165,7 +166,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     auto return_buffer_host = syscall_handler.get_return_buffer();
     if (!return_buffer_host.has_value()) {
       // Handle the SystemError case
-      return {return_buffer_host.error().to_host_fn_error(), gas_amount};
+      return {return_buffer_host.error().to_host_fn_error(),
+              WrappedGasAmount{gas_amount}};
     }
 
     SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
@@ -176,14 +178,14 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     else {
       output_return_buffer_len = 0;
     }
-    return {*invoke_res, gas_amount};
+    return {*invoke_res, WrappedGasAmount{gas_amount}};
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
-  return {invoke_res, gas_amount};
+  return {invoke_res, WrappedGasAmount{gas_amount}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer,
                      bool input_revert_frame) noexcept
@@ -195,10 +197,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   // -> !, which could lead to UB in the contract code if that function then
   // returns an error.
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::kHostExit},
-            // TODO(geoff): this is a fucked conversion lmao
-            static_cast<int32_t>(
-                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm)};
+    return {HostFnError{HostFnErrorCode::kHostExit}, WrappedGasAmount{0}};
   }
 
   ReturnBuffer buffer;
@@ -206,7 +205,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     buffer.resize_uninitialized(input_buffer.size());
   } catch (std::exception &e) {
     error("unrecoverable: failed to resize return buffer: {}", e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
+    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
+            WrappedGasAmount{0}};
   }
   if (!input_buffer.empty()) {
     std::memcpy(buffer.data(),
@@ -216,20 +216,20 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 
   syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame);
 
-  return {HostFnError{HostFnErrorCode::kHostReturn}, 0};
+  return {HostFnError{HostFnErrorCode::kHostReturn}, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetReturnedBuffer_inner(
     SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
     RuntimeMemoryLength &output_written_len) noexcept
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    return {status->error().code(), 0};
+    return {status->error().code(), WrappedGasAmount{0}};
   }
   CHECK(**status != nullptr);
 
@@ -259,13 +259,13 @@ syscall_GetReturnedBuffer_inner(
     }
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_Exit_inner() noexcept
 {
-  return {HostFnError{HostFnErrorCode::kHostExit}, 0};
+  return {HostFnError{HostFnErrorCode::kHostExit}, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

@@ -347,10 +347,13 @@ EventBlockContext::await_all_executors_closed()
   co_return true; // All executors closed normally
 }
 
-x23::Async<void>
+x23::Detached
 EventBlockContext::send_events_to_indexers(
-    BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
+    x23::CoroGuard &&cg, BlockHeight block_height,
+    std::vector<indexer_event_client_t> &indexers)
 {
+  co_await get_threadpool().bg();
+
   TxEventLogBatch full_event_log;
   {
     std::unique_lock ul = event_log_.lock_threads();

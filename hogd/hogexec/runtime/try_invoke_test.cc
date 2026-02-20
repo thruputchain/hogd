@@ -2639,7 +2639,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
            [=](SystemCallHandler &handler,
                NativeRuntime &runtime) -> InvokeStatus<void> {
              RuntimeMemoryLength output_return_buffer_len;
-             WrappedGasAmount remaining_gas = {runtime.get_available_gas()};
+             WrappedGasAmount remaining_gas{runtime.get_available_gas()};
              Calldata calldata = {};
              std::span<const std::byte> calldata_span =
                  std::as_bytes(std::span(calldata.data(), calldata.size()));
@@ -2686,7 +2686,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
-               if (gas != 50) {
+               if (gas.get() != 50) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
              }

@@ -267,9 +267,9 @@ parse_mock(Inputs const &tuple_args)
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
 
-constexpr static std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+constexpr static std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
     kFaultResult = {SyscallErrorCode::kSyscallErrorCodeFault,
-                    kGenericBadSyscallCost};
+                    WrappedGasAmount{kGenericBadSyscallCost}};
 
 template<typename T>
 concept is_std_optional = requires {
@@ -447,14 +447,14 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
   // end to consume gas and validate return state cannot be skipped.
   auto [syscall_result, gas_consumed] =
       [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
-      -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
+      -> std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount> {
     if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
       if (handler.is_read_only()) {
         trace("Syscall {} is not read-only, but called in read-only mode",
               kSyscall);
         return {HostFnStatus<SyscallErrorCode>{
                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-                0};
+                WrappedGasAmount{0}};
       }
     }
 
@@ -559,7 +559,7 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
   }
 
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
-    bool gas_consume_res = runtime.consume_gas(gas_consumed);
+    bool gas_consume_res = runtime.consume_gas(gas_consumed.get());
     // If the error is not something that can be handled at any layer of the
     // transaction, then cannot swap to kHostOutOfGas here.
     if (is_handleable_error) {

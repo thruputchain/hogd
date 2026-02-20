@@ -331,7 +331,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
-               if (!runtime.consume_gas(gas)) {
+               if (!runtime.consume_gas(gas.get())) {
                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                }
 

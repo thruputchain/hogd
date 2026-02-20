@@ -8,6 +8,7 @@
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -15,13 +16,13 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
                              BlockHeight &output_result) noexcept
 {
   auto status = syscall_handler.get_block_height();
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   output_result = *status;
   if (auto *trace_data =
@@ -35,7 +36,7 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

@@ -6,6 +6,7 @@
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -13,7 +14,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetDeployAddress_inner(
     SystemCallHandler &syscall_handler,
     const ContractAddress *optional_input_caller_address,
@@ -41,10 +42,10 @@ syscall_GetDeployAddress_inner(
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_nonce,
                              const SHA256Hash &input_contract_hash,
@@ -53,10 +54,10 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   auto status =
       syscall_handler.deploy_contract(input_nonce, input_contract_hash);
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!status.value()) {
-    return {status.value().error().code(), 0};
+    return {status.value().error().code(), WrappedGasAmount{0}};
   }
   output_deployed_address = *status.value();
 
@@ -72,7 +73,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
     }
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

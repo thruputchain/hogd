@@ -1,7 +1,5 @@
 
-#include "auth_claim.hh"
-#include "ffi_enums.hh"
-#include "hogd/hogexec/runtime/ffi_helpers.h"
+
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -12,10 +10,14 @@
 #include <utility>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/rust/contract_types/bindings.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -35,7 +37,7 @@ valid_accepted_keys_bitmap(BitMap bitmap)
 }
 } // namespace
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
     const int32_t *optional_input_key_scheme,
@@ -91,48 +93,50 @@ syscall_ChangePublicKeyRegistration_inner(
     }();
   } catch (std::bad_alloc &e) {
     error("unrecoverable: failed to allocate public key config: {}", e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
+    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
+            WrappedGasAmount{0}};
   }
 
   if (!new_key) {
-    return {new_key.error().code(), 0};
+    return {new_key.error().code(), WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.change_public_key_registration(input_key_index,
                                                                new_key.value());
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!status.value()) {
-    return {status.value().error().code(), 0};
+    return {status.value().error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_WriteAddressNonceConfig_inner(
     SystemCallHandler &syscall_handler,
     const generated::NonceConfig &input_nonce_config) noexcept
 {
   if (!valid_accepted_keys_bitmap(input_nonce_config.accepted_keys)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 
   auto nonce_config =
       FFIHelperType<generated::NonceConfig>::to_cpp(input_nonce_config);
   auto status = syscall_handler.set_address_nonce_config(nonce_config);
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!status.value()) {
-    return {status.value().error().code(), 0};
+    return {status.value().error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_WriteAddressGasPermissionConfigs_inner(
     SystemCallHandler &syscall_handler,
     const generated::GasPermissionConfig *optional_input_permission_0,
@@ -176,25 +180,27 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     error("unrecoverable: failed to add bounded number of gas permission "
           "configs to vector of bounded size: {}",
           e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 0};
+    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
+            WrappedGasAmount{0}};
   }
 
   if (found_gap || invalid_bitmap) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.set_address_gas_permission_configs(
       std::move(gas_permission_configs));
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!status.value()) {
-    return {status.value().error().code(), 0};
+    return {status.value().error().code(), WrappedGasAmount{0}};
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
                                 uint32_t &output_count) noexcept
 {
@@ -210,16 +216,17 @@ syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
                            uint32_t input_index,
                            generated::AuthClaim &output_auth_claim) noexcept
 {
   if (input_index >= syscall_handler.get_auth_claims().size()) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
   auto const &claim = syscall_handler.get_auth_claims()[input_index];
   output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
@@ -234,7 +241,7 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

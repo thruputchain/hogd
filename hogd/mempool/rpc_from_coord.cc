@@ -69,18 +69,33 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_deserialize_batch = 0.0;
+  double stage_wait_commit_lock = 0.0;
+  double stage_auth_verify = 0.0;
+  double stage_filter_invalid = 0.0;
+  double stage_prepare_response_and_notify = 0.0;
+  double stage_await_add_txs = 0.0;
+
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
+  size_t num_submitted_txs = txs.size();
+  record_stage(stage_deserialize_batch);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
+  record_stage(stage_wait_commit_lock);
 
-  ElapsedTimer timer;
-  info("submit_unvetted, {} txs", txs.size());
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
           scheduler_->current_block(), txs);
-  info("auth took {}", timer.elapsed());
+  record_stage(stage_auth_verify);
 
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -89,10 +104,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       to_remove_indices.push_back(i);
     }
   }
-  info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
+  record_stage(stage_filter_invalid);
   // Careful: it is tempting to overlap the overhead of
   // [authmempool_verify_transactions()] with that of [scheduler_->add_txs()]
   // (and then after remove any unverified txs from the scheduler). But this
@@ -105,12 +120,19 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   ParallelBatch response;
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
+  record_stage(stage_prepare_response_and_notify);
 
   co_await add_txs_handle;
+  record_stage(stage_await_add_txs);
 
-  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
-       "= {}",
-       scheduler_->size(), timer.elapsed());
+  info("submit_unvetted() stages: deserialize_batch={:.6f}, "
+       "wait_commit_lock={:.6f}, auth_verify={:.6f}, filter_invalid={:.6f}, "
+       "prepare_response_and_notify={:.6f}, await_add_txs={:.6f}, "
+       "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
+       stage_deserialize_batch, stage_wait_commit_lock, stage_auth_verify,
+       stage_filter_invalid, stage_prepare_response_and_notify,
+       stage_await_add_txs, timer.elapsed(), scheduler_->size(),
+       num_submitted_txs, txs.size());
   co_return;
 }
 
@@ -424,8 +446,20 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 x23::Async<void>
 MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_lock_wait = 0.0;
+  double stage_schedule_loop = 0.0;
+  double stage_await_batches = 0.0;
+
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
+  record_stage(stage_lock_wait);
 
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(kNumSchedulerIterations);
@@ -459,16 +493,27 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
     x23::span<SignedTransaction> txs_span(cache.txs.begin() + num_scheduled,
                                           cache.txs.end());
     num_scheduled = cache.tx_hashes.size();
-    handles.push_back(
-        propose_batch_in_chunks(cache.block_id, txs_span,
-                                cache.transaction_nomination_chunks[i],
-                                ret_span));
+    {
+      ElapsedTimer timer;
+      handles.push_back(
+          propose_batch_in_chunks(cache.block_id, txs_span,
+                                  cache.transaction_nomination_chunks[i],
+                                  ret_span));
+      info("schedule() propose_batch_in_chunks() took {}", timer.elapsed());
+    }
   }
+  record_stage(stage_schedule_loop);
 
   for (size_t i = 0; i < handles.size(); i++) {
     co_await handles[i];
     cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
   }
+  record_stage(stage_await_batches);
+
+  info("schedule() stages: lock_wait={:.6f}, schedule_loop={:.6f}, "
+       "await_batches={:.6f}, total={:.6f}, handles={}, tx_hashes={}",
+       stage_lock_wait, stage_schedule_loop, stage_await_batches,
+       timer.elapsed(), handles.size(), cache.tx_hashes.size());
 
   co_return;
 }
@@ -492,6 +537,18 @@ x23::Async<void>
 MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                                                PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_spawn_finish_calls = 0.0;
+  double stage_generate_block_hash = 0.0;
+  double stage_serialize_nomination = 0.0;
+  double stage_await_finish_calls = 0.0;
+
   // Gracefully shut down executor work and send the nomination chunks
   // (including the final block hash) back to the coordinator.
   x23::Vec<x23::Async<void>> finish_block_handles;
@@ -499,6 +556,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     finish_block_handles.push_back(
         finish_block(cache.block_id, /*executor_idx=*/i));
   }
+  record_stage(stage_spawn_finish_calls);
 
   {
     Nomination &nomination =
@@ -506,6 +564,8 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     nomination.block_height = db_tip.height + 1;
     nomination.block_hash = get_block_hash(cache.tx_hashes,
                                            /*prev_block_hash=*/db_tip.hash);
+    record_stage(stage_generate_block_hash);
+
     nomination.prev_block_hash = db_tip.hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
@@ -516,10 +576,19 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     co_await t_to_parallel_batch(cache.txs,
                                  cache.nomination_result.nominated_block().txs);
   }
+  record_stage(stage_serialize_nomination);
 
   for (x23::Async<void> &handle : finish_block_handles) {
     co_await handle;
   }
+  record_stage(stage_await_finish_calls);
+
+  info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
+       "generate_block_hash={:.6f}, serialize_nomination={:.6f}, "
+       "await_finish_calls={:.6f}, total={:.6f}, finish_handles={}",
+       stage_spawn_finish_calls, stage_generate_block_hash,
+       stage_serialize_nomination, stage_await_finish_calls, timer.elapsed(),
+       finish_block_handles.size());
   co_return;
 }
 
@@ -535,31 +604,69 @@ MempoolCoordinatorRpc::abandon_block(const PendingBlock &cache)
 x23::Async<void>
 MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_spawn_async_calls = 0.0;
+  double stage_await_close_snapshot = 0.0;
+  double stage_await_close_block = 0.0;
+  double stage_await_commit_snapshot = 0.0;
+
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
   x23::Async<EventBlockResult> close_block_handle =
       eventsched_close_block(cache.block_id, scheduler_->current_block());
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id);
+  record_stage(stage_spawn_async_calls);
 
   {
     DbBlockResult result = co_await close_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
+  record_stage(stage_await_close_snapshot);
   {
     EventBlockResult result = co_await close_block_handle;
     CHECK_EQ(result.error(), RPCError::kRPCNone);
   }
+  record_stage(stage_await_close_block);
   {
     DbBlockResult result = co_await commit_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
+  record_stage(stage_await_commit_snapshot);
+
+  info("commit_block() stages: spawn_async_calls={:.6f}, "
+       "await_close_snapshot={:.6f}, await_close_block={:.6f}, "
+       "await_commit_snapshot={:.6f}, total={:.6f}, block_id={}",
+       stage_spawn_async_calls, stage_await_close_snapshot,
+       stage_await_close_block, stage_await_commit_snapshot, timer.elapsed(),
+       cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_precheck = 0.0;
+  double stage_wait_transfers = 0.0;
+  double stage_wait_auth_data = 0.0;
+  double stage_initialize_overlap = 0.0;
+  double stage_schedule_remaining = 0.0;
+  double stage_process_outcomes = 0.0;
+  double stage_add_failed_txs = 0.0;
+  double stage_finish_nominating = 0.0;
+  double stage_finalize_result = 0.0;
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
   // NOLINTNEXTLINE(modernize-use-auto):
@@ -584,13 +691,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  record_stage(stage_precheck);
 
   // Wait for hogdb to notify us of all HOG transfers that occurred in the
   // previous block. These transfer affect account balances, which in turn
   // affects scheduling priorities for accounts, so we need to wait for this
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
+  record_stage(stage_wait_transfers);
   co_await wait_for_auth_data(db_tip.height);
+  record_stage(stage_wait_auth_data);
 
   nominated_block_cache_.block_id = generate_block_id();
   // We place the block txs and tx hashes into these vectors. We mark these
@@ -646,19 +756,24 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  record_stage(stage_initialize_overlap);
 
   // Schedule the block and send the txs to the executors.
   co_await schedule(nominated_block_cache_);
+  record_stage(stage_schedule_remaining);
   info("schedule() gave us {} txs, scheduler size is {}",
        nominated_block_cache_.tx_hashes.size(), scheduler_->size());
 
   // Process the transaction outcomes.
   process_tx_outcomes(nominated_block_cache_);
+  record_stage(stage_process_outcomes);
   if (!nominated_block_cache_.failed_txs.empty()) {
     co_await scheduler_->add_txs(nominated_block_cache_.failed_txs);
   }
+  record_stage(stage_add_failed_txs);
 
   co_await finish_nominating_block(db_tip, nominated_block_cache_);
+  record_stage(stage_finish_nominating);
 
   // We set [nominated_block_cache_.nomination_result.outcome()] to
   // [SchedulerNominationOutcome::SchedulerNominationOK] above. See the comments
@@ -672,8 +787,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                   .nomination.block_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
-  info("nominate() took {}, num tx hashes {}, num tx nominations {}",
-       timer.elapsed(), nominated_block_cache_.result_tx_hashes.size(),
+  record_stage(stage_finalize_result);
+  info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
+       "wait_auth_data={:.6f}, initialize_overlap={:.6f}, "
+       "schedule_remaining={:.6f}, process_outcomes={:.6f}, "
+       "add_failed_txs={:.6f}, finish_nominating={:.6f}, "
+       "finalize_result={:.6f}, total={:.6f}, num tx hashes {}, "
+       "num tx nominations {}",
+       stage_precheck, stage_wait_transfers, stage_wait_auth_data,
+       stage_initialize_overlap, stage_schedule_remaining,
+       stage_process_outcomes, stage_add_failed_txs, stage_finish_nominating,
+       stage_finalize_result, timer.elapsed(),
+       nominated_block_cache_.result_tx_hashes.size(),
        nominated_block_cache_.result_tx_nominations.size());
   last_ = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
@@ -863,8 +988,44 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_wait_commit_lock = 0.0;
+  double stage_wait_validated_lock = 0.0;
+  double stage_precheck_validations = 0.0;
+  double stage_wait_nominated_lock = 0.0;
+  double stage_precheck_block_presence = 0.0;
+  double stage_build_handles = 0.0;
+  double stage_compute_reenqueue_set = 0.0;
+  double stage_remove_from_scheduler = 0.0;
+  double stage_await_handles = 0.0;
+  double stage_finalize = 0.0;
+  auto emit_commit_stats = [&](const char *outcome, size_t handles_size,
+                               size_t reenqueue_size,
+                               size_t remove_from_scheduler_size) {
+    info("schedulercoord_commit_block() stages: "
+         "wait_commit_lock={:.6f}, wait_validated_lock={:.6f}, "
+         "precheck_validations={:.6f}, wait_nominated_lock={:.6f}, "
+         "precheck_block_presence={:.6f}, build_handles={:.6f}, "
+         "compute_reenqueue_set={:.6f}, remove_from_scheduler={:.6f}, "
+         "await_handles={:.6f}, finalize={:.6f}, total={:.6f}, outcome={}, "
+         "block_id={}, handles={}, reenqueue_size={}, remove_size={}",
+         stage_wait_commit_lock, stage_wait_validated_lock,
+         stage_precheck_validations, stage_wait_nominated_lock,
+         stage_precheck_block_presence, stage_build_handles,
+         stage_compute_reenqueue_set, stage_remove_from_scheduler,
+         stage_await_handles, stage_finalize, timer.elapsed(), outcome,
+         block_id, handles_size, reenqueue_size, remove_from_scheduler_size);
+  };
+
   x23::CoroGuard commit_cg;
   co_await commit_cg(commit_lock_);
+  record_stage(stage_wait_commit_lock);
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
@@ -875,21 +1036,32 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   info("schedulercoord_commit_block, delta = {}", delta_count);
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
+  record_stage(stage_wait_validated_lock);
   if (num_validations_in_progress_) {
+    record_stage(stage_precheck_validations);
+    emit_commit_stats("race", /*handles_size=*/0, /*reenqueue_size=*/0,
+                      /*remove_from_scheduler_size=*/0);
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerCommitOutcome::SchedulerCommitRace;
   }
+  record_stage(stage_precheck_validations);
   x23::CoroGuard nominate_cg;
   co_await nominate_cg(nominated_block_cache_lock_);
+  record_stage(stage_wait_nominated_lock);
 
   if ((!nominated_block_cache_.block_id ||
        nominated_block_cache_.block_id != block_id) &&
       !validated_block_cache_.contains(block_id)) {
+    record_stage(stage_precheck_block_presence);
+    emit_commit_stats("block_not_found", /*handles_size=*/0,
+                      /*reenqueue_size=*/0,
+                      /*remove_from_scheduler_size=*/0);
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
+  record_stage(stage_precheck_block_presence);
 
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(validated_block_cache_.size());
@@ -913,6 +1085,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       handles.push_back(abandon_block(cache));
     }
   }
+  record_stage(stage_build_handles);
 
   // We need to do two things:
   // 1. If the nominated block is not the committed block, we need to return
@@ -955,18 +1128,22 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       return_to_runqueue.erase(hash);
     }
   }
+  record_stage(stage_compute_reenqueue_set);
 
   CHECK_CONST_PTR(remove_from_scheduler);
   scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                             return_to_runqueue.cend());
+  const size_t remove_from_scheduler_size = remove_from_scheduler->size();
   co_await scheduler_->remove_from_scheduler(
       x23::span<const SignedTransactionHash>(*remove_from_scheduler),
       /*validated_block=*/(nominated_block_cache_.block_id == 0UL) ||
           nominated_block_cache_.block_id != block_id);
+  record_stage(stage_remove_from_scheduler);
 
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
+  record_stage(stage_await_handles);
 
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
   // elements in the vectors in [nominated_block_cache_], so if we clear those
@@ -976,6 +1153,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   validated_block_cache_.clear();
 
   scheduler_->increment_current_block();
+  record_stage(stage_finalize);
+  emit_commit_stats("ok", handles.size(), return_to_runqueue.size(),
+                    remove_from_scheduler_size);
   last_ = std::chrono::steady_clock::now();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
