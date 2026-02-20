@@ -9,6 +9,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
@@ -41,10 +42,25 @@ DeletionLock::write_committed_change(LockContext const &ctx,
   }
 
   assert(ctx.dao);
-  HogDBStatus<void> remove_ret = ctx.dao->remove_item(ctx.key);
-  if (!remove_ret) {
-    return remove_ret;
+
+  if (type == kRetrocausalQueue) {
+    // Delegate to RCQ-specific cleanup: removes metadata + all blocks from DAO.
+    auto cleanup_ret = RetrocausalQueueLock::cleanup_on_deletion(ctx);
+    if (!cleanup_ret.has_value()) {
+      return cleanup_ret.error();
+    }
   }
+  else {
+    // For non-RCQ types, use the standard remove_item.
+    HogDBStatus<void> remove_ret = ctx.dao->remove_item(ctx.key);
+    if (!remove_ret) {
+      return remove_ret;
+    }
+  }
+
+  // Remove ctx.key (the metadata/item key) from the merkle trie.
+  // TODO(stutsman): RCQ blocks are not in the trie, which is a severe bug
+  // to be fixed in an upcoming patch.
   // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
   // will never attempt to remove a key that does not exist. We already checked
   // above that the key exists when we removed it from the database.

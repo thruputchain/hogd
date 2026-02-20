@@ -43,6 +43,10 @@ public:
            meta.consume_state.max_fully_consumed_block_number;
   }
 
+  // Cleanup all RCQ-specific storage (blocks and metadata) when an RCQ is
+  // deleted. This is called by DeletionLock when deleting an RCQ item.
+  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx);
+
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.
   // Contains consume_state (head), max_live_block_num (tail), live_entries.
