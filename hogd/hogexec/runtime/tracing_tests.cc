@@ -249,9 +249,8 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client.make_invocation<"run_test">(
-              10000, static_cast<uint64_t>(kSyscallCount))},
+      Transaction{.invocation = client.make_invocation<"run_test">(
+                      10000, static_cast<uint64_t>(kSyscallCount))},
       *runtime_context_);
   handler.enable_transaction_stats();
   auto res = handler.root_invoke();

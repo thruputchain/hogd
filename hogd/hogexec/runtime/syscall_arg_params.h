@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <type_traits>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
@@ -40,8 +41,8 @@ template<typename T> struct SyscallArgParams;
 template<> struct SyscallArgParams<bool> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static std::optional<bool>
-  parse(std::span<std::byte> /*unused*/, uint64_t input)
+  constexpr static std::optional<bool> parse(std::span<std::byte> /*unused*/,
+                                             uint64_t input)
   {
     if (input > 1) {
       return std::nullopt;
@@ -74,8 +75,8 @@ requires (sizeof(T) < sizeof(uint64_t) && !std::same_as<T, bool>)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static std::optional<T>
-  parse(std::span<std::byte> /*unused*/, uint64_t input)
+  constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
+                                          uint64_t input)
   {
     if (input > std::numeric_limits<T>::max()) {
       return std::nullopt;
@@ -107,6 +108,7 @@ struct SyscallArgParams<T> {
 // arguments, and not as a memory offset.
 template<std::integral T>
 requires ((sizeof(T) <= 8) &&
+          // NOLINTNEXTLINE(readability-simplify-boolean-expr)
           !(std::unsigned_integral<T> && sizeof(T) < sizeof(uint64_t)) &&
           !std::same_as<T, bool>)
 struct SyscallArgParams<T> {
@@ -125,17 +127,57 @@ struct SyscallArgParams<T> {
 // primitive type enum values
 template<typename T> requires (std::is_enum_v<T> && sizeof(T) <= 8)
 struct SyscallArgParams<T> {
+  using underlying_t = std::underlying_type_t<T>;
+
   constexpr static size_t kNumInputs = 1;
-  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
+
+  constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
+                                          uint64_t input)
   {
-    return static_cast<T>(input);
+    if constexpr (std::is_signed_v<underlying_t>) {
+      auto signed_input = static_cast<int64_t>(input);
+      if (signed_input > std::numeric_limits<underlying_t>::max() ||
+          signed_input < std::numeric_limits<underlying_t>::min()) {
+        return std::nullopt;
+      }
+    }
+    else if constexpr (sizeof(underlying_t) < sizeof(uint64_t)) {
+      if (input > std::numeric_limits<underlying_t>::max()) {
+        return std::nullopt;
+      }
+    }
+
+    return static_cast<T>(static_cast<underlying_t>(input));
   }
-  constexpr static T parse_mock(uint64_t input)
+
+  constexpr static std::optional<T> parse_mock(uint64_t input)
   {
-    return static_cast<T>(input);
+    if constexpr (std::is_signed_v<underlying_t>) {
+      if (input >
+          static_cast<uint64_t>(std::numeric_limits<underlying_t>::max())) {
+        return std::nullopt;
+      }
+    }
+    else if constexpr (sizeof(underlying_t) < sizeof(uint64_t)) {
+      if (input > std::numeric_limits<underlying_t>::max()) {
+        return std::nullopt;
+      }
+    }
+
+    return static_cast<T>(static_cast<underlying_t>(input));
   }
-  constexpr static bool validate(T /*unused*/) { return true; }
-  constexpr static T deref(T value) { return value; }
+
+  constexpr static bool validate(std::optional<T> value)
+  {
+    return value.has_value();
+  }
+
+  constexpr static T deref(std::optional<T> value)
+  {
+    assert(value.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
 };
 
 // Input types that can be passed by value but not within a uint64
