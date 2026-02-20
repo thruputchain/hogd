@@ -238,6 +238,36 @@ TEST_F(TracingTest, NoSyscallTest)
   ASSERT_EQ(trace->system_calls[2].body.syscall_number(), SyscallNo::kReturn);
 }
 
+TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
+{
+  auto contract_addr = make_contract_address(0);
+  auto client =
+      ContractTraitClient<no_syscall_test::NoSyscallTest>(contract_addr);
+  auto contract = load_contract("no_syscall_test.wasm");
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client.make_invocation<"run_test">(
+              10000, static_cast<uint64_t>(kSyscallCount))},
+      *runtime_context_);
+  handler.enable_transaction_stats();
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->invalid_syscall_count, 1);
+  EXPECT_EQ(stats->syscall_fault_count, 0);
+  EXPECT_EQ(stats->syscall_counts[std::to_underlying(SyscallNo::kGetCalldata)],
+            1);
+  EXPECT_EQ(stats->syscall_counts[std::to_underlying(SyscallNo::kReturn)], 1);
+}
+
 TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
 {
   auto contract_0_addr = make_contract_address(0);
