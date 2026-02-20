@@ -131,8 +131,7 @@ struct SyscallArgParams<T> {
 
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
-                                          uint64_t input)
+  constexpr static std::optional<T> parse_impl(uint64_t input)
   {
     if constexpr (std::is_signed_v<underlying_t>) {
       auto signed_input = static_cast<int64_t>(input);
@@ -150,21 +149,15 @@ struct SyscallArgParams<T> {
     return static_cast<T>(static_cast<underlying_t>(input));
   }
 
+  constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
+                                          uint64_t input)
+  {
+    return parse_impl(input);
+  }
+
   constexpr static std::optional<T> parse_mock(uint64_t input)
   {
-    if constexpr (std::is_signed_v<underlying_t>) {
-      if (input >
-          static_cast<uint64_t>(std::numeric_limits<underlying_t>::max())) {
-        return std::nullopt;
-      }
-    }
-    else if constexpr (sizeof(underlying_t) < sizeof(uint64_t)) {
-      if (input > std::numeric_limits<underlying_t>::max()) {
-        return std::nullopt;
-      }
-    }
-
-    return static_cast<T>(static_cast<underlying_t>(input));
+    return parse_impl(input);
   }
 
   constexpr static bool validate(std::optional<T> value)

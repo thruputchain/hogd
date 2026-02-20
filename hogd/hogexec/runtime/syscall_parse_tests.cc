@@ -170,6 +170,19 @@ TEST(SyscallParseTests, ParseEnumRejectsOutOfRangeUnderlyingValues)
       contract_memory,
       static_cast<uint64_t>(std::numeric_limits<int32_t>::min()));
   ASSERT_TRUE(parsed_i32_low_ok.has_value());
+
+  auto parsed_i32_low_ok_mock = SyscallArgParams<TestSignedEnum>::parse_mock(
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::min()));
+  ASSERT_TRUE(parsed_i32_low_ok_mock.has_value());
+
+  auto parsed_i32_bad_mock = SyscallArgParams<TestSignedEnum>::parse_mock(
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1);
+  EXPECT_FALSE(parsed_i32_bad_mock.has_value());
+
+  auto parsed_i32_sign_extended_neg1_mock =
+      SyscallArgParams<TestSignedEnum>::parse_mock(
+          std::numeric_limits<uint64_t>::max());
+  ASSERT_TRUE(parsed_i32_sign_extended_neg1_mock.has_value());
 }
 
 } // namespace hogd
