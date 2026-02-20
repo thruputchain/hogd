@@ -294,6 +294,91 @@ TEST_F(EventTest, BadEventInputs)
   ASSERT_FALSE(tx_event_log.has_value());
 }
 
+TEST_F(EventTest, EventLengthIncludesTopics)
+{
+  auto native_contract_0 = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             SHA256Hash topic = sha256(std::string("topic"));
+
+             x23::Vec<uint8_t> max_event_data;
+             max_event_data.resize(kMaxEventLength - topic.size());
+
+             {
+               auto [status, gas] = syscall_LogEvent_inner(
+                   handler, &topic, nullptr, nullptr,
+                   std::as_bytes(std::span(max_event_data)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+
+             x23::Vec<uint8_t> too_long_event_data;
+             too_long_event_data.resize(max_event_data.size() + 1);
+             {
+               auto [status, gas] = syscall_LogEvent_inner(
+                   handler, &topic, nullptr, nullptr,
+                   std::as_bytes(std::span(too_long_event_data)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               if (status.value() !=
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+  auto contract_0_addr = make_contract_address(0xFF);
+  write_deployment(contract_0_addr, contract_0);
+  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_0_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto r = handler.try_commit_transaction();
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events()());
+
+  advance_block();
+
+  auto tx_event_log = get_tx_event_log(tx_id);
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log->events.size(), 1);
+  ASSERT_EQ(tx_event_log->events[0].num_topics, 1);
+  ASSERT_EQ(tx_event_log->events[0].serialized_event.size(), kMaxEventLength);
+}
+
 TEST_F(EventTest, EventWithRevertingFrames)
 {
   // A native contract with the following methods:

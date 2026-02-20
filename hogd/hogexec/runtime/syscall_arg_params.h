@@ -37,10 +37,78 @@ namespace hogd {
 // non-optional args can be passed as T or T&.
 template<typename T> struct SyscallArgParams;
 
+template<> struct SyscallArgParams<bool> {
+  constexpr static size_t kNumInputs = 1;
+
+  constexpr static std::optional<bool>
+  parse(std::span<std::byte> /*unused*/, uint64_t input)
+  {
+    if (input > 1) {
+      return std::nullopt;
+    }
+    return static_cast<bool>(input);
+  }
+
+  constexpr static std::optional<bool> parse_mock(uint64_t input)
+  {
+    if (input > 1) {
+      return std::nullopt;
+    }
+    return static_cast<bool>(input);
+  }
+  constexpr static bool validate(std::optional<bool> value)
+  {
+    return value.has_value();
+  }
+  constexpr static bool deref(std::optional<bool> value)
+  {
+    assert(value.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
+};
+
+// Unsigned integer types narrower than uint64_t should not silently truncate.
+template<std::unsigned_integral T>
+requires (sizeof(T) < sizeof(uint64_t) && !std::same_as<T, bool>)
+struct SyscallArgParams<T> {
+  constexpr static size_t kNumInputs = 1;
+
+  constexpr static std::optional<T>
+  parse(std::span<std::byte> /*unused*/, uint64_t input)
+  {
+    if (input > std::numeric_limits<T>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<T>(input);
+  }
+
+  constexpr static std::optional<T> parse_mock(uint64_t input)
+  {
+    if (input > std::numeric_limits<T>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<T>(input);
+  }
+  constexpr static bool validate(std::optional<T> value)
+  {
+    return value.has_value();
+  }
+  constexpr static T deref(std::optional<T> value)
+  {
+    assert(value.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
+};
+
 // Primitive type syscall input
 // For items that can be passed directly within one of the uint64 syscall
 // arguments, and not as a memory offset.
-template<std::integral T> requires (sizeof(T) <= 8)
+template<std::integral T>
+requires ((sizeof(T) <= 8) &&
+          !(std::unsigned_integral<T> && sizeof(T) < sizeof(uint64_t)) &&
+          !std::same_as<T, bool>)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 

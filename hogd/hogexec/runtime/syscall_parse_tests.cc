@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -20,7 +21,9 @@ TEST(SyscallParseTests, ParsePrimitiveTypes)
   auto contract_memory = std::as_writable_bytes(std::span(memory));
 
   // small input types ignore contract memory
-  EXPECT_EQ(1234, SyscallArgParams<uint32_t>::parse(contract_memory, 1234));
+  auto parsed_u32 = SyscallArgParams<uint32_t>::parse(contract_memory, 1234);
+  ASSERT_TRUE(parsed_u32.has_value());
+  EXPECT_EQ(1234, parsed_u32.value());
 
   {
     // small output types work as regular pointers
@@ -84,6 +87,36 @@ TEST(SyscallParseTests, ParseMisalignedData)
   check_int128((int128_t{0x0000000000000000} << 64) +
                    int128_t{0x0001020304050607},
                8);
+}
+
+TEST(SyscallParseTests, ParseUnsignedNarrowRejectsOverflow)
+{
+  std::vector<uint8_t> memory = {0, 1, 2, 3};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  auto parsed_u32 = SyscallArgParams<uint32_t>::parse(
+      contract_memory, uint64_t{1} << 32);
+  EXPECT_FALSE(parsed_u32.has_value());
+  EXPECT_FALSE(SyscallArgParams<uint32_t>::validate(parsed_u32));
+}
+
+TEST(SyscallParseTests, ParseBoolRejectsNonCanonicalValues)
+{
+  std::vector<uint8_t> memory = {0, 1, 2, 3};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  auto parsed_false = SyscallArgParams<bool>::parse(contract_memory, 0);
+  ASSERT_TRUE(parsed_false.has_value());
+  EXPECT_FALSE(parsed_false.value());
+
+  auto parsed_true = SyscallArgParams<bool>::parse(contract_memory, 1);
+  ASSERT_TRUE(parsed_true.has_value());
+  EXPECT_TRUE(parsed_true.value());
+
+  auto parsed_bad = SyscallArgParams<bool>::parse(
+      contract_memory, std::numeric_limits<uint64_t>::max());
+  EXPECT_FALSE(parsed_bad.has_value());
+  EXPECT_FALSE(SyscallArgParams<bool>::validate(parsed_bad));
 }
 
 } // namespace hogd
