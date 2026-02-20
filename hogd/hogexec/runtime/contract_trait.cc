@@ -33,6 +33,7 @@ parse_semver(std::string_view identifier_version)
   std::string version_str(identifier_version);
   std::smatch matches;
 
+  [[maybe_unused]]
   auto ok = std::regex_match(version_str, matches, semver_regex);
   x23assert(ok);
   x23assert(matches.size() >= 4);
