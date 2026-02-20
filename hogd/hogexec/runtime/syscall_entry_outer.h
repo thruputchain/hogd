@@ -525,8 +525,6 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
     return res;
   }(std::make_index_sequence<syscall_t::kNumArgs>{});
 
-  info("Syscall gas consumed: {}", gas_consumed);
-
   if constexpr (is_debug_build()) {
     // In debug builds, verify that the syscall only returns documented error
     // codes. This helps catch cases where a syscall returns an error that isn't
