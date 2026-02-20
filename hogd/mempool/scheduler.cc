@@ -471,7 +471,8 @@ Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
   auto [txs, lock] = account_to_tx_[account];
-  const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
+  const TxKey lower_bound{.expiry_block_height = current_block(),
+                          .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
   // We just check if there is a tx to run for this account. We do not check if
   // the account has enough gas units to run the tx.
@@ -552,7 +553,7 @@ Scheduler::schedule(size_t num_txs,
   removed_accounts.clear();
   accounts_excluded_from_block.clear();
 
-  const TxKey lower_bound = {.expiry_block_height = current_block_,
+  const TxKey lower_bound = {.expiry_block_height = current_block(),
                              .tx_hash = {}};
   auto account_it = ready_accounts_.begin();
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
@@ -652,7 +653,7 @@ Scheduler::schedule(size_t num_txs,
       // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
       // this account.
       move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
-                                           current_block_);
+                                           current_block());
     }
   }
   // Add [removed_accounts] back to [ready_accounts_] for each account that is

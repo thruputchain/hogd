@@ -63,15 +63,12 @@ public:
   }
 
   void get_txs_for_account(const ContractAddress &address,
-                           SignedTransactionHashBatch &tx_hashes,
-                           SignedTransactionBatch &txs)
+                           SignedTransactionHashBatch &tx_hashes)
   {
     auto [address_txs, lock] = account_to_tx_[address];
     tx_hashes.reserve(address_txs.size());
-    txs.reserve(address_txs.size());
     for (const auto &[tx_key, tx_value] : address_txs) {
       tx_hashes.push_back(tx_key.tx_hash);
-      txs.push_back(tx_value->tx);
     }
   }
 
@@ -118,9 +115,14 @@ public:
   // between them.
   static void cycle_groups(HogAge &current_averages);
 
-  BlockHeight current_block() const { return current_block_; }
-  void increment_current_block() { current_block_++; }
-  void decrement_current_block() { current_block_--; }
+  BlockHeight current_block() const
+  {
+    return current_block_.load(std::memory_order_relaxed);
+  }
+  void increment_current_block()
+  {
+    current_block_.fetch_add(1, std::memory_order_relaxed);
+  }
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
@@ -223,7 +225,7 @@ private:
 
   // The number of txs on the runqueue.
   std::atomic<size_t> size_ = 0;
-  BlockHeight current_block_ = 0;
+  std::atomic<BlockHeight> current_block_ = 0;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

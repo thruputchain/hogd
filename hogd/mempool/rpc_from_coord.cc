@@ -7,6 +7,7 @@
 #include <ctime>
 #include <future>
 #include <memory>
+#include <set>
 #include <span>
 #include <unordered_set>
 #include <utility>
@@ -47,12 +48,13 @@ namespace {
 
 template<typename T>
 void
-remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
+remove_indices(x23::XdrVec<T> &remove_from,
+               const std::unordered_set<size_t> &indices)
 {
   size_t write_idx = 0;
   size_t num_erased = 0;
   for (size_t read_idx = 0; read_idx < remove_from.size(); read_idx++) {
-    if (num_erased < indices.size() && read_idx == indices[num_erased]) {
+    if (num_erased < indices.size() && indices.count(read_idx)) {
       // We are erasing this element, so skip it.
       ++num_erased;
     }
@@ -77,31 +79,44 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     last_stage_ts = now;
   };
   double stage_deserialize_batch = 0.0;
-  double stage_wait_commit_lock = 0.0;
+  double stage_capture_verify_height = 0.0;
   double stage_auth_verify = 0.0;
+  double stage_wait_commit_lock_before_add = 0.0;
   double stage_filter_invalid = 0.0;
+  double stage_add_txs = 0.0;
   double stage_prepare_response_and_notify = 0.0;
-  double stage_await_add_txs = 0.0;
 
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
   size_t num_submitted_txs = txs.size();
   record_stage(stage_deserialize_batch);
 
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
-  record_stage(stage_wait_commit_lock);
+  // It is safe to do a relaxed load of the current block height because we
+  // acquire [commit_lock_] below when we check if any accounts have changed
+  // their auth data.
+  const BlockHeight verify_height = scheduler_->current_block();
+  record_stage(stage_capture_verify_height);
 
   AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
+      co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                             txs);
   record_stage(stage_auth_verify);
 
-  x23::Vec<size_t> to_remove_indices;
+  std::unordered_set<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove_indices.push_back(i);
+      to_remove_indices.insert(i);
+    }
+  }
+
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+  record_stage(stage_wait_commit_lock_before_add);
+  for (size_t i = 0; i < txs.size(); i++) {
+    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
+    if (get_account_last_auth_change_height(account) >= verify_height) {
+      to_remove_indices.insert(i);
     }
   }
   if (!to_remove_indices.empty()) {
@@ -121,17 +136,20 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
   record_stage(stage_prepare_response_and_notify);
-
+  // TODO(jhumphri): It would be better to call [cg.reset()] as soon as
+  // [add_txs()] completes so that we do not hold the lock while
+  // [t_to_parallel_batch()] and [coordscheduler_notify_vetted()] run above.
   co_await add_txs_handle;
-  record_stage(stage_await_add_txs);
+  record_stage(stage_add_txs);
 
   info("submit_unvetted() stages: deserialize_batch={:.6f}, "
-       "wait_commit_lock={:.6f}, auth_verify={:.6f}, filter_invalid={:.6f}, "
-       "prepare_response_and_notify={:.6f}, await_add_txs={:.6f}, "
+       "capture_verify_height={:.6f}, auth_verify={:.6f}, "
+       "wait_commit_lock_before_add={:.6f}, filter_invalid={:.6f}, "
+       "add_txs={:.6f}, prepare_response_and_notify={:.6f}, "
        "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
-       stage_deserialize_batch, stage_wait_commit_lock, stage_auth_verify,
-       stage_filter_invalid, stage_prepare_response_and_notify,
-       stage_await_add_txs, timer.elapsed(), scheduler_->size(),
+       stage_deserialize_batch, stage_capture_verify_height, stage_auth_verify,
+       stage_wait_commit_lock_before_add, stage_filter_invalid, stage_add_txs,
+       stage_prepare_response_and_notify, timer.elapsed(), scheduler_->size(),
        num_submitted_txs, txs.size());
   co_return;
 }
@@ -1180,35 +1198,16 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
-  static SignedTransactionHashBatch tx_hashes;
-  static SignedTransactionBatch txs;
-  tx_hashes.clear();
-  txs.clear();
+  static SignedTransactionHashBatch tx_hashes_to_remove;
+  tx_hashes_to_remove.clear();
   for (const KeyChange &change : key_changes) {
-    // Get all txs for [change.address] and re-verify them. Remove any that fail
-    // verification.
-    static SignedTransactionHashBatch change_tx_hashes;
-    static SignedTransactionBatch change_txs;
-    change_tx_hashes.clear();
-    change_txs.clear();
-    scheduler_->get_txs_for_account(change.address, change_tx_hashes,
-                                    change_txs);
-    tx_hashes += change_tx_hashes;
-    txs += change_txs;
+    account_last_auth_change_height_[change.address] = height;
+    scheduler_->get_txs_for_account(change.address, tx_hashes_to_remove);
   }
-  AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
-  x23::Vec<SignedTransactionHash> to_remove;
-  for (size_t i = 0; i < auth_ret.size(); i++) {
-    const AuthErrorCode &code = auth_ret[i];
-    if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(tx_hashes[i]);
-    }
-  }
+
   // The txs are on the runqueue and need to be removed, so we set
   // [validated_block] to true.
-  co_await scheduler_->remove_from_scheduler(to_remove,
+  co_await scheduler_->remove_from_scheduler(tx_hashes_to_remove,
                                              /*validated_block=*/true);
   auth_data_height_.store(height);
   auth_data_height_.broadcast(&default_threadpool());

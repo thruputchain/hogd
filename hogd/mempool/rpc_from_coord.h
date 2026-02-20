@@ -211,6 +211,16 @@ public:
                                      KeyChangeBatch key_changes);
 
 private:
+  BlockHeight
+  get_account_last_auth_change_height(const ContractAddress &account)
+  {
+    auto it = account_last_auth_change_height_.find(account);
+    if (it == account_last_auth_change_height_.end()) {
+      return 0;
+    }
+    return it->second;
+  }
+
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
   // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -348,11 +358,12 @@ private:
   // Protects [validated_block_cache_].
   x23::CoroLock validated_block_cache_lock_;
   size_t num_validations_in_progress_ = 0;
-  // Ensures that a commit does not occur while txs are being verified. Txs are
-  // verified against a certain block height, so if they race with a block
-  // commit, we could add txs to the scheduler that are no longer verified as of
-  // the last committed block.
+  // Serializes tx admission with commit/auth updates. In submit_unvetted(), we
+  // only hold this lock while re-checking account auth change heights and
+  // enqueuing txs (not while doing auth verification RPCs).
   x23::CoroLock commit_lock_;
+  std::unordered_map<ContractAddress, BlockHeight>
+      account_last_auth_change_height_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
