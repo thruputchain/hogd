@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -355,7 +356,7 @@ EventBlockContext::send_events_to_indexers(
   co_await get_threadpool().bg();
 
   TxEventLogBatch full_event_log;
-  {
+  try {
     std::unique_lock ul = event_log_.lock_threads();
     event_log_.for_each(ul, [&full_event_log](
                                 TxEventLogBatch &per_thread_event_log) {
@@ -364,6 +365,12 @@ EventBlockContext::send_events_to_indexers(
           std::make_move_iterator(per_thread_event_log.end()));
       per_thread_event_log.clear();
     });
+
+    // CI tests triggered an std::bad_alloc error here; logging the specifics of
+    // the error in case it occurs again
+  } catch (const std::exception &e) {
+    error("failed to send events to indexers: {}", e.what());
+    throw;
   }
 
   std::vector<x23::Async<void>> handles;
