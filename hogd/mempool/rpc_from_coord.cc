@@ -95,6 +95,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   // acquire [commit_lock_] below when we check if any accounts have changed
   // their auth data.
   const BlockHeight verify_height = scheduler_->current_block();
+  info("submit_unvetted will check if the txs are valid for height {}",
+       verify_height);
   record_stage(stage_capture_verify_height);
 
   AuthErrorCodeBatch auth_ret =
@@ -109,16 +111,20 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       to_remove_indices.insert(i);
     }
   }
+  info("{} txs were invalid", to_remove_indices.size());
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
   record_stage(stage_wait_commit_lock_before_add);
+  size_t num = 0;
   for (size_t i = 0; i < txs.size(); i++) {
     const ContractAddress &account = txs[i].tx.invocation.invoked_address;
     if (get_account_last_auth_change_height(account) >= verify_height) {
       to_remove_indices.insert(i);
+      num++;
     }
   }
+  info("{} txs were removed because auth height changed", num);
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
