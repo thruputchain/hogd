@@ -350,8 +350,8 @@ EventBlockContext::await_all_executors_closed()
 
 x23::Detached
 EventBlockContext::send_events_to_indexers(
-    x23::CoroGuard &&cg, BlockHeight block_height,
-    std::vector<indexer_event_client_t> &indexers)
+    x23::CoroGuard &&cg, std::atomic<ssize_t> &pending_detached_coroutines,
+    BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
 {
   co_await get_threadpool().bg();
 
@@ -384,6 +384,8 @@ EventBlockContext::send_events_to_indexers(
     co_await handle;
   }
   handles.clear();
+
+  pending_detached_coroutines.fetch_sub(1, std::memory_order_release);
   co_return;
 }
 

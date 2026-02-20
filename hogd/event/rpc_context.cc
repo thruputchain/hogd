@@ -132,10 +132,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   }
   record_stage(stage_finish_file_and_gc);
 
-  // We are moving [g] into [send_events_to_indexers()], which returns an
-  // [x23::Detached]. [send_events_to_indexers()] will not release [g] until it
-  // is finished with its work, so we do not need to worry about the context or
-  // [indexers_] changing until the detached coroutine is finished.
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
   context.get().send_events_to_indexers(std::move(g), block_height, indexers_);
   record_stage(stage_wait_indexers);
 

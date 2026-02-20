@@ -26,6 +26,13 @@ public:
     : work_directory_(work_directory)
   {}
 
+  ~EventRpcContext()
+  {
+    while (pending_detached_coroutines_.load(std::memory_order_acquire)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
   // Returns nullptr if the block is not open.
@@ -86,6 +93,7 @@ private:
   };
 
   x23::CoroLock lock_;
+  std::atomic<ssize_t> pending_detached_coroutines_ = 0;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
   std::vector<indexer_event_client_t> indexers_;
