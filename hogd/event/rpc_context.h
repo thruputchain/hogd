@@ -64,8 +64,8 @@ private:
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
   void gc_context_internal(
-      std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it,
-      x23::CoroGuard const & /*unused*/);
+      std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
+          it);
 
   x23::Async<EventStatus<void>> wait_for_executors_closed(BlockID block_id);
 

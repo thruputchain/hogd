@@ -9,6 +9,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/time.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
@@ -16,7 +17,6 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/debug.h"
-#include "x23/fastclock.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -80,20 +80,35 @@ EventRPCContext::wait_for_executors_closed(BlockID block_id)
 x23::Async<EventStatus<SHA256Hash>>
 EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_wait_executors_closed = 0.0;
+  double stage_wait_lock = 0.0;
+  double stage_prepare_context_and_async = 0.0;
+  double stage_wait_file_write = 0.0;
+  double stage_wait_indexers = 0.0;
+  double stage_finish_file_and_gc = 0.0;
+
   auto status = co_await wait_for_executors_closed(block_id);
+  record_stage(stage_wait_executors_closed);
   if (!status.has_value()) {
     co_return status.error();
   }
 
   x23::CoroGuard g;
   co_await g(lock_);
+  record_stage(stage_wait_lock);
 
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
   auto &context = it->second;
-  auto ts = x23::fastclock::now();
 
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
     auto *pool = x23::ThreadPool::get_thread_pool();
@@ -105,23 +120,37 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return;
   }(context.get());
 
-  auto indexers_handle =
-      context.get().send_events_to_indexers(block_height, indexers_);
-
   auto out_hash = context.get().get_root_hash();
-  auto ts2 = x23::fastclock::now();
+  record_stage(stage_prepare_context_and_async);
+
   co_await file_wait;
-  auto ts3 = x23::fastclock::now();
-  co_await indexers_handle;
-  auto ts4 = x23::fastclock::now();
+  record_stage(stage_wait_file_write);
+
   co_await context.get().finish_file(out_hash);
   if (it->second.initiate_shutdown()) {
-    gc_context_internal(it, g);
+    gc_context_internal(it);
   }
-  auto ts5 = x23::fastclock::now();
-  info("time to get hash: {} ns, time to finish file: {} ns, time to send "
-       "events to indexers: {} ns, time to gc context + rename: {} ns",
-       ts2 - ts, ts3 - ts2, ts4 - ts3, ts5 - ts4);
+  record_stage(stage_finish_file_and_gc);
+
+  // We are moving [g] into [send_events_to_indexers()], which returns an
+  // [x23::Detached]. [send_events_to_indexers()] will not release [g] until it
+  // is finished with its work, so we do not need to worry about the context or
+  // [indexers_] changing until the detached coroutine is finished.
+  context.get().send_events_to_indexers(std::move(g), block_height, indexers_);
+  record_stage(stage_wait_indexers);
+
+  // We moved [g] into [send_events_to_indexers()], so be sure not to do any
+  // work beyond this point which touches a context or [indexers_]!
+
+  info("close_block() stages: wait_executors_closed={:.6f}, "
+       "wait_lock={:.6f}, prepare_context_and_async={:.6f}, "
+       "wait_file_write={:.6f}, wait_indexers={:.6f}, "
+       "finish_file_and_gc={:.6f}, total={:.6f}, outcome={}, "
+       "block_id={}",
+       stage_wait_executors_closed, stage_wait_lock,
+       stage_prepare_context_and_async, stage_wait_file_write,
+       stage_wait_indexers, stage_finish_file_and_gc, timer.elapsed(), "ok",
+       block_id);
   co_return out_hash;
 }
 
@@ -139,7 +168,7 @@ EventRPCContext::abandon_block(BlockID block_id)
   co_await context.get().await_abandon();
 
   if (context.initiate_shutdown()) {
-    gc_context_internal(it, g);
+    gc_context_internal(it);
   }
   co_return EventStatus<void>();
 }
@@ -152,13 +181,12 @@ EventRPCContext::gc_context(BlockID block_id)
 
   auto it = event_block_contexts_.find(block_id);
   assert(it != event_block_contexts_.end());
-  gc_context_internal(it, g);
+  gc_context_internal(it);
 }
 
 void
 EventRPCContext::gc_context_internal(
-    std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it,
-    x23::CoroGuard const & /*unused*/)
+    std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it)
 {
   // the block must already have been shutdown by this point,
   // and should have no outstanding references

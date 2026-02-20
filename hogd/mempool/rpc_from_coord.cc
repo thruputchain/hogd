@@ -69,18 +69,33 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_deserialize_batch = 0.0;
+  double stage_wait_commit_lock = 0.0;
+  double stage_auth_verify = 0.0;
+  double stage_filter_invalid = 0.0;
+  double stage_prepare_response_and_notify = 0.0;
+  double stage_await_add_txs = 0.0;
+
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
+  size_t num_submitted_txs = txs.size();
+  record_stage(stage_deserialize_batch);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
+  record_stage(stage_wait_commit_lock);
 
-  ElapsedTimer timer;
-  info("submit_unvetted, {} txs", txs.size());
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
           scheduler_->current_block(), txs);
-  info("auth took {}", timer.elapsed());
+  record_stage(stage_auth_verify);
 
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -89,10 +104,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       to_remove_indices.push_back(i);
     }
   }
-  info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
+  record_stage(stage_filter_invalid);
   // Careful: it is tempting to overlap the overhead of
   // [authmempool_verify_transactions()] with that of [scheduler_->add_txs()]
   // (and then after remove any unverified txs from the scheduler). But this
@@ -105,12 +120,19 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   ParallelBatch response;
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
+  record_stage(stage_prepare_response_and_notify);
 
   co_await add_txs_handle;
+  record_stage(stage_await_add_txs);
 
-  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
-       "= {}",
-       scheduler_->size(), timer.elapsed());
+  info("submit_unvetted() stages: deserialize_batch={:.6f}, "
+       "wait_commit_lock={:.6f}, auth_verify={:.6f}, filter_invalid={:.6f}, "
+       "prepare_response_and_notify={:.6f}, await_add_txs={:.6f}, "
+       "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
+       stage_deserialize_batch, stage_wait_commit_lock, stage_auth_verify,
+       stage_filter_invalid, stage_prepare_response_and_notify,
+       stage_await_add_txs, timer.elapsed(), scheduler_->size(),
+       num_submitted_txs, txs.size());
   co_return;
 }
 
@@ -523,6 +545,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     last_stage_ts = now;
   };
   double stage_spawn_finish_calls = 0.0;
+  double stage_generate_block_hash = 0.0;
   double stage_serialize_nomination = 0.0;
   double stage_await_finish_calls = 0.0;
 
@@ -541,6 +564,8 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     nomination.block_height = db_tip.height + 1;
     nomination.block_hash = get_block_hash(cache.tx_hashes,
                                            /*prev_block_hash=*/db_tip.hash);
+    record_stage(stage_generate_block_hash);
+
     nomination.prev_block_hash = db_tip.hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
@@ -559,10 +584,11 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   record_stage(stage_await_finish_calls);
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
-       "serialize_nomination={:.6f}, await_finish_calls={:.6f}, "
-       "total={:.6f}, finish_handles={}",
-       stage_spawn_finish_calls, stage_serialize_nomination,
-       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
+       "generate_block_hash={:.6f}, serialize_nomination={:.6f}, "
+       "await_finish_calls={:.6f}, total={:.6f}, finish_handles={}",
+       stage_spawn_finish_calls, stage_generate_block_hash,
+       stage_serialize_nomination, stage_await_finish_calls, timer.elapsed(),
+       finish_block_handles.size());
   co_return;
 }
 
