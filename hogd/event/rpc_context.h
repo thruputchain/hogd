@@ -26,7 +26,7 @@ public:
     : work_directory_(work_directory)
   {}
 
-  ~EventRpcContext()
+  ~EventRPCContext()
   {
     while (pending_detached_coroutines_.load(std::memory_order_acquire)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
