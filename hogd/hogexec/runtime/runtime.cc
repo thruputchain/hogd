@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/runtime.h"
 
-#include <cassert>
 #include <memory>
 #include <string_view>
 
@@ -99,7 +98,7 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
     gas_remaining = 0;
   }
 
-  assert(gas_remaining <= gas_limit);
+  CHECK(gas_remaining <= gas_limit);
   uint64_t gas_consumed = gas_limit - gas_remaining;
 
   // Restore previous gas limit.

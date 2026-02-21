@@ -45,7 +45,8 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
                     Args... args)
 {
   SyscallFunc syscall_fn = nullptr;
-  if (syscall_no >= kSyscallTable.size()) {
+  bool valid_syscall_no = syscall_no < kSyscallTable.size();
+  if (!valid_syscall_no) {
     // invalid syscall
     if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
       stats->invalid_syscall_count++;
@@ -64,7 +65,9 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
   assert(call_context->syscall_handler);
 
   if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
-    stats->syscall_counts[syscall_no]++;
+    if (valid_syscall_no) {
+      stats->syscall_counts[syscall_no]++;
+    }
   }
 
   return syscall_fn(*call_context->syscall_handler, *call_context->runtime,

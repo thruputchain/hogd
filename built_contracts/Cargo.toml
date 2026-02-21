@@ -21,7 +21,8 @@ members = [
     "integration_test_contracts/return_fault_test",
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/sha256_wrapper",
-    "integration_test_contracts/syscall_misc_tests"
+    "integration_test_contracts/syscall_misc_tests",
+    "integration_test_contracts/syscall_parse_hardening_test"
 ]
 resolver = "2"
 

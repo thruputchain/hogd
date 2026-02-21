@@ -123,6 +123,7 @@ add_library(runtime_test_objects OBJECT
   syscall_entry_outer_tests.cc
   syscall_error_handling_tests.cc
   syscall_misc_tests.cc
+  syscall_parse_hardening_wasm_test.cc
   syscall_parse_tests.cc
   tracing_tests.cc
   try_invoke_test.cc
