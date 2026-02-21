@@ -33,6 +33,8 @@ make_event_from_xdr_struct(x23::is_xdr_struct auto const &t)
   std::memset(name_buffer.data(), 0, name_buffer.size());
   constexpr static std::string_view kTypeName =
       x23::xdr_meta<std::decay_t<decltype(t)>>::type_name;
+  static_assert(kTypeName.size() <= 32,
+                "XDR type name exceeds 32-byte event name buffer");
   std::memcpy(name_buffer.data(), kTypeName.data(), kTypeName.size());
   buf.append_range(name_buffer);
   buf.append_range(x23::serialize(t));

@@ -53,4 +53,19 @@ TEST(StringTest, Encode)
             "aGVsbG8gd29ybGQh");
 }
 
+TEST(StringTest, DecodeHexEvenLength)
+{
+  // Even-length hex string should decode correctly
+  auto result = decode_hex("abcd");
+  ASSERT_EQ(result.size(), 2U);
+  EXPECT_EQ(result[0], std::byte{0xab});
+  EXPECT_EQ(result[1], std::byte{0xcd});
+}
+
+TEST(StringTest, DecodeHexOddLengthDeath)
+{
+  // Odd-length hex string should CHECK-fail (out-of-bounds read)
+  EXPECT_DEATH(decode_hex("abc"), "");
+}
+
 } // namespace hogd

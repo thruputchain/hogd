@@ -44,4 +44,22 @@ TEST(StorageCostModelTest, RoundtripCustomValues)
   EXPECT_EQ(original, roundtripped);
 }
 
+// Verify that get_bytestring_cost does not truncate for large bytestring_len
+// values. With kBytestringCostPerByte = 10, a bytestring_len near the 64-bit
+// max would overflow in 64-bit arithmetic but should be correct in 128-bit.
+TEST(StorageCostModelTest, GetBytestringCostLargeLen)
+{
+  auto model = StorageCostModel::default_cost_model();
+  // default_cost_model has kBaseItemCost = 12000, kBytestringCostPerByte = 10
+
+  // UINT64_MAX / 10 = 1844674407370955161, so any value larger than that
+  // multiplied by 10 will overflow uint64_t.
+  // Use 2000000000000000000 (2e18) * 10 = 2e19 which overflows uint64_t
+  // (max ~1.84e19).
+  size_t large_len = size_t{2'000'000'000'000'000'000ULL};
+  int128_t expected = int128_t{12000} + (int128_t{large_len} * int128_t{10});
+  int128_t actual = model.get_bytestring_cost(large_len);
+  EXPECT_EQ(actual, expected);
+}
+
 } // namespace hogd
