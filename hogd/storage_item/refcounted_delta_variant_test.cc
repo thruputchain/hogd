@@ -355,7 +355,7 @@ TEST(RefcountedDeltaVariant, RCQNoEmptyBlockWhenInsertFullyConsumed)
 TEST(RefcountedDeltaVariant, RCQBlocksRemainContiguousAfterPruneAndInsert)
 {
   // Round 1: insert block 1
-  RefcountedDeltaVariant round1;
+  RefcountedDeltaVariant round1; // NOLINT(misc-confusable-identifiers)
   InvalidStateFlag invalid_state_flag1;
   auto *arg1 = round1.try_set_variant<RetrocausalQueueArgs>();
   ASSERT_TRUE(arg1);
