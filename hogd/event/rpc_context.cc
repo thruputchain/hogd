@@ -122,7 +122,6 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   SHA256Hash out_hash = context.get().get_root_hash();
   record_stage(stage_prepare_context_and_async);
 
-  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
   [](EventRPCContext &event, std::unique_ptr<x23::CoroGuard> g,
      BlockID block_id, BlockHeight block_height, SHA256Hash out_hash,
      x23::Async<void> file_wait) -> x23::Detached {
@@ -143,8 +142,6 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     if (it->second.initiate_shutdown()) {
       event.gc_context_internal(it);
     }
-
-    event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_acquire);
     co_return;
   }(*this, std::move(g), block_id, block_height, out_hash,
                                  std::move(file_wait));
