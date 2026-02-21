@@ -15,7 +15,7 @@ TxEmittedEvent
 make_tx_emitted_event(ContractAddress const &contract_address,
                       uint32_t num_topics, std::span<const std::byte> event)
 {
-  CHECK_LE(event.size(), kMaxEventLength);
+  CHECK_LE(event.size(), size_t{kMaxEventLength});
 
   return TxEmittedEvent{
       .contract_address = contract_address,

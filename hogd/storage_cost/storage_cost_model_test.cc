@@ -56,7 +56,7 @@ TEST(StorageCostModelTest, GetBytestringCostLargeLen)
   // multiplied by 10 will overflow uint64_t.
   // Use 2000000000000000000 (2e18) * 10 = 2e19 which overflows uint64_t
   // (max ~1.84e19).
-  size_t large_len = size_t{2'000'000'000'000'000'000ULL};
+  auto large_len = size_t{2'000'000'000'000'000'000ULL};
   int128_t expected = int128_t{12000} + (int128_t{large_len} * int128_t{10});
   int128_t actual = model.get_bytestring_cost(large_len);
   EXPECT_EQ(actual, expected);
