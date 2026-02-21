@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
