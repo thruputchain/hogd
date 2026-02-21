@@ -91,9 +91,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   size_t num_submitted_txs = txs.size();
   record_stage(stage_deserialize_batch);
 
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
-
   // It is safe to do a relaxed load of the current block height because we
   // acquire [commit_lock_] below when we check if any accounts have changed
   // their auth data.
@@ -102,20 +99,22 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
        verify_height);
   record_stage(stage_capture_verify_height);
 
-  //  AuthErrorCodeBatch auth_ret =
-  //      co_await auth_client_->authmempool_verify_transactions(verify_height,
-  //                                                             txs);
+  AuthErrorCodeBatch auth_ret =
+      co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                             txs);
   record_stage(stage_auth_verify);
 
   std::unordered_set<size_t> to_remove_indices;
-  //  for (size_t i = 0; i < auth_ret.size(); i++) {
-  //    const AuthErrorCode &code = auth_ret[i];
-  //    if (code != AuthErrorCode::kAuthSuccess) {
-  //      to_remove_indices.insert(i);
-  //    }
-  //  }
+  for (size_t i = 0; i < auth_ret.size(); i++) {
+    const AuthErrorCode &code = auth_ret[i];
+    if (code != AuthErrorCode::kAuthSuccess) {
+      to_remove_indices.insert(i);
+    }
+  }
   info("{} txs were invalid", to_remove_indices.size());
 
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
   record_stage(stage_wait_commit_lock_before_add);
   size_t num = 0;
   for (size_t i = 0; i < txs.size(); i++) {
@@ -724,7 +723,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
   record_stage(stage_wait_transfers);
-  // co_await wait_for_auth_data(db_tip.height);
+  co_await wait_for_auth_data(db_tip.height);
   record_stage(stage_wait_auth_data);
 
   nominated_block_cache_.block_id = generate_block_id();
