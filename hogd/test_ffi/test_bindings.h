@@ -188,7 +188,8 @@ open_mock_invocation_frame(void *syscall_handler,
 struct ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);
 
-// These need to be called before and after invoking system calls in a mock invocation frame.
+// These need to be called before and after invoking system calls in a mock
+// invocation frame.
 enum TestFFIErrorCode push_context(void *syscall_handler);
 enum TestFFIErrorCode pop_context();
 
