@@ -27,7 +27,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
   static std::optional<AuthClaim>
   to_cpp(generated::AuthClaim const &ffi_auth_claim)
   {
-    AuthClaim auth_claim;
+    AuthClaim auth_claim{};
 
     switch (ffi_auth_claim.tag) {
     case generated::AuthClaim::AuthClaim_kInvokedAddressSignature:
@@ -74,7 +74,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
 
   static generated::AuthClaim to_ffi(AuthClaim const &cpp_auth_claim)
   {
-    generated::AuthClaim ffi_auth_claim;
+    generated::AuthClaim ffi_auth_claim{};
     switch (cpp_auth_claim.claim_type()) {
     case AuthClaimType::kInvokedAddressSignature:
       ffi_auth_claim.k_invoked_address_signature = {
