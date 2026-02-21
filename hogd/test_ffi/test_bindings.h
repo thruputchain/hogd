@@ -10,7 +10,7 @@ extern "C" {
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
 #define TEST_FFI_VERSION_MINOR 7
-#define TEST_FFI_VERSION_PATCH 0
+#define TEST_FFI_VERSION_PATCH 1
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -187,6 +187,11 @@ open_mock_invocation_frame(void *syscall_handler,
 
 struct ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);
+
+// These need to be called before and after invoking system calls in a mock
+// invocation frame.
+enum TestFFIErrorCode push_context(void *syscall_handler);
+enum TestFFIErrorCode pop_context();
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
