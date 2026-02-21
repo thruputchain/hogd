@@ -136,14 +136,13 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                                       .added_entries = {}}),
                    &cost_model, item.get()));
 
-  EXPECT_EQ(
-      cost_model.get_retrocausal_queue_cost(2, 1) - cost_model.kBaseItemCost,
-      variant.get_marginal_cost_upper_bound(
-          make_rcq_delta(std::nullopt,
-                         RetrocausalQueueInsertDelta{
-                             .added_entries = {make_test_queue_entry(1),
-                                               make_test_queue_entry(2)}}),
-          &cost_model, item.get()));
+  EXPECT_EQ(cost_model.get_retrocausal_queue_cost(2, 1),
+            variant.get_marginal_cost_upper_bound(
+                make_rcq_delta(std::nullopt,
+                               RetrocausalQueueInsertDelta{
+                                   .added_entries = {make_test_queue_entry(1),
+                                                     make_test_queue_entry(2)}}),
+                &cost_model, item.get()));
 
   ASSERT_TRUE(arg->try_reserve_consume());
   EXPECT_EQ(0,
@@ -158,14 +157,13 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                     RetrocausalQueueInsertDelta{.added_entries = {}}),
                 &cost_model, item.get()));
   // same test case as above, but after a try_reserve_consume has been called.
-  EXPECT_EQ(
-      cost_model.get_retrocausal_queue_cost(2, 1) - cost_model.kBaseItemCost,
-      variant.get_marginal_cost_upper_bound(
-          make_rcq_delta(std::nullopt,
-                         RetrocausalQueueInsertDelta{
-                             .added_entries = {make_test_queue_entry(1),
-                                               make_test_queue_entry(2)}}),
-          &cost_model, item.get()));
+  EXPECT_EQ(cost_model.get_retrocausal_queue_cost(2, 1),
+            variant.get_marginal_cost_upper_bound(
+                make_rcq_delta(std::nullopt,
+                               RetrocausalQueueInsertDelta{
+                                   .added_entries = {make_test_queue_entry(1),
+                                                     make_test_queue_entry(2)}}),
+                &cost_model, item.get()));
 
   // consume 1 entry from the first block and 1 entry from the current block
   // (which hasn't been inserted yet)
@@ -195,13 +193,12 @@ TEST(RefcountedDeltaVariant, RCQCosts)
 
   // During the marginal cost upper bound, we don't check to see whether the
   // entries being committed were already consumed.
-  EXPECT_EQ(
-      cost_model.get_retrocausal_queue_cost(1, 1) - cost_model.kBaseItemCost,
-      variant.get_marginal_cost_upper_bound(
-          make_rcq_delta(std::nullopt,
-                         RetrocausalQueueInsertDelta{
-                             .added_entries = {make_test_queue_entry(1)}}),
-          &cost_model, item.get()));
+  EXPECT_EQ(cost_model.get_retrocausal_queue_cost(1, 1),
+            variant.get_marginal_cost_upper_bound(
+                make_rcq_delta(std::nullopt,
+                               RetrocausalQueueInsertDelta{
+                                   .added_entries = {make_test_queue_entry(1)}}),
+                &cost_model, item.get()));
   arg->commit_insert(
       RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(1)}},
       invalid_state_flag);
@@ -209,13 +206,12 @@ TEST(RefcountedDeltaVariant, RCQCosts)
 
   // After previous state, there still isn't a new block, so this insert would
   // create a new one.
-  EXPECT_EQ(
-      cost_model.get_retrocausal_queue_cost(1, 1) - cost_model.kBaseItemCost,
-      variant.get_marginal_cost_upper_bound(
-          make_rcq_delta(std::nullopt,
-                         RetrocausalQueueInsertDelta{
-                             .added_entries = {make_test_queue_entry(2)}}),
-          &cost_model, item.get()));
+  EXPECT_EQ(cost_model.get_retrocausal_queue_cost(1, 1),
+            variant.get_marginal_cost_upper_bound(
+                make_rcq_delta(std::nullopt,
+                               RetrocausalQueueInsertDelta{
+                                   .added_entries = {make_test_queue_entry(2)}}),
+                &cost_model, item.get()));
   auto item2 = variant.to_item(item, &cost_model);
   auto stats = item2->queue().get_active_stats();
   EXPECT_EQ(stats.active_block_count, 1);
@@ -251,14 +247,13 @@ TEST(RefcountedDeltaVariant, RCQCostsBlockCountUpperBound)
   EXPECT_EQ(item->storage_cost(), cost_model.get_retrocausal_queue_cost(5, 1));
 
   // inserting entries creates a new block
-  EXPECT_EQ(
-      cost_model.get_retrocausal_queue_cost(2, 1) - cost_model.kBaseItemCost,
-      variant.get_marginal_cost_upper_bound(
-          make_rcq_delta(std::nullopt,
-                         RetrocausalQueueInsertDelta{
-                             .added_entries = {make_test_queue_entry(1),
-                                               make_test_queue_entry(2)}}),
-          &cost_model, item.get()));
+  EXPECT_EQ(cost_model.get_retrocausal_queue_cost(2, 1),
+            variant.get_marginal_cost_upper_bound(
+                make_rcq_delta(std::nullopt,
+                               RetrocausalQueueInsertDelta{
+                                   .added_entries = {make_test_queue_entry(1),
+                                                     make_test_queue_entry(2)}}),
+                &cost_model, item.get()));
 
   ASSERT_TRUE(arg->try_reserve_consume());
 
@@ -276,7 +271,7 @@ TEST(RefcountedDeltaVariant, RCQCostsBlockCountUpperBound)
 
   // create 2 entries and consume 2 entries from current block; one from past
   // block This requires paying for the new block, as there's an insertion
-  EXPECT_EQ(cost_model.kRCQCostPerBlock,
+  EXPECT_EQ(cost_model.kBaseItemCost + cost_model.kRCQCostPerBlock,
             variant.get_marginal_cost_upper_bound(
                 make_rcq_delta(
                     RetrocausalQueueConsumeDelta{
