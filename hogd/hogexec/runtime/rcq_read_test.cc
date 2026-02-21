@@ -8,7 +8,6 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
-#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -86,6 +85,7 @@ public:
     advance_block();
   }
 };
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 TEST_P(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
 {
@@ -333,6 +333,8 @@ TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
   ASSERT_TRUE(block_from_seven.has_value());
   ASSERT_FALSE(block_from_seven.value().has_value());
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RCQReadTest,
                          ::testing::Values(TestDB::kMockInMemory,
