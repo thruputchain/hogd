@@ -91,6 +91,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   size_t num_submitted_txs = txs.size();
   record_stage(stage_deserialize_batch);
 
+  // TODO(jhumphri): Move this to somewhere below [verify_transactions] once we
+  // update the auth server.
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+
   // It is safe to do a relaxed load of the current block height because we
   // acquire [commit_lock_] below when we check if any accounts have changed
   // their auth data.
@@ -113,8 +118,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   }
   info("{} txs were invalid", to_remove_indices.size());
 
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
   record_stage(stage_wait_commit_lock_before_add);
   size_t num = 0;
   for (size_t i = 0; i < txs.size(); i++) {
