@@ -1,6 +1,7 @@
 #include "hogd/event/rpc_context.h"
 
 #include <cassert>
+#include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
