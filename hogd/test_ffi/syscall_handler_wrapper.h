@@ -84,7 +84,7 @@ public:
       return false;
     }
 
-    assert(mock_runtime_stack_.empty());
+    CHECK(mock_runtime_stack_.empty());
     current_context_ = this;
     return true;
   }
