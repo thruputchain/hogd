@@ -237,11 +237,6 @@ TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
 
 TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP()
-        << "MockDB bug: concurrent consume+insert can trigger storage-cost "
-        << "accounting assert; tracked separately.";
-  }
   if (GetParam() == TestDB::kHogDB) {
     GTEST_SKIP()
         << "HogDB bug: RCQ concurrent consume+insert should clear prior "
