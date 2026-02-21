@@ -150,6 +150,28 @@ TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
   EXPECT_EQ(block_from_one.value()->entries[0], make_rcq_entry(9));
 }
 
+TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "HogDB bug: RCQ delete() should clear prior blocks, but lookup for "
+        << "search_start_number=2 returns nonempty block";
+    return;
+  }
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
+
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(1)})); // block 1
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
+  submit_delta(key, make_delete_delta());                        // block 3
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(9)})); // block 4
+
+  auto block_from_two =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(block_from_two.has_value());
+  EXPECT_FALSE(block_from_two.value().has_value());
+}
+
 TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
