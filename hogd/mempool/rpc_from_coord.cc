@@ -724,7 +724,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
   record_stage(stage_wait_transfers);
-  co_await wait_for_auth_data(db_tip.height);
+  // co_await wait_for_auth_data(db_tip.height);
   record_stage(stage_wait_auth_data);
 
   nominated_block_cache_.block_id = generate_block_id();
