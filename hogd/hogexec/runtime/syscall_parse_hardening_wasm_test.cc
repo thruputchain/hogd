@@ -32,9 +32,8 @@ public:
 protected:
   void SetUp() override
   {
-    using syscall_parse_hardening_test_meta =
-        ContractTraitMeta<
-            syscall_parse_hardening_test::SyscallParseHardeningTest>;
+    using syscall_parse_hardening_test_meta = ContractTraitMeta<
+        syscall_parse_hardening_test::SyscallParseHardeningTest>;
 
     auto contract = syscall_parse_hardening_test_meta::load_wasm();
     write_contract(contract);
@@ -56,7 +55,8 @@ protected:
   uint64_t nonce_ = 0;
 };
 
-// Can't turn value that doesn't fit into an int32_t into a CryptographicScheme enum (i32)
+// Can't turn value that doesn't fit into an int32_t into a CryptographicScheme
+// enum (i32)
 TEST_F(SyscallParseHardeningWasmTest, VerifySignatureRejectsNoncanonicalScheme)
 {
   auto handler = make_new_system_call_handler(
@@ -74,12 +74,12 @@ TEST_F(SyscallParseHardeningWasmTest, VerifySignatureRejectsNoncanonicalScheme)
 TEST_F(SyscallParseHardeningWasmTest, ChangePubkeyOptionalPointerFaults)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client_.make_invocation<
-              "test_change_pubkey_optional_pointer_fault">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation = client_.make_invocation<
+                      "test_change_pubkey_optional_pointer_fault">(UINT64_MAX),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }

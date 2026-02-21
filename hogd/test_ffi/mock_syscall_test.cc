@@ -225,22 +225,26 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   context.push_mock_runtime(&mock_runtime);
   mock_runtime.set_available_gas(1000);
 
-  auto res_canonical = mock_syscall_parser<SignedI32TypeTestSyscallMeta>(
-      SyscallNo::kExit, UINT64_MAX, 0, 0, 0, 0, 0, 0);
+  auto res_canonical =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        UINT64_MAX, 0, 0, 0, 0,
+                                                        0, 0);
   ASSERT_EQ(res_canonical.panic, 0);
-  ASSERT_EQ(
-      res_canonical.result_code,
-      std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+  ASSERT_EQ(res_canonical.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
-  auto res_noncanonical = mock_syscall_parser<SignedI32TypeTestSyscallMeta>(
-      SyscallNo::kExit, 0x00000000FFFFFFFFULL, 0, 0, 0, 0, 0, 0);
+  auto res_noncanonical =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        0x00000000FFFFFFFFULL,
+                                                        0, 0, 0, 0, 0, 0);
   ASSERT_EQ(res_noncanonical.panic, 0);
-  ASSERT_EQ(
-      res_noncanonical.result_code,
-      std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+  ASSERT_EQ(res_noncanonical.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
 
-  auto res_overflow = mock_syscall_parser<SignedI32TypeTestSyscallMeta>(
-      SyscallNo::kExit, 0x0000000080000000ULL, 0, 0, 0, 0, 0, 0);
+  auto res_overflow =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        0x0000000080000000ULL,
+                                                        0, 0, 0, 0, 0, 0);
   ASSERT_EQ(res_overflow.panic, 0);
   ASSERT_EQ(res_overflow.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
