@@ -573,9 +573,6 @@ TEST_F(DirectRCQTests, ConsumeAndInsertNetZeroDoesNotPersistEmptyBlock)
   ASSERT_FALSE(next_block.value().has_value());
 }
 
-// This test probes block-number lookup behavior in a way that is currently
-// under active interpretation. Keep disabled while we move coverage to the
-// dedicated RCQ read semantics suite.
 TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -614,9 +611,11 @@ TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
   ASSERT_EQ(queue->metadata().max_live_block_num, 3);
   ASSERT_EQ(queue->metadata().live_entries, 2);
 
-  // This test sets search_start_number to 2, instead of 1 (the fully consumed
-  // rcq block) so that this test passes without triggering the diff between
-  // hogdb and mockdb.
+  auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key, 1);
+  ASSERT_TRUE(b1.has_value());
+  ASSERT_FALSE(b1.value().has_value());
+
+  // RCQ block 1 is gone
   auto b2 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
                                                             key, 2);
   ASSERT_TRUE(b2.has_value());
