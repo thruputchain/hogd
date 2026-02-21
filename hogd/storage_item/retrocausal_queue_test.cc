@@ -67,7 +67,7 @@ TEST(RetrocausalQueue, ClearSeveralBlocks)
                                                 25,
                                             .partial_consumed_number = 1},
       RetrocausalQueueBlock{.entries = {make_test_queue_entry(0)},
-                            .block_number = 52});
+                            .block_number = 51});
 
   const auto *next_entries = queue->try_get_next_block(0);
   ASSERT_TRUE(next_entries);

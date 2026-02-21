@@ -74,6 +74,9 @@ public:
   const RetrocausalQueueBlock *
   try_get_next_block(uint64_t search_start_number) const;
 
+  // Returns the block with the exact block number, or nullptr if not present.
+  const RetrocausalQueueBlock *try_get_block(uint64_t block_number) const;
+
   uint64_t get_current_block_number() const { return current_block_number_; }
 
   RetrocausalQueuePastBlockConsumeDelta get_consume_state() const

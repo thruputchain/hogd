@@ -316,6 +316,186 @@ TEST(RefcountedDeltaVariant, RCQCostsBlockCountUpperBound)
   EXPECT_EQ(stats2.active_size, 5);
 }
 
+TEST(RefcountedDeltaVariant, RCQNoEmptyBlockWhenInsertFullyConsumed)
+{
+  RefcountedDeltaVariant variant;
+  InvalidStateFlag invalid_state_flag;
+  auto *arg = variant.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg);
+  ASSERT_TRUE(arg->try_reserve_consume());
+
+  // Consume one current-block entry before its insert, then insert exactly
+  // that same entry. This is the validation-mode pairing case that should
+  // not create a persisted empty block.
+  arg->commit_consume(
+      RetrocausalQueueConsumeDelta{
+          .past_block_consume =
+              RetrocausalQueuePastBlockConsumeDelta{
+                  .max_fully_consumed_block_number = 0,
+                  .partial_consumed_number = 0},
+          .current_block_consumed = {make_test_queue_entry(1)}},
+      invalid_state_flag);
+
+  arg->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(1)}},
+      invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  auto out = variant.to_item(nullptr, &cost_model);
+  ASSERT_TRUE(out);
+  ASSERT_EQ(out->type(), StorageItemType::kItemTypeRetrocausalQueue);
+
+  auto const &queue = out->queue();
+  EXPECT_EQ(queue.get_active_stats(),
+            (RetrocausalQueueStats{.active_block_count = 0, .active_size = 0}));
+  EXPECT_EQ(queue.get_current_block_number(), 0U);
+  EXPECT_EQ(queue.try_get_next_block(1), nullptr);
+}
+
+TEST(RefcountedDeltaVariant, RCQBlocksRemainContiguousAfterPruneAndInsert)
+{
+  // Round 1: insert block 1
+  RefcountedDeltaVariant round1;
+  InvalidStateFlag invalid_state_flag1;
+  auto *arg1 = round1.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg1);
+  arg1->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(1)}},
+      invalid_state_flag1);
+  auto item1 = round1.to_item(nullptr, &cost_model);
+  ASSERT_TRUE(item1);
+  ASSERT_EQ(item1->queue().get_current_block_number(), 1U);
+
+  // Round 2: insert block 2
+  RefcountedDeltaVariant round2;
+  auto *arg2 = round2.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg2);
+  InvalidStateFlag invalid_state_flag2;
+  arg2->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(2)}},
+      invalid_state_flag2);
+  auto item2 = round2.to_item(item1, &cost_model);
+  ASSERT_TRUE(item2);
+  ASSERT_EQ(item2->queue().get_current_block_number(), 2U);
+
+  // Round 3: consume block 1 fully, then insert one new entry.
+  RefcountedDeltaVariant round3;
+  auto *arg3 = round3.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg3);
+  ASSERT_TRUE(arg3->try_reserve_consume());
+  InvalidStateFlag invalid_state_flag3;
+  arg3->commit_consume(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 1,
+                                           .partial_consumed_number = 0},
+                                   .current_block_consumed = {}},
+      invalid_state_flag3);
+  arg3->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(3)}},
+      invalid_state_flag3);
+  auto item3 = round3.to_item(item2, &cost_model);
+  ASSERT_TRUE(item3);
+
+  auto const &queue = item3->queue();
+  ASSERT_EQ(queue.get_current_block_number(), 3U);
+
+  auto const *b2 = queue.try_get_next_block(1);
+  ASSERT_TRUE(b2);
+  EXPECT_EQ(b2->block_number, 2U);
+  ASSERT_EQ(b2->entries.size(), 1U);
+  EXPECT_EQ(b2->entries[0], make_test_queue_entry(2));
+
+  auto const *b3 = queue.try_get_next_block(3);
+  ASSERT_TRUE(b3);
+  EXPECT_EQ(b3->block_number, 3U);
+  ASSERT_EQ(b3->entries.size(), 1U);
+  EXPECT_EQ(b3->entries[0], make_test_queue_entry(3));
+
+  EXPECT_EQ(queue.try_get_next_block(4), nullptr);
+}
+
+// storage_item is used by mockdb path; HogDB has its own RCQ metadata path.
+// Keep this regression check disabled to document intentional behavior drift.
+TEST(RefcountedDeltaVariant,
+     DISABLED_RCQWireMetadataLosesConsumeStateAfterPartialConsume)
+{
+  RefcountedDeltaVariant round1;
+  InvalidStateFlag invalid_state_flag1;
+  auto *arg1 = round1.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg1);
+  arg1->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(1),
+                                                    make_test_queue_entry(2)}},
+      invalid_state_flag1);
+  auto item1 = round1.to_item(nullptr, &cost_model);
+  ASSERT_TRUE(item1);
+
+  RefcountedDeltaVariant round2;
+  auto *arg2 = round2.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg2);
+  ASSERT_TRUE(arg2->try_reserve_consume());
+  InvalidStateFlag invalid_state_flag2;
+  arg2->commit_consume(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 0,
+                                           .partial_consumed_number = 1},
+                                   .current_block_consumed = {}},
+      invalid_state_flag2);
+  auto item2 = round2.to_item(item1, &cost_model);
+  ASSERT_TRUE(item2);
+
+  auto const consume_state = item2->queue().get_consume_state();
+  ASSERT_EQ(consume_state.max_fully_consumed_block_number, 0U);
+  ASSERT_EQ(consume_state.partial_consumed_number, 1U);
+
+  auto wire = item2->to_wire_item();
+  EXPECT_EQ(wire.metadata().consume_state.max_fully_consumed_block_number,
+            consume_state.max_fully_consumed_block_number);
+  EXPECT_EQ(wire.metadata().consume_state.partial_consumed_number,
+            consume_state.partial_consumed_number);
+}
+
+// storage_item is used by mockdb path; HogDB has its own RCQ metadata path.
+// Keep this regression check disabled to document intentional behavior drift.
+TEST(RefcountedDeltaVariant, DISABLED_RCQWireMetadataEmptyQueueHasMaxLiveZero)
+{
+  RefcountedDeltaVariant round1;
+  InvalidStateFlag invalid_state_flag1;
+  auto *arg1 = round1.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg1);
+  arg1->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(1)}},
+      invalid_state_flag1);
+  auto item1 = round1.to_item(nullptr, &cost_model);
+  ASSERT_TRUE(item1);
+
+  RefcountedDeltaVariant round2;
+  auto *arg2 = round2.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg2);
+  ASSERT_TRUE(arg2->try_reserve_consume());
+  InvalidStateFlag invalid_state_flag2;
+  arg2->commit_consume(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 1,
+                                           .partial_consumed_number = 0},
+                                   .current_block_consumed = {}},
+      invalid_state_flag2);
+  auto item2 = round2.to_item(item1, &cost_model);
+  ASSERT_TRUE(item2);
+
+  auto const &queue = item2->queue();
+  EXPECT_EQ(queue.get_active_stats(),
+            (RetrocausalQueueStats{.active_block_count = 0, .active_size = 0}));
+  EXPECT_EQ(queue.try_get_next_block(1), nullptr);
+
+  auto wire = item2->to_wire_item();
+  ASSERT_EQ(wire.metadata().live_entries, 0U);
+  EXPECT_EQ(wire.metadata().max_live_block_num, 0U);
+}
+
 TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
 {
   RefcountedDeltaVariant variant;
