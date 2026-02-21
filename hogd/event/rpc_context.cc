@@ -97,8 +97,10 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return status.error();
   }
 
-  x23::CoroGuard g;
-  co_await g(lock_);
+  // We [std::move(g)] into the detached coroutine below. You cannot move an
+  // [x23::CoroGuard], so we wrap it in an [std::unique_ptr<>].
+  auto g = std::make_unique<x23::CoroGuard>();
+  co_await (*g)(lock_);
   record_stage(stage_wait_lock);
 
   auto it = event_block_contexts_.find(block_id);
@@ -121,9 +123,9 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   record_stage(stage_prepare_context_and_async);
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
-  [](EventRPCContext &event, x23::CoroGuard &&g, BlockID block_id,
-     BlockHeight block_height, SHA256Hash out_hash,
-     x23::Async<void> &&file_wait) -> x23::Detached {
+  [](EventRPCContext &event, std::unique_ptr<x23::CoroGuard> g,
+     BlockID block_id, BlockHeight block_height, SHA256Hash out_hash,
+     x23::Async<void> file_wait) -> x23::Detached {
     auto *pool = x23::ThreadPool::get_thread_pool();
     if (!pool) {
       pool = &default_threadpool();
@@ -145,7 +147,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_acquire);
     co_return;
   }(*this, std::move(g), block_id, block_height, out_hash,
-                                   std::move(file_wait));
+                                 std::move(file_wait));
 
   // We moved [g] into the detached coroutine above, so be sure not to do any
   // work beyond this point which touches a context or [indexers_]!
