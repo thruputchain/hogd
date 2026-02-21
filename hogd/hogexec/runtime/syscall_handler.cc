@@ -764,10 +764,6 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
 
-  auto invalid_input = []() -> SyscallStatus<void> {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  };
-
   uint64_t serialized_size = data.size();
   auto try_add_size = [&](uint64_t delta) {
     return !integer_add_overflow(serialized_size, delta, &serialized_size);
@@ -775,10 +771,10 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
   if ((topic0 && !try_add_size(topic0->size())) ||
       (topic1 && !try_add_size(topic1->size())) ||
       (topic2 && !try_add_size(topic2->size()))) {
-    return invalid_input();
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   if (serialized_size > kMaxEventLength) {
-    return invalid_input();
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   x23::Buf buf;
