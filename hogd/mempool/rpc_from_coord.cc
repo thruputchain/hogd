@@ -490,6 +490,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
+  double total_schedule_time = 0.0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     if (i > 0) {
       // The first call to [schedule()] is done in [schedulercoord_nominate()]
@@ -497,8 +498,9 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
       ElapsedTimer timer;
       scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                            cache.tx_hashes, cache.txs);
-      info("schedule() took {}, scheduler size is {}", timer.elapsed(),
-           scheduler_->size());
+      total_schedule_time += timer.elapsed();
+      info("schedule() iteration took {}, scheduler size is {}",
+           timer.elapsed(), scheduler_->size());
     }
     size_t num_scheduled_this_iteration = cache.txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {
@@ -526,6 +528,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
       info("schedule() propose_batch_in_chunks() took {}", timer.elapsed());
     }
   }
+  info("schedule(), total schedule time is {}", total_schedule_time);
   record_stage(stage_schedule_loop);
 
   for (size_t i = 0; i < handles.size(); i++) {
