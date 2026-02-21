@@ -57,6 +57,23 @@ public:
     return delta;
   }
 
+  static StorageDelta
+  make_rcq_consume_insert_delta(uint64_t max_fully_consumed_block_number,
+                                uint64_t partial_consumed_number,
+                                std::vector<QueueEntry> const &values)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+        .past_block_consume =
+            RetrocausalQueuePastBlockConsumeDelta{
+                .max_fully_consumed_block_number = max_fully_consumed_block_number,
+                .partial_consumed_number = partial_consumed_number},
+        .current_block_consumed = {}};
+    delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{
+        .added_entries = {values.begin(), values.end()}};
+    return delta;
+  }
+
   void submit_delta(AddressAndKey const &key, StorageDelta delta)
   {
     auto tx = make_new_per_tx_db_proxy();
@@ -153,9 +170,9 @@ TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
 TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
 {
   if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "HogDB bug: RCQ delete() should clear prior blocks, but lookup for "
+    GTEST_SKIP()
+        << "HogDB bug: RCQ delete() should clear prior blocks, but lookup for "
         << "search_start_number=2 returns nonempty block";
-    return;
   }
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -164,6 +181,95 @@ TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
   submit_delta(key, make_delete_delta());                        // block 3
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(9)})); // block 4
+
+  auto block_from_two =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(block_from_two.has_value());
+  EXPECT_FALSE(block_from_two.value().has_value());
+}
+
+TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "HogDB bug: RCQ full consume should clear prior blocks, but lookup "
+        << "for search_start_number=2 returns nonempty block";
+  }
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
+
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(1)})); // block 1
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
+  submit_delta(key, make_rcq_consume_delta(2, 0));               // block 3
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(9)})); // block 4
+
+  auto block_from_two =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(block_from_two.has_value());
+  EXPECT_FALSE(block_from_two.value().has_value());
+}
+
+TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "HogDB bug: RCQ consume+insert should clear prior blocks, but "
+        << "lookup for search_start_number=2 returns nonempty block";
+  }
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
+
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(1)})); // block 1
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
+  submit_delta(
+      key, make_rcq_consume_insert_delta(2, 0, {make_rcq_entry(9)})); // block 3
+
+  auto block_from_two =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(block_from_two.has_value());
+  EXPECT_FALSE(block_from_two.value().has_value());
+}
+
+TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP()
+        << "MockDB bug: concurrent consume+insert can trigger storage-cost "
+        << "accounting assert; tracked separately.";
+  }
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "HogDB bug: RCQ concurrent consume+insert should clear prior "
+        << "blocks, but lookup for search_start_number=2 returns nonempty "
+        << "block";
+  }
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
+
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(1)})); // block 1
+  submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
+
+  // Same block: one tx consumes all prior entries, one tx inserts.
+  auto tx_consume = make_new_per_tx_db_proxy();
+  tx_consume.add_delta(
+      key, make_rcq_consume_delta(2, 0),
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_consume.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  auto tx_insert = make_new_per_tx_db_proxy();
+  tx_insert.add_delta(
+      key, make_rcq_insert_delta({make_rcq_entry(9)}),
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_insert.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  ASSERT_TRUE(tx_consume.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction({}).has_value());
+  advance_block();
 
   auto block_from_two =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
