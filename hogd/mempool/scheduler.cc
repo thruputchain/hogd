@@ -149,6 +149,8 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
   return account_txs.insert({key, &tx_value}).second;
 }
 
+// TODO(jhumphri): I think we are allocating a new decorated signature vec below
+// when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
