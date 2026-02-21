@@ -22,6 +22,7 @@ enum class TestSignedEnum : int32_t {
 
 } // namespace
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(SyscallParseTests, ParsePrimitiveTypes)
 {
   // some arbitrary iniital data
@@ -256,5 +257,7 @@ TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
   auto bad_arg = SyscallArgParams<const uint32_t *>::parse(contract_memory, 16);
   ASSERT_FALSE(SyscallArgParams<const uint32_t *>::validate(bad_arg));
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
