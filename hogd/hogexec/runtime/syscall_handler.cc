@@ -764,6 +764,19 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
 
+  uint64_t serialized_size = data.size();
+  auto try_add_size = [&](uint64_t delta) {
+    return !integer_add_overflow(serialized_size, delta, &serialized_size);
+  };
+  if ((topic0 && !try_add_size(topic0->size())) ||
+      (topic1 && !try_add_size(topic1->size())) ||
+      (topic2 && !try_add_size(topic2->size()))) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (serialized_size > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   x23::Buf buf;
   uint32_t num_topics = 0;
   if (topic0) {
@@ -780,10 +793,6 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
   }
 
   buf.append(reinterpret_cast<const uint8_t *>(data.data()), data.size());
-
-  if (buf.size() > kMaxEventLength) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   auto message = make_tx_emitted_event(
       invocation_frame_stack_.get_active_frame().address(), num_topics,

@@ -1,8 +1,8 @@
-#include <array>
-#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <span>
@@ -14,6 +14,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -24,13 +25,12 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 namespace hogd {
 
 namespace {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 int_type_test(uint32_t inp_1, int128_t const &inp_128,
               int128_t inp_128_by_value, uint32_t &out_1, uint64_t &out_2,
               int128_t &out_128) noexcept
@@ -42,10 +42,11 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
   out_1 = 10;
   out_2 = UINT64_MAX;
   out_128 = int128_t{out_1} + int128_t{out_2};
-  return {{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable}, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
+          WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 span_type_test(std::span<const std::byte> span_in,
                std::span<std::byte> span_out) noexcept
 {
@@ -60,13 +61,21 @@ span_type_test(std::span<const std::byte> span_in,
   span_out[2] = std::byte{3};
   span_out[3] = std::byte{4};
 
-  return {{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist}, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+          WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 no_return_test() noexcept
 {
-  return {{SyscallErrorCode::kSyscallErrorCodeNone}, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+signed_i32_type_test(int32_t input_value) noexcept
+{
+  EXPECT_EQ(input_value, -1);
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 // just used to instantiate the mock contract
@@ -115,6 +124,17 @@ struct NoReturnSyscallMeta {
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
   constexpr static bool kCanReturn = false;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+struct SignedI32TypeTestSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = true;
+  constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
+  constexpr static auto kInnerFunc = &signed_i32_type_test;
+  constexpr static std::array<std::string_view, 1> kInputNames = {
+      "input_value"};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static bool kCanReturn = true;
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
@@ -190,6 +210,47 @@ TEST(MockSyscallTest, SpanTest)
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist));
 
   EXPECT_EQ(out, 0x04030201);
+}
+
+TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+  mock_runtime.set_available_gas(1000);
+
+  auto res_canonical =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        UINT64_MAX, 0, 0, 0, 0,
+                                                        0, 0);
+  ASSERT_EQ(res_canonical.panic, 0);
+  ASSERT_EQ(res_canonical.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+
+  auto res_noncanonical =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        0x00000000FFFFFFFFULL,
+                                                        0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res_noncanonical.panic, 0);
+  ASSERT_EQ(res_noncanonical.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+
+  auto res_overflow =
+      mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
+                                                        0x0000000080000000ULL,
+                                                        0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res_overflow.panic, 0);
+  ASSERT_EQ(res_overflow.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+
+  context.pop_mock_runtime();
+  context.pop_context();
 }
 
 TEST(MockSyscallTest, NoReturnTest)

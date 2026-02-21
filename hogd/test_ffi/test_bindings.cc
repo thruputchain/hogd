@@ -449,6 +449,33 @@ finish_mock_invocation_frame(void *syscall_handler,
       static_cast<InvokeErrorCode>(invoke_error_code));
 }
 
+TestFFIErrorCode
+push_context(void *syscall_handler)
+{
+  if (!syscall_handler) {
+    error("push_context error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  if (!context->push_context()) {
+    error("failed to push context");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+  return kTestFFIErrorCodeNone;
+}
+
+TestFFIErrorCode
+pop_context()
+{
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    error("pop_context error: no context!");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
+  context->pop_context();
+  return kTestFFIErrorCodeNone;
+}
+
 std::string
 format_foreign_try_commit_result(const ForeignTryCommitResult &result)
 {
@@ -959,6 +986,18 @@ ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code)
 {
   return hogd::finish_mock_invocation_frame(syscall_handler, invoke_error_code);
+}
+
+TestFFIErrorCode
+push_context(void *syscall_handler)
+{
+  return hogd::push_context(syscall_handler);
+}
+
+TestFFIErrorCode
+pop_context()
+{
+  return hogd::pop_context();
 }
 
 TestFFIErrorCode

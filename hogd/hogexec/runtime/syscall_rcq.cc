@@ -11,6 +11,7 @@
 #include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -18,7 +19,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_RetrocausalQueueInsert_inner(
     SystemCallHandler &syscall_handler, StorageKeyContractData const &input_key,
     std::span<const std::byte> input_queue_entry) noexcept
@@ -26,17 +27,17 @@ syscall_RetrocausalQueueInsert_inner(
   auto status =
       syscall_handler.retrocausal_queue_insert(input_key, input_queue_entry);
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
-    return {rcq_syscall_status.error().code(), 0};
+    return {rcq_syscall_status.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_RetrocausalQueueConsume_inner(
     SystemCallHandler &syscall_handler, const StorageKeyContractData &input_key,
     bool input_peek, std::span<std::byte> output_queue_entry,
@@ -45,11 +46,11 @@ syscall_RetrocausalQueueConsume_inner(
   auto status =
       syscall_handler.retrocausal_queue_consume(input_key, input_peek);
   if (!status) {
-    return {status.error().to_host_fn_error(), 0};
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
-    return {rcq_syscall_status.error().code(), 0};
+    return {rcq_syscall_status.error().code(), WrappedGasAmount{0}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -70,7 +71,7 @@ syscall_RetrocausalQueueConsume_inner(
     }
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -8,6 +9,20 @@
 
 namespace hogd {
 
+namespace {
+
+enum class TestUnsignedEnum : uint8_t {
+  kZero = 0,
+  kMax = 0xFF,
+};
+
+enum class TestSignedEnum : int32_t {
+  kZero = 0,
+};
+
+} // namespace
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(SyscallParseTests, ParsePrimitiveTypes)
 {
   // some arbitrary iniital data
@@ -20,7 +35,9 @@ TEST(SyscallParseTests, ParsePrimitiveTypes)
   auto contract_memory = std::as_writable_bytes(std::span(memory));
 
   // small input types ignore contract memory
-  EXPECT_EQ(1234, SyscallArgParams<uint32_t>::parse(contract_memory, 1234));
+  auto parsed_u32 = SyscallArgParams<uint32_t>::parse(contract_memory, 1234);
+  ASSERT_TRUE(parsed_u32.has_value());
+  EXPECT_EQ(1234, parsed_u32.value());
 
   {
     // small output types work as regular pointers
@@ -85,5 +102,162 @@ TEST(SyscallParseTests, ParseMisalignedData)
                    int128_t{0x0001020304050607},
                8);
 }
+
+TEST(SyscallParseTests, ParseUnsignedNarrowRejectsOverflow)
+{
+  std::vector<uint8_t> memory = {0, 1, 2, 3};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  auto parsed_u32 =
+      SyscallArgParams<uint32_t>::parse(contract_memory, uint64_t{1} << 32);
+  EXPECT_FALSE(parsed_u32.has_value());
+  EXPECT_FALSE(SyscallArgParams<uint32_t>::validate(parsed_u32));
+}
+
+TEST(SyscallParseTests, ParseSignedNarrowRejectsNonSignExtended)
+{
+  std::vector<uint8_t> memory = {0, 1, 2, 3};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  // Sign-extended -1 is valid.
+  auto parsed_neg1 =
+      SyscallArgParams<int32_t>::parse(contract_memory, 0xFFFFFFFFFFFFFFFFULL);
+  ASSERT_TRUE(parsed_neg1.has_value());
+  EXPECT_EQ(*parsed_neg1, -1);
+
+  // Sign-extended INT32_MIN is valid.
+  auto parsed_min =
+      SyscallArgParams<int32_t>::parse(contract_memory, 0xFFFFFFFF80000000ULL);
+  ASSERT_TRUE(parsed_min.has_value());
+  EXPECT_EQ(*parsed_min, std::numeric_limits<int32_t>::min());
+
+  // INT32_MAX is valid.
+  auto parsed_max =
+      SyscallArgParams<int32_t>::parse(contract_memory, 0x000000007FFFFFFFULL);
+  ASSERT_TRUE(parsed_max.has_value());
+  EXPECT_EQ(*parsed_max, std::numeric_limits<int32_t>::max());
+
+  // Zero is valid.
+  auto parsed_zero = SyscallArgParams<int32_t>::parse(contract_memory, 0);
+  ASSERT_TRUE(parsed_zero.has_value());
+  EXPECT_EQ(*parsed_zero, 0);
+
+  // Non-sign-extended -1 is rejected (0x00000000FFFFFFFF).
+  auto parsed_bad =
+      SyscallArgParams<int32_t>::parse(contract_memory, 0x00000000FFFFFFFFULL);
+  EXPECT_FALSE(parsed_bad.has_value());
+  EXPECT_FALSE(SyscallArgParams<int32_t>::validate(parsed_bad));
+
+  // INT32_MAX + 1 (0x0000000080000000) is rejected.
+  auto parsed_overflow =
+      SyscallArgParams<int32_t>::parse(contract_memory, 0x0000000080000000ULL);
+  EXPECT_FALSE(parsed_overflow.has_value());
+
+  // Below INT32_MIN is rejected.
+  auto parsed_underflow =
+      SyscallArgParams<int32_t>::parse(contract_memory, 0xFFFFFFFF7FFFFFFFULL);
+  EXPECT_FALSE(parsed_underflow.has_value());
+}
+
+TEST(SyscallParseTests, ParseBoolRejectsNonCanonicalValues)
+{
+  std::vector<uint8_t> memory = {0, 1, 2, 3};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  auto parsed_false = SyscallArgParams<bool>::parse(contract_memory, 0);
+  ASSERT_TRUE(parsed_false.has_value());
+  EXPECT_FALSE(parsed_false.value());
+
+  auto parsed_true = SyscallArgParams<bool>::parse(contract_memory, 1);
+  ASSERT_TRUE(parsed_true.has_value());
+  EXPECT_TRUE(parsed_true.value());
+
+  auto parsed_bad =
+      SyscallArgParams<bool>::parse(contract_memory,
+                                    std::numeric_limits<uint64_t>::max());
+  EXPECT_FALSE(parsed_bad.has_value());
+  EXPECT_FALSE(SyscallArgParams<bool>::validate(parsed_bad));
+}
+
+TEST(SyscallParseTests, ParseEnumRejectsOutOfRangeUnderlyingValues)
+{
+  std::vector<uint8_t> memory = {0, 1, 2, 3};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  auto parsed_u8_ok = SyscallArgParams<TestUnsignedEnum>::parse(
+      contract_memory, std::numeric_limits<uint8_t>::max());
+  ASSERT_TRUE(parsed_u8_ok.has_value());
+  EXPECT_EQ(parsed_u8_ok.value(), TestUnsignedEnum::kMax);
+
+  auto parsed_u8_bad =
+      SyscallArgParams<TestUnsignedEnum>::parse(contract_memory, 0x100);
+  EXPECT_FALSE(parsed_u8_bad.has_value());
+  EXPECT_FALSE(SyscallArgParams<TestUnsignedEnum>::validate(parsed_u8_bad));
+
+  auto parsed_i32_ok = SyscallArgParams<TestSignedEnum>::parse(
+      contract_memory,
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()));
+  ASSERT_TRUE(parsed_i32_ok.has_value());
+
+  auto parsed_i32_bad = SyscallArgParams<TestSignedEnum>::parse(
+      contract_memory,
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1);
+  EXPECT_FALSE(parsed_i32_bad.has_value());
+  EXPECT_FALSE(SyscallArgParams<TestSignedEnum>::validate(parsed_i32_bad));
+
+  int64_t below_min_i32 =
+      static_cast<int64_t>(std::numeric_limits<int32_t>::min()) - 1;
+  auto parsed_i32_bad_low = SyscallArgParams<TestSignedEnum>::parse(
+      contract_memory, static_cast<uint64_t>(below_min_i32));
+  EXPECT_FALSE(parsed_i32_bad_low.has_value());
+  EXPECT_FALSE(SyscallArgParams<TestSignedEnum>::validate(parsed_i32_bad_low));
+
+  auto parsed_i32_low_ok = SyscallArgParams<TestSignedEnum>::parse(
+      contract_memory,
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::min()));
+  ASSERT_TRUE(parsed_i32_low_ok.has_value());
+
+  // Non-sign-extended negative encodings are rejected.
+  auto parsed_i32_bad_nonsignext =
+      SyscallArgParams<TestSignedEnum>::parse(contract_memory,
+                                              0x00000000FFFFFFFFULL);
+  EXPECT_FALSE(parsed_i32_bad_nonsignext.has_value());
+  EXPECT_FALSE(
+      SyscallArgParams<TestSignedEnum>::validate(parsed_i32_bad_nonsignext));
+
+  auto parsed_i32_low_ok_mock = SyscallArgParams<TestSignedEnum>::parse_mock(
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::min()));
+  ASSERT_TRUE(parsed_i32_low_ok_mock.has_value());
+
+  auto parsed_i32_bad_mock = SyscallArgParams<TestSignedEnum>::parse_mock(
+      static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1);
+  EXPECT_FALSE(parsed_i32_bad_mock.has_value());
+
+  auto parsed_i32_sign_extended_neg1_mock =
+      SyscallArgParams<TestSignedEnum>::parse_mock(
+          std::numeric_limits<uint64_t>::max());
+  ASSERT_TRUE(parsed_i32_sign_extended_neg1_mock.has_value());
+}
+
+TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
+{
+  std::vector<uint8_t> memory = {1, 2, 3, 4, 5, 6, 7, 8};
+  auto contract_memory = std::as_writable_bytes(std::span(memory));
+
+  auto valid_arg =
+      SyscallArgParams<const uint32_t *>::parse(contract_memory, 0);
+  ASSERT_TRUE(SyscallArgParams<const uint32_t *>::validate(valid_arg));
+  ASSERT_NE(SyscallArgParams<const uint32_t *>::deref(valid_arg), nullptr);
+
+  auto null_arg = SyscallArgParams<const uint32_t *>::parse(
+      contract_memory, std::numeric_limits<uint64_t>::max());
+  ASSERT_TRUE(SyscallArgParams<const uint32_t *>::validate(null_arg));
+  ASSERT_EQ(SyscallArgParams<const uint32_t *>::deref(null_arg), nullptr);
+
+  auto bad_arg = SyscallArgParams<const uint32_t *>::parse(contract_memory, 16);
+  ASSERT_FALSE(SyscallArgParams<const uint32_t *>::validate(bad_arg));
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

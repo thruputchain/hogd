@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -36,15 +35,20 @@ namespace {
 
 StorageKeyContractData
 calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
-                      ContractEntrypointID entrypoint,
-                      std::span<const std::uint8_t> calldata)
+                      ContractEntrypointID entrypoint, Calldata const &calldata)
 {
   // Create the key data: "Initial Deployment" || hash || nonce || entrypoint ||
   // calldata
   std::vector<std::uint8_t> key_data;
 
-  // Add prefix
+  // Domain separator
   std::string_view prefix = "Initial Deployment";
+
+  // reserve space for the key data
+  key_data.reserve(prefix.size() + hash.size() + nonce.size() +
+                   entrypoint.size() + calldata.size());
+
+  // Add prefix
   key_data.insert(key_data.end(), prefix.begin(), prefix.end());
 
   // Add hash
@@ -114,12 +118,12 @@ make_native_initial_token_claim_contract()
   builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
       [](SystemCallHandler &handler, NativeRuntime & /*unused*/,
          SHA256Hash hash, SHA256Hash nonce, ContractEntrypointID entrypoint,
-         x23::Vec<uint8_t, 4294967295> calldata) -> InvokeStatus<void> {
+         Calldata calldata) -> InvokeStatus<void> {
         trace("initial token claim claim_initial_tokens");
 
         // Create storage key: sha256("Initial Deployment" || hash || nonce ||
         // entrypoint || calldata)
-        auto contract_data_key =
+        StorageKeyContractData const &contract_data_key =
             calculate_storage_key(hash, nonce, entrypoint, calldata);
 
         auto allocation = load_allocation(handler, contract_data_key);
@@ -173,7 +177,8 @@ make_native_initial_token_claim_contract()
         auto method_id = sdk_method_id(entrypoint);
 
         auto [invoke_result, invoke_gas] =
-            handler.invoke(deployed_addr, method_id, UINT64_MAX, calldata,
+            handler.invoke(deployed_addr, method_id, UINT64_MAX,
+                           std::move(calldata),
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
         if (!invoke_result.has_value()) {

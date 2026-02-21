@@ -38,7 +38,7 @@ BUILD_DIR=./build-pkg
 BUILD_TYPE="Release"
 
 BUILD_ARGS=()
-BUILD_ARGS+=(-x -DX23_CORO_TRACE=1)
+# BUILD_ARGS+=(-x -DX23_CORO_TRACE=1)
 
 if [[ -n "${COMPILER_FLAG}" ]]; then
   BUILD_ARGS+=(-c "${COMPILER_FLAG}")
@@ -62,7 +62,7 @@ echo "building in ${BUILD_DIR}"
 # source ${HOGD_ROOT}/scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'building hogd'
-${SCRIPT_DIR}/build.sh "${BUILD_ARGS[@]}"
+NPROC=$(nproc) ${SCRIPT_DIR}/build.sh "${BUILD_ARGS[@]}"
 
 echo 'building chuckd & scpd'
 # These build scripts place the binaries in the current working directory, so we

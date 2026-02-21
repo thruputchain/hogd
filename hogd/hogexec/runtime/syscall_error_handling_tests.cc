@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "contract.hh"
@@ -16,7 +17,9 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -57,10 +60,10 @@ private:
 namespace {
 
 template<HostFnErrorCode Code>
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 error_syscall_func() noexcept
 {
-  return {HostFnError{Code}, 1000};
+  return {HostFnError{Code}, WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -199,10 +202,11 @@ TEST_F(SyscallErrorHandlingTest, GasLimitOverridesExit)
 }
 
 namespace {
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 noreturn_failing_syscall_func() noexcept
 {
-  return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, 1000};
+  return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
+          WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -243,10 +247,11 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
 
 namespace {
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 noerror_syscall_func() noexcept
 {
-  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist, 1000};
+  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+          WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -383,6 +388,73 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
   // TODO(geoff): same as above
   ASSERT_EQ(runtime.get_available_gas(), 10);
+}
+
+// WrappedGasAmount must not be implicitly constructible from int,
+// ensuring that accidentally returning a non-gas value as the gas amount
+// is a compile error.
+static_assert(!std::is_convertible_v<int, WrappedGasAmount>);
+static_assert(!std::is_convertible_v<int32_t, WrappedGasAmount>);
+static_assert(!std::is_convertible_v<uint64_t, WrappedGasAmount>);
+static_assert(!std::is_convertible_v<GasAmount, WrappedGasAmount>);
+
+// Regression test for the bug in syscall_Return_inner where
+// the gas amount field was accidentally set to a cast of
+// SyscallErrorCode::kSyscallErrorCodeDeterministicWasm instead of 0.
+TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
+{
+  auto context = make_hogexec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  auto host_call_context = std::make_unique<HostCallContext>();
+  host_call_context->syscall_handler = &handler;
+
+  handler.start_frame(kPlaceholderInvocation,
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+  // Create a buffer larger than kMaxReturnBufferLen (1024)
+  std::array<std::byte, 1025> oversized_buffer{};
+
+  auto [status, gas] =
+      syscall_Return_inner(handler,
+                           std::span<const std::byte>(oversized_buffer), false);
+
+  // The syscall should fail with kHostExit
+  ASSERT_FALSE(status.has_value());
+  ASSERT_EQ(status.error().code(), HostFnErrorCode::kHostExit);
+
+  // The gas consumed must be 0, not an error code value
+  ASSERT_EQ(gas.get(), 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// Test that syscall_Return_inner with a valid buffer returns 0 gas consumed
+TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
+{
+  auto context = make_hogexec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  auto host_call_context = std::make_unique<HostCallContext>();
+  host_call_context->syscall_handler = &handler;
+
+  handler.start_frame(kPlaceholderInvocation,
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+  std::array<std::byte, 10> valid_buffer{};
+
+  auto [status, gas] =
+      syscall_Return_inner(handler, std::span<const std::byte>(valid_buffer),
+                           false);
+
+  // The syscall should succeed with kHostReturn
+  ASSERT_FALSE(status.has_value());
+  ASSERT_EQ(status.error().code(), HostFnErrorCode::kHostReturn);
+
+  // The gas consumed must be 0
+  ASSERT_EQ(gas.get(), 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
 
 } // namespace hogd

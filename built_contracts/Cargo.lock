@@ -1737,6 +1737,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "syscall_parse_hardening_test"
+version = "0.1.0"
+dependencies = [
+ "sdk",
+ "syscall_parse_hardening_test",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
