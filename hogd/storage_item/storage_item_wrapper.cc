@@ -85,6 +85,12 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item() const
   uint64_t active_size = meta.active_size;
   auto out = WireStorageItem(StorageItemType::kItemTypeRetrocausalQueue);
   out.metadata() = RetrocausalQueueMetadata{
+      .consume_state =
+          RetrocausalQueuePastBlockConsumeDelta{
+              .max_fully_consumed_block_number =
+                  queue_.get_lowest_block_number(),
+              .partial_consumed_number = 0,
+          },
       .max_live_block_num = queue_.get_current_block_number(),
       .live_entries = active_size,
   };

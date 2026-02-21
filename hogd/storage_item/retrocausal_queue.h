@@ -79,6 +79,14 @@ public:
 
   uint64_t get_current_block_number() const { return current_block_number_; }
 
+  uint64_t get_lowest_block_number() const
+  {
+    if (blocks_.empty()) {
+      return 0;
+    }
+    return blocks_.begin()->first - 1;
+  }
+
   RetrocausalQueuePastBlockConsumeDelta get_consume_state() const
   {
     return consume_state_;
