@@ -611,7 +611,8 @@ TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
   ASSERT_EQ(queue->metadata().max_live_block_num, 3);
   ASSERT_EQ(queue->metadata().live_entries, 2);
 
-  auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key, 1);
+  auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 1);
   ASSERT_TRUE(b1.has_value());
   ASSERT_FALSE(b1.value().has_value());
 
