@@ -26,6 +26,14 @@ public:
     : work_directory_(work_directory)
   {}
 
+  ~EventRPCContext()
+  {
+    [](EventRPCContext &event) -> x23::Async<void> {
+      x23::CoroGuard cg;
+      co_await cg(event.lock_);
+    } (*this)();
+  }
+
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
   // Returns nullptr if the block is not open.

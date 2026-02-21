@@ -1,6 +1,7 @@
 #include "hogd/event/rpc_context.h"
 
 #include <cassert>
+#include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
@@ -90,9 +91,6 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   double stage_wait_executors_closed = 0.0;
   double stage_wait_lock = 0.0;
   double stage_prepare_context_and_async = 0.0;
-  double stage_wait_file_write = 0.0;
-  double stage_wait_indexers = 0.0;
-  double stage_finish_file_and_gc = 0.0;
 
   auto status = co_await wait_for_executors_closed(block_id);
   record_stage(stage_wait_executors_closed);
@@ -100,8 +98,10 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return status.error();
   }
 
-  x23::CoroGuard g;
-  co_await g(lock_);
+  // We [std::move(g)] into the detached coroutine below. You cannot move an
+  // [x23::CoroGuard], so we wrap it in an [std::unique_ptr<>].
+  auto g = std::make_unique<x23::CoroGuard>();
+  co_await (*g)(lock_);
   record_stage(stage_wait_lock);
 
   auto it = event_block_contexts_.find(block_id);
@@ -120,37 +120,41 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return;
   }(context.get());
 
-  auto out_hash = context.get().get_root_hash();
+  SHA256Hash out_hash = context.get().get_root_hash();
   record_stage(stage_prepare_context_and_async);
 
-  co_await file_wait;
-  record_stage(stage_wait_file_write);
+  [](EventRPCContext &event, std::unique_ptr<x23::CoroGuard> g,
+     BlockID block_id, BlockHeight block_height, SHA256Hash out_hash,
+     x23::Async<void> file_wait) -> x23::Detached {
+    auto *pool = x23::ThreadPool::get_thread_pool();
+    if (!pool) {
+      pool = &default_threadpool();
+    }
+    co_await pool->bg();
 
-  co_await context.get().finish_file(out_hash);
-  if (it->second.initiate_shutdown()) {
-    gc_context_internal(it);
-  }
-  record_stage(stage_finish_file_and_gc);
+    auto it = event.event_block_contexts_.find(block_id);
+    CHECK(it != event.event_block_contexts_.end());
+    auto &context = it->second;
 
-  // We are moving [g] into [send_events_to_indexers()], which returns an
-  // [x23::Detached]. [send_events_to_indexers()] will not release [g] until it
-  // is finished with its work, so we do not need to worry about the context or
-  // [indexers_] changing until the detached coroutine is finished.
-  context.get().send_events_to_indexers(std::move(g), block_height, indexers_);
-  record_stage(stage_wait_indexers);
+    co_await file_wait;
+    co_await context.get().finish_file(out_hash);
+    co_await context.get().send_events_to_indexers(block_height,
+                                                   event.indexers_);
+    if (it->second.initiate_shutdown()) {
+      event.gc_context_internal(it);
+    }
+    co_return;
+  }(*this, std::move(g), block_id, block_height, out_hash,
+                                 std::move(file_wait));
 
-  // We moved [g] into [send_events_to_indexers()], so be sure not to do any
+  // We moved [g] into the detached coroutine above, so be sure not to do any
   // work beyond this point which touches a context or [indexers_]!
 
-  info("close_block() stages: wait_executors_closed={:.6f}, "
-       "wait_lock={:.6f}, prepare_context_and_async={:.6f}, "
-       "wait_file_write={:.6f}, wait_indexers={:.6f}, "
-       "finish_file_and_gc={:.6f}, total={:.6f}, outcome={}, "
-       "block_id={}",
-       stage_wait_executors_closed, stage_wait_lock,
-       stage_prepare_context_and_async, stage_wait_file_write,
-       stage_wait_indexers, stage_finish_file_and_gc, timer.elapsed(), "ok",
-       block_id);
+  info(
+      "close_block() stages: wait_executors_closed={:.6f}, wait_lock={:.6f}, "
+      "prepare_context_and_async={:.6f}, total={:.6f}, outcome={}, block_id={}",
+      stage_wait_executors_closed, stage_wait_lock,
+      stage_prepare_context_and_async, timer.elapsed(), "ok", block_id);
   co_return out_hash;
 }
 
