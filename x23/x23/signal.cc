@@ -111,6 +111,7 @@ service_once()
 
     if (happened && !it->second.deleted) {
       ptr.reset();
+      // multimap deletes do not invalidate iterators
       it->second.cb();
       ptr = take_sig_cbs();
     }

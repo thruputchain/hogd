@@ -36,11 +36,19 @@ public:
   {}
   AutoSignalCbHandle &operator=(AutoSignalCbHandle &&other) noexcept
   {
+    if (this == &other)
+      return *this;
+    if (delflag_)
+      cancel();
     delflag_ = std::exchange(other.delflag_, nullptr);
     return *this;
   }
   AutoSignalCbHandle &operator=(RawSignalCbHandle &&other) noexcept
   {
+    if (this == &other)
+      return *this;
+    if (delflag_)
+      cancel();
     delflag_ = std::exchange(other.delflag_, nullptr);
     return *this;
   }
