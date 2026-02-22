@@ -312,6 +312,18 @@ public:
                              ProposalModeCtor{}, runtime_context);
   }
 
+  SystemCallHandler make_new_system_call_handler_validation(
+      Transaction const &tx, RuntimeContext &runtime_context,
+      NondeterministicProposalData proposal_data)
+  {
+    auto txid = allocate_txid();
+    return SystemCallHandler(tx, *storage_snapshot_cache_,
+                             make_new_per_tx_db_proxy(txid),
+                             make_new_per_tx_event_server_proxy(txid),
+                             ValidationModeCtor{std::move(proposal_data)},
+                             runtime_context);
+  }
+
   // keeps a reference to the storage snapshot cache to avoid invalidating it
   // when the block is advanced
   std::shared_ptr<StorageSnapshotCache> get_storage_snapshot_cache() const

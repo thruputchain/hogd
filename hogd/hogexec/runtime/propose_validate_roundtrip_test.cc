@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -12,7 +11,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -49,22 +47,6 @@ protected:
     write_contract(native_contract_b_xdr_);
     write_deployment(kAddrB, native_contract_b_xdr_);
     setup_grant_storage_token(kAddrB, 1'000'000'000);
-  }
-
-  // Helper: create a SystemCallHandler in validation mode
-  SystemCallHandler
-  make_validation_handler(Transaction const &tx,
-                          RuntimeContext &runtime_context,
-                          NondeterministicProposalData proposal_data)
-  {
-    auto ssc = get_storage_snapshot_cache();
-    return SystemCallHandler(tx, *ssc,
-                             make_new_per_tx_db_proxy(
-                                 std::numeric_limits<TransactionID>::max()),
-                             make_new_per_tx_event_server_proxy(
-                                 std::numeric_limits<TransactionID>::max()),
-                             ValidationModeCtor{std::move(proposal_data)},
-                             runtime_context);
   }
 
   static constexpr ContractAddress kAddrA = make_contract_address(0);
@@ -187,7 +169,8 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 
   // === Phase 2: Validation mode with correct proposal data ===
   {
-    auto handler = make_validation_handler(tx, *native_context, proposal_data);
+    auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                           proposal_data);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
         << "Validation with correct proposal data should succeed";
@@ -265,8 +248,8 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
     // Add an extra bit: now bit_count=2 but execution only consumes 1
     tampered.nondeterministic_bit_count = 2;
 
-    auto handler =
-        make_validation_handler(tx, *native_context, std::move(tampered));
+    auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                           std::move(tampered));
     auto res = handler.root_invoke();
     // check_all_consumed() should fail because 2 bits were supplied but
     // only 1 was consumed.
@@ -376,8 +359,8 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 
     discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-    auto handler =
-        make_validation_handler(tx, *native_context, std::move(tampered));
+    auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                           std::move(tampered));
     auto res = handler.root_invoke();
     // The root invoke succeeds (contract A returns Ok), but
     // check_final_validation_data detects the unconsumed bit.
@@ -424,8 +407,8 @@ TEST_P(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
   malformed.nondeterministic_bit_count = 10;
   malformed.nondeterministic_bits.clear(); // 0 bytes, but claims 10 bits
 
-  auto handler =
-      make_validation_handler(tx, *native_context, std::move(malformed));
+  auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                         std::move(malformed));
   auto res = handler.root_invoke();
   // validate() should reject this in perform_initial_validation
   EXPECT_FALSE(res.is_root_success())
@@ -464,8 +447,8 @@ TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
   grinding.nondeterministic_bits = {
       0xFF}; // high 7 bits are padding, should be 0
 
-  auto handler =
-      make_validation_handler(tx, *native_context, std::move(grinding));
+  auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                         std::move(grinding));
   auto res = handler.root_invoke();
   EXPECT_FALSE(res.is_root_success())
       << "Padding bits set in last byte should be rejected (entropy "
