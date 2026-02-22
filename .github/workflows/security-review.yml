@@ -2,6 +2,7 @@ name: Security Review
 
 on:
   pull_request:
+    types: [opened, labeled]
 
 permissions:
   pull-requests: write
@@ -9,6 +10,7 @@ permissions:
 
 jobs:
   security:
+    if: github.event.action == 'opened' || github.event.label.name == 'security-review'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,3 +22,4 @@ jobs:
         with:
           comment-pr: true
           claude-api-key: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+          run-every-commit: true
