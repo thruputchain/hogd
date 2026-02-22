@@ -55,20 +55,23 @@ public:
   Value value_;
   // Does not own the next_ptr_.  Memory is freed when the bump allocator is
   // destroyed.
-  std::atomic<value_bucket_t *> next_ptr_;
+  std::atomic<value_bucket_t *> next_ptr_ = nullptr;
 
+  // You almost certainly do not want to do an insert concurrent with a for_each.
+  // In such a situation, the insert() might or might not get picked up the the for_each.
   template<typename Func>
   requires std::invocable<Func, std::pair<const KeyType &, Value &>>
   static void for_each(std::atomic<value_bucket_t *> *scan_ptr, Func &f)
   {
     while (auto *next_value_bucket =
-               scan_ptr->load(std::memory_order_relaxed)) {
+               scan_ptr->load(std::memory_order_acquire)) {
       f(std::make_pair(std::cref(next_value_bucket->key_),
                        std::ref(next_value_bucket->value_)));
       scan_ptr = &next_value_bucket->next_ptr_;
     }
   }
 
+  // DO NOT insert concurrent with a for_each_destructive.
   template<typename Func>
   requires std::invocable<Func, std::pair<const KeyType &, Value &>>
   static void for_each_destructive(value_bucket_t *value_bucket, Func &f)
@@ -76,7 +79,10 @@ public:
     while (value_bucket != nullptr) {
       f(std::make_pair(std::cref(value_bucket->key_),
                        std::ref(value_bucket->value_)));
-      auto *next_bucket = value_bucket->next_ptr_.load();
+      // acquire to synchronize with the last insertion.
+      // In most circumstances there'll be some other synchronization forming a happens-before relation
+      // between this acquire and the insert, but this doesn't hurt.
+      auto *next_bucket = value_bucket->next_ptr_.load(std::memory_order_acquire);
       value_bucket->~value_bucket_t();
       value_bucket = next_bucket;
     }
@@ -84,8 +90,9 @@ public:
 
   static Value *get(std::atomic<value_bucket_t *> *scan_ptr, const KeyType &key)
   {
+    // acquire to synchronize with the last insertion.
     while (auto *next_value_bucket =
-               scan_ptr->load(std::memory_order_relaxed)) {
+               scan_ptr->load(std::memory_order_acquire)) {
       if (KeyEqual{}(next_value_bucket->key_, key)) {
         return &next_value_bucket->value_;
       }
@@ -98,7 +105,7 @@ public:
   {
     while (value_bucket != nullptr) {
       value_bucket_t *next_value_bucket =
-          value_bucket->next_ptr_.load(std::memory_order_relaxed);
+          value_bucket->next_ptr_.load(std::memory_order_acquire);
       value_bucket->~value_bucket_t();
       value_bucket = next_value_bucket;
     }
@@ -156,7 +163,7 @@ public:
 
       // Continue scanning the list
       scan_ptr = &next_value_bucket->next_ptr_;
-      next_value_bucket = scan_ptr->load(std::memory_order_relaxed);
+      next_value_bucket = scan_ptr->load(std::memory_order_acquire);
     }
   }
 };
@@ -251,7 +258,7 @@ public:
                 buckets_[i].load(std::memory_order_relaxed);
             value_bucket_t::for_each_destructive(bucket, f);
           }
-          if (start >= end) {
+          if (start + width >= buckets_.size()) {
             return;
           }
         }
@@ -270,7 +277,7 @@ public:
     pool.for_each_parallel(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
-          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+          value_bucket_t::clear(bucket.load(std::memory_order_acquire));
         },
         width);
     cleared_ = true;
@@ -280,7 +287,7 @@ private:
   void clear_slow() noexcept
   {
     for (auto &bucket : buckets_) {
-      value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+      value_bucket_t::clear(bucket.load(std::memory_order_acquire));
     }
     cleared_ = true;
   }

@@ -3,7 +3,9 @@
 #include <atomic>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <functional>
+#include <memory>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -244,9 +246,9 @@ private:
         if (v == value) {
           bool r = true;
           if (erase) {
-            if (v == Traits::kTombstone) {
-              return false;
-            }
+            // v cannot be tombstone here, as v == value here, and we assert
+            // at the top that value is not tombstone
+            assert(v != Traits::kTombstone);
             // This is subtle. Note here the only overwrites allowed on an entry
             // are for ones that are non-empty and non-tombstone. Hence, if we
             // see CAS failure, it must be because another thread erased the
