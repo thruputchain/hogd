@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "hogd/base/types.h"
 #include "auth_claim.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/rust/contract_types/bindings.h"
 #include "types.hh"
@@ -64,7 +64,8 @@ TEST(FFIHelpers, AuthClaimInvalid)
 // simulating corrupted or adversarial FFI data from untrusted WASM memory.
 TEST(FFIHelpers, AuthClaimInvalidTags)
 {
-  for (int tag_val : {-2, 100, 255, 1000, std::numeric_limits<int32_t>::max()}) {
+  for (int tag_val :
+       {-2, 100, 255, 1000, std::numeric_limits<int32_t>::max()}) {
     generated::AuthClaim ffi_auth_claim{};
     ffi_auth_claim.tag = static_cast<generated::AuthClaim::Tag>(tag_val);
     auto result = FFIHelperType<generated::AuthClaim>::to_cpp(ffi_auth_claim);
