@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/ffi_helpers.h"
