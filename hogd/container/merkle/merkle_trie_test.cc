@@ -1655,7 +1655,7 @@ TEST(MerkleTriePrefix, Multithread128)
   run_multithread(/*num_threads=*/128);
 }
 
-// Tests for node encoding/decoding roundtrip (Bug 1 & Bug 3 fixes).
+// Tests for node encoding/decoding roundtrip.
 // Verifies that size_to_bytes always produces exactly 8 bytes
 // (sizeof(uint64_t)) and that the decoder properly reads all 8 bytes back.
 TEST(MerkleNode, LeafEncodingRoundtrip)
