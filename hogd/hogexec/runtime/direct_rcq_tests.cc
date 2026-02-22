@@ -66,6 +66,25 @@ public:
     return delta;
   }
 
+  constexpr static auto make_rcq_consume_insert_delta(
+      uint32_t max_fully_consumed_block_number,
+      uint32_t partial_consumed_number,
+      x23::Vec<QueueEntry, 0xffffffff> const &current_block_consumed,
+      std::vector<QueueEntry> const &inserted_entries)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    RetrocausalQueuePastBlockConsumeDelta consume_delta = {
+        .max_fully_consumed_block_number = max_fully_consumed_block_number,
+        .partial_consumed_number = partial_consumed_number};
+    delta.retrocausal_queue().consume =
+        RetrocausalQueueConsumeDelta{.past_block_consume = consume_delta,
+                                     .current_block_consumed =
+                                         current_block_consumed};
+    delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{
+        .added_entries = {inserted_entries.begin(), inserted_entries.end()}};
+    return delta;
+  }
+
   std::optional<QueueEntry> load_concurrent_entry(AddressAndKey const &addrkey,
                                                   uint32_t index)
   {
@@ -526,6 +545,171 @@ TEST_F(DirectRCQTests, MultipleEntriesPerInsert)
       make_contract_data_addrkey(kContractAddress, "rcq0"), 4);
   ASSERT_TRUE(entry5.has_value());
   ASSERT_EQ(entry5.value(), make_rcq_entry({4}));
+}
+
+TEST_F(DirectRCQTests, ConsumeAndInsertNetZeroDoesNotPersistEmptyBlock)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key,
+               make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({7})},
+                                             {make_rcq_entry({7})}),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_FALSE(queue.has_value());
+
+  auto next_block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(next_block.has_value());
+  ASSERT_FALSE(next_block.value().has_value());
+}
+
+TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  advance_block();
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({2})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key,
+                make_rcq_consume_insert_delta(1, 0, {}, {make_rcq_entry({3})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 1);
+  ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number, 0);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 3);
+  ASSERT_EQ(queue->metadata().live_entries, 2);
+
+  auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 1);
+  ASSERT_TRUE(b1.has_value());
+  ASSERT_FALSE(b1.value().has_value());
+
+  // RCQ block 1 is gone
+  auto b2 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 2);
+  ASSERT_TRUE(b2.has_value());
+  ASSERT_TRUE(b2.value().has_value());
+  ASSERT_EQ(b2.value()->block_number, 2);
+  ASSERT_EQ(b2.value()->entries.size(), 1);
+  ASSERT_EQ(b2.value()->entries[0], make_rcq_entry({2}));
+
+  auto b3 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 3);
+  ASSERT_TRUE(b3.has_value());
+  ASSERT_TRUE(b3.value().has_value());
+  ASSERT_EQ(b3.value()->block_number, 3);
+  ASSERT_EQ(b3.value()->entries.size(), 1);
+  ASSERT_EQ(b3.value()->entries[0], make_rcq_entry({3}));
+
+  auto b4 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 4);
+  ASSERT_TRUE(b4.has_value());
+  ASSERT_FALSE(b4.value().has_value());
+}
+
+TEST_F(DirectRCQTests, ConsumeSingleBlockOneByOneAcrossBlocks)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq0");
+
+  std::vector<QueueEntry> inserted = {make_rcq_entry({0}), make_rcq_entry({1}),
+                                      make_rcq_entry({2}), make_rcq_entry({3})};
+
+  auto tx_insert = make_new_per_tx_db_proxy();
+  tx_insert.add_delta(key, make_rcq_insert_delta(inserted),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_insert.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_insert.commit_transaction({}).has_value());
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 0);
+  ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number, 0);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+  ASSERT_EQ(queue->metadata().live_entries, inserted.size());
+
+  for (uint32_t consumed = 1; consumed < inserted.size(); ++consumed) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(key, make_rcq_consume_delta(0, consumed, {}),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+
+    queue = lookup_storage_item_from_db(key);
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+    ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number,
+              0);
+    ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number,
+              consumed);
+    ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+    ASSERT_EQ(queue->metadata().live_entries, inserted.size() - consumed);
+
+    auto block =
+        get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                        1);
+    ASSERT_TRUE(block.has_value());
+    ASSERT_TRUE(block.value().has_value());
+    ASSERT_EQ(block.value()->block_number, 1);
+    ASSERT_EQ(block.value()->entries.size(), inserted.size());
+  }
+
+  // Consume the final entry and fully clear block 1.
+  auto tx_final = make_new_per_tx_db_proxy();
+  tx_final.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                     std::to_underlying(
+                         StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_final.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_final.commit_transaction({}).has_value());
+  advance_block();
+
+  auto final_queue = lookup_storage_item_from_db(key);
+  ASSERT_FALSE(final_queue.has_value());
+
+  auto block_after_clear =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block_after_clear.has_value());
+  ASSERT_FALSE(block_after_clear.value().has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

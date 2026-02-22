@@ -262,7 +262,7 @@ RetrocausalQueueArgs::get_current_committed_cost(
 int128_t
 RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *current_model,
-    StorageItemWrapper const *base_item) const
+    StorageItemWrapper const * /*unused*/) const
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
 
@@ -319,7 +319,9 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     if (delta.retrocausal_queue().insert.added_entries.empty()) {
       return 0;
     }
-    if (base_item) {
+    // Just overestimate the cost of the base item.
+    // This handles the case of a consume() that commits, then an insert()
+    /*if (base_item) {
       // The inserter must cover any gap between the base item's stored cost
       // and kBaseItemCost. For a non-empty RCQ base (cost >= kBaseItemCost)
       // or a non-RCQ base (e.g. bytestring, also >= kBaseItemCost), this is
@@ -328,7 +330,7 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
       // exists" must be paid for by the inserter.
       return std::max<int128_t>(0, current_model->kBaseItemCost -
                                        base_item->storage_cost());
-    }
+    }*/
     return current_model->kBaseItemCost;
   }();
 

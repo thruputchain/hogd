@@ -168,7 +168,7 @@ DbExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
   }
 
   auto const &queue = item->queue();
-  const auto *next_block = queue.try_get_next_block(search_start_number);
+  const auto *next_block = queue.try_get_block(search_start_number);
   if (!next_block) {
     return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
