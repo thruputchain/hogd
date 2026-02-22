@@ -2,22 +2,30 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <span>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <x23/debug.h>
+#include <x23/serialize.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 
 namespace x23 {
+
+static_assert(std::endian::native == std::endian::little,
+              "CXS serialization uses native-endian memcpy for integers "
+              "and is only correct on little-endian platforms");
 
 // De/serializer for data structures in CXS format.
 // Attempt to deserialize an invalid binary Cxs representation.
@@ -567,11 +575,116 @@ serialize_cxs(const is_xdr_type auto &...value)
   return buf;
 }
 
+// Deserializer with recursion depth tracking, mirroring the XDR
+// Deserializer's DeserializationRecursionChecker pattern.
+template<bool CheckRecursion>
+struct CxsDeserializer
+  : public std::conditional_t<CheckRecursion,
+                              detail::DeserializationRecursionChecker,
+                              std::monostate> {
+  std::span<const uint8_t> &data;
+
+  explicit CxsDeserializer(std::span<const uint8_t> &d) noexcept : data(d) {}
+
+  template<typename... Args>
+  [[noreturn]] void raise(std::format_string<Args...> fmt, Args &&...args) const
+  {
+    throw CxsBadInput{std::vformat(fmt.get(), std::make_format_args(args...))};
+  }
+
+  void go(std::monostate & /*unused*/) {}
+
+  template<std::integral T> void go(T &value)
+  {
+    CxsSerializer<T>::load(data, value);
+  }
+
+  template<typename T> requires (std::is_enum_v<T>)
+  void go(T &value)
+  {
+    CxsSerializer<T>::load(data, value);
+  }
+
+  template<typename T>
+  requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
+  void go(T &value)
+  {
+    CxsSerializer<T>::load(data, value);
+  }
+
+  template<is_xdr_cat<XdrCategory::kOpaqueVec, XdrCategory::kString> X>
+  void go(X &value)
+  {
+    CxsSerializer<X>::load(data, value);
+  }
+
+  template<is_xdr_cat<XdrCategory::kOpaqueArray> X> void go(X &value)
+  {
+    CxsSerializer<X>::load(data, value);
+  }
+
+  template<is_xdr_struct T> void go(T &value)
+  {
+    if constexpr (CheckRecursion && is_recursive_xdr<T>)
+      this->recurse();
+    visit_fields([this](auto &x) { this->go(x); }, value);
+  }
+
+  template<is_xdr_union T> void go(T &value)
+  {
+    if constexpr (CheckRecursion && is_recursive_xdr<T>)
+      this->recurse();
+    using ops = union_ops<T>;
+    using discriminant_type = typename ops::discriminant_type;
+    discriminant_type d;
+    go(d);
+    union_set_discriminant(value, d);
+    if (ops::index(value) == -1) {
+      throw CxsBadInput("Bad discriminant {} deserializing {}", get<0>(value),
+                        ops::meta::type_name);
+    }
+    union_visit_arm([this](auto &x) { this->go(x); }, value);
+  }
+
+  template<is_xdr_cat<XdrCategory::kArray> X> void go(X &value)
+  {
+    for (auto &element : value)
+      go(element);
+  }
+
+  template<is_xdr_cat<XdrCategory::kVec> X> void go(X &value)
+  {
+    uint32_t size;
+    go(size);
+    if (size > X::max_size()) [[unlikely]]
+      throw CxsBadInput("length {} exceeds maximum deserializing {}", size,
+                        xdr_type_name<X>());
+    value.resize(0);
+    value.reserve(
+        std::min<std::uint32_t>(size,
+                                0x10000 / sizeof(typename X::value_type)));
+    for (size_t i = 0; i < size; ++i) {
+      value.resize_uninitialized(i + 1);
+      go(value[i]);
+    }
+  }
+
+  template<is_xdr_cat<XdrCategory::kPtr> X> void go(X &value)
+  {
+    bool b;
+    go(b);
+    value.resize(b);
+    if (b)
+      go(*value);
+  }
+};
+
 template<is_xdr_type T>
 void
 deserialize_cxs(T *value, std::span<const uint8_t> data)
 {
-  CxsSerializer<T>::load(data, *value);
+  CxsDeserializer<contains_recursive_xdr<T>> d(data);
+  d.go(*value);
   if (data.size() != 0) {
     throw CxsBadInput("Extra data after deserializing {}", xdr_type_name<T>());
   }
