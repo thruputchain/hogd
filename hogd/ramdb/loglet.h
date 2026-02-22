@@ -458,6 +458,9 @@ public:
   UniqueLoglet &operator=(UniqueLoglet &&ul) noexcept
   {
     allocator_ = ul.allocator_;
+    if (ll_) {
+      allocator_->free(ll_);
+    }
     ll_ = std::exchange(ul.ll_, nullptr);
     return *this;
   }
