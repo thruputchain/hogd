@@ -110,10 +110,9 @@ service_once()
     }
 
     if (happened && !it->second.deleted) {
-      // Access it while the lock is held
-      auto cb = std::move(it->second.cb);
       ptr.reset();
-      cb();
+      // multimap deletes do not invalidate iterators
+      it->second.cb();
       ptr = take_sig_cbs();
     }
 
