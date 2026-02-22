@@ -57,8 +57,9 @@ public:
   // destroyed.
   std::atomic<value_bucket_t *> next_ptr_ = nullptr;
 
-  // You almost certainly do not want to do an insert concurrent with a for_each.
-  // In such a situation, the insert() might or might not get picked up the the for_each.
+  // You almost certainly do not want to do an insert concurrent with a
+  // for_each. In such a situation, the insert() might or might not get picked
+  // up the the for_each.
   template<typename Func>
   requires std::invocable<Func, std::pair<const KeyType &, Value &>>
   static void for_each(std::atomic<value_bucket_t *> *scan_ptr, Func &f)
@@ -80,9 +81,11 @@ public:
       f(std::make_pair(std::cref(value_bucket->key_),
                        std::ref(value_bucket->value_)));
       // acquire to synchronize with the last insertion.
-      // In most circumstances there'll be some other synchronization forming a happens-before relation
-      // between this acquire and the insert, but this doesn't hurt.
-      auto *next_bucket = value_bucket->next_ptr_.load(std::memory_order_acquire);
+      // In most circumstances there'll be some other synchronization forming a
+      // happens-before relation between this acquire and the insert, but this
+      // doesn't hurt.
+      auto *next_bucket =
+          value_bucket->next_ptr_.load(std::memory_order_acquire);
       value_bucket->~value_bucket_t();
       value_bucket = next_bucket;
     }
