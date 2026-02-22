@@ -7,6 +7,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
@@ -492,6 +493,116 @@ TEST_F(DirectRCQTests, ConcurrentInsertAndConsume)
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+}
+
+// Per-block-cost analogue of consume/insert contention:
+// tx1 insert (current block), tx2 retrocausally consume, tx3 insert.
+// This exercises lock accounting when block count can both decrease (consume)
+// and increase/stay-live (inserts) within the same block.
+TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsertPerBlockCost)
+{
+  GTEST_SKIP()
+      << "Hogdb: assertion failure at retrocausal_queue_lock.cc line 264";
+
+  constexpr int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(kContractAddress, kInitialBalance);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_per_block_cost");
+
+  // Same block:
+  // tx1 inserts, tx2 consumes block 1, tx3 inserts.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({10})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_insert_delta({make_rcq_entry({11})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Commit consume before inserts to stress reservation/release ordering.
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 1);
+  ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number, 0);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 2);
+  ASSERT_EQ(queue->metadata().live_entries, 2);
+
+  auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 1);
+  ASSERT_TRUE(b1.has_value());
+  ASSERT_TRUE(b1.value().has_value());
+  ASSERT_EQ(b1.value()->block_number, 2);
+  ASSERT_EQ(b1.value()->entries.size(), 1);
+  ASSERT_EQ(b1.value()->entries[0], make_rcq_entry({11}));
+
+  auto bal_item = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kContractAddress));
+  ASSERT_TRUE(bal_item.has_value());
+  ASSERT_EQ(from_xdr(bal_item->nnint()),
+            kInitialBalance -
+                cost_model_->get_retrocausal_queue_cost(
+                    /*active_queue_size=*/1, /*active_block_count=*/1));
+}
+
+// Repro harness for investigating HogDB invariant:
+// assert(cost_change <= vec.back().locked_storage_cost) in invoke_tx.cc.
+TEST_F(DirectRCQTests, ReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
+{
+  GTEST_SKIP()
+      << "HogDB bug: RCQ concurrent consume+insert can trigger storage-cost "
+      << "assert(cost_change <= vec.back().locked_storage_cost) in "
+         "invoke_tx.cc.";
+
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_assert_repro");
+
+  auto submit_single = [&](StorageDelta delta) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(key, std::move(delta),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  };
+
+  // Prepare two past blocks.
+  submit_single(make_rcq_insert_delta({make_rcq_entry({1})}));
+  submit_single(make_rcq_insert_delta({make_rcq_entry({2})}));
+
+  // Same block: one tx fully consumes past blocks, one tx inserts.
+  auto tx_consume = make_new_per_tx_db_proxy();
+  tx_consume.add_delta(key, make_rcq_consume_delta(2, 0, {}),
+                       std::to_underlying(
+                           StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_consume.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  auto tx_insert = make_new_per_tx_db_proxy();
+  tx_insert.add_delta(key, make_rcq_insert_delta({make_rcq_entry({9})}),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_insert.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // If the invariant fails, one of these commits will abort the process.
+  ASSERT_TRUE(tx_consume.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction({}).has_value());
 }
 
 // Verifies that a single insert delta can contain multiple entries and that

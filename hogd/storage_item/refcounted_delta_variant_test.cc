@@ -352,6 +352,96 @@ TEST(RefcountedDeltaVariant, RCQNoEmptyBlockWhenInsertFullyConsumed)
   EXPECT_EQ(queue.try_get_next_block(1), nullptr);
 }
 
+TEST(RefcountedDeltaVariant,
+     RCQUpperBoundAddsBlockAfterPastConsumeWhenNoPendingBlock)
+{
+  RefcountedDeltaVariant variant;
+  InvalidStateFlag invalid_state_flag;
+  auto *arg = variant.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg);
+
+  // Base queue: one persisted block with two entries.
+  RetrocausalQueue queue(0);
+  RetrocausalQueue queue2(
+      queue,
+      RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
+                                                0,
+                                            .partial_consumed_number = 0},
+      RetrocausalQueueBlock{.entries = {make_test_queue_entry(1),
+                                        make_test_queue_entry(2)},
+                            .block_number = 1});
+  auto item = std::make_shared<const StorageItemWrapper>(std::move(queue2),
+                                                         &cost_model);
+
+  ASSERT_TRUE(arg->try_reserve_consume());
+  arg->commit_consume(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 0,
+                                           .partial_consumed_number = 1},
+                                   .current_block_consumed = {}},
+      invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  // No pending current block yet: first insert must reserve a new block.
+  EXPECT_EQ(
+      cost_model.kBaseItemCost + cost_model.kRCQCostPerBlock +
+          cost_model.kRCQCostPerEntry,
+      variant.get_marginal_cost_upper_bound(
+          make_rcq_delta(std::nullopt,
+                         RetrocausalQueueInsertDelta{
+                             .added_entries = {make_test_queue_entry(9)}}),
+          &cost_model, item.get()));
+}
+
+TEST(RefcountedDeltaVariant,
+     RCQUpperBoundSkipsBlockAfterPastConsumeWhenPendingBlockExists)
+{
+  RefcountedDeltaVariant variant;
+  InvalidStateFlag invalid_state_flag;
+  auto *arg = variant.try_set_variant<RetrocausalQueueArgs>();
+  ASSERT_TRUE(arg);
+
+  // Base queue: one persisted block with two entries.
+  RetrocausalQueue queue(0);
+  RetrocausalQueue queue2(
+      queue,
+      RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
+                                                0,
+                                            .partial_consumed_number = 0},
+      RetrocausalQueueBlock{.entries = {make_test_queue_entry(1),
+                                        make_test_queue_entry(2)},
+                            .block_number = 1});
+  auto item = std::make_shared<const StorageItemWrapper>(std::move(queue2),
+                                                         &cost_model);
+
+  ASSERT_TRUE(arg->try_reserve_consume());
+  arg->commit_consume(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 0,
+                                           .partial_consumed_number = 1},
+                                   .current_block_consumed = {}},
+      invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  // Create a pending current block.
+  arg->commit_insert(
+      RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(8)}},
+      invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  // With a pending current block already present, an additional insert should
+  // not reserve another RCQ block in the upper bound.
+  EXPECT_EQ(
+      cost_model.kBaseItemCost + cost_model.kRCQCostPerEntry,
+      variant.get_marginal_cost_upper_bound(
+          make_rcq_delta(std::nullopt,
+                         RetrocausalQueueInsertDelta{
+                             .added_entries = {make_test_queue_entry(9)}}),
+          &cost_model, item.get()));
+}
+
 TEST(RefcountedDeltaVariant, RCQBlocksRemainContiguousAfterPruneAndInsert)
 {
   // Round 1: insert block 1
