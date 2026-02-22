@@ -1655,6 +1655,8 @@ TEST(MerkleTriePrefix, Multithread128)
   run_multithread(/*num_threads=*/128);
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // Tests for node encoding/decoding roundtrip.
 // Verifies that size_to_bytes always produces exactly 8 bytes
 // (sizeof(uint64_t)) and that the decoder properly reads all 8 bytes back.
@@ -1684,7 +1686,7 @@ TEST(MerkleNode, LeafEncodingRoundtrip)
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
   ASSERT_TRUE(
-      raw.value_hash.has_value()); // NOLINT(bugprone-unchecked-optional-access)
+      raw.value_hash.has_value());
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
 
   // Verify the hash matches.
@@ -1784,7 +1786,7 @@ TEST(MerkleNode, LeafEncodingRoundtripOddPath)
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
   ASSERT_TRUE(
-      raw.value_hash.has_value()); // NOLINT(bugprone-unchecked-optional-access)
+      raw.value_hash.has_value());
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
@@ -1812,12 +1814,14 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
   ASSERT_TRUE(
-      raw.value_hash.has_value()); // NOLINT(bugprone-unchecked-optional-access)
+      raw.value_hash.has_value());
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
   allocator.free(leaf);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
 
