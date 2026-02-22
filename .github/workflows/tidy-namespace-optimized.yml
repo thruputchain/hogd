@@ -14,6 +14,7 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+  CARGO_BUILD_JOBS: "6"
 
 jobs:
   tidy:
@@ -115,6 +116,7 @@ jobs:
           echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
           echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          echo 'NPROC=30' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
           # Configure ccache with proper path expansion
