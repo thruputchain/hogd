@@ -1,11 +1,11 @@
+#include <gtest/gtest.h>
+
+
 #include <cstddef>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <future>
-#include <gtest/gtest.h>
 #include <iostream>
-
 #include <map>
 #include <memory>
 #include <print>
@@ -19,6 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
@@ -1683,7 +1684,7 @@ TEST(MerkleNode, LeafEncodingRoundtrip)
   // Verify roundtrip fidelity.
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
-  ASSERT_TRUE(raw.value_hash.has_value());
+  ASSERT_TRUE(raw.value_hash.has_value()); // NOLINT(bugprone-unchecked-optional-access)
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
 
   // Verify the hash matches.
@@ -1782,7 +1783,7 @@ TEST(MerkleNode, LeafEncodingRoundtripOddPath)
   EXPECT_EQ(idx, encoding_copy.size());
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
-  ASSERT_TRUE(raw.value_hash.has_value());
+  ASSERT_TRUE(raw.value_hash.has_value()); // NOLINT(bugprone-unchecked-optional-access)
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
@@ -1809,7 +1810,7 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   EXPECT_EQ(idx, encoding_copy.size());
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
-  ASSERT_TRUE(raw.value_hash.has_value());
+  ASSERT_TRUE(raw.value_hash.has_value()); // NOLINT(bugprone-unchecked-optional-access)
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
