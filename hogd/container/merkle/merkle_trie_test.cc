@@ -1685,8 +1685,7 @@ TEST(MerkleNode, LeafEncodingRoundtrip)
   // Verify roundtrip fidelity.
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
-  ASSERT_TRUE(
-      raw.value_hash.has_value());
+  ASSERT_TRUE(raw.value_hash.has_value());
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
 
   // Verify the hash matches.
@@ -1785,8 +1784,7 @@ TEST(MerkleNode, LeafEncodingRoundtripOddPath)
   EXPECT_EQ(idx, encoding_copy.size());
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
-  ASSERT_TRUE(
-      raw.value_hash.has_value());
+  ASSERT_TRUE(raw.value_hash.has_value());
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
@@ -1813,8 +1811,7 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   EXPECT_EQ(idx, encoding_copy.size());
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
   EXPECT_EQ(raw.path, leaf->path);
-  ASSERT_TRUE(
-      raw.value_hash.has_value());
+  ASSERT_TRUE(raw.value_hash.has_value());
   EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
