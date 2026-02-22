@@ -806,6 +806,10 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
     num_topics++;
   }
 
+  buf.append_range(
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(data.data()),
+                               data.size()));
+
   return log_event(num_topics, std::as_bytes(std::span(buf)));
 }
 
