@@ -159,6 +159,8 @@ public:
     memset(static_cast<void *>(child.data()), 0,
            child.size() *
                sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)
+    rw_lock.reset();
+    hash_lock.reset();
   }
 
   std::string str() const;
