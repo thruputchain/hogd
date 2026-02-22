@@ -787,10 +787,14 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
   }
 
   // TODO(jhumphri): Support different endianness.
-  BlockHeight block_height = *reinterpret_cast<BlockHeight *>(value.data());
+  CHECK_GE(value.size(), sizeof(BlockHeight));
+  BlockHeight block_height;
+  // value.data() is not guaranteed to be 8-byte aligned
+  // hence we use std::memcpy instead of *reinterpret_cast<BlockHeight
+  // *>(value.data())
+  std::memcpy(&block_height, value.data(), sizeof(BlockHeight));
   TxEventLog event_log;
   try {
-    CHECK_GE(value.size(), sizeof(BlockHeight));
     x23::deserialize(&event_log,
                      x23::BufView{reinterpret_cast<const uint8_t *>(
                                       value.data() + sizeof(BlockHeight)),
