@@ -9,6 +9,7 @@
 #include <x23/vec.h>
 
 #include "tests/xdrtest.hh"
+#include "x23/x23.h"
 
 namespace x23 {
 
@@ -118,6 +119,18 @@ TEST(Deserialize, CxsVectorTooLarge)
   input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
   std::span<const uint8_t> sp(input);
   EXPECT_THROW(x23::deserialize_cxs(&vec, sp), x23::CxsBadInput);
+}
+
+// xdr_size(BorrowedPtr<T>) previously returned 0 for null, but xdr_serialize
+// writes a 4-byte discriminant.  serialize_to uses xdr_size to allocate, so
+// this triggers a heap-buffer-overflow under ASAN.
+TEST(Serialize, NullBorrowedPtrSize)
+{
+  BorrowedPtr<uint32_t> bp;
+  ASSERT_FALSE(bp);
+  Buf buf = serialize(bp);
+  // A null optional should serialize as a 4-byte zero discriminant.
+  EXPECT_EQ(buf.size(), 4UZ);
 }
 
 // NOLINTEND(modernize-type-traits)
