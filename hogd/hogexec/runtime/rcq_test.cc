@@ -399,6 +399,54 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
   ASSERT_FALSE(consume({1})); // Queue should be empty.
 }
 
+// Syscall-level mirror of the direct RCQ assert repro sequence:
+// 1) create two committed past blocks, each with one entry
+// 2) in a later block, run one tx that consumes both entries
+// 3) concurrently run one tx that inserts a new entry
+// 4) commit consume first, then insert
+TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "HogDB bug: RCQ concurrent consume+insert can trigger storage-cost "
+        << "assert(cost_change <= vec.back().locked_storage_cost) in "
+           "invoke_tx.cc.";
+    return;
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  ASSERT_TRUE(insert({1}));
+  advance_block();
+  ASSERT_TRUE(insert({2}));
+  advance_block();
+
+  auto handler_consume = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(
+                                                   1), // Consume
+                                           .calldata = Calldata({2})}}},
+      *context_);
+  ASSERT_TRUE(handler_consume.root_invoke().is_root_success());
+
+  auto handler_insert = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_address_,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(
+                                                   0), // Insert
+                                           .calldata = Calldata({9})}}},
+      *context_);
+  ASSERT_TRUE(handler_insert.root_invoke().is_root_success());
+
+  // If the invariant is violated, one of these commits will abort the process.
+  ASSERT_EQ(handler_consume.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_insert.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 TEST_P(RCQTest, ConsumeFromPastBlock)
 {
   // Creates a native contract with the following methods:

@@ -494,6 +494,52 @@ TEST_F(DirectRCQTests, ConcurrentInsertAndConsume)
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
+// Repro harness for investigating HogDB invariant:
+// assert(cost_change <= vec.back().locked_storage_cost) in invoke_tx.cc.
+TEST_F(DirectRCQTests, ReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
+{
+  GTEST_SKIP()
+      << "HogDB bug: RCQ concurrent consume+insert can trigger storage-cost "
+      << "assert(cost_change <= vec.back().locked_storage_cost) in "
+         "invoke_tx.cc.";
+
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_assert_repro");
+
+  auto submit_single = [&](StorageDelta delta) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(key, std::move(delta),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  };
+
+  // Prepare two past blocks.
+  submit_single(make_rcq_insert_delta({make_rcq_entry({1})}));
+  submit_single(make_rcq_insert_delta({make_rcq_entry({2})}));
+
+  // Same block: one tx fully consumes past blocks, one tx inserts.
+  auto tx_consume = make_new_per_tx_db_proxy();
+  tx_consume.add_delta(key, make_rcq_consume_delta(2, 0, {}),
+                       std::to_underlying(
+                           StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_consume.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  auto tx_insert = make_new_per_tx_db_proxy();
+  tx_insert.add_delta(key, make_rcq_insert_delta({make_rcq_entry({9})}),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_insert.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // If the invariant fails, one of these commits will abort the process.
+  ASSERT_TRUE(tx_consume.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction({}).has_value());
+}
+
 // Verifies that a single insert delta can contain multiple entries and that
 // multiple concurrent transactions can each batch-insert to the same RCQ.
 TEST_F(DirectRCQTests, MultipleEntriesPerInsert)
