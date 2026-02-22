@@ -1670,17 +1670,15 @@ TEST(MerkleNode, LeafEncodingRoundtrip)
   leaf->value_hash = sha256(value);
 
   // Encode the node.
-  const std::vector<std::byte> &encoding = leaf->get_node_encoding();
-  // Make a copy since get_node_encoding returns a thread-local reference.
-  std::vector<std::byte> encoding_copy(encoding.begin(), encoding.end());
+  auto encoding = leaf->get_node_encoding();
 
   // Decode the node.
   size_t idx = 0;
   Node::Raw raw;
-  ASSERT_TRUE(Node::get_node_from_encoding(encoding_copy, idx, raw));
+  ASSERT_TRUE(Node::get_node_from_encoding(encoding, idx, raw));
 
   // Verify all bytes were consumed.
-  EXPECT_EQ(idx, encoding_copy.size());
+  EXPECT_EQ(idx, encoding.size());
 
   // Verify roundtrip fidelity.
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
