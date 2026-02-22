@@ -904,8 +904,8 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     case ContractType::kWasmi:
       return contract.wasmi_contract().wasm.size();
     default:
-      assert(false);
-      return 0LU;
+      panic("Unrecoverable; Invalid contract type: {}",
+            contract.contract_type());
     }
   }();
 
