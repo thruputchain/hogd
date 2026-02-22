@@ -457,6 +457,8 @@ public:
   {}
   UniqueLoglet &operator=(UniqueLoglet &&ul) noexcept
   {
+    if (this == &ul)
+      return *this;
     allocator_ = ul.allocator_;
     if (ll_) {
       allocator_->free(ll_);
