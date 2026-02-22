@@ -110,8 +110,10 @@ service_once()
     }
 
     if (happened && !it->second.deleted) {
+      // Access it while the lock is held
+      auto cb = std::move(it->second.cb);
       ptr.reset();
-      it->second.cb();
+      cb();
       ptr = take_sig_cbs();
     }
 
