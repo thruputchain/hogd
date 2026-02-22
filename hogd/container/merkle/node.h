@@ -116,6 +116,8 @@ public:
     CHECK_PTR(node);
 
     node->clear();
+    node->rw_lock.reset();
+    node->hash_lock.reset();
     node->init_branch(parent);
     return node;
   }
@@ -126,6 +128,8 @@ public:
     CHECK_PTR(node);
 
     node->clear();
+    node->rw_lock.reset();
+    node->hash_lock.reset();
     node->init_extension(parent);
     return node;
   }
@@ -136,6 +140,8 @@ public:
     CHECK_PTR(node);
 
     node->clear();
+    node->rw_lock.reset();
+    node->hash_lock.reset();
     node->init_leaf(parent);
     return node;
   }
@@ -159,8 +165,6 @@ public:
     memset(static_cast<void *>(child.data()), 0,
            child.size() *
                sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)
-    rw_lock.reset();
-    hash_lock.reset();
   }
 
   std::string str() const;
