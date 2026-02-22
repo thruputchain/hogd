@@ -162,6 +162,18 @@ SystemCallHandler::SystemCallHandler(
 void
 SystemCallHandler::perform_initial_validation()
 {
+  // Validate the proposal data structure before execution begins.
+  // This checks well-formedness (e.g. bit count matches byte count,
+  // no entropy grinding via padding bits).
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
+    if (!validation_data.validate()) {
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+      return;
+    }
+  }
+
   // TODO(geoff): Adjust if some assumption on the rest of the system changes
   //
   // At this point, we do not know the provenance of signed_tx_.  As such,
@@ -192,7 +204,7 @@ SystemCallHandler::check_final_validation_data()
   assert(cumulative_invoke_result_.is_root_success());
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
-    if (!validation_data.validate()) {
+    if (!validation_data.check_all_consumed()) {
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::kInvokeValidationFailure};
     }
@@ -762,7 +774,9 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
                              std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   uint64_t serialized_size = data.size();
   auto try_add_size = [&](uint64_t delta) {
@@ -792,14 +806,7 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
     num_topics++;
   }
 
-  buf.append(reinterpret_cast<const uint8_t *>(data.data()), data.size());
-
-  auto message = make_tx_emitted_event(
-      invocation_frame_stack_.get_active_frame().address(), num_topics,
-      std::as_bytes(std::span(buf)));
-
-  invocation_frame_stack_.get_active_frame().log_event(std::move(message));
-  return {};
+  return log_event(num_topics, std::as_bytes(std::span(buf)));
 }
 
 SyscallStatus<void>
@@ -807,7 +814,9 @@ SystemCallHandler::log_event(uint32_t num_topics,
                              std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   if (num_topics > kMaxTopics) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -851,7 +860,9 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -962,7 +973,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring,
                                   StorageDeltaFlagSet input_flags)
 {
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
@@ -1071,7 +1084,9 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              int128_t add_value,
                              StorageDeltaFlagSet input_flags)
 {
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
@@ -1098,7 +1113,9 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
                                  StorageDeltaFlagSet flags)
 {
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           flags)) {
@@ -1295,7 +1312,9 @@ SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
   assert(!invocation_frame_stack_.empty());
-  assert(!is_read_only());
+  if (is_read_only()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   AddressAndKey addrkey{
       .address = contract_address,
