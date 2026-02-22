@@ -112,7 +112,7 @@ template<typename Ret, typename... Args>
 bool
 operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
 {
-  return !!f;
+  return !f;
 }
 
 #endif // defined(__cpp_lib_move_only)

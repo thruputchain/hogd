@@ -48,11 +48,11 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
 
   T operator+=(T arg) noexcept requires std::integral<T>
   {
-    return fetch_add(arg) + 1;
+    return fetch_add(arg) + arg;
   }
   T operator-=(T arg) noexcept requires std::integral<T>
   {
-    return fetch_sub(arg) - 1;
+    return fetch_sub(arg) - arg;
   }
 
   T operator++(int) noexcept requires std::integral<T> { return fetch_add(1); }

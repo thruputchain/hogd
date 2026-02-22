@@ -31,4 +31,15 @@ TEST(UniqueFunction, Basics)
   EXPECT_EQ(foo, 14);
 }
 
+TEST(UniqueFunction, NullptrComparison)
+{
+  // A default-constructed (null) UniqueFunction should compare equal to nullptr
+  UniqueFunction<void()> null_fn;
+  EXPECT_TRUE(null_fn == nullptr);
+
+  // A non-null UniqueFunction should NOT compare equal to nullptr
+  UniqueFunction<void()> valid_fn = [] {};
+  EXPECT_FALSE(valid_fn == nullptr);
+}
+
 } // namespace hogd

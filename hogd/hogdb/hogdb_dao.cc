@@ -621,6 +621,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
     case kNNInt128:
     {
       int128_t base_value;
+      CHECK(item.value().value.size() == sizeof(int128_t));
       std::memcpy(&base_value, item.value().value.data(), sizeof(int128_t));
       int128_t out = le_to_cpu(base_value);
 

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -51,6 +52,21 @@ TEST(StringTest, Encode)
             "NBSWY3DPEB3W64TMMQQQ");
   EXPECT_EQ(encode_base64(byte_view(test_str.data(), test_str.size())),
             "aGVsbG8gd29ybGQh");
+}
+
+TEST(StringTest, DecodeHexEvenLength)
+{
+  // Even-length hex string should decode correctly
+  auto result = decode_hex("abcd");
+  ASSERT_EQ(result.size(), 2U);
+  EXPECT_EQ(result[0], std::byte{0xab});
+  EXPECT_EQ(result[1], std::byte{0xcd});
+}
+
+TEST(StringTest, DecodeHexOddLengthDeath)
+{
+  // Odd-length hex string should CHECK-fail (out-of-bounds read)
+  EXPECT_DEATH(decode_hex("abc"), "");
 }
 
 } // namespace hogd
