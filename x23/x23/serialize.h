@@ -419,7 +419,7 @@ xdr_size(BorrowedPtr<T> p)
 {
   if (p)
     return 4UZ + xdr_size(*p);
-  return 0Z;
+  return 4UZ;
 }
 
 template<is_xdr_serializable T>
