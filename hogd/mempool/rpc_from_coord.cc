@@ -104,18 +104,18 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
        verify_height);
   record_stage(stage_capture_verify_height);
 
-  AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                             txs);
+  // AuthErrorCodeBatch auth_ret =
+  //     co_await auth_client_->authmempool_verify_transactions(verify_height,
+  //                                                            txs);
   record_stage(stage_auth_verify);
 
   std::unordered_set<size_t> to_remove_indices;
-  for (size_t i = 0; i < auth_ret.size(); i++) {
-    const AuthErrorCode &code = auth_ret[i];
-    if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove_indices.insert(i);
-    }
-  }
+  // for (size_t i = 0; i < auth_ret.size(); i++) {
+  //   const AuthErrorCode &code = auth_ret[i];
+  //   if (code != AuthErrorCode::kAuthSuccess) {
+  //     to_remove_indices.insert(i);
+  //   }
+  // }
   info("{} txs were invalid", to_remove_indices.size());
 
   record_stage(stage_wait_commit_lock_before_add);
