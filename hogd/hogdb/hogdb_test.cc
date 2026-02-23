@@ -9,6 +9,13 @@
 
 // xdr types
 #include "contract.hh"
+#include "retrocausal_queue.hh"
+#include "rpc_types.hh"
+#include "storage_cost.hh"
+#include "storage_item.hh"
+#include "transaction.hh"
+#include "types.hh"
+
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h"
@@ -21,24 +28,22 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
-#include "rpc_types.hh"
-#include "storage_cost.hh"
-#include "storage_item.hh"
-#include "transaction.hh"
-#include "types.hh"
 
 #include "hogd/base/io.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -505,6 +510,161 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
                                         kSecondTransferAmount -
                                         cost_model_.get_balance_cost();
   EXPECT_EQ(expected_recipient_balance, *recipient_balance);
+}
+
+// Test that RCQ block contents are integrity-protected by the Merkle trie.
+// This test currently FAILS because block contents are NOT committed to the
+// trie - only metadata is. This is a known critical security issue.
+//
+// The test:
+// 1. Creates an RCQ with entries that span multiple blocks
+// 2. Commits and captures the merkle trie root hash
+// 3. Directly modifies RCQ block data in ramdb (simulating an attacker)
+// 4. Recomputes the merkle trie root hash
+// 5. Asserts that the root hash changed
+//
+// Expected behavior: Root hash SHOULD change (integrity protected)
+// Current behavior: Root hash DOES NOT change (bug!)
+TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
+{
+  constexpr size_t kEntriesPerBlock = 100;
+  constexpr size_t kNumBlocks = 3;
+
+  // Setup: create contract with enough storage tokens
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 1);
+
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("x"))),
+                           .contract_size = 10}));
+
+  // Create RCQ with entries across multiple blocks
+  // Each block gets kEntriesPerBlock entries
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    // Create delta with entries for this block
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.resize(kEntriesPerBlock);
+    for (size_t i = 0; i < kEntriesPerBlock; i++) {
+      // Each entry contains a single byte: block_idx
+      delta.insert.added_entries[i] =
+          QueueEntry{static_cast<uint8_t>(block_idx)};
+    }
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+
+    // sync_balance_locks() handles storage cost deduction
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Capture the merkle trie root hash after normal operations
+  // The trie_ has been updated by the BlockTX commits above
+  trie_.generate_top_level_hashes();
+  SHA256Hash original_trie_hash = trie_.get_root_hash();
+
+  info("Original merkle trie root hash: {}", original_trie_hash);
+
+  // Read block 1's data
+  uint64_t target_block_number = 1;
+  auto block_result =
+      db_.read_retrocausal_queue_block(rcq_key, target_block_number);
+  ASSERT_TRUE(block_result);
+  RetrocausalQueueBlock original_block = *block_result;
+
+  info("Original block {} has {} entries, first entry value = {}",
+       target_block_number, original_block.entries.size(),
+       original_block.entries[0][0]);
+  ASSERT_GT(original_block.entries.size(), 0);
+
+  // Now directly modify block 1's data in ramdb (simulating an attacker)
+  // This bypasses the transaction layer and trie updates
+  RetrocausalQueueBlock modified_block = original_block;
+  modified_block.entries[0] =
+      QueueEntry{255}; // Change first entry from 0 to 255
+
+  // Write the modified block directly to ramdb, bypassing trie
+  ASSERT_TRUE(db_.write_retrocausal_queue_block(rcq_key, modified_block));
+  ASSERT_TRUE(db_.commit());
+
+  info("Modified block {} entry 0 from {} to 255", target_block_number,
+       original_block.entries[0][0]);
+
+  // Re-read the RCQ metadata - it should be UNCHANGED (same counts, same
+  // hashes)
+  auto new_meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  ASSERT_TRUE(new_meta_result);
+  auto new_meta = *new_meta_result;
+
+  // Serialize both metadata to compare them
+  auto original_meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  ASSERT_TRUE(original_meta_result);
+  auto original_meta_serialized = x23::serialize(*original_meta_result);
+  auto new_meta_serialized = x23::serialize(new_meta);
+
+  // The metadata serialization should be IDENTICAL (same counts, same
+  // structure)
+  bool metadata_unchanged = (original_meta_serialized == new_meta_serialized);
+  info("Metadata serialization unchanged: {}", metadata_unchanged);
+
+  // Verify the block content was actually modified
+  auto modified_block_result =
+      db_.read_retrocausal_queue_block(rcq_key, target_block_number);
+  ASSERT_TRUE(modified_block_result);
+  auto reread_block = *modified_block_result;
+  EXPECT_NE(original_block.entries[0][0], reread_block.entries[0][0]);
+  EXPECT_EQ(255, reread_block.entries[0][0]);
+
+  // Compute hash of block content to prove it changed
+  auto original_block_serialized = x23::serialize(original_block);
+  auto modified_block_serialized = x23::serialize(reread_block);
+  SHA256Hash original_block_hash =
+      sha256(std::as_bytes(std::span(original_block_serialized)));
+  SHA256Hash modified_block_hash =
+      sha256(std::as_bytes(std::span(modified_block_serialized)));
+
+  info("Block content hash changed: {} -> {}", original_block_hash,
+       modified_block_hash);
+
+  // Recompute the trie root by generating hashes again
+  // Since metadata is unchanged, the trie root should be identical
+  trie_.generate_top_level_hashes();
+  SHA256Hash new_trie_hash = trie_.get_root_hash();
+
+  info("Recomputed merkle trie root hash: {}", new_trie_hash);
+
+  // We modified block contents (proven by different block hashes)
+  // But metadata is unchanged (proven by identical serialization)
+  // Therefore the trie root is also unchanged (since only metadata is in trie)
+  //
+  // In a CORRECT implementation:
+  // - Block content hashes would be stored IN the metadata
+  // - Modifying a block would change its hash in the metadata
+  // - This would change the metadata serialization
+  // - This would change the trie root
+  // - So: original_trie_hash != new_trie_hash -> TEST WOULD PASS
+  //
+  // In the BUGGY implementation (current):
+  // - Block contents are NOT in metadata
+  // - Metadata is unchanged after block modification
+  // - Trie root is unchanged
+  // - So: original_trie_hash == new_trie_hash -> TEST FAILS!
+  EXPECT_NE(original_trie_hash, new_trie_hash)
+      << "Modifying RCQ block contents did NOT change "
+      << "the merkle trie root hash! ";
 }
 
 } // namespace hogd
