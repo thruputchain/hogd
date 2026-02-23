@@ -774,9 +774,7 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
                              std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());
-  if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  CHECK(!is_read_only());
 
   uint64_t serialized_size = data.size();
   auto try_add_size = [&](uint64_t delta) {
@@ -818,9 +816,7 @@ SystemCallHandler::log_event(uint32_t num_topics,
                              std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());
-  if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  CHECK(!is_read_only());
   if (num_topics > kMaxTopics) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -864,9 +860,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
-  if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  CHECK(!is_read_only());
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -977,9 +971,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring,
                                   StorageDeltaFlagSet input_flags)
 {
-  if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  CHECK(!is_read_only());
 
   if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
@@ -1088,9 +1080,7 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              int128_t add_value,
                              StorageDeltaFlagSet input_flags)
 {
-  if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  CHECK(!is_read_only());
 
   if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           input_flags)) {
@@ -1117,9 +1107,7 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
                                  StorageDeltaFlagSet flags)
 {
-  if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  CHECK(!is_read_only());
 
   if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
           flags)) {

@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "precompiles.hh"
@@ -81,14 +82,12 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   // Create a contract that will transfer tokens
   auto sender_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
              auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-                 handler, kReceiverAddr,
+                 ctx.handler(), kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kTransferAmount)));
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
@@ -168,13 +167,12 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   auto sender_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
              auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-                 handler, kReceiverAddr,
+                 ctx.handler(), kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
@@ -184,14 +182,12 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
              return {};
            }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &) -> InvokeStatus<void> {
+          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
              auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
-                 handler, kReceiverAddr,
+                 ctx.handler(), kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
@@ -301,8 +297,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [kFirstTransferAmount, kSecondTransferAmount](
-               SystemCallHandler &handler,
-               NativeRuntime &runtime) -> InvokeStatus<void> {
+               NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto native_token_addr =
                  GenesisConfigurationLoader::kPresetNativeTokenAddress;
              using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -312,10 +307,10 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
              auto calldata1 = erc20_meta::make_calldata<"transfer">(
                  kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
-             auto [r1, _g1] = handler.invoke(
+             auto [r1, _g1] = ctx.handler().invoke(
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                 runtime.get_available_gas(), calldata1,
+                 ctx.runtime().get_available_gas(), calldata1,
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
 
              if (!r1.has_value()) {
@@ -328,10 +323,10 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
              // 2. Call transfer with same arguments, NOT in try_invoke frame -
              // should succeed (creates the balance)
-             auto [r2, _g2] = handler.invoke(
+             auto [r2, _g2] = ctx.handler().invoke(
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                 runtime.get_available_gas(), calldata1,
+                 ctx.runtime().get_available_gas(), calldata1,
                  std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
              if (!r2.has_value()) {
@@ -346,10 +341,10 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
              auto calldata2 = erc20_meta::make_calldata<"transfer">(
                  kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
-             auto [r3, _g3] = handler.invoke(
+             auto [r3, _g3] = ctx.handler().invoke(
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                 runtime.get_available_gas(), calldata2,
+                 ctx.runtime().get_available_gas(), calldata2,
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
 
              if (!r3.has_value()) {

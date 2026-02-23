@@ -2,14 +2,17 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <tuple>
 #include <utility>
 
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/itc_erc20.hh"
+#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -20,17 +23,93 @@
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "standard_asset_events.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "types.hh"
 #include "x23/format.h"
 
 namespace hogd {
 
 namespace {
+
+// Convert a HostFnError from a syscall result to an InvokeError.
+InvokeError
+to_invoke_error(HostFnError const &err)
+{
+  switch (err.code()) {
+  case HostFnErrorCode::kHostOutOfGas:
+    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+  case HostFnErrorCode::kHostUnrecoverable:
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+  case HostFnErrorCode::kHostAbortTransaction:
+    return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+  case HostFnErrorCode::kHostValidationFailure:
+    return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+  case HostFnErrorCode::kHostExit:
+  case HostFnErrorCode::kHostReturn:
+  case HostFnErrorCode::kHostNoneOrRecoverable:
+    break;
+  }
+  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+}
+
+// Emit an event through the kLogEvent syscall.
+// The event_buf must contain topics concatenated with data (as produced by
+// make_event_from_xdr_struct). num_topics topics of sizeof(Topic) bytes each
+// are split off the front; the remainder is data.
+template<uint32_t NumTopics>
+InvokeStatus<void>
+emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
+{
+  static_assert(NumTopics <= 3);
+  auto buf = std::as_bytes(std::span(event_buf));
+
+  const Topic *t0 = nullptr;
+  const Topic *t1 = nullptr;
+  const Topic *t2 = nullptr;
+
+  Topic topics[3];
+  for (uint32_t i = 0; i < NumTopics; ++i) {
+    std::memcpy(&topics[i], buf.data() + (i * sizeof(Topic)), sizeof(Topic));
+  }
+  if constexpr (NumTopics >= 1)
+    t0 = &topics[0];
+  if constexpr (NumTopics >= 2)
+    t1 = &topics[1];
+  if constexpr (NumTopics >= 3)
+    t2 = &topics[2];
+
+  auto data = buf.subspan(NumTopics * sizeof(Topic));
+  auto r = ctx.syscall<SyscallNo::kLogEvent>(t0, t1, t2, data);
+  if (!r.has_value()) {
+    return to_invoke_error(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  return {};
+}
+
+// Get the msg_sender via the kGetMsgSender syscall.
+InvokeStatus<ContractAddress>
+get_msg_sender(NativeSyscallContext &ctx)
+{
+  ContractAddress sender{};
+  auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+  if (!r.has_value()) {
+    return to_invoke_error(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  return sender;
+}
 
 StorageKeyContractData
 allowance_key(ContractAddress owner, ContractAddress spender)
@@ -40,31 +119,40 @@ allowance_key(ContractAddress owner, ContractAddress spender)
   return sha256(*data); // NOLINT(bugprone-unchecked-optional-access)
 }
 
-SystemStatus<bool>
-adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
+InvokeStatus<bool>
+adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
 {
   auto allow_key = allowance_key(owner, spender);
-  auto r = handler.get_nnint(allow_key, true);
+
+  // get_nnint via syscall
+  int128_t output_set{};
+  bool output_set_opt{};
+  int128_t output_add{};
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
+                                                 output_set_opt, output_add);
   if (!r.has_value()) {
-    return r.error();
+    return to_invoke_error(r.error());
   }
-  if (!r.value().has_value()) {
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return false;
   }
-  auto [set, add] = r.value().value();
-  if (integer_add_overflow(add, amount)) {
+
+  if (integer_add_overflow(output_add, amount)) {
     return false;
   }
-  int128_t new_add = add + amount;
-  assert(set.has_value());
-  auto r2 = handler.set_nnint(allow_key, set, new_add,
-                              std::to_underlying(
-                                  StorageDeltaFlags::kStorageDeltaFlagNone));
+  int128_t new_add = output_add + amount;
+  assert(output_set_opt);
+
+  // set_nnint via syscall
+  auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+      allow_key, &output_set, new_add,
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   if (!r2.has_value()) {
-    return r2.error();
+    return to_invoke_error(r2.error());
   }
-  return r2.value().has_value();
+  return *r2 == SyscallErrorCode::kSyscallErrorCodeNone;
 }
 
 // For now, the typedefs exported by a contract aren't added to the generated
@@ -76,12 +164,12 @@ constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
 
 // implementation functions
 InvokeStatus<Result<void, itc_erc20::ERC20Error>>
-transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
-              ContractAddress receiver, amount_t amount)
+transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
+              amount_t amount)
 {
   trace("native token transfer: receiver {} amount {}", x23::show(receiver),
         x23::show(amount));
-  if (!runtime.consume_gas(1)) {
+  if (!ctx.runtime().consume_gas(1)) {
     return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
   }
 
@@ -90,9 +178,9 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   uint128_t amount_unsigned_int =
       uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
-  auto owner = handler.get_msg_sender();
+  auto owner = get_msg_sender(ctx);
   if (!owner.has_value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return owner.error();
   }
 
   // can't negate bigger values
@@ -102,7 +190,8 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   int128_t amount_signed_int = amount_unsigned_int;
 
   // subtract amount from owner's balance
-  auto r1 = handler.modify_native_token_balance(*owner, -amount_signed_int);
+  auto r1 =
+      ctx.handler().modify_native_token_balance(*owner, -amount_signed_int);
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
   }
@@ -111,7 +200,8 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // add amount to receiver's balance
-  auto r2 = handler.modify_native_token_balance(receiver, amount_signed_int);
+  auto r2 =
+      ctx.handler().modify_native_token_balance(receiver, amount_signed_int);
   if (!r2.has_value()) {
     return r2.error().to_invoke_error();
   }
@@ -125,23 +215,21 @@ transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
       .amount = to_xdr(amount_signed_int),
   });
 
-  auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
-  if (!event_res.has_value()) {
+  if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
     warn("failed to log transfer event in native token transfer");
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return err.error();
   }
 
   return {Result<void, itc_erc20::ERC20Error>::make_ok()};
 }
 
 InvokeStatus<Result<void, itc_erc20::ERC20Error>>
-transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
-                   ContractAddress owner, ContractAddress receiver,
-                   amount_t amount)
+transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
+                   ContractAddress receiver, amount_t amount)
 {
   trace("native token transfer_from: owner {} receiver {} amount {}",
         x23::show(owner), x23::show(receiver), x23::show(amount));
-  if (!runtime.consume_gas(1)) {
+  if (!ctx.runtime().consume_gas(1)) {
     return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
   }
 
@@ -149,9 +237,9 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
       uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
   // get spender
-  auto spender = handler.get_msg_sender();
+  auto spender = get_msg_sender(ctx);
   if (!spender.has_value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return spender.error();
   }
 
   // can't negate bigger values
@@ -161,7 +249,8 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   int128_t amount_signed_int = amount_unsigned_int;
 
   // subtract amount from owner's balance
-  auto r1 = handler.modify_native_token_balance(owner, -amount_signed_int);
+  auto r1 =
+      ctx.handler().modify_native_token_balance(owner, -amount_signed_int);
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
   }
@@ -170,7 +259,8 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // add amount to receiver's balance
-  auto r2 = handler.modify_native_token_balance(receiver, amount_signed_int);
+  auto r2 =
+      ctx.handler().modify_native_token_balance(receiver, amount_signed_int);
   if (!r2.has_value()) {
     return r2.error().to_invoke_error();
   }
@@ -179,10 +269,9 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   }
 
   // subtract amount from spender's allowance
-  auto allow_res =
-      adjust_allowance(handler, owner, *spender, -amount_signed_int);
+  auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
   if (!allow_res.has_value()) {
-    return allow_res.error().to_invoke_error();
+    return allow_res.error();
   }
   if (!allow_res.value()) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -194,36 +283,35 @@ transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
       .amount = to_xdr(amount_signed_int),
   });
 
-  auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
-  if (!event_res.has_value()) {
+  if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
     warn("failed to log transfer_from event in native token transfer_from");
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return err.error();
   }
 
   return {Result<void, itc_erc20::ERC20Error>::make_ok()};
 }
 
 InvokeStatus<Result<void, itc_erc20::ERC20Error>>
-adjust_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
-                      ContractAddress spender, difference_t amount)
+adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
+                      difference_t amount)
 {
   trace("native token adjust_allowance: spender {} amount {}",
         x23::show(spender), x23::show(amount));
-  if (!runtime.consume_gas(1)) {
+  if (!ctx.runtime().consume_gas(1)) {
     return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
   }
 
-  auto owner = handler.get_msg_sender();
+  auto owner = get_msg_sender(ctx);
   if (!owner.has_value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return owner.error();
   }
 
   int128_t amount_signed_int =
       int128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
-  auto r = adjust_allowance(handler, *owner, spender, amount_signed_int);
+  auto r = adjust_allowance(ctx, *owner, spender, amount_signed_int);
   if (!r.has_value()) {
-    return r.error().to_invoke_error();
+    return r.error();
   }
   if (!r.value()) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -235,41 +323,45 @@ adjust_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
       .amount = to_xdr(amount_signed_int),
   });
 
-  auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
-  if (!event_res.has_value()) {
+  if (auto err = emit_event<3>(ctx, event_buf); !err.has_value()) {
     warn("failed to log adjust_allowance event in native token "
          "adjust_allowance");
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return err.error();
   }
 
   return {Result<void, itc_erc20::ERC20Error>::make_ok()};
 }
 
 InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>>
-get_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
-                   ContractAddress owner, ContractAddress spender)
+get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
+                   ContractAddress spender)
 {
   trace("native token get_allowance: owner {} spender {}", x23::show(owner),
         x23::show(spender));
-  if (!runtime.consume_gas(1)) {
-
+  if (!ctx.runtime().consume_gas(1)) {
     return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
   }
 
   auto allow_key = allowance_key(owner, spender);
-  auto r = handler.get_nnint(allow_key, true);
+
+  int128_t output_set{};
+  bool output_set_opt{};
+  int128_t output_add{};
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
+                                                 output_set_opt, output_add);
   if (!r.has_value()) {
-    return r.error().to_invoke_error();
+    return to_invoke_error(r.error());
   }
-  if (!r.value().has_value()) {
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
+
   // TODO(geoff): what is the correct overflow behavior on get_allowance?
-  auto [set, add] = r.value().value();
-  if (!set.has_value()) {
+  if (!output_set_opt) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
-  auto [total, of] = overflowing_add(*set, add);
+  auto [total, of] = overflowing_add(output_set, output_add);
   if (of) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
@@ -303,15 +395,14 @@ make_native_token_contract()
 
   // get_balance_of
   builder.add<itc_erc20::ERC20, "get_balance_of">(
-      [](SystemCallHandler &handler, NativeRuntime &runtime,
-         ContractAddress contract_address)
+      [](NativeSyscallContext &ctx, ContractAddress contract_address)
           -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
-        if (!runtime.consume_gas(1)) {
+        if (!ctx.runtime().consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
-        auto balance = handler.get_native_token_balance(contract_address);
+        auto balance = ctx.handler().get_native_token_balance(contract_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }
@@ -326,19 +417,19 @@ make_native_token_contract()
 
   // get_balance
   builder.add<itc_erc20::ERC20, "get_balance">(
-      [](SystemCallHandler &handler, NativeRuntime &runtime)
+      [](NativeSyscallContext &ctx)
           -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
         trace("native token get_balance");
-        if (!runtime.consume_gas(1)) {
+        if (!ctx.runtime().consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
 
-        auto caller_address = handler.get_msg_sender();
+        auto caller_address = get_msg_sender(ctx);
         if (!caller_address.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return caller_address.error();
         }
 
-        auto balance = handler.get_native_token_balance(*caller_address);
+        auto balance = ctx.handler().get_native_token_balance(*caller_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }

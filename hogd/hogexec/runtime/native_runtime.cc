@@ -9,6 +9,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 
@@ -25,7 +26,8 @@ NativeContract::invoke(Runtime::MethodID method,
   auto it = functions_.find(method);
   if (it == functions_.end())
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-  return it->second(syscall_handler, runtime);
+  NativeSyscallContext ctx(syscall_handler, runtime);
+  return it->second(ctx);
 }
 
 SystemStatus<std::unique_ptr<Runtime>>

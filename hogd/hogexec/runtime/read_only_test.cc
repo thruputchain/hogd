@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "precompiles.hh"
@@ -70,10 +71,10 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] =
-                 client_.invoke_opt<"read_only_bytestring_set">(handler, false);
+                 client_.invoke_opt<"read_only_bytestring_set">(ctx.handler(),
+                                                                false);
              if (!check_result(res)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -81,12 +82,12 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
              return {};
            }},
           {1,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto [res, _gas] = client_.invoke_opt<
-                 "read_only_bytestring_set",
-                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(handler,
-                                                                      true);
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto [res, _gas] =
+                 client_.invoke_opt<"read_only_bytestring_set",
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagReadOnly)>(
+                     ctx.handler(), true);
              if (!check_result(res)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -162,10 +163,10 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] =
-                 client_.invoke_opt<"read_only_log_event">(handler, false);
+                 client_.invoke_opt<"read_only_log_event">(ctx.handler(),
+                                                           false);
              if (!check_result(res)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -173,12 +174,12 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
              return {};
            }},
           {1,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto [res, _gas] = client_.invoke_opt<
-                 "read_only_log_event",
-                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(handler,
-                                                                      true);
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto [res, _gas] =
+                 client_.invoke_opt<"read_only_log_event",
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagReadOnly)>(
+                     ctx.handler(), true);
              if (!check_result(res)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -256,25 +257,23 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             if (!handler.is_read_only()) {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             if (!ctx.handler().is_read_only()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              return {};
            }},
           {1,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // call 0, with no read-only flag added.
-             if (!handler.is_read_only()) {
+             if (!ctx.handler().is_read_only()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              auto [res, _gas] =
-                 handler.invoke(native_contract_addr, 0, UINT64_MAX, {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagNone));
+                 ctx.handler().invoke(native_contract_addr, 0, UINT64_MAX, {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -282,13 +281,12 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
              return {};
            }},
           {2,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // call 1, with read-only flag added.
              auto [res, _gas] =
-                 handler.invoke(native_contract_addr, 1, UINT64_MAX, {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagReadOnly));
+                 ctx.handler().invoke(native_contract_addr, 1, UINT64_MAX, {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagReadOnly));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -364,12 +362,11 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   auto caller_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = native_token_client.invoke_opt<
                  "get_balance_of",
                  std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(
-                 handler, kObserverAddr);
+                 ctx.handler(), kObserverAddr);
              if (!res.has_value() || !res.value().has_value() ||
                  !res.value().value().has_value() ||
                  !res.value().value().value().is_ok()) {
@@ -382,12 +379,11 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
              return {};
            }},
           {1,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = native_token_client.invoke_opt<
                  "transfer",
                  std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(
-                 handler, kReceiverAddr, make_amount(transfer_amount));
+                 ctx.handler(), kReceiverAddr, make_amount(transfer_amount));
              // The invoke should fail because modify_native_token_balance
              // returns InvalidSyscallInput in read-only mode, which causes
              // the transfer to return a deterministic error. The frame
@@ -400,10 +396,9 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
              return {};
            }},
           {2,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = native_token_client.invoke_opt<"transfer">(
-                 handler, kReceiverAddr, make_amount(transfer_amount));
+                 ctx.handler(), kReceiverAddr, make_amount(transfer_amount));
              if (!res.has_value() || !res.value().has_value() ||
                  !res.value().value().has_value() ||
                  !res.value().value().value().is_ok()) {

@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -116,11 +117,11 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [](SystemCallHandler &handler, uint32_t input,
+      [](NativeSyscallContext &ctx, uint32_t input,
          uint32_t expect) -> InvokeStatus<void> {
         fib_client_t client(kFibContractAddr);
         auto [decoded, _gas] =
-            client.template invoke_opt<"fibonacci">(handler, input);
+            client.template invoke_opt<"fibonacci">(ctx.handler(), input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};

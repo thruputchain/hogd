@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
@@ -64,12 +65,12 @@ TEST_F(EventTest, EventSuccess)
   auto native_contract_0 = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              const std::string event_data = "test 0 topics";
 
              auto [status, gas] =
-                 syscall_LogEvent_inner(handler, nullptr, nullptr, nullptr,
+                 syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr,
+                                        nullptr,
                                         std::as_bytes(std::span(event_data)));
              if (!status.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -82,14 +83,13 @@ TEST_F(EventTest, EventSuccess)
              return {};
            }},
           {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              const std::string event_data = "test 1 topic";
 
              SHA256Hash topic = sha256(std::string("topic"));
 
              auto [status, gas] =
-                 syscall_LogEvent_inner(handler, &topic, nullptr, nullptr,
+                 syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
                                         std::as_bytes(std::span(event_data)));
              if (!status.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -101,12 +101,12 @@ TEST_F(EventTest, EventSuccess)
 
              return {};
            }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             auto [status, gas] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto [status, gas] =
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                                      ctx.runtime().get_available_gas(), {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagNone));
              if (!status.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
              }
@@ -115,9 +115,11 @@ TEST_F(EventTest, EventSuccess)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto [status2, gas2] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagNone));
+             auto [status2, gas2] =
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                                      ctx.runtime().get_available_gas(), {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagNone));
              if (!status2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
              }
@@ -126,7 +128,7 @@ TEST_F(EventTest, EventSuccess)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (!runtime.consume_gas(gas + gas2)) {
+             if (!ctx.runtime().consume_gas(gas + gas2)) {
                return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
              }
 
@@ -196,9 +198,7 @@ TEST_F(EventTest, BadEventInputs)
 {
   auto native_contract_0 = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              SHA256Hash topic0 = sha256(std::string("topic"));
              SHA256Hash topic1 = sha256(std::string("topic"));
              SHA256Hash topic2 = sha256(std::string("topic"));
@@ -207,10 +207,9 @@ TEST_F(EventTest, BadEventInputs)
              too_long_event.resize(kMaxEventLength + 1);
 
              {
-               auto [status, gas] =
-                   syscall_LogEvent_inner(handler, nullptr, &topic1, nullptr,
-                                          std::as_bytes(std::span(
-                                              "test bad topic organization")));
+               auto [status, gas] = syscall_LogEvent_inner(
+                   ctx.handler(), nullptr, &topic1, nullptr,
+                   std::as_bytes(std::span("test bad topic organization")));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -222,10 +221,9 @@ TEST_F(EventTest, BadEventInputs)
              }
 
              {
-               auto [status, gas] =
-                   syscall_LogEvent_inner(handler, &topic0, nullptr, &topic2,
-                                          std::as_bytes(std::span(
-                                              "test bad topic organization")));
+               auto [status, gas] = syscall_LogEvent_inner(
+                   ctx.handler(), &topic0, nullptr, &topic2,
+                   std::as_bytes(std::span("test bad topic organization")));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -237,10 +235,9 @@ TEST_F(EventTest, BadEventInputs)
              }
 
              {
-               auto [status, gas] =
-                   syscall_LogEvent_inner(handler, nullptr, nullptr, nullptr,
-                                          std::as_bytes(
-                                              std::span(too_long_event)));
+               auto [status, gas] = syscall_LogEvent_inner(
+                   ctx.handler(), nullptr, nullptr, nullptr,
+                   std::as_bytes(std::span(too_long_event)));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -298,19 +295,16 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 {
   auto native_contract_0 = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              SHA256Hash topic = sha256(std::string("topic"));
 
              x23::Vec<uint8_t> max_event_data;
              max_event_data.resize(kMaxEventLength - topic.size());
 
              {
-               auto [status, gas] =
-                   syscall_LogEvent_inner(handler, &topic, nullptr, nullptr,
-                                          std::as_bytes(
-                                              std::span(max_event_data)));
+               auto [status, gas] = syscall_LogEvent_inner(
+                   ctx.handler(), &topic, nullptr, nullptr,
+                   std::as_bytes(std::span(max_event_data)));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -323,10 +317,9 @@ TEST_F(EventTest, EventLengthIncludesTopics)
              x23::Vec<uint8_t> too_long_event_data;
              too_long_event_data.resize(max_event_data.size() + 1);
              {
-               auto [status, gas] =
-                   syscall_LogEvent_inner(handler, &topic, nullptr, nullptr,
-                                          std::as_bytes(
-                                              std::span(too_long_event_data)));
+               auto [status, gas] = syscall_LogEvent_inner(
+                   ctx.handler(), &topic, nullptr, nullptr,
+                   std::as_bytes(std::span(too_long_event_data)));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -402,13 +395,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
             // Method 0: Produces an event with 0 topics, with event data from
             // calldata
             {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Use calldata as event data
-               auto const &calldata = handler.get_calldata();
+               auto const &calldata = ctx.handler().get_calldata();
 
                auto [status, gas] =
-                   syscall_LogEvent_inner(handler, nullptr, nullptr, nullptr,
+                   syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr,
+                                          nullptr,
                                           std::as_bytes(std::span(calldata)));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -418,7 +411,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
-               if (!runtime.consume_gas(gas.get())) {
+               if (!ctx.runtime().consume_gas(gas.get())) {
                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                }
 
@@ -426,17 +419,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
              }},
             // Method 1: Calls method 0, then manually reverts the frame
             {1,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Call method 0 with some test data
                std::string test_data = "method1_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
-               auto [status, gas] =
-                   handler.invoke(handler.get_current_address(), 0,
-                                  runtime.get_available_gas(), calldata,
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto [status, gas] = ctx.handler().invoke(
+                   ctx.handler().get_current_address(), 0,
+                   ctx.runtime().get_available_gas(), calldata,
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -445,27 +436,25 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
-               if (!runtime.consume_gas(gas)) {
+               if (!ctx.runtime().consume_gas(gas)) {
                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                }
 
                // Manually revert the frame - this should revert the event
-               handler.set_return_buffer(ReturnBuffer{}, true);
+               ctx.handler().set_return_buffer(ReturnBuffer{}, true);
                return {};
              }},
             // Method 2: Calls method 0, then returns a Deterministic error
             {2,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Call method 0 with some test data
                std::string test_data = "method2_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
-               auto [status, gas] =
-                   handler.invoke(handler.get_current_address(), 0,
-                                  runtime.get_available_gas(), calldata,
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto [status, gas] = ctx.handler().invoke(
+                   ctx.handler().get_current_address(), 0,
+                   ctx.runtime().get_available_gas(), calldata,
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -474,7 +463,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
-               if (!runtime.consume_gas(gas)) {
+               if (!ctx.runtime().consume_gas(gas)) {
                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                }
 
@@ -482,19 +471,16 @@ TEST_F(EventTest, EventWithRevertingFrames)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }},
             // Method 3: Calls method 0, then 1, then 0, then 2, then 0
-            {3,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+            {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Call method 0 (first event - should succeed)
                {
                  std::string test_data = "first_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] =
-                     handler.invoke(handler.get_current_address(), 0,
-                                    runtime.get_available_gas(), calldata,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto [status, gas] = ctx.handler().invoke(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), calldata,
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone));
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -504,18 +490,17 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
 
-                 if (!runtime.consume_gas(gas)) {
+                 if (!ctx.runtime().consume_gas(gas)) {
                    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                  }
                }
 
                // Call method 1 (should revert, so no event)
                {
-                 auto [status, gas] =
-                     handler.invoke(handler.get_current_address(), 1,
-                                    runtime.get_available_gas(), {},
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto [status, gas] = ctx.handler().invoke(
+                     ctx.handler().get_current_address(), 1,
+                     ctx.runtime().get_available_gas(), {},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone));
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -526,7 +511,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
 
-                 if (!runtime.consume_gas(gas)) {
+                 if (!ctx.runtime().consume_gas(gas)) {
                    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                  }
                }
@@ -536,11 +521,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "second_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] =
-                     handler.invoke(handler.get_current_address(), 0,
-                                    runtime.get_available_gas(), calldata,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto [status, gas] = ctx.handler().invoke(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), calldata,
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone));
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -550,7 +534,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
 
-                 if (!runtime.consume_gas(gas)) {
+                 if (!ctx.runtime().consume_gas(gas)) {
                    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                  }
                }
@@ -558,11 +542,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
                // Call method 2 (should fail with deterministic error, so no
                // event)
                {
-                 auto [status, gas] =
-                     handler.invoke(handler.get_current_address(), 2,
-                                    runtime.get_available_gas(), {},
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto [status, gas] = ctx.handler().invoke(
+                     ctx.handler().get_current_address(), 2,
+                     ctx.runtime().get_available_gas(), {},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone));
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -573,7 +556,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
 
-                 if (!runtime.consume_gas(gas)) {
+                 if (!ctx.runtime().consume_gas(gas)) {
                    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                  }
                }
@@ -583,11 +566,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "third_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] =
-                     handler.invoke(handler.get_current_address(), 0,
-                                    runtime.get_available_gas(), calldata,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto [status, gas] = ctx.handler().invoke(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), calldata,
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone));
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -597,7 +579,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
 
-                 if (!runtime.consume_gas(gas)) {
+                 if (!ctx.runtime().consume_gas(gas)) {
                    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                  }
                }

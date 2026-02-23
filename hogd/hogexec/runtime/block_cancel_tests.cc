@@ -12,6 +12,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -46,9 +47,9 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](SystemCallHandler & /*unused*/, NativeRuntime & /*unused*/)
-                 -> InvokeStatus<void> { return {}; }}});
+            {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+               return {};
+             }}});
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -96,13 +97,14 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Invoke method 1 using try_invoke
-               auto [r0, _g0] = handler.invoke(
-                   handler.get_current_address(), 1,
-                   runtime.get_available_gas(), handler.get_calldata(),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+               auto [r0, _g0] =
+                   ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                                        ctx.runtime().get_available_gas(),
+                                        ctx.handler().get_calldata(),
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
 
                if (r0.has_value() ||
                    r0.error().code() !=
@@ -114,13 +116,11 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
 
                return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
              }},
-            {1,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Perform a storage write
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span{"hello"}),
+                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||

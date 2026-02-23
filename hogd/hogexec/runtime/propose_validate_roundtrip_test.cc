@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -71,19 +72,18 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
   auto native_contract_a = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // try_invoke B method 0 — should succeed
-             auto [r0, _g0] = handler.invoke(
-                 kAddrB, 0, runtime.get_available_gas(), Calldata{},
+             auto [r0, _g0] = ctx.handler().invoke(
+                 kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // try_invoke B method 1 — should also succeed
-             auto [r1, _g1] = handler.invoke(
-                 kAddrB, 1, runtime.get_available_gas(), Calldata{},
+             auto [r1, _g1] = ctx.handler().invoke(
+                 kAddrB, 1, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -92,7 +92,8 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
              // Write something to prove we survived both try_invokes
              auto key = make_storage_key("result");
              auto [ws, _wg] = syscall_BytestringSet_inner(
-                 handler, key, std::as_bytes(std::span(std::string_view("ok"))),
+                 ctx.handler(), key,
+                 std::as_bytes(std::span(std::string_view("ok"))),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!ws.has_value() ||
                  ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -105,11 +106,10 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
   auto native_contract_b = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("b_data0");
              auto [ws, _wg] = syscall_BytestringSet_inner(
-                 handler, key,
+                 ctx.handler(), key,
                  std::as_bytes(std::span(std::string_view("hello"))),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!ws.has_value() ||
@@ -119,11 +119,10 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
              return {};
            }},
           {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("b_data1");
              auto [ws, _wg] = syscall_BytestringSet_inner(
-                 handler, key,
+                 ctx.handler(), key,
                  std::as_bytes(std::span(std::string_view("world"))),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!ws.has_value() ||
@@ -188,11 +187,10 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
   auto native_contract_a = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Single try_invoke that succeeds: produces 1 bit
-             auto [r0, _g0] = handler.invoke(
-                 kAddrB, 0, runtime.get_available_gas(), Calldata{},
+             auto [r0, _g0] = ctx.handler().invoke(
+                 kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -204,11 +202,10 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
   auto native_contract_b = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("b_data");
              auto [ws, _wg] = syscall_BytestringSet_inner(
-                 handler, key,
+                 ctx.handler(), key,
                  std::as_bytes(std::span(std::string_view("hello"))),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!ws.has_value() ||
@@ -270,11 +267,10 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
   auto native_contract_a = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // try_invoke B method 0
-             auto [r0, _g0] = handler.invoke(
-                 kAddrB, 0, runtime.get_available_gas(), Calldata{},
+             auto [r0, _g0] = ctx.handler().invoke(
+                 kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -282,8 +278,8 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 
              // Only do the second try_invoke if the first succeeded
              if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               auto [r1, _g1] = handler.invoke(
-                   kAddrB, 1, runtime.get_available_gas(), Calldata{},
+               auto [r1, _g1] = ctx.handler().invoke(
+                   kAddrB, 1, ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -297,11 +293,10 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
   auto native_contract_b = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("b_data0");
              auto [ws, _wg] = syscall_BytestringSet_inner(
-                 handler, key,
+                 ctx.handler(), key,
                  std::as_bytes(std::span(std::string_view("hello"))),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!ws.has_value() ||
@@ -311,11 +306,10 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
              return {};
            }},
           {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("b_data1");
              auto [ws, _wg] = syscall_BytestringSet_inner(
-                 handler, key,
+                 ctx.handler(), key,
                  std::as_bytes(std::span(std::string_view("world"))),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!ws.has_value() ||
@@ -384,8 +378,7 @@ TEST_P(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
   auto native_contract_a = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler & /*handler*/,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
              // Simple no-op — just return success
              return {};
            }},
@@ -425,8 +418,9 @@ TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
   auto native_contract_a = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler & /*handler*/,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> { return {}; }},
+           [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+             return {};
+           }},
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;

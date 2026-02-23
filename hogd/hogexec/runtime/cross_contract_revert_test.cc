@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -75,11 +76,10 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_a_data, contract_a_key,
-            contract_b_addr](SystemCallHandler &handler,
-                             NativeRuntime &runtime) -> InvokeStatus<void> {
+            contract_b_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract A writes its own state
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, contract_a_key,
+                 ctx.handler(), contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
@@ -90,8 +90,8 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
              // Call Contract B (which will revert)
              auto [r1, _g1] =
-                 handler.invoke(contract_b_addr, 0, runtime.get_available_gas(),
-                                {}, 0);
+                 ctx.handler().invoke(contract_b_addr, 0,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -101,7 +101,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              }
 
              // Contract A should receive Contract B's return data
-             auto status = handler.get_return_buffer();
+             auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -124,11 +124,10 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_b_data, contract_b_return_data,
-            contract_b_key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
+            contract_b_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract B writes state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, contract_b_key,
+                 ctx.handler(), contract_b_key,
                  std::as_bytes(std::span(contract_b_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
@@ -142,7 +141,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              buffer.resize_uninitialized(contract_b_return_data.size());
              std::memcpy(buffer.data(), contract_b_return_data.data(),
                          contract_b_return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -226,11 +225,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_a_data, contract_a_key,
-            contract_b_addr](SystemCallHandler &handler,
-                             NativeRuntime &runtime) -> InvokeStatus<void> {
+            contract_b_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract A writes its own state
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, contract_a_key,
+                 ctx.handler(), contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
@@ -241,8 +239,8 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Call Contract B
              auto [r1, _g1] =
-                 handler.invoke(contract_b_addr, 0, runtime.get_available_gas(),
-                                {}, 0);
+                 ctx.handler().invoke(contract_b_addr, 0,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -252,7 +250,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              }
 
              // Contract A should receive Contract B's processed return data
-             auto status = handler.get_return_buffer();
+             auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -276,11 +274,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_b_data, contract_b_return_data, contract_b_key,
-            contract_c_addr](SystemCallHandler &handler,
-                             NativeRuntime &runtime) -> InvokeStatus<void> {
+            contract_c_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract B writes state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, contract_b_key,
+                 ctx.handler(), contract_b_key,
                  std::as_bytes(std::span(contract_b_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
@@ -291,8 +288,8 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Call Contract C (which will revert)
              auto [r1, _g1] =
-                 handler.invoke(contract_c_addr, 0, runtime.get_available_gas(),
-                                {}, 0);
+                 ctx.handler().invoke(contract_c_addr, 0,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -302,7 +299,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              }
 
              // Contract B receives Contract C's return data
-             auto status = handler.get_return_buffer();
+             auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -322,7 +319,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              buffer.resize_uninitialized(contract_b_return_data.size());
              std::memcpy(buffer.data(), contract_b_return_data.data(),
                          contract_b_return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -331,11 +328,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_c_data, contract_c_return_data,
-            contract_c_key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
+            contract_c_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract C writes state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, contract_c_key,
+                 ctx.handler(), contract_c_key,
                  std::as_bytes(std::span(contract_c_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
@@ -349,7 +345,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              buffer.resize_uninitialized(contract_c_return_data.size());
              std::memcpy(buffer.data(), contract_c_return_data.data(),
                          contract_c_return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -433,11 +429,10 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_a_data, contract_a_key,
-            contract_b_addr](SystemCallHandler &handler,
-                             NativeRuntime &runtime) -> InvokeStatus<void> {
+            contract_b_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract A writes its own state
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, contract_a_key,
+                 ctx.handler(), contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
@@ -448,8 +443,8 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
              // Call Contract B (which will revert)
              auto [r1, _g1] =
-                 handler.invoke(contract_b_addr, 0, runtime.get_available_gas(),
-                                {}, 0);
+                 ctx.handler().invoke(contract_b_addr, 0,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -459,7 +454,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              }
 
              // Contract A should receive Contract B's return data
-             auto status = handler.get_return_buffer();
+             auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -481,14 +476,14 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
   auto contract_b = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [contract_b_return_data](SystemCallHandler &handler,
-                                    NativeRuntime &) -> InvokeStatus<void> {
+           [contract_b_return_data](
+               NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract B manually reverts with return data
              ReturnBuffer buffer;
              buffer.resize_uninitialized(contract_b_return_data.size());
              std::memcpy(buffer.data(), contract_b_return_data.data(),
                          contract_b_return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 

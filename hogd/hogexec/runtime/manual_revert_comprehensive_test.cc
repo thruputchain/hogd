@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -77,11 +78,10 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_hello, return_data,
-            key](SystemCallHandler &handler,
-                 NativeRuntime &) -> InvokeStatus<void> {
+            key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Write state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key, std::as_bytes(std::span(str_hello)),
+                 ctx.handler(), key, std::as_bytes(std::span(str_hello)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -94,7 +94,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
              ReturnBuffer buffer;
              buffer.resize_uninitialized(return_data.size());
              std::memcpy(buffer.data(), return_data.data(), return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -159,11 +159,11 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
           // Parent method (0)
           {0,
            [parent_data,
-            parent_key](SystemCallHandler &handler,
-                        NativeRuntime &runtime) -> InvokeStatus<void> {
+            parent_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Parent writes its own state
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, parent_key, std::as_bytes(std::span(parent_data)),
+                 ctx.handler(), parent_key,
+                 std::as_bytes(std::span(parent_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -174,8 +174,8 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
 
              // Invoke child method that will revert
              auto [r1, _g1] =
-                 handler.invoke(handler.get_current_address(), 1,
-                                runtime.get_available_gas(), {}, 0);
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -185,7 +185,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              }
 
              // Check that child's return data is available
-             auto status = handler.get_return_buffer();
+             auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -205,11 +205,10 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
           // Child method (1) - manually reverts with return data
           {1,
            [child_data, child_return_data,
-            child_key](SystemCallHandler &handler,
-                       NativeRuntime &) -> InvokeStatus<void> {
+            child_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Child writes state that should be reverted
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, child_key, std::as_bytes(std::span(child_data)),
+                 ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -223,7 +222,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              buffer.resize_uninitialized(child_return_data.size());
              std::memcpy(buffer.data(), child_return_data.data(),
                          child_return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -290,10 +289,9 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
             // Method 0: Manual revert with return data
             {0,
              [test_data, return_data,
-              key](SystemCallHandler &handler,
-                   NativeRuntime &) -> InvokeStatus<void> {
+              key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
@@ -307,15 +305,14 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                buffer.resize_uninitialized(return_data.size());
                std::memcpy(buffer.data(), return_data.data(),
                            return_data.size());
-               handler.set_return_buffer(std::move(buffer), true);
+               ctx.handler().set_return_buffer(std::move(buffer), true);
                return {};
              }},
             // Method 1: Normal failure
             {1,
-             [test_data, key](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<void> {
+             [test_data, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
@@ -411,13 +408,12 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [test_data,
-            return_data](SystemCallHandler &handler,
-                         NativeRuntime &runtime) -> InvokeStatus<void> {
+            return_data](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Do expensive work before reverting
              for (int i = 0; i < 10; ++i) {
                auto temp_key = make_storage_key("temp_" + std::to_string(i));
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, temp_key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), temp_key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
@@ -428,7 +424,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
-               if (!runtime.consume_gas(1000)) {
+               if (!ctx.runtime().consume_gas(1000)) {
                  ADD_FAILURE() << "Failed to consume gas";
                }
              }
@@ -437,7 +433,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
              ReturnBuffer buffer;
              buffer.resize_uninitialized(return_data.size());
              std::memcpy(buffer.data(), return_data.data(), return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -511,11 +507,10 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           // Level 1 - calls level 2, gets reverted data, then reverts itself
           {1,
-           [data1, return1](SystemCallHandler &handler,
-                            NativeRuntime &runtime) -> InvokeStatus<void> {
+           [data1, return1](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("level1");
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key, std::as_bytes(std::span(data1)),
+                 ctx.handler(), key, std::as_bytes(std::span(data1)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -526,8 +521,8 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
 
              // Call level 2
              auto [r2, _g2] =
-                 handler.invoke(handler.get_current_address(), 2,
-                                runtime.get_available_gas(), {}, 0);
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 2,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -540,16 +535,15 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              ReturnBuffer buffer;
              buffer.resize_uninitialized(return1.size());
              std::memcpy(buffer.data(), return1.data(), return1.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }},
           // Level 2 - calls level 3, gets reverted data, then reverts itself
           {2,
-           [data2, return2](SystemCallHandler &handler,
-                            NativeRuntime &runtime) -> InvokeStatus<void> {
+           [data2, return2](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("level2");
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key, std::as_bytes(std::span(data2)),
+                 ctx.handler(), key, std::as_bytes(std::span(data2)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -560,8 +554,8 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
 
              // Call level 3
              auto [r3, _g3] =
-                 handler.invoke(handler.get_current_address(), 3,
-                                runtime.get_available_gas(), {}, 0);
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 3,
+                                      ctx.runtime().get_available_gas(), {}, 0);
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -574,16 +568,15 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              ReturnBuffer buffer;
              buffer.resize_uninitialized(return2.size());
              std::memcpy(buffer.data(), return2.data(), return2.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }},
           // Level 3 - deepest level, just reverts
           {3,
-           [data3, return3](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
+           [data3, return3](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("level3");
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key, std::as_bytes(std::span(data3)),
+                 ctx.handler(), key, std::as_bytes(std::span(data3)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -596,7 +589,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              ReturnBuffer buffer;
              buffer.resize_uninitialized(return3.size());
              std::memcpy(buffer.data(), return3.data(), return3.size());
-             handler.set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true);
              return {};
            }}});
 
@@ -661,11 +654,10 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [test_data, key](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<void> {
+             [test_data, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Write state that should be reverted on error
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
@@ -680,15 +672,14 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                auto error_msg = make_bytestring("Storage key not found");
                buffer.resize_uninitialized(error_msg.size());
                std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
-               handler.set_return_buffer(std::move(buffer), true);
+               ctx.handler().set_return_buffer(std::move(buffer), true);
                return {};
              }},
             {1,
-             [test_data, key](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<void> {
+             [test_data, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Write state that should be reverted on error
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
@@ -705,15 +696,14 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                    make_bytestring("Insufficient gas for invocation");
                buffer.resize_uninitialized(error_msg.size());
                std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
-               handler.set_return_buffer(std::move(buffer), true);
+               ctx.handler().set_return_buffer(std::move(buffer), true);
                return {};
              }},
             {2,
-             [test_data, key](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<void> {
+             [test_data, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Write state that should be reverted on error
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
@@ -729,15 +719,14 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                auto error_msg = make_bytestring("Test custom contract error");
                buffer.resize_uninitialized(error_msg.size());
                std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
-               handler.set_return_buffer(std::move(buffer), true);
+               ctx.handler().set_return_buffer(std::move(buffer), true);
                return {};
              }},
             {3,
-             [test_data, key](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<void> {
+             [test_data, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Write state that should NOT be reverted (no error)
                auto [res, _gas] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(test_data)),
+                   ctx.handler(), key, std::as_bytes(std::span(test_data)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||

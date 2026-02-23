@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -55,11 +56,10 @@ TEST_P(RevertTest, RootFrameReverts)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [str_hello, key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
+           [str_hello, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Write the bytestring to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key, std::as_bytes(std::span(str_hello)),
+                 ctx.handler(), key, std::as_bytes(std::span(str_hello)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -69,7 +69,7 @@ TEST_P(RevertTest, RootFrameReverts)
              }
 
              // Now revert the transaction
-             handler.set_return_buffer(ReturnBuffer{}, true);
+             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
              return {};
            }}});
 
@@ -143,12 +143,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 1
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r1, _g1] =
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                                      ctx.runtime().get_available_gas(), {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -163,7 +164,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              auto key1 = make_storage_key("test1");
              auto key2 = make_storage_key("test2");
 
-             auto res1 = handler.get_bytestring(key1);
+             auto res1 = ctx.handler().get_bytestring(key1);
              if (!res1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -171,7 +172,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res2 = handler.get_bytestring(key2);
+             auto res2 = ctx.handler().get_bytestring(key2);
              if (!res2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -182,12 +183,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              return {};
            }},
           {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 2
-             auto [r2, _g2] = handler.invoke(
-                 handler.get_current_address(), 2, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r2, _g2] =
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 2,
+                                      ctx.runtime().get_available_gas(), {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagTryInvoke));
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -197,15 +199,14 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              }
              // Now manually revert this frame, which should undo the locks
              // acquired by method 2 and method 3
-             handler.set_return_buffer(ReturnBuffer{}, true);
+             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
              return {};
            }},
           {2,
-           [str_hello, key1](SystemCallHandler &handler,
-                             NativeRuntime &runtime) -> InvokeStatus<void> {
+           [str_hello, key1](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Write "hello" to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key1, std::as_bytes(std::span(str_hello)),
+                 ctx.handler(), key1, std::as_bytes(std::span(str_hello)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -215,9 +216,11 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              }
 
              // Try invoke method 3
-             auto [r3, _g3] = handler.invoke(
-                 handler.get_current_address(), 3, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r3, _g3] =
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 3,
+                                      ctx.runtime().get_available_gas(), {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagTryInvoke));
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -229,11 +232,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              return {};
            }},
           {3,
-           [str_world, key2](SystemCallHandler &handler,
-                             NativeRuntime &) -> InvokeStatus<void> {
+           [str_world, key2](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Write "world" to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 handler, key2, std::as_bytes(std::span(str_world)),
+                 ctx.handler(), key2, std::as_bytes(std::span(str_world)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -302,19 +304,17 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler & /*unused*/,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
              // Return a fault immediately
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
+          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Call method 0, which will fault
-             auto [r0, _g0] = handler.invoke(handler.get_current_address(), 0,
-                                             runtime.get_available_gas(), {},
-                                             std::to_underlying(
-                                                 InvokeFlag::kInvokeFlagNone));
+             auto [r0, _g0] =
+                 ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                                      ctx.runtime().get_available_gas(), {},
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagNone));
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -330,7 +330,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
              RuntimeMemoryLength written_len = 0;
 
              auto [res, _gas] = syscall_GetReturnedBuffer_inner(
-                 handler, std::as_writable_bytes(std::span(buffer)),
+                 ctx.handler(), std::as_writable_bytes(std::span(buffer)),
                  written_len);
              if (!res.has_value()) {
                ADD_FAILURE()

@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -62,25 +63,24 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 handler, key, nullptr, 200,
+                 ctx.handler(), key, nullptr, 200,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res2 = handler.get_nnint(key, false);
+             auto res2 = ctx.handler().get_nnint(key, false);
              if (auto err = check_nnint_get_result(res2, std::nullopt, 200);
                  !err) {
                return err;
              }
 
              auto [r3, _gas3] = syscall_NonnegativeIntSetAdd_inner(
-                 handler, key, nullptr, 300,
+                 ctx.handler(), key, nullptr, 300,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r3.has_value() ||
                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -88,7 +88,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
              }
 
              // expected result: base 0, add 300
-             auto res4 = handler.get_nnint(key, true);
+             auto res4 = ctx.handler().get_nnint(key, true);
              if (auto err = check_nnint_get_result(res4, 0, 300); !err) {
                return err;
              }
@@ -146,12 +146,11 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              int128_t set_value = 200;
              auto [res, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 handler, key, &set_value, 300,
+                 ctx.handler(), key, &set_value, 300,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -159,14 +158,14 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
              }
 
              auto [res2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
-                 handler, key, nullptr, 100,
+                 ctx.handler(), key, nullptr, 100,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res2.has_value() ||
                  res2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res3 = handler.get_nnint(key, true);
+             auto res3 = ctx.handler().get_nnint(key, true);
              if (auto err = check_nnint_get_result(res3, 50, 100); !err) {
                return err;
              }
@@ -237,12 +236,11 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, // First method: set_add on (0, 200)
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                int128_t set_value = 0;
                auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                   handler, key, &set_value, 200,
+                   ctx.handler(), key, &set_value, 200,
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!r.has_value() ||
@@ -252,11 +250,10 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                return {};
              }},
             {1, // Second method: add on (-100)
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                   handler, key, nullptr, -100,
+                   ctx.handler(), key, nullptr, -100,
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!r.has_value() ||

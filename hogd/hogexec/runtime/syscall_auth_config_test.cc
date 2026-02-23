@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/rust/contract_types/bindings.h"
@@ -47,15 +48,13 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
   // Create a native contract with a method that calls the syscall
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              generated::NonceConfig ffi_nonce_config{};
              ffi_nonce_config.accepted_keys = 0x01; // Accept key 0
              ffi_nonce_config.required_weight = Weight{1};
 
              auto [status, gas] =
-                 syscall_WriteAddressNonceConfig_inner(handler,
+                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
                                                        ffi_nonce_config);
 
              if (!status.has_value() ||
@@ -111,9 +110,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsSuccess)
   // Create a native contract with a method that calls the syscall
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              generated::GasPermissionConfig ffi_config0{};
              ffi_config0.limit = GasAmount{1000};
              ffi_config0.accepted_keys = 0x01; // Accept key 0
@@ -126,8 +123,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsSuccess)
 
              auto [status, gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &ffi_config0, &ffi_config1, nullptr, nullptr,
-                     nullptr);
+                     ctx.handler(), &ffi_config0, &ffi_config1, nullptr,
+                     nullptr, nullptr);
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -187,13 +184,12 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsEmpty)
   // Create a native contract with a method that calls the syscall
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // All configs are null - should succeed with empty list
              auto [status, gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, nullptr, nullptr, nullptr, nullptr, nullptr);
+                     ctx.handler(), nullptr, nullptr, nullptr, nullptr,
+                     nullptr);
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -248,9 +244,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapError)
   // Create a native contract with a method that calls the syscall
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              generated::GasPermissionConfig ffi_config0{};
              ffi_config0.limit = GasAmount{1000};
              ffi_config0.accepted_keys = 0x01;
@@ -265,8 +259,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapError)
              // fail
              auto [status, gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &ffi_config0, nullptr, &ffi_config2, nullptr,
-                     nullptr);
+                     ctx.handler(), &ffi_config0, nullptr, &ffi_config2,
+                     nullptr, nullptr);
 
              if (!status.has_value() ||
                  status.value() !=
@@ -311,9 +305,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapAtEnd)
   // Create a native contract with a method that calls the syscall
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              generated::GasPermissionConfig ffi_config0{};
              ffi_config0.limit = GasAmount{1000};
              ffi_config0.accepted_keys = 0x01;
@@ -322,7 +314,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapAtEnd)
              // Configs followed by nulls should be fine
              auto [status, gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &ffi_config0, nullptr, nullptr, nullptr, nullptr);
+                     ctx.handler(), &ffi_config0, nullptr, nullptr, nullptr,
+                     nullptr);
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -367,9 +360,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
   // Create a native contract with a method that calls the syscall
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              generated::GasPermissionConfig ffi_configs[5];
              for (int i = 0; i < 5; i++) {
                ffi_configs[i].limit =
@@ -381,8 +372,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
 
              auto [status, gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &ffi_configs[0], &ffi_configs[1], &ffi_configs[2],
-                     &ffi_configs[3], &ffi_configs[4]);
+                     ctx.handler(), &ffi_configs[0], &ffi_configs[1],
+                     &ffi_configs[2], &ffi_configs[3], &ffi_configs[4]);
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -447,9 +438,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
   // Create a native contract with a method that calls all three syscalls
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [public_key](SystemCallHandler &handler,
-                        NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [public_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // 1. Set a public key at index 0
              int32_t key_scheme =
                  std::to_underlying(CryptographicScheme::Ed25519);
@@ -459,7 +448,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
                  public_key.size());
 
              auto [pk_status, pk_gas] =
-                 syscall_ChangePublicKeyRegistration_inner(handler, 0,
+                 syscall_ChangePublicKeyRegistration_inner(ctx.handler(), 0,
                                                            &key_scheme,
                                                            key_bytes,
                                                            &key_weight);
@@ -475,7 +464,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
              ffi_nonce_config.required_weight = Weight{3};
 
              auto [nonce_status, nonce_gas] =
-                 syscall_WriteAddressNonceConfig_inner(handler,
+                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
                                                        ffi_nonce_config);
 
              if (!nonce_status.has_value() ||
@@ -497,8 +486,8 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
 
              auto [gas_status, gas_gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &ffi_config0, &ffi_config1, nullptr, nullptr,
-                     nullptr);
+                     ctx.handler(), &ffi_config0, &ffi_config1, nullptr,
+                     nullptr, nullptr);
 
              if (!gas_status.has_value() ||
                  gas_status.value() !=
@@ -570,16 +559,14 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
 
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Bit set beyond kMaxSigners (bit 21 set, kMaxSigners=21)
              generated::NonceConfig ffi_nonce_config{};
              ffi_nonce_config.accepted_keys = 1U << kMaxSigners;
              ffi_nonce_config.required_weight = Weight{1};
 
              auto [status, gas] =
-                 syscall_WriteAddressNonceConfig_inner(handler,
+                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
                                                        ffi_nonce_config);
              if (!status.has_value() ||
                  status.value() !=
@@ -592,7 +579,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
              // All bits set - should also fail
              ffi_nonce_config.accepted_keys = 0xFFFF'FFFF;
              auto [status2, gas2] =
-                 syscall_WriteAddressNonceConfig_inner(handler,
+                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
                                                        ffi_nonce_config);
              if (!status2.has_value() ||
                  status2.value() !=
@@ -604,7 +591,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
              // Valid bitmap (highest valid bit) should succeed
              ffi_nonce_config.accepted_keys = 1U << (kMaxSigners - 1);
              auto [status3, gas3] =
-                 syscall_WriteAddressNonceConfig_inner(handler,
+                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
                                                        ffi_nonce_config);
              if (!status3.has_value() ||
                  status3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -648,9 +635,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsInvalidBitmap)
 
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // First config valid, second has invalid bitmap
              generated::GasPermissionConfig valid_config{};
              valid_config.limit = GasAmount{1000};
@@ -664,8 +649,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsInvalidBitmap)
 
              auto [status, gas] =
                  syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &valid_config, &invalid_config, nullptr, nullptr,
-                     nullptr);
+                     ctx.handler(), &valid_config, &invalid_config, nullptr,
+                     nullptr, nullptr);
              if (!status.has_value() ||
                  status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {

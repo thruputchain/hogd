@@ -46,10 +46,11 @@ class NativeRuntime;
 // Native contracts do not come with metering built in.  Each native contract
 // method should therefore make gas metering calls (consume_gas) to the supplied
 // runtime pointer, as necessary.
+class NativeSyscallContext;
+
 class NativeContract {
 public:
-  using function_t =
-      std::function<InvokeStatus<void>(SystemCallHandler &, NativeRuntime &)>;
+  using function_t = std::function<InvokeStatus<void>(NativeSyscallContext &)>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
     : functions_(std::move(functions))
