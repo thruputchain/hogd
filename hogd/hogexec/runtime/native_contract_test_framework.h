@@ -212,6 +212,12 @@ public:
     return event_server_.get_events(block_id, tx_id);
   }
 
+  std::optional<TxEventLog> get_events_by_hash(BlockID block_id,
+                                               SHA256Hash const &tx_hash)
+  {
+    return event_server_.get_events_by_hash(block_id, tx_hash);
+  }
+
   // Blocking control for testing delays
   void block_emit_events() { event_server_.block_emit_events(); }
   void unblock_emit_events() { event_server_.unblock_emit_events(); }

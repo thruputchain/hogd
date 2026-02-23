@@ -86,4 +86,24 @@ TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
   return it->second.at(tx_id);
 }
 
+std::optional<TxEventLog>
+TestEventAggregator::get_events_by_hash(BlockID block_id,
+                                        SHA256Hash const &tx_hash)
+{
+  std::scoped_lock lock(mtx_);
+  auto it = events_.find(block_id);
+  if (it == events_.end()) {
+    error("Block {} not found", block_id);
+    return std::nullopt;
+  }
+
+  for (auto const &[tx_id, event_log] : it->second) {
+    if (event_log.proposed_tx_hash == tx_hash) {
+      return event_log;
+    }
+  }
+  error("Tx hash not found in block {}", block_id);
+  return std::nullopt;
+}
+
 } // namespace hogd

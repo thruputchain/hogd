@@ -30,8 +30,7 @@ public:
   // Create a DispatchPool with nthreads total worker threads distributed
   // across kBucketCount WorkerPools.
   explicit DispatchPool(int nthreads)
-    : pools_(std::min<int>(kBucketCount, nthreads)),
-      job_counts_(pools_.size()),
+    : pools_(std::min<int>(kBucketCount, nthreads)), job_counts_(pools_.size()),
       threads_per_pool_(divide_up(nthreads, static_cast<int>(pools_.size())))
   {
     int bucket_count = pools_.size();
@@ -96,7 +95,8 @@ public:
     int pool_idx;
     if (pending_1 < static_cast<size_t>(threads_per_pool_)) {
       pool_idx = r1;
-    } else {
+    }
+    else {
       // Power-of-two-choices: pick a second random pool and use the
       // less-loaded one.
       int r2 = rnd(rnd_seed) % (pools_.size() - 1);

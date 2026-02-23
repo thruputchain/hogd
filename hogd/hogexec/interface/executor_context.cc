@@ -67,7 +67,7 @@ ExecutorContext::propose_transaction_batch(
   });
   auto r = co_await awaitable;
   assert(r.size() == signed_txs.size());
-  co_return r;
+  co_return std::move(r);
 }
 
 x23::Async<ExecValidateBatchResult>
@@ -86,7 +86,9 @@ ExecutorContext::validate_transaction_batch(
     }
     cb(std::move(batch_res));
   });
-  co_return co_await awaitable;
+  auto r = co_await awaitable;
+  assert(r.size() == proposed_txs.size());
+  co_return std::move(r);
 }
 
 x23::Async<ExecResult>
