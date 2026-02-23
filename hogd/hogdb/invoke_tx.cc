@@ -192,7 +192,7 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
-      assert(cost_change <= vec.back().locked_storage_cost);
+      CHECK_LE(cost_change, vec.back().locked_storage_cost);
       // NONDETERMINISTIC:Compute the amount of storage tokens that can be
       // released after this transaction commits.
       int128_t released_cost = vec.back().locked_storage_cost - cost_change;

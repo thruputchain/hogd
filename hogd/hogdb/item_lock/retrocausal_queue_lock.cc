@@ -225,8 +225,35 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       meta.live_entries + delta.insert.added_entries.size();
   const uint64_t new_live_blocks = live_block_count(meta) + added_blocks;
 
-  return ctx.cost_model->get_retrocausal_queue_cost(new_live_entries,
-                                                    new_live_blocks);
+  int128_t absolute_cost =
+      ctx.cost_model->get_retrocausal_queue_cost(new_live_entries,
+                                                 new_live_blocks);
+
+  // Pessimistic reserve: when inserting into a non-empty RCQ, we must reserve
+  // enough to cover the case where a concurrent consume empties the queue
+  // before we commit. In that case, commit_change would calculate cost relative
+  // to the empty state (cost_before=0), meaning we'd pay the full
+  // kBaseItemCost.
+  //
+  // To ensure cost_change <= locked_storage_cost in all cases:
+  //   ItemLock computes: marginal_reserve = absolute_cost - snapshot_cost
+  //   We need: marginal_reserve >= cost_if_empty (worst case after concurrent
+  //   consume) Therefore: absolute_cost >= snapshot_cost + cost_if_empty
+  if (!delta.insert.added_entries.empty() && meta.live_entries > 0) {
+    // Compute snapshot cost (cost at block start)
+    int128_t snapshot_cost =
+        ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries,
+                                                   live_block_count(meta));
+
+    // Cost if the RCQ were empty and we're adding only our entries
+    int128_t cost_if_empty = ctx.cost_model->get_retrocausal_queue_cost(
+        delta.insert.added_entries.size(), added_blocks);
+
+    // Ensure absolute_cost is at least snapshot + cost_if_empty
+    absolute_cost = std::max(absolute_cost, snapshot_cost + cost_if_empty);
+  }
+
+  return absolute_cost;
 }
 
 int128_t
