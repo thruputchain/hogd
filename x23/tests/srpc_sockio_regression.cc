@@ -1,29 +1,15 @@
 #include <gtest/gtest.h>
 
-#include <array>
-#include <cstdint>
 #include <string_view>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <x23/rpc_common.h>
 #include <x23/sockio.h>
 #include <x23/srpc.h>
 
+#include "tests/xdrtest.hh"
+
 namespace x23 {
-namespace {
-
-struct DummyVersionMeta {
-  static constexpr std::uint32_t program = 0x7f00aa11;
-  static constexpr std::uint32_t version = 1;
-};
-
-struct DummyProcMeta {
-  using version_meta = DummyVersionMeta;
-  static constexpr std::uint32_t proc = 1;
-};
-
-} // namespace
 
 TEST(SrpcRegression, ProgramUnavailableReplyIsFramed)
 {
@@ -37,29 +23,21 @@ TEST(SrpcRegression, ProgramUnavailableReplyIsFramed)
   UniqueFd accepted(::accept(listener.get(), nullptr, nullptr));
   ASSERT_TRUE(accepted);
 
-  RefPtr<SRpcStream<>> server{*new SRpcStream<>(std::move(accepted))};
-  server->go();
+  RefPtr<SRpcStream<>> server_stream{*new SRpcStream<>(std::move(accepted))};
+  RefPtr<SRpcStream<>> client_stream{*new SRpcStream<>(std::move(client))};
+  server_stream->go(); // Intentionally no registered service.
+  client_stream->go();
 
-  rpc_msg call = call_msg<DummyProcMeta>();
-  call.xid = 0x01020304;
-  Buf request = make_record(call);
-
-  for (size_t sent = 0; sent < request.size();) {
-    ssize_t n = ::write(client.get(), request.data() + sent, request.size() - sent);
-    ASSERT_GT(n, 0);
-    sent += static_cast<size_t>(n);
+  auto c = client_stream->client(blank_rpc_v1{});
+  try {
+    c.null();
+    FAIL() << "Expected XdrCallFailed(PROG_UNAVAIL)";
+  } catch (const XdrCallFailed &e) {
+    using enum accept_stat;
+    ASSERT_EQ(e.m_.body.mtype(), msg_type::REPLY);
+    ASSERT_EQ(e.m_.body.rbody().stat(), reply_stat::MSG_ACCEPTED);
+    EXPECT_EQ(e.m_.body.rbody().areply().reply_data.stat(), PROG_UNAVAIL);
   }
-
-  std::array<std::uint8_t, 4> header{};
-  for (size_t got = 0; got < header.size();) {
-    ssize_t n = ::read(client.get(), header.data() + got, header.size() - got);
-    ASSERT_GT(n, 0);
-    got += static_cast<size_t>(n);
-  }
-
-  const std::uint32_t first_word = getbe<std::uint32_t>(header.data());
-  EXPECT_NE(first_word, call.xid);
-  EXPECT_NE(first_word & 0x80000000U, 0U);
 }
 
 TEST(SockioRegression, HostPortParseBracketedIpv6)
