@@ -99,12 +99,6 @@ public:
       clear();
     }
   }
-  value_type pop_return_front() noexcept
-  {
-    value_type ret = std::move(front);
-    pop_front(1);
-    return ret;
-  }
   using super::pop_back;
   void swap(VecQ &other) noexcept
   {
