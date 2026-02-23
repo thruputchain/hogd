@@ -28,6 +28,7 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -212,8 +213,8 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Now all the events should be emitted
 
   // Look up events by transaction hash
-  for (size_t i = 0; i < txs.size(); ++i) {
-    SHA256Hash tx_hash = sha256(txs[i].tx);
+  for (const auto & tx : txs) {
+    SHA256Hash tx_hash = sha256(tx.tx);
     auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
     ASSERT_TRUE(events.has_value()) << "Events should be present";
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -300,8 +301,8 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   }
 
   // Verify events haven't been emitted yet (they're blocked)
-  for (size_t i = 0; i < txs.size(); ++i) {
-    SHA256Hash tx_hash = sha256(txs[i].tx);
+  for (const auto & tx : txs) {
+    SHA256Hash tx_hash = sha256(tx.tx);
     auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
     // Events should not be present yet since emission is blocked
     ASSERT_FALSE(events.has_value()) << "Events should be blocked";
@@ -315,8 +316,8 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
 
   // Check that events were emitted using hash-based lookup
   bool found_events = false;
-  for (size_t i = 0; i < txs.size(); ++i) {
-    SHA256Hash tx_hash = sha256(txs[i].tx);
+  for (const auto & tx : txs) {
+    SHA256Hash tx_hash = sha256(tx.tx);
     auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
     if (events.has_value() && !events->events.empty()) {
       found_events = true;

@@ -93,7 +93,7 @@ public:
     // This avoids an RNG call, a modulo, and an atomic load on a random
     // cache line — saving ~15-30ns per submit under light-to-moderate load.
     int pool_idx;
-    if (pending_1 < static_cast<size_t>(threads_per_pool_)) {
+    if (pending_1 < threads_per_pool_) {
       pool_idx = r1;
     }
     else {
@@ -144,7 +144,7 @@ public:
 private:
   std::vector<std::unique_ptr<WorkerPool>> pools_;
   std::vector<std::atomic<size_t>> job_counts_;
-  int threads_per_pool_;
+  size_t threads_per_pool_;
 };
 
 } // namespace hogd
