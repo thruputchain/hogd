@@ -263,7 +263,7 @@ validate_nonce(const SignedTransaction &stx, const AddressAuthData &auth_data,
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
     const DecoratedSignature &sig = stx.signatures[i];
-    if (sigs.auth_claim_idx >= stx.tx.auth_claims.size()) {
+    if (sig.auth_claim_idx >= stx.tx.auth_claims.size()) {
       continue;
     }
     const AuthClaim &auth_claim = stx.tx.auth_claims[sig.auth_claim_idx];
@@ -300,11 +300,11 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
                                                0);
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const x23::Vec<DecoratedSignature> &sigs = stx.signatures[i];
-    if (sigs.auth_claim_idx >= stx.tx.auth_claims.size()) {
+    const DecoratedSignature &sig = stx.signatures[i];
+    if (sig.auth_claim_idx >= stx.tx.auth_claims.size()) {
       continue;
     }
-    const AuthClaim &auth_claim = stx.tx.auth_claims[sigs.auth_claim_idx];
+    const AuthClaim &auth_claim = stx.tx.auth_claims[sig.auth_claim_idx];
     const ContractAddress &claim_addr = [&auth_claim, &stx]() {
       switch (auth_claim.claim_type()) {
       case AuthClaimType::kInvokedAddressSignature:
@@ -368,15 +368,15 @@ verify_auth_claims_internal(
   }
 
   // Verify that each claimed auth has a corresponding set of valid signatures.
-  static PerThread <
-      std::unordered_map<size_t, x23::Vec<DecoratedSignature *>> sig_map;
+  static PerThread<std::unordered_map<size_t, x23::Vec<DecoratedSignature *>>>
+      sig_map;
   sig_map->clear();
   for (DecoratedSignature &sig : stx.signatures) {
-    sig_map[sig.auth_claim_idx].push_back(&sig);
+    (*sig_map)[sig.auth_claim_idx].push_back(&sig);
   }
   for (size_t i = 0; i < stx.tx.auth_claims.size(); i++) {
     const AuthClaim &auth_claim = stx.tx.auth_claims[i];
-    const x23::Vec<DecoratedSignature *> &sigs = sig_map[i];
+    const x23::Vec<DecoratedSignature *> &sigs = (*sig_map)[i];
     const AddressAuthData *auth_data = nullptr;
 
     if constexpr (verify_weights_against_auth_data(VerfType)) {
