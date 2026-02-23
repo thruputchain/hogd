@@ -375,13 +375,13 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
 
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kBalanceCheckerContractId,
-        [](SystemCallHandler &handler,
+        [](NativeSyscallContext &ctx,
            uint128_xdr expected_balance) -> InvokeStatus<void> {
           ContractTraitClient<itc_erc20::ERC20> erc20_client(
               kERC20ContractAddress);
           auto [result, _gas] =
               erc20_client.template invoke_opt<"get_balance_of">(
-                  handler, kReceiverAddress);
+                  ctx.handler(), kReceiverAddress);
           if (!result.has_value() || !result.value().has_value() ||
               !result.value().value().has_value()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};

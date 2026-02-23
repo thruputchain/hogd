@@ -2717,16 +2717,13 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   auto caller_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [=](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len;
-             WrappedGasAmount remaining_gas{ctx.runtime().get_available_gas()};
+             RuntimeMemoryLength output_return_buffer_len = 0;
              Calldata calldata = {};
-             std::span<const std::byte> calldata_span =
-                 std::as_bytes(std::span(calldata.data(), calldata.size()));
              // 1. try_invoke on a missing contract
              {
-               auto [res, _gas] = syscall_Invoke_inner(
-                   ctx.handler(), remaining_gas, missing_contract_addr, 0, 1000,
-                   calldata_span,
+               auto res = ctx.syscall<SyscallNo::kInvoke>(
+                   missing_contract_addr, 0, 1000,
+                   std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
 
@@ -2739,9 +2736,9 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
              // 2. try_invoke on error_contract, but with a method that does not
              // exist
              {
-               auto [res, _gas] = syscall_Invoke_inner(
-                   ctx.handler(), remaining_gas, error_contract_addr, 999, 1000,
-                   calldata_span,
+               auto res = ctx.syscall<SyscallNo::kInvoke>(
+                   error_contract_addr, 999, 1000,
+                   std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
                if (!res.has_value() ||
@@ -2753,11 +2750,13 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
              // 3. try_invoke on error_contract, correct method, but with gas
              // limit 50 (not enough)
              {
-               auto [res, gas] = syscall_Invoke_inner(
-                   ctx.handler(), remaining_gas, error_contract_addr, 0, 50,
-                   calldata_span,
+               auto gas_before = ctx.runtime().get_available_gas();
+               auto res = ctx.syscall<SyscallNo::kInvoke>(
+                   error_contract_addr, 0, 50,
+                   std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
+               auto gas_used = gas_before - ctx.runtime().get_available_gas();
                // This should return as a deterministic error (handleable), with
                // 50 gas consumed
                if (!res.has_value() ||
@@ -2765,16 +2764,16 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
-               if (gas.get() != 50) {
+               if (gas_used != 50) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
              }
              // 4. try_invoke on error_contract, correct method, with gas limit
              // 1000 (enough)
              {
-               auto [res, _gas] = syscall_Invoke_inner(
-                   ctx.handler(), remaining_gas, error_contract_addr, 0, 1000,
-                   calldata_span,
+               auto res = ctx.syscall<SyscallNo::kInvoke>(
+                   error_contract_addr, 0, 1000,
+                   std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
                if (!res.has_value() ||
@@ -2786,9 +2785,9 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
              // 5. try_invoke on error_contract, valid method, with gas limit
              // 1000 (enough)
              {
-               auto [res, _gas] = syscall_Invoke_inner(
-                   ctx.handler(), remaining_gas, error_contract_addr, 1, 1000,
-                   calldata_span,
+               auto res = ctx.syscall<SyscallNo::kInvoke>(
+                   error_contract_addr, 1, 1000,
+                   std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
                if (!res.has_value() ||
