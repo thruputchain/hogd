@@ -3,6 +3,8 @@ name: Build Test Bindings for Contract SDK (hog_sched)
 on:
     push:
         branches: ["main"]
+    pull_request:
+        branches: ["main"]
     workflow_dispatch:
 
 env:
