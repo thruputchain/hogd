@@ -416,10 +416,26 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
 x23::Async<bool>
 MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_spawn_snapshot = 0.0;
+  double stage_open_event_block = 0.0;
+  double stage_spawn_open_proposal_blocks = 0.0;
+  double stage_await_snapshot = 0.0;
+  double stage_await_open_proposal_blocks = 0.0;
+  double stage_cleanup_failures = 0.0;
+  double stage_finalize = 0.0;
+
   // Create snapshot.
   x23::Async<DbSchedResult> create_snapshot_handler =
       create_snapshot(/*prev_block_id=*/cache.db_tip.id, cache.block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
+  record_stage(stage_spawn_snapshot);
 
   // Open block (on event server). [open_proposal_block()] below ultimately
   // causes RPCs to be sent to the server event server. When the event server
@@ -427,6 +443,7 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
   // [co_await eventsched_open_block()] below before doing
   // [open_proposal_block()] to prevent a race.
   CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
+  record_stage(stage_open_event_block);
 
   // Open proposal blocks.
   x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
@@ -435,9 +452,11 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
         open_proposal_block(cache.block_id,
                             /*executor_idx=*/i));
   }
+  record_stage(stage_spawn_open_proposal_blocks);
 
   // [co_await] the block initialization RPCs.
   DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
+  record_stage(stage_await_snapshot);
 
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
@@ -447,6 +466,7 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
       open_proposal_block_success = false;
     }
   }
+  record_stage(stage_await_open_proposal_blocks);
 
   if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
       !open_proposal_block_success) {
@@ -464,9 +484,35 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
                               /*executor_idx=*/i);
       }
     }
+    record_stage(stage_cleanup_failures);
+    record_stage(stage_finalize);
+
+    info("initialize_block() stages: spawn_snapshot={:.6f}, "
+         "open_event_block={:.6f}, spawn_open_proposal_blocks={:.6f}, "
+         "await_snapshot={:.6f}, await_open_proposal_blocks={:.6f}, "
+         "cleanup_failures={:.6f}, finalize={:.6f}, total={:.6f}, "
+         "snapshot_success={}, open_proposal_success={}, executors={}",
+         stage_spawn_snapshot, stage_open_event_block,
+         stage_spawn_open_proposal_blocks, stage_await_snapshot,
+         stage_await_open_proposal_blocks, stage_cleanup_failures,
+         stage_finalize, timer.elapsed(),
+         create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK,
+         open_proposal_block_success, open_proposal_block_handlers.size());
 
     co_return false;
   }
+  record_stage(stage_finalize);
+  info("initialize_block() stages: spawn_snapshot={:.6f}, "
+       "open_event_block={:.6f}, spawn_open_proposal_blocks={:.6f}, "
+       "await_snapshot={:.6f}, await_open_proposal_blocks={:.6f}, "
+       "cleanup_failures={:.6f}, finalize={:.6f}, total={:.6f}, "
+       "snapshot_success={}, open_proposal_success={}, executors={}",
+       stage_spawn_snapshot, stage_open_event_block,
+       stage_spawn_open_proposal_blocks, stage_await_snapshot,
+       stage_await_open_proposal_blocks, stage_cleanup_failures, stage_finalize,
+       timer.elapsed(),
+       create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK,
+       open_proposal_block_success, open_proposal_block_handlers.size());
   co_return true;
 }
 
