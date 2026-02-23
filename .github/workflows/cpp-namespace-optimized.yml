@@ -184,12 +184,31 @@ jobs:
         run: ./scripts/fetch.sh
 
       - name: Build GCC Debug
-        run: ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror"
+        run: >-
+          ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror"
+          -x -DCRASHDUMP_ON_TIMEOUT=ON
 
       - name: Run Tests
         run: |
           cd build/gcc
-          ctest --output-on-failure --parallel $(nproc) --timeout 100
+          ctest --output-on-failure --parallel $(nproc) --timeout 120
+
+      - name: Print backtraces from timed-out tests
+        if: failure()
+        run: |
+          shopt -s nullglob
+          bts=(/tmp/backtraces/bt.*)
+          if [ ${#bts[@]} -eq 0 ]; then
+            echo "No timeout backtraces captured"
+            exit 0
+          fi
+          echo "Found ${#bts[@]} backtrace(s) from timed-out tests"
+          for bt in "${bts[@]}"; do
+            echo ""
+            echo "================================================================"
+            cat "$bt"
+            echo "================================================================"
+          done
 
       - name: Show ccache stats
         if: always()
