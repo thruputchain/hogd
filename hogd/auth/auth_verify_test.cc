@@ -38,10 +38,12 @@ make_self_individual_key_claim(uint8_t id)
 }
 
 constexpr DecoratedSignature
-make_signature(SecretKey sk, Transaction const &tx, uint8_t id)
+make_signature(SecretKey sk, Transaction const &tx,
+               unsigned long auth_claim_idx, unsigned long public_key_id)
 {
   DecoratedSignature signature;
-  signature.public_key_id = id;
+  signature.auth_claim_idx = auth_claim_idx;
+  signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
       ed25519_sign(sk.ed25519(), x23::serialize(tx));
@@ -90,9 +92,8 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   SignedTransaction stx{};
   stx.tx = tx;
-  DecoratedSignatureList decorated_signatures;
-  decorated_signatures.list.push_back(make_signature(sk, tx, 0));
-  stx.signatures.push_back(decorated_signatures);
+  stx.signatures.push_back(
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
@@ -154,21 +155,18 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   // tx1 is signed by the wrong key
   SignedTransaction stx1{};
   stx1.tx = tx1;
-  DecoratedSignatureList decorated_signatures1;
-  decorated_signatures1.list.push_back(make_signature(sk2, tx1, 0));
-  stx1.signatures.push_back(decorated_signatures1);
+  stx1.signatures.push_back(
+      make_signature(sk2, tx1, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   SignedTransaction stx2{};
   stx2.tx = tx2;
-  DecoratedSignatureList decorated_signatures2;
-  decorated_signatures2.list.push_back(make_signature(sk2, tx2, 0));
-  stx2.signatures.push_back(decorated_signatures2);
+  stx2.signatures.list.push_back(
+      make_signature(sk2, tx2, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   SignedTransaction stx3{};
   stx3.tx = tx3;
-  DecoratedSignatureList decorated_signatures3;
-  decorated_signatures3.list.push_back(make_signature(sk2, tx3, 0));
-  stx3.signatures.push_back(decorated_signatures3);
+  stx3.signatures.list.push_back(
+      make_signature(sk2, tx3, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);
