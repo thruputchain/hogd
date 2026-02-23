@@ -20,8 +20,7 @@ namespace hogd {
 
 #ifdef __cpp_lib_move_only_function
 
-template<typename Sig>
-using UniqueFunction = std::move_only_function<Sig>;
+template<typename Sig> using UniqueFunction = std::move_only_function<Sig>;
 
 #else // defined(__cpp_lib_move_only_function)
 
