@@ -12,17 +12,17 @@
 #include <utility>
 #include <version>
 
-#ifdef __cpp_lib_move_only
+#ifdef __cpp_lib_move_only_function
 #include <functional>
-#endif // defined(__cpp_lib_move_only)
+#endif // defined(__cpp_lib_move_only_function)
 
 namespace hogd {
 
-#ifdef __cpp_lib_move_only
+#ifdef __cpp_lib_move_only_function
 
-using UniqueFunction = std::move_only_function;
+template<typename Sig> using UniqueFunction = std::move_only_function<Sig>;
 
-#else // defined(__cpp_lib_move_only)
+#else // defined(__cpp_lib_move_only_function)
 
 namespace detail {
 
@@ -115,6 +115,6 @@ operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
   return !f;
 }
 
-#endif // defined(__cpp_lib_move_only)
+#endif // defined(__cpp_lib_move_only_function)
 
 } // namespace hogd

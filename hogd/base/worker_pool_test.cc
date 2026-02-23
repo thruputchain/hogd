@@ -56,6 +56,22 @@ TEST(WorkerPoolTest, Exceptions)
   EXPECT_THROW(f.get(), std::invalid_argument);
 }
 
+TEST(WorkerPoolTest, SubmitDetached)
+{
+  constexpr int kJobs = 10'000;
+  WorkerPool &pool = WorkerPool::get_default_pool();
+  std::atomic<int> count{0};
+
+  for (int i = 0; i < kJobs; i++)
+    pool.submit_detached([&count] { count++; });
+
+  // Wait until all detached jobs complete by polling pending_jobs.
+  while (pool.pending_jobs() > 0)
+    ;
+
+  EXPECT_EQ(count, kJobs);
+}
+
 TEST(WorkerPoolTest, ParallelForEach)
 {
   constexpr ssize_t kElements = 1024;

@@ -131,6 +131,19 @@ public:
     return future;
   }
 
+  // submit_detached enqueues a fire-and-forget job with no future/promise
+  // overhead. The caller must not need the return value or exception
+  // propagation — if the lambda throws, it propagates to std::terminate().
+  template<typename Func> requires std::is_invocable_r_v<void, Func>
+  void submit_detached(Func &&func)
+  {
+    std::scoped_lock g(lock_);
+    pending_jobs_.fetch_add(1, std::memory_order_relaxed);
+    jobs_.emplace(std::forward<Func>(func));
+    if (active_workers_ < target_workers_)
+      cv_.notify_one();
+  }
+
   // for_each_parallel divides a range into jobs and runs f on its elements in
   // parallel. The width defines the number of elements per job (i.e.,
   // the batching factor). This function blocks until all jobs finish.
