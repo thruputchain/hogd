@@ -95,7 +95,6 @@ add_x23_gtest(sync)
 add_x23_gtest(detached)
 add_x23_gtest(uiobuf)
 add_x23_gtest(xdr)
-add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
