@@ -19,9 +19,9 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -36,21 +36,14 @@ public:
 protected:
   void SetUp() override {}
 
-  static InvokeStatus<void> check_nnint_get_result(
-      SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
-          res,
+  static InvokeStatus<void> check_nnint_get_result(std::optional<int128_t> res_base,
+                                                   int128_t res_add,
       std::optional<int128_t> expected_base, int128_t expected_add)
   {
-    if (!res.has_value()) {
-      return res.error().to_invoke_error();
-    }
-    if (!res.value().has_value()) {
+    if (res_base != expected_base) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
-    if (res.value().value().first != expected_base) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    }
-    if (res.value().value().second != expected_add) {
+    if (res_add != expected_add) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};
@@ -65,31 +58,53 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, nullptr, 200,
+             auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, static_cast<int128_t const *>(nullptr), 200,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-             if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+             if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res2 = ctx.handler().get_nnint(key, false);
-             if (auto err = check_nnint_get_result(res2, std::nullopt, 200);
+             int128_t output_set_2{};
+             bool output_set_opt_2{};
+             int128_t output_add_2{};
+             auto res2 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set_2, output_set_opt_2, output_add_2);
+             if (!res2.has_value() ||
+                 *res2 != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (auto err = check_nnint_get_result(
+                     output_set_opt_2 ? std::optional<int128_t>(output_set_2)
+                                      : std::nullopt,
+                     output_add_2, std::nullopt, 200);
                  !err) {
                return err;
              }
 
-             auto [r3, _gas3] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, nullptr, 300,
+             auto r3 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, static_cast<int128_t const *>(nullptr), 300,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r3.has_value() ||
-                 r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r3 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // expected result: base 0, add 300
-             auto res4 = ctx.handler().get_nnint(key, true);
-             if (auto err = check_nnint_get_result(res4, 0, 300); !err) {
+             int128_t output_set_4{};
+             bool output_set_opt_4{};
+             int128_t output_add_4{};
+             auto res4 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, true, output_set_4, output_set_opt_4, output_add_4);
+             if (!res4.has_value() ||
+                 *res4 != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (auto err = check_nnint_get_result(
+                     output_set_opt_4 ? std::optional<int128_t>(output_set_4)
+                                      : std::nullopt,
+                     output_add_4, 0, 300);
+                 !err) {
                return err;
              }
 
@@ -149,24 +164,36 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              int128_t set_value = 200;
-             auto [res, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, &set_value, 300,
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 300,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res.has_value() ||
-                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto [res2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, nullptr, 100,
+             auto res2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, static_cast<int128_t const *>(nullptr), 100,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!res2.has_value() ||
-                 res2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *res2 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res3 = ctx.handler().get_nnint(key, true);
-             if (auto err = check_nnint_get_result(res3, 50, 100); !err) {
+             int128_t output_set_3{};
+             bool output_set_opt_3{};
+             int128_t output_add_3{};
+             auto res3 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, true, output_set_3, output_set_opt_3, output_add_3);
+             if (!res3.has_value() ||
+                 *res3 != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (auto err = check_nnint_get_result(
+                     output_set_opt_3 ? std::optional<int128_t>(output_set_3)
+                                      : std::nullopt,
+                     output_add_3, 50, 100);
+                 !err) {
                return err;
              }
 
@@ -239,12 +266,12 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                int128_t set_value = 0;
-               auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                   ctx.handler(), key, &set_value, 200,
+               auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                   key, &set_value, 200,
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!r.has_value() ||
-                   r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                   *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                return {};
@@ -252,12 +279,12 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
             {1, // Second method: add on (-100)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
-               auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                   ctx.handler(), key, nullptr, -100,
+               auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                   key, static_cast<int128_t const *>(nullptr), -100,
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!r.has_value() ||
-                   r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                   *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                return {};

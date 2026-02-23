@@ -91,7 +91,7 @@ private:
 
 // Helper used by native-contract tests: invoke via syscall routing while
 // preserving the old `(status, gas)` shape expected by many tests.
-inline std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+inline std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_invoke(NativeSyscallContext &ctx, ContractAddress const &input_address,
                uint64_t input_entrypoint_id, GasAmount input_gas_limit,
                Calldata input_calldata, InvokeFlagSet input_flags)
@@ -103,7 +103,7 @@ syscall_invoke(NativeSyscallContext &ctx, ContractAddress const &input_address,
       output_return_buffer_len);
   // `ctx.syscall` already applies gas accounting; return 0 to keep test call
   // sites that still consume `gas` from double-charging.
-  return {status, WrappedGasAmount{0}};
+  return {status, 0};
 }
 
 } // namespace hogd
