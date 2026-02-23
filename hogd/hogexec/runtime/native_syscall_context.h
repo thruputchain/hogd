@@ -52,24 +52,6 @@ public:
   SystemCallHandler &handler() { return handler_; }
   NativeRuntime &runtime() { return runtime_; }
 
-  // Helper used by native-contract tests: invoke via syscall routing while
-  // preserving the old `(status, gas)` shape expected by many tests.
-  static std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-  syscall_invoke(NativeSyscallContext &ctx,
-                 ContractAddress const &input_address,
-                 uint64_t input_entrypoint_id, GasAmount input_gas_limit,
-                 Calldata input_calldata, InvokeFlagSet input_flags)
-  {
-    RuntimeMemoryLength output_return_buffer_len{};
-    auto status = ctx.syscall<SyscallNo::kInvoke>(
-        input_address, input_entrypoint_id, input_gas_limit,
-        std::as_bytes(std::span(input_calldata)), input_flags,
-        output_return_buffer_len);
-    // `ctx.syscall` already applies gas accounting; return 0 to keep test call
-    // sites that still consume `gas` from double-charging.
-    return {status, 0};
-  }
-
 private:
   SystemCallHandler &handler_;
   NativeRuntime &runtime_;
@@ -99,7 +81,13 @@ private:
           .value = arg ? std::optional<T>(*arg) : std::nullopt};
     }
     else if constexpr (x23::is_bytespan<ArgParam>) {
-      return std::optional{std::as_bytes(std::span(arg))};
+      using Span = std::remove_cvref_t<ArgParam>;
+      if constexpr (std::is_const_v<typename Span::element_type>) {
+        return std::optional{std::as_bytes(std::span(arg))};
+      }
+      else {
+        return std::optional{std::as_writable_bytes(std::span(arg))};
+      }
     }
     else {
       // Value types, input refs, spans: wrap in optional
@@ -107,18 +95,5 @@ private:
     }
   }
 };
-
-// Backward-compatible free-function form used by many runtime tests.
-inline std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_invoke(NativeSyscallContext &ctx, ContractAddress const &input_address,
-               uint64_t input_entrypoint_id, GasAmount input_gas_limit,
-               Calldata input_calldata, InvokeFlagSet input_flags)
-{
-  return NativeSyscallContext::syscall_invoke(ctx, input_address,
-                                              input_entrypoint_id,
-                                              input_gas_limit,
-                                              std::move(input_calldata),
-                                              input_flags);
-}
 
 } // namespace hogd

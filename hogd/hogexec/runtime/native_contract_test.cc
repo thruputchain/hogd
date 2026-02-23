@@ -116,13 +116,15 @@ TEST_F(NativeContractTest, BasicInstantiate)
                            calldata.data() + sizeof(Runtime::MethodID),
                            invoked_addr.size());
 
-               auto invoke_res = syscall_invoke(
-                   ctx, invoked_addr, invoked_id,
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
+                   invoked_addr, invoked_id,
                    std::numeric_limits<GasAmount>::max(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   output_return_buffer_len);
 
-               if (invoke_res.first) {
-                 return (invoke_res.first.value() ==
+               if (invoke_res) {
+                 return (invoke_res.value() ==
                          SyscallErrorCode::kSyscallErrorCodeNone)
                             ? InvokeStatus<void>{}
                             : InvokeError{
@@ -182,12 +184,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       1, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
-        auto [r1, g1] = syscall_invoke(
-            ctx, kAddress, 0, UINT64_MAX,
-            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
-                serialize<uint32_t>(100)
-                    .value(),
-            std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto r1 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kAddress, 0, UINT64_MAX,
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<uint32_t>(100)
+                      .value(),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone),
+              output_return_buffer_len);
+        }();
+        [[maybe_unused]] auto g1 = GasAmount{0};
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -195,12 +202,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r2, g2] = syscall_invoke(
-            ctx, kAddress, 0, UINT64_MAX,
-            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
-                serialize<uint32_t>(200)
-                    .value(),
-            std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto r2 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kAddress, 0, UINT64_MAX,
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<uint32_t>(200)
+                      .value(),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone),
+              output_return_buffer_len);
+        }();
+        [[maybe_unused]] auto g2 = GasAmount{0};
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -208,12 +220,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r3, g3] = syscall_invoke(
-            ctx, kAddress, 0, UINT64_MAX,
-            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
-                serialize<uint32_t>(150)
-                    .value(),
-            std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto r3 = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kAddress, 0, UINT64_MAX,
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<uint32_t>(150)
+                      .value(),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone),
+              output_return_buffer_len);
+        }();
+        [[maybe_unused]] auto g3 = GasAmount{0};
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -230,9 +247,14 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
-        auto [r, g] =
-            syscall_invoke(ctx, kAddress, 1, UINT64_MAX, Calldata{},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto r = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kAddress, 1, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::kInvokeFlagNone),
+              output_return_buffer_len);
+        }();
+        [[maybe_unused]] auto g = GasAmount{0};
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }

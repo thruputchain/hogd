@@ -99,12 +99,15 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Invoke method 1 using try_invoke
-               auto [r0, _g0] =
-                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                  ctx.runtime().get_available_gas(),
-                                  ctx.handler().get_calldata(),
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagTryInvoke));
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 1,
+                     ctx.runtime().get_available_gas(),
+                     ctx.handler().get_calldata(),
+                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     output_return_buffer_len);
+               }();
 
                if (r0.has_value() ||
                    r0.error().code() !=

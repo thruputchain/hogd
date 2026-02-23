@@ -173,9 +173,13 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              }
 
              // Invoke child method that will revert
-             auto [r1, _g1] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                ctx.runtime().get_available_gas(), {}, 0);
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 1,
+                   ctx.runtime().get_available_gas(), Calldata{}, 0,
+                   output_return_buffer_len);
+             }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -520,9 +524,13 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              }
 
              // Call level 2
-             auto [r2, _g2] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
-                                ctx.runtime().get_available_gas(), {}, 0);
+             auto r2 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 2,
+                   ctx.runtime().get_available_gas(), Calldata{}, 0,
+                   output_return_buffer_len);
+             }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -553,9 +561,13 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              }
 
              // Call level 3
-             auto [r3, _g3] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 3,
-                                ctx.runtime().get_available_gas(), {}, 0);
+             auto r3 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 3,
+                   ctx.runtime().get_available_gas(), Calldata{}, 0,
+                   output_return_buffer_len);
+             }();
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }

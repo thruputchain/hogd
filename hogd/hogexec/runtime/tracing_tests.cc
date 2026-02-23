@@ -276,15 +276,12 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             ctx.handler().start_syscall_trace(
-                 SyscallNo::kInvoke, ctx.runtime().get_available_gas());
-
-             auto [r, gas] =
-                 syscall_invoke(ctx, target_addr, 0,
-                                ctx.runtime().get_available_gas(), {}, 0);
-
-             ctx.handler().finish_syscall_trace(
-                 r, ctx.runtime().get_available_gas());
+             RuntimeMemoryLength output_return_buffer_len = 0;
+             Calldata calldata{};
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 target_addr, 0, ctx.runtime().get_available_gas(),
+                 std::as_bytes(std::span(calldata)), 0,
+                 output_return_buffer_len);
 
              if (!r.has_value() ||
                  r.value() !=
@@ -359,19 +356,16 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }}});
 
-  // Caller contract: method 0 invokes callee method 0 with manual tracing
+  // Caller contract: method 0 invokes callee method 0
   auto caller_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             ctx.handler().start_syscall_trace(
-                 SyscallNo::kInvoke, ctx.runtime().get_available_gas());
-
-             auto [r, gas] =
-                 syscall_invoke(ctx, callee_addr, 0,
-                                ctx.runtime().get_available_gas(), {}, 0);
-
-             ctx.handler().finish_syscall_trace(
-                 r, ctx.runtime().get_available_gas());
+             RuntimeMemoryLength output_return_buffer_len = 0;
+             Calldata calldata{};
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 callee_addr, 0, ctx.runtime().get_available_gas(),
+                 std::as_bytes(std::span(calldata)), 0,
+                 output_return_buffer_len);
 
              if (!r.has_value() ||
                  r.value() !=
@@ -468,20 +462,16 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                }
                return {};
              }},
-            // Method 1: try_invoke method 0 with manual trace entries
+            // Method 1: try_invoke method 0
             {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               ctx.handler().start_syscall_trace(
-                   SyscallNo::kInvoke, ctx.runtime().get_available_gas());
-
                Calldata args = {'t', 'e', 's', 't'};
-               auto [r, gas] =
-                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                  ctx.runtime().get_available_gas(), args,
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagTryInvoke));
-
-               ctx.handler().finish_syscall_trace(
-                   r, ctx.runtime().get_available_gas());
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 0,
+                   ctx.runtime().get_available_gas(),
+                   std::as_bytes(std::span(args)),
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
 
                // Handle try_invoke result — return success regardless
                return {};

@@ -145,11 +145,14 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 1
-             auto [r1, _g1] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                ctx.runtime().get_available_gas(), {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 1,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+             }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -185,11 +188,14 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
           {1,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 2
-             auto [r2, _g2] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
-                                ctx.runtime().get_available_gas(), {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
+             auto r2 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 2,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+             }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -216,11 +222,14 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              }
 
              // Try invoke method 3
-             auto [r3, _g3] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 3,
-                                ctx.runtime().get_available_gas(), {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
+             auto r3 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 3,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+             }();
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -310,11 +319,14 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
            }},
           {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Call method 0, which will fault
-             auto [r0, _g0] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                ctx.runtime().get_available_gas(), {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagNone));
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 0,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   output_return_buffer_len);
+             }();
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }

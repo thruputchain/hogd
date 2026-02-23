@@ -102,11 +102,15 @@ TEST_F(EventTest, EventSuccess)
              return {};
            }},
           {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto [status, gas] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                ctx.runtime().get_available_gas(), {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagNone));
+             auto status = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 0,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   output_return_buffer_len);
+             }();
+             [[maybe_unused]] auto gas = GasAmount{0};
              if (!status.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
              }
@@ -115,11 +119,15 @@ TEST_F(EventTest, EventSuccess)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto [status2, gas2] =
-                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                ctx.runtime().get_available_gas(), {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagNone));
+             auto status2 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 1,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   output_return_buffer_len);
+             }();
+             [[maybe_unused]] auto gas2 = GasAmount{0};
              if (!status2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
              }
@@ -424,11 +432,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
                std::string test_data = "method1_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
-               auto [status, gas] =
-                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                  ctx.runtime().get_available_gas(), calldata,
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto status = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), calldata,
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
+               [[maybe_unused]] auto gas = GasAmount{0};
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -452,11 +464,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
                std::string test_data = "method2_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
-               auto [status, gas] =
-                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                  ctx.runtime().get_available_gas(), calldata,
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto status = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), calldata,
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
+               [[maybe_unused]] auto gas = GasAmount{0};
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
@@ -479,11 +495,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "first_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] =
-                     syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                    ctx.runtime().get_available_gas(), calldata,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto status = [&]() {
+                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   return ctx.syscall<SyscallNo::kInvoke>(
+                       ctx.handler().get_current_address(), 0,
+                       ctx.runtime().get_available_gas(), calldata,
+                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       output_return_buffer_len);
+                 }();
+                 [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -500,11 +520,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
                // Call method 1 (should revert, so no event)
                {
-                 auto [status, gas] =
-                     syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                    ctx.runtime().get_available_gas(), {},
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto status = [&]() {
+                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   return ctx.syscall<SyscallNo::kInvoke>(
+                       ctx.handler().get_current_address(), 1,
+                       ctx.runtime().get_available_gas(), Calldata{},
+                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       output_return_buffer_len);
+                 }();
+                 [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -525,11 +549,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "second_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] =
-                     syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                    ctx.runtime().get_available_gas(), calldata,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto status = [&]() {
+                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   return ctx.syscall<SyscallNo::kInvoke>(
+                       ctx.handler().get_current_address(), 0,
+                       ctx.runtime().get_available_gas(), calldata,
+                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       output_return_buffer_len);
+                 }();
+                 [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -547,11 +575,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
                // Call method 2 (should fail with deterministic error, so no
                // event)
                {
-                 auto [status, gas] =
-                     syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
-                                    ctx.runtime().get_available_gas(), {},
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto status = [&]() {
+                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   return ctx.syscall<SyscallNo::kInvoke>(
+                       ctx.handler().get_current_address(), 2,
+                       ctx.runtime().get_available_gas(), Calldata{},
+                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       output_return_buffer_len);
+                 }();
+                 [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }
@@ -572,11 +604,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "third_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] =
-                     syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                    ctx.runtime().get_available_gas(), calldata,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagNone));
+                 auto status = [&]() {
+                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   return ctx.syscall<SyscallNo::kInvoke>(
+                       ctx.handler().get_current_address(), 0,
+                       ctx.runtime().get_available_gas(), calldata,
+                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       output_return_buffer_len);
+                 }();
+                 [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
                    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                  }

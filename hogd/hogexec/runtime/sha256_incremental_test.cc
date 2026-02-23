@@ -129,9 +129,13 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [invoke_status, _gas] =
-            syscall_invoke(ctx, kAddress, 1, UINT64_MAX, Calldata{},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto invoke_status = [&]() {
+          RuntimeMemoryLength output_return_buffer_len = 0;
+          return ctx.syscall<SyscallNo::kInvoke>(
+              kAddress, 1, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::kInvokeFlagNone),
+              output_return_buffer_len);
+        }();
         if (!invoke_status.has_value() ||
             invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};

@@ -270,10 +270,13 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
              if (!ctx.handler().is_read_only()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             auto [res, _gas] =
-                 syscall_invoke(ctx, native_contract_addr, 0, UINT64_MAX, {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagNone));
+             auto res = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   native_contract_addr, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   output_return_buffer_len);
+             }();
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -283,10 +286,13 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
           {2,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // call 1, with read-only flag added.
-             auto [res, _gas] =
-                 syscall_invoke(ctx, native_contract_addr, 1, UINT64_MAX, {},
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagReadOnly));
+             auto res = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   native_contract_addr, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagReadOnly),
+                   output_return_buffer_len);
+             }();
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
