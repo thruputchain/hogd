@@ -62,7 +62,7 @@ struct Declaration {
   string bound;
   string comment;
   string attrs;
-  bool is_private;
+  bool is_private = false;
 };
 
 struct UnionArm {
