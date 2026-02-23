@@ -399,48 +399,6 @@ public:
   }
 };
 
-// A pointer that is good only until you suspend the current
-// coroutine, which is the duration of the mutual exclusion provided
-// by CoroSharedLock::coro_lock_shared.
-template<typename T> class CoroTempPtr : public ThreadPool::CrashIfSuspended {
-public:
-  using value_type = T;
-
-  CoroTempPtr(T *p = nullptr) noexcept : CrashIfSuspended(make_cis(p)), p_{p} {}
-  CoroTempPtr(T *p, const ThreadPool::CrashIfSuspended &cs) noexcept
-    : CrashIfSuspended(cs), p_(p)
-  {}
-  CoroTempPtr &operator=(T *p) noexcept
-  {
-    p_ = p;
-    CrashIfSuspended::operator=(make_cis(p_));
-    return *this;
-  }
-
-  T *get() const noexcept
-  {
-    check();
-    return p_;
-  }
-  operator T &() const noexcept { return *get(); }
-  T *operator->() const noexcept { return get(); }
-  explicit operator bool() const noexcept { return p_; }
-  void reset() noexcept
-  {
-    p_ = nullptr;
-    CrashIfSuspended::reset();
-  }
-
-private:
-  T *p_;
-  [[no_unique_address]] ThreadPool::CrashIfSuspended cis_;
-
-  static void make_cis(T *p)
-  {
-    return p ? CrashIfSuspended{} : CrashIfSuspended{nullptr};
-  }
-};
-
 // Simple coroutine-based semaphore.
 //
 //    CoroSem sem(1);         // initial value of counter (defaults to 1)
