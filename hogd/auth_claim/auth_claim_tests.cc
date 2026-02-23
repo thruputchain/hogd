@@ -53,8 +53,8 @@ protected:
   }
 
   static DecoratedSignature make_signature(SecretKey sk, Transaction const &tx,
-                                           unsigned long auth_claim_idx,
-                                           unsigned long public_key_id)
+                                           uint32_t auth_claim_idx,
+                                           uint32_t public_key_id)
   {
     Signature sig(CryptographicScheme::Ed25519);
     assert(sk.scheme() == CryptographicScheme::Ed25519);
