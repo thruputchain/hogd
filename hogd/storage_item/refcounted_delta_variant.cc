@@ -262,7 +262,7 @@ RetrocausalQueueArgs::get_current_committed_cost(
 int128_t
 RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *current_model,
-    StorageItemWrapper const * /*unused*/) const
+    StorageItemWrapper const * /*base_item*/) const
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
 
@@ -319,18 +319,10 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     if (delta.retrocausal_queue().insert.added_entries.empty()) {
       return 0;
     }
-    // Just overestimate the cost of the base item.
-    // This handles the case of a consume() that commits, then an insert()
-    /*if (base_item) {
-      // The inserter must cover any gap between the base item's stored cost
-      // and kBaseItemCost. For a non-empty RCQ base (cost >= kBaseItemCost)
-      // or a non-RCQ base (e.g. bytestring, also >= kBaseItemCost), this is
-      // 0. For an empty RCQ base (cost 0 after c5b933fc), this is
-      // kBaseItemCost — the transition from "no metadata" to "metadata
-      // exists" must be paid for by the inserter.
-      return std::max<int128_t>(0, current_model->kBaseItemCost -
-                                       base_item->storage_cost());
-    }*/
+    // Per spec.md section 8.4.1: Reserve cost must be pessimistic and
+    // only depend on snapshot + delta, NOT on concurrent commits.
+    // Always charge full base_item_cost to handle case where a concurrent
+    // consume empties the queue before this insert commits.
     return current_model->kBaseItemCost;
   }();
 

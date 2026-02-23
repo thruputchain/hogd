@@ -171,11 +171,6 @@ TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
 
 TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "HogDB bug: RCQ delete() should clear prior blocks, but lookup for "
-        << "search_start_number=2 returns nonempty block";
-  }
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
 
@@ -193,11 +188,6 @@ TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
 
 TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "HogDB bug: RCQ full consume should clear prior blocks, but lookup "
-        << "for search_start_number=2 returns nonempty block";
-  }
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
 
@@ -215,11 +205,6 @@ TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
 
 TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "HogDB bug: RCQ consume+insert should clear prior blocks, but "
-        << "lookup for search_start_number=2 returns nonempty block";
-  }
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
 
@@ -238,12 +223,6 @@ TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
 
 TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "HogDB bug: RCQ concurrent consume+insert should clear prior "
-        << "blocks, but lookup for search_start_number=2 returns nonempty "
-        << "block";
-  }
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
 
