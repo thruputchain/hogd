@@ -38,8 +38,8 @@ make_self_individual_key_claim(uint8_t id)
 }
 
 constexpr DecoratedSignature
-make_signature(SecretKey sk, Transaction const &tx,
-               unsigned long auth_claim_idx, unsigned long public_key_id)
+make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
+               uint32_t public_key_id)
 {
   DecoratedSignature signature;
   signature.auth_claim_idx = auth_claim_idx;
