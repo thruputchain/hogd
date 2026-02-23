@@ -8,17 +8,21 @@
 #include <utility>
 
 #include "built_contracts/contract_loader.h"
+#include "built_contracts/itc_erc20.h"
 #include "built_contracts/read_only_test.h"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "precompiles.hh"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -153,6 +157,99 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   }
 }
 
+TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             auto [res, _gas] =
+                 client_.invoke_opt<"read_only_log_event">(handler, false);
+             if (!check_result(res)) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }},
+          {1,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             auto [res, _gas] = client_.invoke_opt<
+                 "read_only_log_event",
+                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(handler,
+                                                                      true);
+             if (!check_result(res)) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    return std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kWasmi, {wasm_context.release(), true}},
+            {ContractType::kNative, {native_context.get(), false}}});
+  };
+
+  auto context = make_context();
+
+  auto native_contract_addr = make_contract_address(1);
+  auto native_contract_xdr = make_native_contract(0);
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, native_contract_xdr);
+  setup_grant_storage_token(native_contract_addr, 1'000'000'000);
+
+  {
+    // LogEvent allowed in non-read-only mode
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = native_contract_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
+        *context);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.emit_events()());
+  }
+
+  {
+    // LogEvent blocked in read-only mode
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = native_contract_addr,
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
+        *context);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
 TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 {
   auto native_contract_addr = make_contract_address(1);
@@ -234,6 +331,166 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
+// Verifies that read-only enforcement works on the real native token
+// precompile. get_balance_of is read-only safe and should succeed;
+// transfer calls modify_native_token_balance and log_event which now
+// return errors in read-only mode, causing the transfer to fail.
+TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
+{
+  using amount_t = std::tuple<uint64_t, uint64_t>;
+  auto make_amount = [](uint128_t amount) -> amount_t {
+    return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
+  };
+
+  constexpr ContractAddress kCallerAddr = make_contract_address(10);
+  constexpr ContractAddress kReceiverAddr = make_contract_address(11);
+  constexpr ContractAddress kObserverAddr = make_contract_address(12);
+  constexpr int128_t kInitialBalance = 1'000'000;
+  const int128_t transfer_amount =
+      100 + get_default_cost_model()->get_balance_cost();
+
+  setup_grant_storage_token(kCallerAddr, kInitialBalance);
+  setup_grant_storage_token(kObserverAddr, 12345);
+
+  auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+      GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+  // Method 0: invoke get_balance_of in read-only mode (should succeed)
+  // Method 1: invoke transfer in read-only mode (should fail)
+  // Method 2: invoke transfer in normal mode (should succeed)
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             auto [res, _gas] = native_token_client.invoke_opt<
+                 "get_balance_of",
+                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(
+                 handler, kObserverAddr);
+             if (!res.has_value() || !res.value().has_value() ||
+                 !res.value().value().has_value() ||
+                 !res.value().value().value().is_ok()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             auto balance = res.value().value().value().ok();
+             if (balance != make_amount(12345)) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+          {1,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             auto [res, _gas] = native_token_client.invoke_opt<
+                 "transfer",
+                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(
+                 handler, kReceiverAddr, make_amount(transfer_amount));
+             // The invoke should fail because modify_native_token_balance
+             // returns InvalidSyscallInput in read-only mode, which causes
+             // the transfer to return a deterministic error. The frame
+             // should revert.
+             if (res.has_value() && res.value().has_value() &&
+                 res.value().value().has_value() &&
+                 res.value().value().value().is_ok()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+          {2,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             auto [res, _gas] = native_token_client.invoke_opt<"transfer">(
+                 handler, kReceiverAddr, make_amount(transfer_amount));
+             if (!res.has_value() || !res.value().has_value() ||
+                 !res.value().value().has_value() ||
+                 !res.value().value().value().is_ok()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+      });
+
+  constexpr int32_t kCallerNativeId = 100;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kCallerNativeId, std::move(caller_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kWasmi, {wasm_context.get(), false}},
+          {ContractType::kNative, {native_context.get(), false}},
+      });
+
+  auto caller_contract_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_contract_xdr);
+  write_deployment(kCallerAddr, caller_contract_xdr);
+  setup_grant_storage_token(kCallerAddr, 1'000'000'000);
+
+  {
+    // get_balance_of succeeds in read-only mode
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = kCallerAddr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
+        *multiplexed_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  {
+    // transfer fails in read-only mode
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = kCallerAddr,
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
+        *multiplexed_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  {
+    // transfer succeeds in normal (non-read-only) mode
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = kCallerAddr,
+                                   .entrypoint = entrypoint_from_method_id(2),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
+        *multiplexed_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.emit_events()());
   }
 }
 

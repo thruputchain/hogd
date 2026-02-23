@@ -121,11 +121,6 @@ ValidationModeData::validate() const
     }
   }
 
-  if (next_queue_entry_index_ !=
-      proposal_data_.observed_queue_entry_sequence.size()) {
-    return false;
-  }
-
   return true;
 }
 
@@ -139,6 +134,10 @@ ValidationModeData::check_all_consumed() const
   if (proposal_data_.nondeterministic_bits.size() !=
       (proposal_data_.nondeterministic_bit_count / 8) +
           (proposal_data_.nondeterministic_bit_count % 8 == 0 ? 0 : 1))
+    return false;
+  // have we consumed all queue entry observations
+  if (next_queue_entry_index_ !=
+      proposal_data_.observed_queue_entry_sequence.size())
     return false;
   return true;
 }
