@@ -345,8 +345,10 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     for (uint64_t b =
              base_metadata.consume_state.max_fully_consumed_block_number;
          b < total_past_block_consume.max_fully_consumed_block_number; ++b) {
-      CHECK(
-          ctx.dao->remove_retrocausal_queue_block(ctx.key, b + 1).has_value());
+      auto r = ctx.dao->remove_retrocausal_queue_block(ctx.key, b + 1);
+      if (!r.has_value()) {
+        return r;
+      }
     }
     updated_metadata.consume_state = total_past_block_consume;
   }
