@@ -398,7 +398,6 @@ public:
     co_return ThreadPool::CrashIfSuspended{};
   }
 };
-
 // Simple coroutine-based semaphore.
 //
 //    CoroSem sem(1);         // initial value of counter (defaults to 1)
