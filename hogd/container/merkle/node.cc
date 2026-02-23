@@ -30,9 +30,9 @@ cast_char_to_byte(unsigned char ch)
 }
 
 void
-size_to_bytes(size_t s, std::vector<std::byte> &append_to)
+size_to_bytes(uint64_t s, std::vector<std::byte> &append_to)
 {
-  for (size_t i = 0; i < sizeof(size_t); i++) {
+  for (size_t i = 0; i < sizeof(uint64_t); i++) {
     append_to.push_back(std::byte((s >> (8 * i)) & 0xFF));
   }
 }
@@ -141,11 +141,15 @@ bool
 get_path_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
                        Node::Raw &node)
 {
-  if (idx + sizeof(size_t) > encodings.size()) {
+  if (idx + sizeof(uint64_t) > encodings.size()) {
     return false;
   }
-  auto path_size = static_cast<size_t>(encodings[idx]);
-  idx += sizeof(size_t);
+  uint64_t path_size = 0;
+  for (size_t i = 0; i < sizeof(uint64_t); i++) {
+    path_size |= static_cast<uint64_t>(static_cast<uint8_t>(encodings[idx + i]))
+                 << (8 * i);
+  }
+  idx += sizeof(uint64_t);
 
   if (path_size > HexArray::kMaxNumHexDigits) {
     return false;
