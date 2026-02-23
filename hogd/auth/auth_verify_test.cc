@@ -160,12 +160,12 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   SignedTransaction stx2{};
   stx2.tx = tx2;
-  stx2.signatures.list.push_back(
+  stx2.signatures.push_back(
       make_signature(sk2, tx2, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   SignedTransaction stx3{};
   stx3.tx = tx3;
-  stx3.signatures.list.push_back(
+  stx3.signatures.push_back(
       make_signature(sk2, tx3, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
