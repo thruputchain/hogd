@@ -210,6 +210,17 @@ public:
   x23::Async<void> auth_data_changed(BlockHeight height,
                                      KeyChangeBatch key_changes);
 
+  x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
+  {
+    int64_t current_height;
+    while ((current_height = auth_data_height_.load()) !=
+           static_cast<int64_t>(expected_height)) {
+      CHECK_EQ(current_height + 1, expected_height);
+      co_await auth_data_height_.wait(current_height);
+    }
+    co_return;
+  }
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -318,17 +329,6 @@ private:
     co_await cg(validated_block_cache_lock_);
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
-  }
-
-  x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
-  {
-    int64_t current_height;
-    while ((current_height = auth_data_height_.load()) !=
-           static_cast<int64_t>(expected_height)) {
-      CHECK_EQ(current_height + 1, expected_height);
-      co_await auth_data_height_.wait(current_height);
-    }
-    co_return;
   }
 
   MempoolDbRpc *db_rpc_;
