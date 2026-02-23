@@ -26,6 +26,7 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -161,20 +162,20 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_a,
            uint32_t consume_b) -> InvokeStatus<void> {
           // consume -> delete -> consume
+          RuntimeMemoryLength written_len = 0;
 
-          auto [r1, _g1] =
-              syscall_invoke(ctx, kContractAddress, 1,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(consume_a),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto r1 = ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(consume_a),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r2, _g2] = syscall_DeleteObject_inner(
-              ctx.handler(), kStorageKey,
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey,
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -182,11 +183,11 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r3, _g3] =
-              syscall_invoke(ctx, kContractAddress, 1,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(consume_b),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto r3 = ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(consume_b),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -203,10 +204,9 @@ protected:
            uint32_t consume_b) -> InvokeStatus<void> {
           // consume (nothing observed) -> delete -> consume
 
-          auto [r1, _g1] =
-              syscall_invoke(ctx, kContractAddress, 2,
-                             std::numeric_limits<GasAmount>::max(), {},
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto [r1, _g1] = NativeSyscallContext::syscall_invoke(
+              ctx, kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
+              {}, std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(expect none)";
@@ -227,11 +227,10 @@ protected:
 
           wait_flag_2_.wait(false);
 
-          auto [r3, _g3] =
-              syscall_invoke(ctx, kContractAddress, 1,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(consume_b),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto [r3, _g3] = NativeSyscallContext::syscall_invoke(
+              ctx, kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(consume_b),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -247,20 +246,20 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t consume_b) -> InvokeStatus<void> {
           // insert() -> delete -> consume
+          RuntimeMemoryLength written_len = 0;
 
-          auto [r1, _g1] =
-              syscall_invoke(ctx, kContractAddress, 0,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(insert_a),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto r1 = ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(insert_a),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r2, _g2] = syscall_DeleteObject_inner(
-              ctx.handler(), kStorageKey,
+          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey,
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -268,11 +267,10 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r3, _g3] =
-              syscall_invoke(ctx, kContractAddress, 1,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(consume_b),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto r3 = ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(consume_b),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -287,8 +285,8 @@ protected:
         13,
         [](NativeSyscallContext &ctx, uint32_t insert_1) -> InvokeStatus<void> {
           // delete -> insert()
-          auto [r1, _g1] = syscall_DeleteObject_inner(
-              ctx.handler(), kStorageKey,
+          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey,
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -296,11 +294,10 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r2, _g2] =
-              syscall_invoke(ctx, kContractAddress, 0,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(insert_1),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto [r2, _g2] = NativeSyscallContext::syscall_invoke(
+              ctx, kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(insert_1),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
@@ -316,11 +313,10 @@ protected:
         14,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> InvokeStatus<void> {
-          auto [r1, _g1] =
-              syscall_invoke(ctx, kContractAddress, 1,
-                             std::numeric_limits<GasAmount>::max(),
-                             x23::serialize(consume_a),
-                             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+          auto [r1, _g1] = NativeSyscallContext::syscall_invoke(
+              ctx, kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
+              x23::serialize(consume_a),
+              std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(a)";

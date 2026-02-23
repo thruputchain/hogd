@@ -18,10 +18,10 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 
@@ -41,21 +41,15 @@ public:
   {}
 
 protected:
-  static InvokeStatus<void> check_nnint_get_result(
-      SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
-          res,
-      std::optional<int128_t> expected_base, int128_t expected_add)
+  static InvokeStatus<void>
+  check_nnint_get_result(std::optional<int128_t> res_base, int128_t res_add,
+                         std::optional<int128_t> expected_base,
+                         int128_t expected_add)
   {
-    if (!res.has_value()) {
-      return res.error().to_invoke_error();
-    }
-    if (!res.value().has_value()) {
+    if (res_base != expected_base) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
-    if (res.value().value().first != expected_base) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    }
-    if (res.value().value().second != expected_add) {
+    if (res_add != expected_add) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};
@@ -72,8 +66,20 @@ TEST_P(NNIntGetTest, GetOnNonExistentKey)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("nonexistent");
-             auto res = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res, std::nullopt, 0);
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt
+                                               ? std::optional<int128_t>(
+                                                     output_set)
+                                               : std::nullopt,
+                                           output_add, std::nullopt, 0);
            }},
       });
 
@@ -118,26 +124,38 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
              auto key = make_storage_key("deleted_key");
              // First, set a value
              int128_t set_value = 100;
-             auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, &set_value, 50,
+             auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 50,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Then delete it
-             auto [r2, _gas2] = syscall_DeleteObject_inner(
-                 ctx.handler(), key,
+             auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+                 key,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r2.has_value() ||
-                 r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Get with force_load_snapshot=false should return (nullopt, 0)
-             auto res = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res, std::nullopt, 0);
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt
+                                               ? std::optional<int128_t>(
+                                                     output_set)
+                                               : std::nullopt,
+                                           output_add, std::nullopt, 0);
            }},
       });
 
@@ -181,17 +199,29 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("nnint_with_base");
              int128_t set_value = 200;
-             auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, &set_value, 50,
+             auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 50,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Get with force_load_snapshot=false should return (200, 50)
-             auto res = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res, 200, 50);
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt
+                                               ? std::optional<int128_t>(
+                                                     output_set)
+                                               : std::nullopt,
+                                           output_add, 200, 50);
            }},
       });
 
@@ -235,17 +265,29 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto key = make_storage_key("nnint_add_only");
              // Set with nullopt base, just add value
-             auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, nullptr, 75,
+             auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, static_cast<int128_t const *>(nullptr), 75,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Get with force_load_snapshot=false should return (nullopt, 75)
-             auto res = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res, std::nullopt, 75);
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt
+                                               ? std::optional<int128_t>(
+                                                     output_set)
+                                               : std::nullopt,
+                                           output_add, std::nullopt, 75);
            }},
       });
 
@@ -290,18 +332,30 @@ TEST_P(NNIntGetTest, GetOnBytestringKey)
              auto key = make_storage_key("bytestring_key");
              // First, set a bytestring value
              Bytestring bytestring_data = make_bytestring("test_data");
-             auto [r, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), key, std::as_bytes(std::span(bytestring_data)),
+             auto r = ctx.syscall<SyscallNo::kBytestringSet>(
+                 key, std::as_bytes(std::span(bytestring_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Get with force_load_snapshot=false should return (nullopt, 0)
              // because the type doesn't match
-             auto res = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res, std::nullopt, 0);
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt
+                                               ? std::optional<int128_t>(
+                                                     output_set)
+                                               : std::nullopt,
+                                           output_add, std::nullopt, 0);
            }},
       });
 
@@ -356,8 +410,20 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
              auto key = make_storage_key("snapshot_key");
              // Get with force_load_snapshot=false should return (nullopt, 0)
              // without loading from snapshot
-             auto res = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res, std::nullopt, 0);
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt
+                                               ? std::optional<int128_t>(
+                                                     output_set)
+                                               : std::nullopt,
+                                           output_add, std::nullopt, 0);
            }},
       });
 
@@ -400,32 +466,56 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
              auto key = make_storage_key("multi_op_key");
              // First set with base value
              int128_t set_value = 100;
-             auto [r1, _gas1] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, &set_value, 10,
+             auto r1 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 10,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r1.has_value() ||
-                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r1 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Get should return (100, 10)
-             auto res1 = ctx.handler().get_nnint(key, false);
-             if (auto err = check_nnint_get_result(res1, 100, 10); !err) {
+             int128_t output_set_1{};
+             bool output_set_opt_1{};
+             int128_t output_add_1{};
+             auto res1 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set_1, output_set_opt_1, output_add_1);
+             if (!res1.has_value() ||
+                 *res1 != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (auto err = check_nnint_get_result(
+                     output_set_opt_1 ? std::optional<int128_t>(output_set_1)
+                                      : std::nullopt,
+                     output_add_1, 100, 10);
+                 !err) {
                return err;
              }
 
              // Then add without base (overwrites previous write)
-             auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
-                 ctx.handler(), key, nullptr, 25,
+             auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, static_cast<int128_t const *>(nullptr), 25,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
              if (!r2.has_value() ||
-                 r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Get should now return (nullopt, 25) - the latest write
-             auto res2 = ctx.handler().get_nnint(key, false);
-             return check_nnint_get_result(res2, std::nullopt, 25);
+             int128_t output_set_2{};
+             bool output_set_opt_2{};
+             int128_t output_add_2{};
+             auto res2 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, false, output_set_2, output_set_opt_2, output_add_2);
+             if (!res2.has_value() ||
+                 *res2 != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return check_nnint_get_result(output_set_opt_2
+                                               ? std::optional<int128_t>(
+                                                     output_set_2)
+                                               : std::nullopt,
+                                           output_add_2, std::nullopt, 25);
            }},
       });
 
