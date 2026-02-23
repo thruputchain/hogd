@@ -15,7 +15,6 @@ add_subdirectory(genesis)
 add_subdirectory(loadgen)
 add_subdirectory(auth_claim)
 add_subdirectory(auth)
-add_subdirectory(test_ffi)
 
 # Then combine them into the hogd library (used by all executables below)
 add_library(
