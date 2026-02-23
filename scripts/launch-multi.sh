@@ -5,14 +5,24 @@
 HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
 HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
 
-loadgen_server="hog3"
-chuckd_server="hog3"
-mempool_server="hog3"
-hogexec_servers=("hog1" "hog2")
-event_server="hog1"
-indexer_server="hog1"
-hogdb_servers=("hog1")
-auth_server="hog1"
+# loadgen_server="hog3"
+# chuckd_server="hog3"
+# mempool_server="hog3"
+# hogexec_servers=("hog1" "hog2")
+# event_server="hog1"
+# indexer_server="hog1"
+# hogdb_servers=("hog1")
+# auth_server="hog1"
+
+# CI configuration.
+loadgen_server="hog7"
+chuckd_server="hog4"
+mempool_server="hog10"
+hogexec_servers=("hog5" "hog6")
+event_server="hog9"
+indexer_server="hog9"
+hogdb_servers=("hog11")
+auth_server="hog8"
 logdir=/tmp/$(whoami)
 
 # override above in build or source directory hog.conf file
@@ -101,7 +111,7 @@ make_logdir() {
 # Kills all of the processes on all of the servers.
 kill_everything() {
   local do_wait=$1
-  local all_procs=("${procs[@]}" "go")
+  local all_procs=("${procs[@]}" "go" "hog_lock")
 
   for s in "${all_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "killall -9 -q -e ${all_procs[@]}" || :
@@ -141,6 +151,31 @@ cleanup() {
   exit $status
 }
 trap cleanup EXIT INT TERM
+
+# Acquire per-host locks before launching services. hog_lock stays running in
+# the background and holds locks until this script exits.
+hog_lock_args=(-i "launch-multi")
+for s in "${all_servers[@]}"; do
+  hog_lock_args+=(--host "$s")
+done
+
+hog_lock_log=$(mktemp /tmp/launch-multi-hog-lock.XXXXXX.log)
+echo "Acquiring host locks..."
+echo "hog_lock ${hog_lock_args[@]}"
+hog_lock "${hog_lock_args[@]}" >"$hog_lock_log" 2>&1 &
+hog_lock_pid=$!
+while true; do
+  if grep -qi "locks acquired" "$hog_lock_log"; then
+    echo "Host locks acquired."
+    break
+  fi
+  if ! kill -0 "$hog_lock_pid" 2>/dev/null; then
+    echo "hog_lock exited before acquiring locks."
+    cat "$hog_lock_log"
+    exit 1
+  fi
+  sleep 0.2
+done
 
 make -C "$HOGD_BUILD_DIR" -j$(nproc)
 # These build scripts place the binaries in the current working directory, so we
@@ -238,6 +273,7 @@ remote_launch "$event_server" "$EVENT_BINARY" \
 
 # Start indexer.
 echo "Start indexer..."
+ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
   --event-addr "$event_server":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
 
@@ -260,7 +296,6 @@ echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
   --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
-sleep 1
 
 # Launch chuckd.
 echo "Start chuckd..."
@@ -273,7 +308,7 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
-  --in-addr hog3:7888 \
+  --in-addr "$chuckd_server":7888 \
   --debug-port 5500 \
   --num-accts 10000 \
   --txs-per-block 1000000 \
@@ -314,7 +349,7 @@ wait_port "$auth_server" $AUTH_DB_PORT
 wait_port "$auth_server" $AUTH_MEMPOOL_PORT
 
 # Wait for chuckd (port 7888).
-wait_port hog3 7888
+wait_port "$chuckd_server" 7888
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" $MEMPOOL_COORDINATOR_PORT
