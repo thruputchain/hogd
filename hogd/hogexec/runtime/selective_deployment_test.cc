@@ -170,9 +170,10 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
                  NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Attempt to deploy the native token contract - should fail
                ContractAddress deploy_addr;
-               auto [syscall_res, _gas] =
-                   syscall_DeployContract_inner(ctx.handler(), kDeployNonce,
-                                                native_token_hash, deploy_addr);
+               auto syscall_res =
+                   ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
+                                                           native_token_hash,
+                                                           deploy_addr);
                if (!syscall_res.has_value() ||
                    syscall_res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {

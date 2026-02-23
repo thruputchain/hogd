@@ -54,8 +54,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
          BlockHeight expected_height) -> InvokeStatus<void> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 0;
-        auto [status, gas] =
-            syscall_GetBlockHeight_inner(ctx.handler(), block_height);
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -129,8 +128,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
          BlockHeight expected_height) -> InvokeStatus<void> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 0;
-        auto [status, gas] =
-            syscall_GetBlockHeight_inner(ctx.handler(), block_height);
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

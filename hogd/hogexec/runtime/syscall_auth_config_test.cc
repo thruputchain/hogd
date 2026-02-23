@@ -53,9 +53,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
              ffi_nonce_config.accepted_keys = 0x01; // Accept key 0
              ffi_nonce_config.required_weight = Weight{1};
 
-             auto [status, gas] =
-                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
-                                                       ffi_nonce_config);
+             auto status = ctx.syscall<SyscallNo::kWriteAddressNonceConfig>(
+                 ffi_nonce_config);
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -447,11 +446,9 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
                  reinterpret_cast<const std::byte *>(public_key.data()),
                  public_key.size());
 
-             auto [pk_status, pk_gas] =
-                 syscall_ChangePublicKeyRegistration_inner(ctx.handler(), 0,
-                                                           &key_scheme,
-                                                           key_bytes,
-                                                           &key_weight);
+             auto pk_status =
+                 ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                     0, &key_scheme, key_bytes, &key_weight);
 
              if (!pk_status.has_value() ||
                  pk_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -463,9 +460,9 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
              ffi_nonce_config.accepted_keys = 0x01; // Accept key 0
              ffi_nonce_config.required_weight = Weight{3};
 
-             auto [nonce_status, nonce_gas] =
-                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
-                                                       ffi_nonce_config);
+             auto nonce_status =
+                 ctx.syscall<SyscallNo::kWriteAddressNonceConfig>(
+                     ffi_nonce_config);
 
              if (!nonce_status.has_value() ||
                  nonce_status.value() !=
@@ -565,9 +562,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
              ffi_nonce_config.accepted_keys = 1U << kMaxSigners;
              ffi_nonce_config.required_weight = Weight{1};
 
-             auto [status, gas] =
-                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
-                                                       ffi_nonce_config);
+             auto status = ctx.syscall<SyscallNo::kWriteAddressNonceConfig>(
+                 ffi_nonce_config);
              if (!status.has_value() ||
                  status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
@@ -578,9 +574,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
 
              // All bits set - should also fail
              ffi_nonce_config.accepted_keys = 0xFFFF'FFFF;
-             auto [status2, gas2] =
-                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
-                                                       ffi_nonce_config);
+             auto status2 = ctx.syscall<SyscallNo::kWriteAddressNonceConfig>(
+                 ffi_nonce_config);
              if (!status2.has_value() ||
                  status2.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
@@ -590,9 +585,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
 
              // Valid bitmap (highest valid bit) should succeed
              ffi_nonce_config.accepted_keys = 1U << (kMaxSigners - 1);
-             auto [status3, gas3] =
-                 syscall_WriteAddressNonceConfig_inner(ctx.handler(),
-                                                       ffi_nonce_config);
+             auto status3 = ctx.syscall<SyscallNo::kWriteAddressNonceConfig>(
+                 ffi_nonce_config);
              if (!status3.has_value() ||
                  status3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Valid bitmap should succeed";

@@ -68,10 +68,11 @@ TEST_F(EventTest, EventSuccess)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              const std::string event_data = "test 0 topics";
 
-             auto [status, gas] =
-                 syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr,
-                                        nullptr,
-                                        std::as_bytes(std::span(event_data)));
+             auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                 static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 std::as_bytes(std::span(event_data)));
              if (!status.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
              }
@@ -88,9 +89,10 @@ TEST_F(EventTest, EventSuccess)
 
              SHA256Hash topic = sha256(std::string("topic"));
 
-             auto [status, gas] =
-                 syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
-                                        std::as_bytes(std::span(event_data)));
+             auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                 &topic, static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 std::as_bytes(std::span(event_data)));
              if (!status.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
              }
@@ -407,20 +409,17 @@ TEST_F(EventTest, EventWithRevertingFrames)
                // Use calldata as event data
                auto const &calldata = ctx.handler().get_calldata();
 
-               auto [status, gas] =
-                   syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr,
-                                          nullptr,
-                                          std::as_bytes(std::span(calldata)));
+               auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   std::as_bytes(std::span(calldata)));
                if (!status.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
 
                if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
-
-               if (!ctx.runtime().consume_gas(gas.get())) {
-                 return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                }
 
                return {};

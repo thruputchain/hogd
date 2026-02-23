@@ -104,8 +104,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
-               auto [delete_status, _g3] =
-                   syscall_DeleteObject_inner(ctx.handler(), key, 0);
+               auto delete_status =
+                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
@@ -230,10 +230,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                int128_t current_set = 0;
                bool current_set_opt = false;
                int128_t current_add = 0;
-               auto [status, _g1] =
-                   syscall_NonnegativeIntGet_inner(ctx.handler(), key, true,
-                                                   current_set, current_set_opt,
-                                                   current_add);
+               auto status = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                   key, true, current_set, current_set_opt, current_add);
                if (!status.has_value()) {
                  ADD_FAILURE() << "Failed to get nnint: " << status.error();
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -269,8 +267,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
-               auto [delete_status, _g3] =
-                   syscall_DeleteObject_inner(ctx.handler(), key, 0);
+               auto delete_status =
+                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
@@ -432,8 +430,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
-               auto [delete_status, _g3] =
-                   syscall_DeleteObject_inner(ctx.handler(), key, 0);
+               auto delete_status =
+                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();

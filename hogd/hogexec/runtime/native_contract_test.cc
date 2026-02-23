@@ -355,10 +355,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         std::vector<uint8_t> bstring(100);
         RuntimeMemoryLength written_len = 0;
-        auto [res, _gas] = syscall_BytestringGet_inner(ctx.handler(), kBadKey,
-                                                       std::as_writable_bytes(
-                                                           std::span(bstring)),
-                                                       written_len);
+        auto res = ctx.syscall<SyscallNo::kBytestringGet>(
+            kBadKey, std::as_writable_bytes(std::span(bstring)), written_len);
         // This test should fail because it accesses the bytestring the server
         // is configured to return an unrecoverable error on
         if (res.has_value() ||
