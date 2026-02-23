@@ -319,10 +319,9 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     if (delta.retrocausal_queue().insert.added_entries.empty()) {
       return 0;
     }
-    // Per spec.md section 8.4.1: Reserve cost must be pessimistic and
-    // only depend on snapshot + delta, NOT on concurrent commits.
-    // Always charge full base_item_cost to handle case where a concurrent
-    // consume empties the queue before this insert commits.
+    // Reserve cost must be pessimistic and only depend on snapshot + delta, NOT
+    // on concurrent commits.  Always charge full base_item_cost to handle case
+    // where a concurrent consume empties the queue before this insert commits.
     return current_model->kBaseItemCost;
   }();
 
