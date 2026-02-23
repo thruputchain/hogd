@@ -256,8 +256,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               kAddress, 1, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::kInvokeFlagNone),
               output_return_buffer_len);
-          return std::pair{
-              invoke_status, gas_before - ctx.runtime().get_available_gas()};
+          return std::pair{invoke_status,
+                           gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[invoke_status, g] = r;
         if (!invoke_status.has_value()) {
