@@ -135,7 +135,11 @@ ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
 TransactionID
 ExecutorMempoolRpc::allocate_tx_ids(size_t count)
 {
-  uint64_t base = self_id_.fetch_add(count, std::memory_order_relaxed);
+  auto &allocator = *tx_id_allocator_;
+  if (allocator.base_pool_ == nullptr) [[unlikely]] {
+    allocator.base_pool_ = &base_alloc_pool_;
+  }
+  uint64_t base = allocator.allocate(count);
   assert(base + count - 1 < uint64_t{1} << 48); // another executor's id block
   return TransactionID{base + (uint64_t{self_executor_id_} << 48)};
 }

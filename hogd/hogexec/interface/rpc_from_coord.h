@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -9,6 +11,7 @@
 #include "exec_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -106,7 +109,30 @@ private:
   x23::MaybeAsync<void> release_context(BlockID block_id,
                                         PerThreadARC<ExecutorContext> *ctx);
 
-  std::atomic<uint64_t> self_id_ = 0;
+  struct TxIDAllocator {
+    uint64_t value_ = 0;
+    uint64_t limit_ = 0;
+    std::atomic<uint64_t> *base_pool_ = nullptr;
+
+    uint64_t allocate(size_t count)
+    {
+      assert(base_pool_ != nullptr);
+      if (value_ + count > limit_) {
+        value_ =
+            base_pool_->fetch_add(std::max<uint64_t>(kBaseAllocSize, count),
+                                  std::memory_order_relaxed);
+        limit_ = value_ + count;
+      }
+      uint64_t result = value_;
+      value_ += count;
+      return result;
+    }
+  };
+
+  PerThread<TxIDAllocator> tx_id_allocator_;
+  std::atomic<uint64_t> base_alloc_pool_ = 0;
+  constexpr static uint64_t kBaseAllocSize = 256;
+
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
 
   std::unique_ptr<ExecutorStateManager> executor_states_;
