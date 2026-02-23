@@ -185,17 +185,19 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       1, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
         auto r1 = [&]() {
+          auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddress, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(100)
                       .value(),
               std::to_underlying(InvokeFlag::kInvokeFlagNone),
               output_return_buffer_len);
+          return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
-        [[maybe_unused]] auto g1 = GasAmount{0};
-        if (!r1.has_value()) {
+        auto const &[r1_status, g1] = r1;
+        if (!r1_status.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         if (g1 != 100) {
@@ -203,17 +205,19 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto r2 = [&]() {
+          auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddress, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(200)
                       .value(),
               std::to_underlying(InvokeFlag::kInvokeFlagNone),
               output_return_buffer_len);
+          return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
-        [[maybe_unused]] auto g2 = GasAmount{0};
-        if (!r2.has_value()) {
+        auto const &[r2_status, g2] = r2;
+        if (!r2_status.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         if (g2 != 200) {
@@ -221,25 +225,23 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto r3 = [&]() {
+          auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddress, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(150)
                       .value(),
               std::to_underlying(InvokeFlag::kInvokeFlagNone),
               output_return_buffer_len);
+          return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
-        [[maybe_unused]] auto g3 = GasAmount{0};
-        if (!r3.has_value()) {
+        auto const &[r3_status, g3] = r3;
+        if (!r3_status.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         if (g3 != 150) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        if (!ctx.runtime().consume_gas(g1 + g2 + g3)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
 
         return 0;
@@ -248,21 +250,21 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         auto r = [&]() {
+          auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
-          return ctx.syscall<SyscallNo::kInvoke>(
+          auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
               kAddress, 1, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::kInvokeFlagNone),
               output_return_buffer_len);
+          return std::pair{
+              invoke_status, gas_before - ctx.runtime().get_available_gas()};
         }();
-        [[maybe_unused]] auto g = GasAmount{0};
-        if (!r.has_value()) {
+        auto const &[invoke_status, g] = r;
+        if (!invoke_status.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         if (g != 100 + 200 + 150) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        if (!ctx.runtime().consume_gas(g)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
 
         return 0;
