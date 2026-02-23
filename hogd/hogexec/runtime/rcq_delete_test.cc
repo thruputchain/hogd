@@ -58,6 +58,7 @@ protected:
     return AddressAndKey{.address = kContractAddress, .key = key};
   }
 
+  // NOLINTNEXTLINE(readability-function-size)
   static std::unique_ptr<RuntimeContext> make_context()
   {
     NativeContractBuilder builder;
