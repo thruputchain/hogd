@@ -262,19 +262,18 @@ validate_nonce(const SignedTransaction &stx, const AddressAuthData &auth_data,
   Weight total_weight = 0;
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const x23::Vec<DecoratedSignature, 0xffffffff> &sigs =
-        stx.signatures[i].list;
-    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
+    const DecoratedSignature &sig = stx.signatures[i];
+    if (sigs.auth_claim_idx >= stx.tx.auth_claims.size()) {
+      continue;
+    }
+    const AuthClaim &auth_claim = stx.tx.auth_claims[sig.auth_claim_idx];
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kInvokedAddressSignature:
     case AuthClaimType::kInvokedAddressSignedWeight:
-      for (const DecoratedSignature &sig : sigs) {
-        if (!bitmap_accepts_key(nonce_config.accepted_keys,
-                                sig.public_key_id)) {
-          return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
-        }
-        total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
+      if (!bitmap_accepts_key(nonce_config.accepted_keys, sig.public_key_id)) {
+        return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
+      total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
       break;
     case AuthClaimType::kOtherAddressSignature:
     case AuthClaimType::kOtherAddressSignedWeight:
