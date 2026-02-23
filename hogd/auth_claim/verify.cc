@@ -135,7 +135,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_individual_key_claim_internal(
     uint32_t key_id, const AddressAuthData *auth_data,
-    x23::Vec<DecoratedSignature *, 0xffffffff> const &sigs,
+    x23::Vec<const DecoratedSignature *> const &sigs,
     x23::BufView serialized_tx, Ed25519SignatureVerifier *signature_verifier)
 {
   if (sigs.size() != 1) {
@@ -169,7 +169,7 @@ AuthVerifyStatus<void>
 verify_weight_key_claim_internal(
     BitMap accepted_keys, Weight required_weight,
     const AddressAuthData *auth_data,
-    x23::Vec<DecoratedSignature *, 0xffffffff> const &sigs,
+    const x23::Vec<const DecoratedSignature *> &sigs,
     x23::BufView serialized_tx, Ed25519SignatureVerifier *signature_verifier)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
@@ -213,7 +213,7 @@ verify_weight_key_claim_internal(
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
-                           x23::Vec<DecoratedSignature *> const &sigs,
+                           x23::Vec<DecoratedSignature const *> const &sigs,
                            const AddressAuthData *auth_data,
                            x23::BufView serialized_tx,
                            Ed25519SignatureVerifier *signature_verifier)
@@ -368,15 +368,16 @@ verify_auth_claims_internal(
   }
 
   // Verify that each claimed auth has a corresponding set of valid signatures.
-  static PerThread<std::unordered_map<size_t, x23::Vec<DecoratedSignature *>>>
+  static PerThread<
+      std::unordered_map<size_t, x23::Vec<const DecoratedSignature *>>>
       sig_map;
   sig_map->clear();
-  for (DecoratedSignature &sig : stx.signatures) {
+  for (const DecoratedSignature &sig : stx.signatures) {
     (*sig_map)[sig.auth_claim_idx].push_back(&sig);
   }
   for (size_t i = 0; i < stx.tx.auth_claims.size(); i++) {
     const AuthClaim &auth_claim = stx.tx.auth_claims[i];
-    const x23::Vec<DecoratedSignature *> &sigs = (*sig_map)[i];
+    const x23::Vec<const DecoratedSignature *> &sigs = (*sig_map)[i];
     const AddressAuthData *auth_data = nullptr;
 
     if constexpr (verify_weights_against_auth_data(VerfType)) {
