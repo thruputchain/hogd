@@ -41,14 +41,13 @@ x23::Async<ExecProposeResult>
 ExecutorContext::propose_transaction(Transaction const &tx, TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
-  auto async_pair = x23::make_async<ExecProposeResult>();
-  x23::Async<ExecProposeResult> &async = async_pair.first;
-  x23::CoroCB<ExecProposeResult> &cb = async_pair.second;
+  x23::Awaitable<ExecProposeResult> awaitable;
+  x23::CoroCB<ExecProposeResult> cb(awaitable);
   worker_pool_.submit([this, &tx, tx_id, cb]() {
     auto res = run_propose_transaction(tx, tx_id);
     cb(res);
   });
-  co_return co_await async;
+  co_return co_await awaitable;
 }
 
 x23::Async<ExecProposeBatchResult>
@@ -56,9 +55,8 @@ ExecutorContext::propose_transaction_batch(
     SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
-  auto async_pair = x23::make_async<ExecProposeBatchResult>();
-  x23::Async<ExecProposeBatchResult> &async = async_pair.first;
-  x23::CoroCB<ExecProposeBatchResult> &cb = async_pair.second;
+  x23::Awaitable<ExecProposeBatchResult> awaitable;
+  x23::CoroCB<ExecProposeBatchResult> cb(awaitable);
   worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
@@ -67,7 +65,7 @@ ExecutorContext::propose_transaction_batch(
     }
     cb(std::move(batch_res));
   });
-  auto r = co_await async;
+  auto r = co_await awaitable;
   assert(r.size() == signed_txs.size());
   co_return r;
 }
@@ -77,9 +75,8 @@ ExecutorContext::validate_transaction_batch(
     ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
-  auto async_pair = x23::make_async<ExecValidateBatchResult>();
-  x23::Async<ExecValidateBatchResult> &async = async_pair.first;
-  x23::CoroCB<ExecValidateBatchResult> &cb = async_pair.second;
+  x23::Awaitable<ExecValidateBatchResult> awaitable;
+  x23::CoroCB<ExecValidateBatchResult> cb(awaitable);
   worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
     ExecValidateBatchResult batch_res;
 
@@ -89,7 +86,7 @@ ExecutorContext::validate_transaction_batch(
     }
     cb(std::move(batch_res));
   });
-  co_return co_await async;
+  co_return co_await awaitable;
 }
 
 x23::Async<ExecResult>
@@ -98,16 +95,15 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 {
   assert(mode_ == ExecutionMode::kValidating);
 
-  auto async_pair = x23::make_async<ExecResult>();
-  x23::Async<ExecResult> &async = async_pair.first;
-  x23::CoroCB<ExecResult> &cb = async_pair.second;
+  x23::Awaitable<ExecResult> awaitable;
+  x23::CoroCB<ExecResult> cb(awaitable);
 
   worker_pool_.submit([this, &proposed_tx, tx_id, cb]() {
     auto res = run_validate_transaction(proposed_tx, tx_id);
     cb(res);
   });
 
-  co_return co_await async;
+  co_return co_await awaitable;
 }
 
 ExecProposeResult

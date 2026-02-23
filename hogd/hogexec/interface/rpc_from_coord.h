@@ -103,8 +103,8 @@ private:
 
   x23::Async<PerThreadARC<ExecutorContext> *>
   try_get_context(BlockID block_id, ExecutionMode mode);
-  x23::Async<void> release_context(BlockID block_id,
-                                   PerThreadARC<ExecutorContext> *ctx);
+  x23::MaybeAsync<void> release_context(BlockID block_id,
+                                        PerThreadARC<ExecutorContext> *ctx);
 
   std::atomic<uint64_t> self_id_ = 0;
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();

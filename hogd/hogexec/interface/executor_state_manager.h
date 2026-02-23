@@ -35,7 +35,7 @@ public:
   // This acquires a reference to the executor context, if the returned value is
   // not null. The caller must eventually release the reference and, if
   // appropriate, call gc_executor_context().
-  x23::Async<PerThreadARC<ExecutorContext> *>
+  x23::MaybeAsync<PerThreadARC<ExecutorContext> *>
   get_executor_context(BlockID block_id);
 
   // return ExecResultOk if successful, or ExecResultSystemError if
@@ -89,7 +89,7 @@ private:
   DispatchPool worker_pool_;
 };
 
-inline x23::Async<PerThreadARC<ExecutorContext> *>
+inline x23::MaybeAsync<PerThreadARC<ExecutorContext> *>
 ExecutorStateManager::get_executor_context(BlockID block_id)
 {
   {
@@ -97,11 +97,11 @@ ExecutorStateManager::get_executor_context(BlockID block_id)
     if (auto it = context_cache_->contexts_.find(block_id);
         it != context_cache_->contexts_.end()) {
       if (!it->second->try_acquire_reference()) [[unlikely]]
-        co_return nullptr;
-      co_return it->second;
+        return {nullptr};
+      return {it->second};
     }
   }
-  co_return co_await get_executor_context_slow(block_id);
+  return get_executor_context_slow(block_id);
 }
 
 } // namespace hogd

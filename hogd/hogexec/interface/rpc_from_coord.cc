@@ -147,13 +147,14 @@ ExecutorMempoolRpc::executorsched_shutdown()
   co_return;
 }
 
-x23::Async<void>
+x23::MaybeAsync<void>
 ExecutorMempoolRpc::release_context(BlockID block_id,
                                     PerThreadARC<ExecutorContext> *ctx)
 {
   if (ctx->release_reference()) {
-    co_await executor_states_->gc_executor_context(block_id);
+    return executor_states_->gc_executor_context(block_id);
   }
+  return {};
 }
 
 } // namespace hogd
