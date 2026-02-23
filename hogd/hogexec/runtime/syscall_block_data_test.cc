@@ -12,10 +12,12 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -49,12 +51,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [](SystemCallHandler &handler,
+      [](NativeSyscallContext &ctx,
          BlockHeight expected_height) -> InvokeStatus<void> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 0;
-        auto [status, gas] =
-            syscall_GetBlockHeight_inner(handler, block_height);
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -124,12 +125,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [](SystemCallHandler &handler,
+      [](NativeSyscallContext &ctx,
          BlockHeight expected_height) -> InvokeStatus<void> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 0;
-        auto [status, gas] =
-            syscall_GetBlockHeight_inner(handler, block_height);
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

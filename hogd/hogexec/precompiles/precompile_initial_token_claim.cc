@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -21,9 +22,11 @@
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -67,22 +70,28 @@ calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
 }
 
 InvokeStatus<uint128_t>
-load_allocation(SystemCallHandler &handler,
+load_allocation(NativeSyscallContext &ctx,
                 StorageKeyContractData const &contract_data_key)
 {
-  auto nnint_result = handler.get_nnint(contract_data_key, true);
-  if (!nnint_result.has_value()) {
-    return nnint_result.error().to_invoke_error();
+  int128_t output_set{};
+  bool output_set_opt{};
+  int128_t output_add{};
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(contract_data_key, true,
+                                                 output_set, output_set_opt,
+                                                 output_add);
+  if (!r.has_value()) {
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
-  if (!nnint_result.value().has_value()) {
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
-  auto [set, add] = nnint_result.value().value();
-  if (!set.has_value()) {
+
+  if (!output_set_opt) {
     panic("failed to get set value from storage key, after calling nnint_get "
           "with load_from_snapshot=true");
   }
-  auto [total, of] = overflowing_add(*set, add);
+  auto [total, of] = overflowing_add(output_set, output_add);
   if (of || total < 0) {
     trace("overflowing_add failed in load_allocation; we must have configured "
           "genesis incorrectly");
@@ -92,17 +101,16 @@ load_allocation(SystemCallHandler &handler,
 }
 
 InvokeStatus<void>
-delete_storage_key(SystemCallHandler &handler,
+delete_storage_key(NativeSyscallContext &ctx,
                    StorageKeyContractData const &contract_data_key)
 {
-  auto delete_result = handler.delete_object(
+  auto r = ctx.syscall<SyscallNo::kDeleteObject>(
       contract_data_key,
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
-  if (!delete_result.has_value()) {
-    return delete_result.error().to_invoke_error();
+  if (!r.has_value()) {
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
-
-  if (!delete_result.value().has_value()) {
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
   return {};
@@ -116,8 +124,8 @@ make_native_initial_token_claim_contract()
   NativeContractBuilder builder;
 
   builder.add<initial_token_claim::InitialTokenClaim, "claim_initial_tokens">(
-      [](SystemCallHandler &handler, NativeRuntime & /*unused*/,
-         SHA256Hash hash, SHA256Hash nonce, ContractEntrypointID entrypoint,
+      [](NativeSyscallContext &ctx, SHA256Hash hash, SHA256Hash nonce,
+         ContractEntrypointID entrypoint,
          Calldata calldata) -> InvokeStatus<void> {
         trace("initial token claim claim_initial_tokens");
 
@@ -126,20 +134,20 @@ make_native_initial_token_claim_contract()
         StorageKeyContractData const &contract_data_key =
             calculate_storage_key(hash, nonce, entrypoint, calldata);
 
-        auto allocation = load_allocation(handler, contract_data_key);
+        auto allocation = load_allocation(ctx, contract_data_key);
         if (!allocation.has_value()) {
           return allocation.error();
         }
 
         // Delete the storage key, to prevent double claiming
-        if (auto err = delete_storage_key(handler, contract_data_key);
+        if (auto err = delete_storage_key(ctx, contract_data_key);
             !err.has_value()) {
           return err;
         }
 
         // Calculate receiver address from contract hash and nonce
         auto receiver_addr = SystemCallHandler::static_get_deploy_address(
-            handler.get_current_address(), nonce, hash);
+            ctx.handler().get_current_address(), nonce, hash);
 
         // Transfer tokens to the receiver via HOG token contract
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
@@ -150,7 +158,8 @@ make_native_initial_token_claim_contract()
                             *allocation & 0xffffffffffffffffULL);
 
         auto [transfer_result, gas_used] =
-            native_token_client.invoke_opt<"transfer">(handler, receiver_addr,
+            native_token_client.invoke_opt<"transfer">(ctx.handler(),
+                                                       receiver_addr,
                                                        allocation_tuple);
 
         if (!transfer_result.has_value() ||
@@ -164,43 +173,32 @@ make_native_initial_token_claim_contract()
         }
 
         // Deploy the contract using hash and nonce
-        auto deploy_result = handler.deploy_contract(nonce, hash);
-        if (!deploy_result.has_value()) {
-          return deploy_result.error().to_invoke_error();
+        ContractAddress deployed_addr{};
+        auto deploy_res =
+            ctx.syscall<SyscallNo::kDeployContract>(nonce, hash, deployed_addr);
+        if (!deploy_res.has_value()) {
+          return NativeContractBuilder::host_fn_error_conversion(
+              deploy_res.error());
         }
-        if (!deploy_result.value().has_value()) {
+        if (*deploy_res != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        auto deployed_addr = deploy_result.value().value();
 
         // Call the initialize entrypoint with provided calldata
         auto method_id = sdk_method_id(entrypoint);
 
-        auto [invoke_result, invoke_gas] =
-            handler.invoke(deployed_addr, method_id, UINT64_MAX,
-                           std::move(calldata),
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        RuntimeMemoryLength output_return_buffer_len{};
+        auto invoke_result = ctx.syscall<SyscallNo::kInvoke>(
+            deployed_addr, method_id, UINT64_MAX,
+            std::as_bytes(std::span(calldata)),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone),
+            output_return_buffer_len);
 
         if (!invoke_result.has_value()) {
-          switch (invoke_result.error().code()) {
-          case HostFnErrorCode::kHostOutOfGas:
-            return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-          case HostFnErrorCode::kHostReturn:
-          case HostFnErrorCode::kHostExit:
-            panic("invoke() cannot return these error codes");
-          case HostFnErrorCode::kHostNoneOrRecoverable:
-            panic("HostFnErrorCode::kHostNoneOrRecoverable is not expected if "
-                  "!invoke_result.has_value()");
-          case HostFnErrorCode::kHostUnrecoverable:
-            return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-          case HostFnErrorCode::kHostValidationFailure:
-            return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-          case HostFnErrorCode::kHostAbortTransaction:
-            return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-            break;
-          }
+          return NativeContractBuilder::host_fn_error_conversion(
+              invoke_result.error());
         }
-        if (invoke_result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+        if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         return {};

@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
@@ -94,10 +95,10 @@ make_caller_contract()
 
   // Call return_ok_void method from TestContract
   builder.add<CallerContract, "call_return_ok_void">(
-      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
-            client.template invoke_opt<"return_ok_void">(handler);
+            client.template invoke_opt<"return_ok_void">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -111,10 +112,10 @@ make_caller_contract()
 
   // Call return_ok_int method from TestContract
   builder.add<CallerContract, "call_return_ok_int">(
-      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
-            client.template invoke_opt<"return_ok_int">(handler);
+            client.template invoke_opt<"return_ok_int">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -132,10 +133,10 @@ make_caller_contract()
 
   // Call return_err_void method from TestContract
   builder.add<CallerContract, "call_return_err_void">(
-      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
-            client.template invoke_opt<"return_err_void">(handler);
+            client.template invoke_opt<"return_err_void">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -149,10 +150,10 @@ make_caller_contract()
 
   // Call return_err_int method from TestContract
   builder.add<CallerContract, "call_return_err_int">(
-      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
-            client.template invoke_opt<"return_err_int">(handler);
+            client.template invoke_opt<"return_err_int">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};

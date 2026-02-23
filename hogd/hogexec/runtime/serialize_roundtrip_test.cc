@@ -23,6 +23,7 @@
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -48,11 +49,10 @@ protected:
         NativeContract>(std::unordered_map<Runtime::MethodID,
                                            NativeContract::function_t>{
         {0,
-         [this](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [this](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::Foo foo{0xABCD};
-           roundtrip_test<"roundtrip_foo">(foo, handler, success);
+           roundtrip_test<"roundtrip_foo">(foo, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -60,68 +60,65 @@ protected:
            return {};
          }},
         {1,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
-           roundtrip_test<"roundtrip_senum">(senum, handler, success);
+           roundtrip_test<"roundtrip_senum">(senum, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            return {};
          }},
         {2,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
            sunion.pos() = 5;
-           roundtrip_test<"roundtrip_sunion">(sunion, handler, success);
+           roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            sunion.d(static_cast<::cxs_test::senum>(0)); // default case
-           roundtrip_test<"roundtrip_sunion">(sunion, handler, success);
+           roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
-           roundtrip_test<"roundtrip_sunion">(sunion, handler, success);
+           roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            return {};
          }},
         {3,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            int32_t value = -1;
-           roundtrip_test<"roundtrip_i32">(value, handler, success);
+           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = 1;
-           roundtrip_test<"roundtrip_i32">(value, handler, success);
+           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = 0;
-           roundtrip_test<"roundtrip_i32">(value, handler, success);
+           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = std::numeric_limits<int32_t>::max();
-           roundtrip_test<"roundtrip_i32">(value, handler, success);
+           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = std::numeric_limits<int32_t>::min();
-           roundtrip_test<"roundtrip_i32">(value, handler, success);
+           roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -129,36 +126,35 @@ protected:
            return {};
          }},
         {4,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
            sunion.neg() = true;
-           roundtrip_test<"roundtrip_sunion_no_void">(sunion, handler, success);
+           roundtrip_test<"roundtrip_sunion_no_void">(sunion, ctx.handler(),
+                                                      success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            return {};
          }},
         {5,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::uunion uunion(1);
            uunion.one() = true;
-           roundtrip_test<"roundtrip_uunion">(uunion, handler, success);
+           roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            uunion.d(2);
            uunion.two() = true;
-           roundtrip_test<"roundtrip_uunion">(uunion, handler, success);
+           roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            uunion.d(4);
            uunion.four() = "hello";
-           roundtrip_test<"roundtrip_uunion">(uunion, handler, success);
+           roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -166,19 +162,18 @@ protected:
            return {};
          }},
         {6,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::uunion_bool uunion_bool{true};
            uunion_bool.one() = false;
-           roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, handler,
+           roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, ctx.handler(),
                                                    success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            uunion_bool.d(false);
            uunion_bool.two() = true;
-           roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, handler,
+           roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, ctx.handler(),
                                                    success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -186,15 +181,14 @@ protected:
            return {};
          }},
         {7,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            ::cxs_test::test_recursive test_recursive;
 
            // empty
            test_recursive.elem = "hello";
-           roundtrip_test<"roundtrip_test_recursive">(test_recursive, handler,
-                                                      success);
+           roundtrip_test<"roundtrip_test_recursive">(test_recursive,
+                                                      ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -202,8 +196,8 @@ protected:
            // with a box ptr
            test_recursive.next.emplace();
            test_recursive.next->elem = "world";
-           roundtrip_test<"roundtrip_test_recursive">(test_recursive, handler,
-                                                      success);
+           roundtrip_test<"roundtrip_test_recursive">(test_recursive,
+                                                      ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -212,8 +206,8 @@ protected:
            test_recursive.nextvec.emplace_back();
            test_recursive.nextvec.emplace_back();
            test_recursive.nextvec.back().elem = "goodbye";
-           roundtrip_test<"roundtrip_test_recursive">(test_recursive, handler,
-                                                      success);
+           roundtrip_test<"roundtrip_test_recursive">(test_recursive,
+                                                      ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -221,8 +215,7 @@ protected:
            return {};
          }},
         {8,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
 
            using Error = txs_roundtrip::Error;
@@ -230,7 +223,7 @@ protected:
            // Test ErrorXDR - Caller branch
            // cxs_roundtrip and txs_roundtrip use the same error types
            Error error_caller = Error(txs_roundtrip::ErrorType::Caller);
-           roundtrip_test<"roundtrip_error_xdr">(error_caller, handler,
+           roundtrip_test<"roundtrip_error_xdr">(error_caller, ctx.handler(),
                                                  success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -241,8 +234,8 @@ protected:
                Error(txs_roundtrip::ErrorType::Contract);
            error_contract_custom.contract_error().which(
                txs_roundtrip::ContractErrorType::Custom);
-           roundtrip_test<"roundtrip_error_xdr">(error_contract_custom, handler,
-                                                 success);
+           roundtrip_test<"roundtrip_error_xdr">(error_contract_custom,
+                                                 ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -254,7 +247,7 @@ protected:
                txs_roundtrip::ContractErrorType::Syscall);
            error_contract_syscall.contract_error().syscall_error() = 42;
            roundtrip_test<"roundtrip_error_xdr">(error_contract_syscall,
-                                                 handler, success);
+                                                 ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -270,7 +263,7 @@ protected:
                .storage_error()
                .syscall_error() = 123;
            roundtrip_test<"roundtrip_error_xdr">(error_contract_storage,
-                                                 handler, success);
+                                                 ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -278,8 +271,7 @@ protected:
            return {};
          }},
         {9,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
 
            using ContractError = txs_roundtrip::ContractError;
@@ -288,7 +280,8 @@ protected:
            ContractError contract_error_custom =
                ContractError(txs_roundtrip::ContractErrorType::Custom);
            roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_custom,
-                                                          handler, success);
+                                                          ctx.handler(),
+                                                          success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -298,7 +291,7 @@ protected:
                ContractError(txs_roundtrip::ContractErrorType::Syscall);
            contract_error_syscall.syscall_error() = 99;
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_syscall, handler, success);
+               contract_error_syscall, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -310,7 +303,7 @@ protected:
                txs_roundtrip::StorageErrorType::Syscall);
            contract_error_storage_syscall.storage_error().syscall_error() = 456;
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_storage_syscall, handler, success);
+               contract_error_storage_syscall, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -321,7 +314,7 @@ protected:
            contract_error_storage_serialization.storage_error().which(
                txs_roundtrip::StorageErrorType::Serialization);
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_storage_serialization, handler, success);
+               contract_error_storage_serialization, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -337,7 +330,7 @@ protected:
                .indexoutofbounds()
                .access = 1500;
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_storage_index, handler, success);
+               contract_error_storage_index, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -345,8 +338,7 @@ protected:
            return {};
          }},
         {10,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
 
            using StorageError = txs_roundtrip::StorageError;
@@ -356,7 +348,7 @@ protected:
                StorageError(txs_roundtrip::StorageErrorType::Syscall);
            storage_err_syscall.syscall_error() = 789;
            roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_syscall,
-                                                       handler, success);
+                                                       ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -365,7 +357,7 @@ protected:
            StorageError storage_err_serialization =
                StorageError(txs_roundtrip::StorageErrorType::Serialization);
            roundtrip_test<"roundtrip_storage_err_xdr">(
-               storage_err_serialization, handler, success);
+               storage_err_serialization, ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -376,7 +368,7 @@ protected:
            storage_err_index.indexoutofbounds().len = 2000;
            storage_err_index.indexoutofbounds().access = 2500;
            roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_index,
-                                                       handler, success);
+                                                       ctx.handler(), success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -384,16 +376,17 @@ protected:
            return {};
          }},
         {11,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            bool success = false;
            x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
-           roundtrip_test<"roundtrip_opaque_vector">(vec, handler, success);
+           roundtrip_test<"roundtrip_opaque_vector">(vec, ctx.handler(),
+                                                     success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
-           roundtrip_test<"roundtrip_opaque_slice">(vec, handler, success);
+           roundtrip_test<"roundtrip_opaque_slice">(vec, ctx.handler(),
+                                                    success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }

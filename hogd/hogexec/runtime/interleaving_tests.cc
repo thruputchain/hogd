@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -52,12 +53,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     // perform a set_add_nnint
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         0,
-        [](SystemCallHandler &handler, int64_t set_amount,
+        [](NativeSyscallContext &ctx, int64_t set_amount,
            int64_t add_amount) -> InvokeStatus<void> {
-          auto r =
-              handler.set_nnint(kKey, set_amount, add_amount,
-                                std::to_underlying(
-                                    StorageDeltaFlags::kStorageDeltaFlagNone));
+          auto r = ctx.handler().set_nnint(
+              kKey, set_amount, add_amount,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
@@ -65,11 +65,10 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         });
     // reset contract state
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
-          auto r =
-              handler.set_nnint(kKey, 35, 0,
-                                std::to_underlying(
-                                    StorageDeltaFlags::kStorageDeltaFlagNone));
+        1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          auto r = ctx.handler().set_nnint(
+              kKey, 35, 0,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }

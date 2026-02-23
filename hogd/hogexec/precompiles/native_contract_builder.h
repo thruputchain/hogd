@@ -10,10 +10,12 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -25,24 +27,14 @@ namespace detail {
 template<typename T> struct NativeContractArgs;
 
 template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(SystemCallHandler &,
-                                              NativeRuntime &, Args...)> {
+struct NativeContractArgs<InvokeStatus<R> (*)(NativeSyscallContext &,
+                                              Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
-  static auto extra_args(SystemCallHandler &handler, NativeRuntime &runtime)
+  static auto extra_args(NativeSyscallContext &ctx)
   {
-    return std::tuple<SystemCallHandler &, NativeRuntime &>{handler, runtime};
-  }
-};
-
-template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(SystemCallHandler &, Args...)> {
-  using return_t = R;
-  using args_t = std::tuple<Args...>;
-  static auto extra_args(SystemCallHandler &handler, NativeRuntime & /*unused*/)
-  {
-    return std::tuple<SystemCallHandler &>{handler};
+    return std::tuple<NativeSyscallContext &>{ctx};
   }
 };
 
@@ -50,9 +42,9 @@ template<typename R, typename... Args>
 struct NativeContractArgs<InvokeStatus<R> (*)(NativeRuntime &, Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
-  static auto extra_args(SystemCallHandler & /*unused*/, NativeRuntime &runtime)
+  static auto extra_args(NativeSyscallContext &ctx)
   {
-    return std::tuple<NativeRuntime &>{runtime};
+    return std::tuple<NativeRuntime &>{ctx.runtime()};
   }
 };
 
@@ -61,8 +53,7 @@ struct NativeContractArgs<InvokeStatus<R> (*)(Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
-  static auto extra_args(SystemCallHandler & /*unused*/,
-                         NativeRuntime & /*unused*/)
+  static auto extra_args(NativeSyscallContext & /*unused*/)
   {
     return std::tuple{};
   }
@@ -151,9 +142,8 @@ public:
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
     auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
-                         SystemCallHandler &handler,
-                         NativeRuntime &runtime) -> InvokeStatus<void> {
-      auto calldata = handler.get_calldata();
+                         NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      auto calldata = ctx.handler().get_calldata();
       auto args = Serializer<Format>::template deserialize<args_t>(
           std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
@@ -164,8 +154,7 @@ public:
       auto return_value =
           [&]<size_t... Is>(
               std::index_sequence<Is...>) -> InvokeStatus<return_t> {
-        auto extra_args =
-            detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
+        auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
         return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
           return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
@@ -177,14 +166,14 @@ public:
       // Now we check whether the return value is a plain value,
       // or a variant of Result<T,E>
 
-      auto do_return = [&handler](auto const &r,
-                                  bool revert_frame) -> InvokeStatus<void> {
+      auto do_return = [&ctx](auto const &r,
+                              bool revert_frame) -> InvokeStatus<void> {
         auto return_buffer = Serializer<Format>::serialize(r);
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        handler.set_return_buffer(std::move(return_buffer.value()),
-                                  revert_frame);
+        ctx.handler().set_return_buffer(std::move(return_buffer.value()),
+                                        revert_frame);
         return {};
       };
 
@@ -239,6 +228,34 @@ public:
       }
     }
     return true;
+  }
+
+  static InvokeError host_fn_error_conversion(HostFnError const &err)
+  {
+    switch (err.code()) {
+    case HostFnErrorCode::kHostOutOfGas:
+      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    case HostFnErrorCode::kHostUnrecoverable:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostAbortTransaction:
+      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+    case HostFnErrorCode::kHostValidationFailure:
+      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    case HostFnErrorCode::kHostExit:
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    case HostFnErrorCode::kHostReturn:
+      error("unrecoverable: contracts using the NativeContractBuilder should "
+            "not call the Return syscall directly");
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostNoneOrRecoverable:
+      error("unrecoverable: host_fn_error_conversion: kHostNoneOrRecoverable "
+            "when error expected");
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    }
+    error(
+        "unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}",
+        err.code());
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   }
 
 private:

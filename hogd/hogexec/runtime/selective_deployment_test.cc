@@ -14,11 +14,13 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -66,13 +68,12 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [contract_1_hash](SystemCallHandler &handler,
-                               NativeRuntime & /*runtime*/)
-                 -> InvokeStatus<void> {
+             [contract_1_hash](
+                 NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Deploy only the first contract
 
                auto deploy_result =
-                   handler.deploy_contract(kDeployNonce, contract_1_hash);
+                   ctx.handler().deploy_contract(kDeployNonce, contract_1_hash);
                if (!deploy_result.has_value()) {
                  return deploy_result.error().to_invoke_error();
                }
@@ -166,14 +167,14 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [native_token_hash](SystemCallHandler &handler,
-                                 NativeRuntime & /*runtime*/)
-                 -> InvokeStatus<void> {
+             [native_token_hash](
+                 NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Attempt to deploy the native token contract - should fail
                ContractAddress deploy_addr;
-               auto [syscall_res, _gas] =
-                   syscall_DeployContract_inner(handler, kDeployNonce,
-                                                native_token_hash, deploy_addr);
+               auto syscall_res =
+                   ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
+                                                           native_token_hash,
+                                                           deploy_addr);
                if (!syscall_res.has_value() ||
                    syscall_res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {

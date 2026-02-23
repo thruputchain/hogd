@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -27,6 +28,7 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -59,14 +61,14 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Read the storage key, expecting it to be empty
                std::vector<std::byte> buf(1024);
                RuntimeMemoryLength len = 0;
                auto [status, _g1] = syscall_BytestringGet_inner(
-                   handler, key, std::as_writable_bytes(std::span(buf)), len);
+                   ctx.handler(), key, std::as_writable_bytes(std::span(buf)),
+                   len);
                if (!status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to get bytestring: " << status.error();
@@ -82,7 +84,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                // Write a bytestring to the storage key
                Bytestring bytestring = make_bytestring("hello");
                auto [write_status, _g2] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(bytestring)),
+                   ctx.handler(), key, std::as_bytes(std::span(bytestring)),
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!write_status.has_value()) {
@@ -100,12 +102,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                return {};
              }},
             {1,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
-               auto [delete_status, _g3] =
-                   syscall_DeleteObject_inner(handler, key, 0);
+               auto delete_status =
+                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
@@ -120,36 +121,45 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
                return {};
              }},
-            {2,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Call method 0 (read empty, then write)
-               auto [r0, _g0] = handler.invoke(
-                   handler.get_current_address(), 0,
-                   runtime.get_available_gas(), handler.get_calldata(),
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(),
+                     ctx.handler().get_calldata(),
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r0.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 1 (delete)
-               auto [r1, _g1] =
-                   handler.invoke(handler.get_current_address(), 1,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto r1 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 1,
+                     ctx.runtime().get_available_gas(), Calldata{},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 0 again (read empty, then write)
-               auto [r2, _g2] =
-                   handler.invoke(handler.get_current_address(), 0,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto r2 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), Calldata{},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r2.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -215,17 +225,14 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Read the storage key, expecting it to be empty
                int128_t current_set = 0;
                bool current_set_opt = false;
                int128_t current_add = 0;
-               auto [status, _g1] =
-                   syscall_NonnegativeIntGet_inner(handler, key, true,
-                                                   current_set, current_set_opt,
-                                                   current_add);
+               auto status = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                   key, true, current_set, current_set_opt, current_add);
                if (!status.has_value()) {
                  ADD_FAILURE() << "Failed to get nnint: " << status.error();
                  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -240,7 +247,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                // Write a nonnegative integer to the storage key
                int128_t set_value = 42;
                auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
-                   handler, key, &set_value, 0,
+                   ctx.handler(), key, &set_value, 0,
                    std::to_underlying(
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!write_status.has_value()) {
@@ -258,12 +265,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                return {};
              }},
             {1,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
-               auto [delete_status, _g3] =
-                   syscall_DeleteObject_inner(handler, key, 0);
+               auto delete_status =
+                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
@@ -278,36 +284,45 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
                return {};
              }},
-            {2,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Call method 0 (read empty, then write)
-               auto [r0, _g0] = handler.invoke(
-                   handler.get_current_address(), 0,
-                   runtime.get_available_gas(), handler.get_calldata(),
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(),
+                     ctx.handler().get_calldata(),
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r0.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 1 (delete)
-               auto [r1, _g1] =
-                   handler.invoke(handler.get_current_address(), 1,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto r1 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 1,
+                     ctx.runtime().get_available_gas(), Calldata{},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 0 again (read empty, then write)
-               auto [r2, _g2] =
-                   handler.invoke(handler.get_current_address(), 0,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto r2 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), Calldata{},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r2.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -374,15 +389,14 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Consume from the storage key, expecting it to be empty
                std::vector<std::byte> buf(1024);
                RuntimeMemoryLength written_len = 0;
                auto [status, _g1] = syscall_RetrocausalQueueConsume_inner(
-                   handler, key, false, std::as_writable_bytes(std::span(buf)),
-                   written_len);
+                   ctx.handler(), key, false,
+                   std::as_writable_bytes(std::span(buf)), written_len);
                if (!status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to consume from queue: " << status.error();
@@ -398,7 +412,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                // Insert an item into the queue
                QueueEntry entry = make_bytestring("item");
                auto [insert_status, _g2] = syscall_RetrocausalQueueInsert_inner(
-                   handler, key, std::as_bytes(std::span(entry)));
+                   ctx.handler(), key, std::as_bytes(std::span(entry)));
                if (!insert_status.has_value()) {
                  ADD_FAILURE() << "Failed to insert into queue: "
                                << insert_status.error();
@@ -414,12 +428,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                return {};
              }},
             {1,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
-               auto [delete_status, _g3] =
-                   syscall_DeleteObject_inner(handler, key, 0);
+               auto delete_status =
+                   ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
@@ -434,36 +447,45 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 
                return {};
              }},
-            {2,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
+            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Call method 0 (consume empty, then insert)
-               auto [r0, _g0] = handler.invoke(
-                   handler.get_current_address(), 0,
-                   runtime.get_available_gas(), handler.get_calldata(),
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(),
+                     ctx.handler().get_calldata(),
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r0.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 1 (delete)
-               auto [r1, _g1] =
-                   handler.invoke(handler.get_current_address(), 1,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto r1 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 1,
+                     ctx.runtime().get_available_gas(), Calldata{},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 0 again (consume empty, then insert)
-               auto [r2, _g2] =
-                   handler.invoke(handler.get_current_address(), 0,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+               auto r2 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     ctx.handler().get_current_address(), 0,
+                     ctx.runtime().get_available_gas(), Calldata{},
+                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     output_return_buffer_len);
+               }();
 
                if (!r2.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -523,24 +545,22 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
   auto make_verify_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                std::vector<std::byte> buf(1024);
                RuntimeMemoryLength written_len = 0;
                // First consume should succeed
                auto [status1, _g1] = syscall_RetrocausalQueueConsume_inner(
-                   handler, key, false, std::as_writable_bytes(std::span(buf)),
-                   written_len);
+                   ctx.handler(), key, false,
+                   std::as_writable_bytes(std::span(buf)), written_len);
                if (!status1.has_value() ||
                    status1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                // Second consume should fail (queue empty)
                auto [status2, _g2] = syscall_RetrocausalQueueConsume_inner(
-                   handler, key, false, std::as_writable_bytes(std::span(buf)),
-                   written_len);
+                   ctx.handler(), key, false,
+                   std::as_writable_bytes(std::span(buf)), written_len);
                if (!status2.has_value() ||
                    status2.value() !=
                        SyscallErrorCode::

@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -45,13 +46,12 @@ protected:
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, // Insert
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-               auto const &calldata = handler.get_calldata();
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &calldata = ctx.handler().get_calldata();
                auto key = make_storage_key("rcq0");
 
                for (uint8_t val : calldata) {
-                 auto res = handler.retrocausal_queue_insert(
+                 auto res = ctx.handler().retrocausal_queue_insert(
                      key, std::as_bytes(std::span(&val, 1)));
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
@@ -60,15 +60,14 @@ protected:
                return {};
              }},
             {1, // Consume
-             [this](SystemCallHandler &handler,
-                    NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             [this](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Calldata is the number of items to consume.
-               auto const &consume_count = handler.get_calldata().at(0);
+               auto const &consume_count = ctx.handler().get_calldata().at(0);
                auto key = make_storage_key("rcq0");
 
                last_consumed_values_.clear();
                for (uint8_t i = 0; i < consume_count; i++) {
-                 auto res = handler.retrocausal_queue_consume(key, false);
+                 auto res = ctx.handler().retrocausal_queue_consume(key, false);
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
                  }
@@ -83,10 +82,10 @@ protected:
                  last_consumed_values_.push_back(entry[0]);
                }
 
-               if (handler.get_calldata().size() > 1) {
-                 uint8_t abort_code = handler.get_calldata().at(1);
+               if (ctx.handler().get_calldata().size() > 1) {
+                 uint8_t abort_code = ctx.handler().get_calldata().at(1);
                  if (abort_code == 1) {
-                   auto status = handler.abort_transaction();
+                   auto status = ctx.handler().abort_transaction();
                    if (!status.has_value()) {
                      return status.error().to_invoke_error();
                    }
@@ -97,9 +96,8 @@ protected:
                return {};
              }},
             {2, // Insert and Consume
-             [this](SystemCallHandler &handler,
-                    NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-               auto const &calldata = handler.get_calldata();
+             [this](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &calldata = ctx.handler().get_calldata();
                // Format: [count_to_consume, val1, val2, ...]
                // First insert all values, then consume 'count_to_consume'
                // items.
@@ -108,7 +106,7 @@ protected:
 
                // Insert all values (bytes after the first)
                for (size_t i = 1; i < calldata.size(); i++) {
-                 auto res = handler.retrocausal_queue_insert(
+                 auto res = ctx.handler().retrocausal_queue_insert(
                      key, std::as_bytes(std::span(&calldata[i], 1)));
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
@@ -118,7 +116,7 @@ protected:
                // Then consume
                last_consumed_values_.clear();
                for (uint8_t i = 0; i < consume_count; i++) {
-                 auto res = handler.retrocausal_queue_consume(key, false);
+                 auto res = ctx.handler().retrocausal_queue_consume(key, false);
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
                  }
@@ -134,12 +132,11 @@ protected:
                return {};
              }},
             {3, // Write NNInt contract storage address
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-               auto const &value = handler.get_calldata().at(0);
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &value = ctx.handler().get_calldata().at(0);
                auto key = make_storage_key("nnint0");
 
-               auto r = handler.set_nnint(key, {value}, 0, {});
+               auto r = ctx.handler().set_nnint(key, {value}, 0, {});
                if (!r.has_value()) {
                  return r.error().to_invoke_error();
                }
