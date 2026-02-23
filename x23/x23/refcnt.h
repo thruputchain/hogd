@@ -131,17 +131,6 @@ public:
     return (self);
   }
   decltype(auto) operator=(this is_mutable auto &&self,
-                           const RefPtr &other) // NOLINT
-  {
-    if (self.p_ != other.p_) {
-      if (self.p_)
-        unref(self.p_);
-      if ((self.p_ = other.p_))
-        ref(self.p_);
-    }
-    return (self);
-  }
-  decltype(auto) operator=(this is_mutable auto &&self,
                            RefPtr &&other) noexcept // NOLINT
   {
     if (&self != &other) {

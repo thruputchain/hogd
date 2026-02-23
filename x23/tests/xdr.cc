@@ -192,3 +192,15 @@ TEST(XdrPtr, Constructor)
     EXPECT_EQ(v.size(), 3UZ);
   }
 }
+
+TEST(XdrPtr, ThreeWayCompareUsesPointeeValue)
+{
+  x23::Ptr<int32_t> a(7);
+  x23::Ptr<int32_t> b(7);
+  x23::Ptr<int32_t> c(9);
+
+  EXPECT_EQ(a, b);
+  EXPECT_TRUE((a <=> b) == 0);
+  EXPECT_LT(a, c);
+  EXPECT_TRUE((a <=> c) < 0);
+}
