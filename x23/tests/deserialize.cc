@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <span>
 
 #include <vector>
@@ -131,6 +132,15 @@ TEST(Serialize, NullBorrowedPtrSize)
   Buf buf = serialize(bp);
   // A null optional should serialize as a 4-byte zero discriminant.
   EXPECT_EQ(buf.size(), 4UZ);
+}
+
+TEST(Vec, ResizeAndOverwriteCountWraps)
+{
+  Str s;
+  EXPECT_THROW(
+      s.resize_and_overwrite(std::numeric_limits<size_t>::max(),
+                             [](char *, size_t) { return 0UZ; }),
+      XdrLengthError);
 }
 
 namespace {

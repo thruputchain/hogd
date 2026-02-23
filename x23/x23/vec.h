@@ -539,6 +539,10 @@ public:
   template<typename Op>
   void resize_and_overwrite(this auto &self, size_type count, Op op)
   {
+    if (count > max_size()) [[unlikely]]
+      throw XdrLengthError{
+          std::format("{} exceeds max size in Vec<{}, {}>", count, tname(),
+                      max_size())};
     self.resize_uninitialized(count + 1);
     self.resize(std::move(op)(self.data(), count));
   }
@@ -839,8 +843,7 @@ public:
   constexpr const char *c_str(this auto &self)
   {
     self.ensure();
-    if (*self.b_.end)
-      *self.b_.end = '\0';
+    *self.b_.end = '\0';
     return self.data();
   }
 
