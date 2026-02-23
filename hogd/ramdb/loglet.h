@@ -461,7 +461,11 @@ public:
       return *this;
     allocator_ = ul.allocator_;
     if (ll_) {
-      allocator_->free(ll_);
+      try {
+        allocator_->free(ll_);
+      } catch (const std::exception &e) {
+        error("Couldn't free UniqueLoglet: {}", e.what());
+      }
     }
     ll_ = std::exchange(ul.ll_, nullptr);
     return *this;
