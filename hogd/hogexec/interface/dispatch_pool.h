@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cassert>
 #include <functional>
-#include <future>
 #include <memory>
 #include <thread>
 #include <type_traits>
@@ -59,19 +58,18 @@ public:
     return total;
   }
 
-  // submit enqueues a job to a WorkerPool, selecting between the current CPU's
-  // LLC bucket pool and a random other pool based on pending job counts.
-  template<typename Func,
-           typename Ret = std::invoke_result_t<std::decay_t<Func>>>
-  requires std::is_invocable_r_v<Ret, Func>
-  std::future<Ret> submit(Func &&func)
+  // submit enqueues a fire-and-forget job to a WorkerPool, selecting between
+  // two random pools based on pending job counts (power-of-two-choices).
+  template<typename Func> requires std::is_invocable_r_v<void, Func>
+  void submit(Func &&func)
   {
     assert(!pools_.empty());
 
     // Only relevant for stress tests where DEFAULT_THREADPOOL_SIZE == 1
     if (pools_.size() == 1) [[unlikely]] {
       job_counts_[0].fetch_add(1, std::memory_order_relaxed);
-      return pools_[0]->submit(std::forward<Func>(func));
+      pools_[0]->submit_detached(std::forward<Func>(func));
+      return;
     }
     // Pick a random other pool to compare (excluding affinity_pool)
     static thread_local uint64_t rnd_seed{
@@ -107,7 +105,7 @@ public:
     // Increment counters
     job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
 
-    return pools_[pool_idx]->submit(std::forward<Func>(func));
+    pools_[pool_idx]->submit_detached(std::forward<Func>(func));
   }
 
   // print_stats prints per-pool job counts and resets them.
