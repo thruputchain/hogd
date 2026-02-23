@@ -162,7 +162,7 @@ protected:
            uint32_t consume_b) -> InvokeStatus<void> {
           // consume -> delete -> consume
 
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -181,7 +181,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -201,7 +201,7 @@ protected:
            uint32_t consume_b) -> InvokeStatus<void> {
           // consume (nothing observed) -> delete -> consume
 
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r1.has_value() ||
@@ -224,7 +224,7 @@ protected:
 
           wait_flag_2_.wait(false);
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -244,7 +244,7 @@ protected:
            uint32_t consume_b) -> InvokeStatus<void> {
           // insert() -> delete -> consume
 
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -263,7 +263,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -290,7 +290,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_1),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -309,7 +309,7 @@ protected:
         14,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -328,7 +328,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -338,7 +338,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_c),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -358,7 +358,7 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t insert_b) -> InvokeStatus<void> {
           // insert(a)
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -369,7 +369,7 @@ protected:
           }
 
           // consume(a)
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -390,7 +390,7 @@ protected:
           }
 
           // insert(b)
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -401,7 +401,7 @@ protected:
           }
 
           // consume(b)
-          auto [r5, _g5] = ctx.handler().invoke(
+          auto [r5, _g5] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -426,7 +426,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r2.has_value() ||
@@ -442,7 +442,7 @@ protected:
     // consume(nothing) -> delete -> consume(nothing)
     builder.add<SerializationFormat::kTxs>(
         18, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r1.has_value() ||
@@ -460,7 +460,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r3.has_value() ||
@@ -478,7 +478,7 @@ protected:
         19,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -497,7 +497,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -516,7 +516,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeNone};
           }
 
-          auto [r5, _g5] = ctx.handler().invoke(
+          auto [r5, _g5] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_c),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -546,7 +546,7 @@ protected:
           }
 
           // insert(a)
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -567,7 +567,7 @@ protected:
           }
 
           // insert(b)
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -578,7 +578,7 @@ protected:
           }
 
           // consume(b) -- self entry consumed before concurrent
-          auto [r5, _g5] = ctx.handler().invoke(
+          auto [r5, _g5] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -589,7 +589,7 @@ protected:
           }
 
           // consume(c) -- concurrent entry
-          auto [r6, _g6] = ctx.handler().invoke(
+          auto [r6, _g6] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_c),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -635,7 +635,7 @@ protected:
           }
 
           // consume (should get same entry since peek doesn't advance)
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(expected),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -657,7 +657,7 @@ protected:
            uint32_t insert_value,
            uint32_t concurrent_value) -> InvokeStatus<void> {
           // consume past block entry
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(past_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -678,7 +678,7 @@ protected:
           }
 
           // insert new entry
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -689,7 +689,7 @@ protected:
           }
 
           // consume self entry (self entries consumed before concurrent)
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -700,7 +700,7 @@ protected:
           }
 
           // consume concurrent entry
-          auto [r5, _g5] = ctx.handler().invoke(
+          auto [r5, _g5] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(concurrent_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -721,7 +721,7 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_value,
            uint32_t insert_value) -> InvokeStatus<void> {
           // consume retrocausal item
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -785,7 +785,7 @@ protected:
           }
 
           // insert item
-          auto [r7, _g7] = ctx.handler().invoke(
+          auto [r7, _g7] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -840,7 +840,7 @@ protected:
         26,
         [](NativeSyscallContext &ctx,
            uint32_t expected_value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 25, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
           if (!r1.has_value()) {
@@ -853,7 +853,7 @@ protected:
           }
 
           // queue should be intact after reverted delete
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(expected_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -871,7 +871,7 @@ protected:
         27,
         [](NativeSyscallContext &ctx, uint32_t peek_val, uint32_t consume_a,
            uint32_t consume_b) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
               x23::serialize(peek_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -881,7 +881,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
               x23::serialize(peek_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -891,7 +891,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -901,7 +901,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -921,7 +921,7 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t self_val,
            uint32_t concurrent_val) -> InvokeStatus<void> {
           // insert(self_val)
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(self_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -932,7 +932,7 @@ protected:
           }
 
           // try_invoke delete (reverted via inner error)
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 25, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
           if (!r2.has_value()) {
@@ -945,7 +945,7 @@ protected:
           }
 
           // consume(self_val) - self entries consumed first
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(self_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -956,7 +956,7 @@ protected:
           }
 
           // consume(concurrent_val)
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(concurrent_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -983,7 +983,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(val_a),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -993,7 +993,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(val_b),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1026,7 +1026,7 @@ protected:
         32,
         [](NativeSyscallContext &ctx,
            uint32_t expected_value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 31, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
           if (!r1.has_value()) {
@@ -1040,7 +1040,7 @@ protected:
           }
 
           // queue still intact
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(expected_value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1058,7 +1058,7 @@ protected:
         33,
         [](NativeSyscallContext &ctx, uint32_t old_val,
            uint32_t peek_val) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(old_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1077,7 +1077,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
               x23::serialize(peek_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1095,7 +1095,7 @@ protected:
         28,
         [](NativeSyscallContext &ctx, uint32_t old_val,
            uint32_t new_val) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(old_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1114,7 +1114,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(new_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1124,7 +1124,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
               x23::serialize(new_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1142,7 +1142,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         34,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1159,7 +1159,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         35,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1175,7 +1175,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         36,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1189,7 +1189,7 @@ protected:
           }
 
           // queue should be empty after reverted insert
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r2.has_value() ||
@@ -1206,7 +1206,7 @@ protected:
         37,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t real_val) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
               x23::serialize(revert_val),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1216,7 +1216,7 @@ protected:
           }
 
           // successful insert
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(real_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1227,7 +1227,7 @@ protected:
           }
 
           // only real_val should be consumable
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(real_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1244,7 +1244,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         38,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1258,7 +1258,7 @@ protected:
           }
 
           // entry should still be available after reverted consume
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1275,7 +1275,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         39,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1289,7 +1289,7 @@ protected:
           }
 
           // entry should still be visible via peek
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1307,7 +1307,7 @@ protected:
         40,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           // first reverted consume
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1322,7 +1322,7 @@ protected:
           }
 
           // second reverted consume
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1337,7 +1337,7 @@ protected:
           }
 
           // entry should still be available
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(value),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1358,7 +1358,7 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_val,
            uint32_t insert_val) -> InvokeStatus<void> {
           // try_invoke: consume + insert, both reverted
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 42, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_val, insert_val),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1372,7 +1372,7 @@ protected:
           }
 
           // original entry still available
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1383,7 +1383,7 @@ protected:
           }
 
           // reverted insert should be gone
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(), {},
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r3.has_value() ||
@@ -1401,7 +1401,7 @@ protected:
         42,
         [](NativeSyscallContext &ctx, uint32_t consume_val,
            uint32_t insert_val) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1411,7 +1411,7 @@ protected:
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1429,7 +1429,7 @@ protected:
         43,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t concurrent_val) -> InvokeStatus<void> {
-          auto [r1, _g1] = ctx.handler().invoke(
+          auto [r1, _g1] = syscall_invoke(ctx, 
               kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
               x23::serialize(revert_val),
               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1439,7 +1439,7 @@ protected:
           }
 
           // consume concurrent entry (unaffected by reverted insert)
-          auto [r2, _g2] = ctx.handler().invoke(
+          auto [r2, _g2] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(concurrent_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1492,7 +1492,7 @@ protected:
           }
 
           // consume concurrent entry -- the consume should succeed
-          auto [r4, _g4] = ctx.handler().invoke(
+          auto [r4, _g4] = syscall_invoke(ctx, 
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(concurrent_val),
               std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -1534,7 +1534,7 @@ protected:
 
           // consume concurrent entry -- the consume should fail because the
           // bytestring exists there
-          auto [r3, _g3] = ctx.handler().invoke(
+          auto [r3, _g3] = syscall_invoke(ctx, 
               kContractAddress, 4, std::numeric_limits<GasAmount>::max(),
               Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone));
           if (!r3.has_value() ||

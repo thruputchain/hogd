@@ -92,7 +92,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
            }},
           {6,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto [r, _gas] = ctx.handler().invoke(native_contract_address, 0,
+             auto [r, _gas] = syscall_invoke(ctx, native_contract_address, 0,
                                                    UINT64_MAX, {}, 0);
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -100,7 +100,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto [r2, _gas2] = ctx.handler().invoke(native_contract_address, 1,
+             auto [r2, _gas2] = syscall_invoke(ctx, native_contract_address, 1,
                                                      UINT64_MAX, {}, 0);
              if (!r2.has_value() ||
                  r2.value() !=
@@ -111,7 +111,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              // Out of gas in child becomes deterministic (handleable) error in
              // caller
-             auto [r3, _gas3] = ctx.handler().invoke(native_contract_address, 2,
+             auto [r3, _gas3] = syscall_invoke(ctx, native_contract_address, 2,
                                                      UINT64_MAX, {}, 0);
              if (!r3.has_value() ||
                  r3.value() !=
@@ -120,7 +120,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
              }
 
-             auto [r4, _gas4] = ctx.handler().invoke(native_contract_address, 3,
+             auto [r4, _gas4] = syscall_invoke(ctx, native_contract_address, 3,
                                                      UINT64_MAX, {}, 0);
              if (r4.has_value() ||
                  r4.error() !=
@@ -129,7 +129,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
              }
 
-             auto [r5, _gas5] = ctx.handler().invoke(native_contract_address, 4,
+             auto [r5, _gas5] = syscall_invoke(ctx, native_contract_address, 4,
                                                      UINT64_MAX, {}, 0);
              if (r5.has_value() ||
                  r5.error() !=
@@ -138,7 +138,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
              }
 
-             auto [r6, _gas6] = ctx.handler().invoke(native_contract_address, 5,
+             auto [r6, _gas6] = syscall_invoke(ctx, native_contract_address, 5,
                                                      UINT64_MAX, {}, 0);
              if (r6.has_value() ||
                  r6.error() !=
@@ -201,7 +201,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Valid flags should succeed
              auto [r1, _g1] =
-                 ctx.handler().invoke(target_address, 0, UINT64_MAX, {},
+                 syscall_invoke(ctx, target_address, 0, UINT64_MAX, {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value() ||
@@ -211,7 +211,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              auto [r2, _g2] =
-                 ctx.handler().invoke(target_address, 0, UINT64_MAX, {},
+                 syscall_invoke(ctx, target_address, 0, UINT64_MAX, {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagReadOnly));
              if (!r2.has_value() ||
@@ -221,7 +221,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              // Combined valid flags should succeed
-             auto [r3, _g3] = ctx.handler().invoke(
+             auto [r3, _g3] = syscall_invoke(ctx, 
                  target_address, 0, UINT64_MAX, {},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke) |
                      std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
@@ -234,7 +234,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
              auto [r4, _g4] =
-                 ctx.handler().invoke(target_address, 0, UINT64_MAX, {}, 0x4);
+                 syscall_invoke(ctx, target_address, 0, UINT64_MAX, {}, 0x4);
              if (!r4.has_value() ||
                  r4.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
@@ -244,7 +244,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              // Arbitrary garbage bits
              auto [r5, _g5] =
-                 ctx.handler().invoke(target_address, 0, UINT64_MAX, {}, 0xFF);
+                 syscall_invoke(ctx, target_address, 0, UINT64_MAX, {}, 0xFF);
              if (!r5.has_value() ||
                  r5.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
@@ -253,7 +253,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              // High bits set
-             auto [r6, _g6] = ctx.handler().invoke(target_address, 0,
+             auto [r6, _g6] = syscall_invoke(ctx, target_address, 0,
                                                    UINT64_MAX, {}, 0x7FFF'FFFF);
              if (!r6.has_value() ||
                  r6.value() !=

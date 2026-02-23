@@ -130,7 +130,7 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
         }
 
         auto [invoke_status, _gas] =
-            ctx.handler().invoke(kAddress, 1, UINT64_MAX, Calldata{},
+            syscall_invoke(ctx, kAddress, 1, UINT64_MAX, Calldata{},
                                  std::to_underlying(
                                      InvokeFlag::kInvokeFlagNone));
         if (!invoke_status.has_value() ||

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -12,6 +13,7 @@
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
+#include "transaction.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 
@@ -86,5 +88,22 @@ private:
   }
 
 };
+
+// Helper used by native-contract tests: invoke via syscall routing while
+// preserving the old `(status, gas)` shape expected by many tests.
+inline std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_invoke(NativeSyscallContext &ctx, ContractAddress const &input_address,
+               uint64_t input_entrypoint_id, GasAmount input_gas_limit,
+               Calldata input_calldata, InvokeFlagSet input_flags)
+{
+  RuntimeMemoryLength output_return_buffer_len{};
+  auto status = ctx.syscall<SyscallNo::kInvoke>(
+      input_address, input_entrypoint_id, input_gas_limit,
+      std::as_bytes(std::span(input_calldata)), input_flags,
+      output_return_buffer_len);
+  // `ctx.syscall` already applies gas accounting; return 0 to keep test call
+  // sites that still consume `gas` from double-charging.
+  return {status, WrappedGasAmount{0}};
+}
 
 } // namespace hogd

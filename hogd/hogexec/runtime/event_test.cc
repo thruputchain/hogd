@@ -103,7 +103,7 @@ TEST_F(EventTest, EventSuccess)
            }},
           {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [status, gas] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagNone));
@@ -116,7 +116,7 @@ TEST_F(EventTest, EventSuccess)
              }
 
              auto [status2, gas2] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagNone));
@@ -424,7 +424,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                std::string test_data = "method1_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
-               auto [status, gas] = ctx.handler().invoke(
+               auto [status, gas] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), calldata,
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -451,7 +451,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                std::string test_data = "method2_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
-               auto [status, gas] = ctx.handler().invoke(
+               auto [status, gas] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), calldata,
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -477,7 +477,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "first_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] = ctx.handler().invoke(
+                 auto [status, gas] = syscall_invoke(ctx, 
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), calldata,
                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -497,7 +497,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
                // Call method 1 (should revert, so no event)
                {
-                 auto [status, gas] = ctx.handler().invoke(
+                 auto [status, gas] = syscall_invoke(ctx, 
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(), {},
                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -521,7 +521,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "second_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] = ctx.handler().invoke(
+                 auto [status, gas] = syscall_invoke(ctx, 
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), calldata,
                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -542,7 +542,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                // Call method 2 (should fail with deterministic error, so no
                // event)
                {
-                 auto [status, gas] = ctx.handler().invoke(
+                 auto [status, gas] = syscall_invoke(ctx, 
                      ctx.handler().get_current_address(), 2,
                      ctx.runtime().get_available_gas(), {},
                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -566,7 +566,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  std::string test_data = "third_event";
                  Calldata calldata(test_data.begin(), test_data.end());
 
-                 auto [status, gas] = ctx.handler().invoke(
+                 auto [status, gas] = syscall_invoke(ctx, 
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), calldata,
                      std::to_underlying(InvokeFlag::kInvokeFlagNone));

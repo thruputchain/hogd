@@ -90,7 +90,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
              // Call Contract B (which will revert)
              auto [r1, _g1] =
-                 ctx.handler().invoke(contract_b_addr, 0,
+                 syscall_invoke(ctx, contract_b_addr, 0,
                                       ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -239,7 +239,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Call Contract B
              auto [r1, _g1] =
-                 ctx.handler().invoke(contract_b_addr, 0,
+                 syscall_invoke(ctx, contract_b_addr, 0,
                                       ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -288,7 +288,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Call Contract C (which will revert)
              auto [r1, _g1] =
-                 ctx.handler().invoke(contract_c_addr, 0,
+                 syscall_invoke(ctx, contract_c_addr, 0,
                                       ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -443,7 +443,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
              // Call Contract B (which will revert)
              auto [r1, _g1] =
-                 ctx.handler().invoke(contract_b_addr, 0,
+                 syscall_invoke(ctx, contract_b_addr, 0,
                                       ctx.runtime().get_available_gas(), {}, 0);
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};

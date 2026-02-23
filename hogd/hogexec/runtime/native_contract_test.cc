@@ -116,7 +116,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
                            calldata.data() + sizeof(Runtime::MethodID),
                            invoked_addr.size());
 
-               auto invoke_res = ctx.handler().invoke(
+               auto invoke_res = syscall_invoke(ctx, 
                    invoked_addr, invoked_id,
                    std::numeric_limits<GasAmount>::max(), Calldata{},
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -182,7 +182,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       1, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
-        auto [r1, g1] = ctx.handler().invoke(
+        auto [r1, g1] = syscall_invoke(ctx, 
             kAddress, 0, UINT64_MAX,
             Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                 serialize<uint32_t>(100)
@@ -195,7 +195,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r2, g2] = ctx.handler().invoke(
+        auto [r2, g2] = syscall_invoke(ctx, 
             kAddress, 0, UINT64_MAX,
             Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                 serialize<uint32_t>(200)
@@ -208,7 +208,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r3, g3] = ctx.handler().invoke(
+        auto [r3, g3] = syscall_invoke(ctx, 
             kAddress, 0, UINT64_MAX,
             Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                 serialize<uint32_t>(150)
@@ -230,7 +230,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
-        auto [r, g] = ctx.handler().invoke(kAddress, 1, UINT64_MAX, Calldata{},
+        auto [r, g] = syscall_invoke(ctx, kAddress, 1, UINT64_MAX, Calldata{},
                                            std::to_underlying(
                                                InvokeFlag::kInvokeFlagNone));
         if (!r.has_value()) {

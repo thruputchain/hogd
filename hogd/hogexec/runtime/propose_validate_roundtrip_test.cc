@@ -74,7 +74,7 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // try_invoke B method 0 — should succeed
-             auto [r0, _g0] = ctx.handler().invoke(
+             auto [r0, _g0] = syscall_invoke(ctx, 
                  kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
@@ -82,7 +82,7 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
              }
 
              // try_invoke B method 1 — should also succeed
-             auto [r1, _g1] = ctx.handler().invoke(
+             auto [r1, _g1] = syscall_invoke(ctx, 
                  kAddrB, 1, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value()) {
@@ -189,7 +189,7 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Single try_invoke that succeeds: produces 1 bit
-             auto [r0, _g0] = ctx.handler().invoke(
+             auto [r0, _g0] = syscall_invoke(ctx, 
                  kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
@@ -269,7 +269,7 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // try_invoke B method 0
-             auto [r0, _g0] = ctx.handler().invoke(
+             auto [r0, _g0] = syscall_invoke(ctx, 
                  kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
@@ -278,7 +278,7 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 
              // Only do the second try_invoke if the first succeeded
              if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               auto [r1, _g1] = ctx.handler().invoke(
+               auto [r1, _g1] = syscall_invoke(ctx, 
                    kAddrB, 1, ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
                if (!r1.has_value()) {

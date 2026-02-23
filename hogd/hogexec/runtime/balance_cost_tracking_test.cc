@@ -307,7 +307,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
              auto calldata1 = erc20_meta::make_calldata<"transfer">(
                  kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
-             auto [r1, _g1] = ctx.handler().invoke(
+             auto [r1, _g1] = syscall_invoke(ctx, 
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
                  ctx.runtime().get_available_gas(), calldata1,
@@ -323,7 +323,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
              // 2. Call transfer with same arguments, NOT in try_invoke frame -
              // should succeed (creates the balance)
-             auto [r2, _g2] = ctx.handler().invoke(
+             auto [r2, _g2] = syscall_invoke(ctx, 
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
                  ctx.runtime().get_available_gas(), calldata1,
@@ -341,7 +341,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
              auto calldata2 = erc20_meta::make_calldata<"transfer">(
                  kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
-             auto [r3, _g3] = ctx.handler().invoke(
+             auto [r3, _g3] = syscall_invoke(ctx, 
                  native_token_addr,
                  sdk_method_id(erc20_meta::entrypoint<"transfer">()),
                  ctx.runtime().get_available_gas(), calldata2,

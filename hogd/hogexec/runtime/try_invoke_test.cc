@@ -112,7 +112,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
         {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            auto calldata = ctx.handler().get_calldata();
 
-           auto [r0, _g0] = ctx.handler().invoke(
+           auto [r0, _g0] = syscall_invoke(ctx, 
                ctx.handler().get_current_address(), 0,
                ctx.runtime().get_available_gas(), ctx.handler().get_calldata(),
                std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -121,7 +121,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
-           auto [r1, _g1] = ctx.handler().invoke(
+           auto [r1, _g1] = syscall_invoke(ctx, 
                ctx.handler().get_current_address(), 1,
                ctx.runtime().get_available_gas(), Calldata{},
                std::to_underlying(InvokeFlag::kInvokeFlagNone));
@@ -219,7 +219,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                         ctx.runtime().get_available_gas(),
                                         ctx.handler().get_calldata(),
                                         std::to_underlying(
@@ -344,7 +344,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Try invoke method 0
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                         ctx.runtime().get_available_gas(), {},
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -353,7 +353,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                }
                // Try invoke method 1
                auto [r1, _g1] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                         ctx.runtime().get_available_gas(), {},
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -366,7 +366,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Try invoke method 0
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                         ctx.runtime().get_available_gas(), {},
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -380,7 +380,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Regular invoke of method 3
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 3,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 3,
                                         ctx.runtime().get_available_gas(), {},
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagNone));
@@ -389,7 +389,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                }
                // Try invoke method 1
                auto [r1, _g1] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                         ctx.runtime().get_available_gas(), {},
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -569,7 +569,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                // Invoke method 0 in try_invoke frame with arguments [-5]
                Calldata args = {static_cast<uint8_t>(-5)};
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                         ctx.runtime().get_available_gas(), args,
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -685,7 +685,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Try invoke method 0 with "hello"
                Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-               auto [r0, _g0] = ctx.handler().invoke(
+               auto [r0, _g0] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_hello,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -696,7 +696,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 
                // Try invoke method 0 with "world"
                Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-               auto [r1, _g1] = ctx.handler().invoke(
+               auto [r1, _g1] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_world,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -711,7 +711,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                // Try invoke method 0 with "foo" (should fail due to exclusive
                // lock)
                Calldata args_foo = {'f', 'o', 'o'};
-               auto [r0, _g0] = ctx.handler().invoke(
+               auto [r0, _g0] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_foo,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -824,7 +824,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Try invoke method 0 with "hello"
                Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-               auto [r0, _g0] = ctx.handler().invoke(
+               auto [r0, _g0] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_hello,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -835,7 +835,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
                // Try invoke method 0 with "world"
                Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-               auto [r1, _g1] = ctx.handler().invoke(
+               auto [r1, _g1] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_world,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -850,7 +850,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                // Try invoke method 0 with "foo" (should fail due to exclusive
                // lock)
                Calldata args_foo = {'f', 'o', 'o'};
-               auto [r0, _g0] = ctx.handler().invoke(
+               auto [r0, _g0] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_foo,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -999,7 +999,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Invoke method 0 in try_invoke frame with arguments [-5]
                Calldata args = {static_cast<uint8_t>(-5)};
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                         ctx.runtime().get_available_gas(), args,
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -1021,7 +1021,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Invoke method 0 with arguments [1]
                Calldata args = {1};
                auto [r0, _g0] =
-                   ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                         ctx.runtime().get_available_gas(), args,
                                         std::to_underlying(
                                             InvokeFlag::kInvokeFlagTryInvoke));
@@ -1164,7 +1164,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                bool expect_second_succeeds = static_cast<bool>(calldata[1]);
 
                Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
-               auto [r0, _g0] = ctx.handler().invoke(
+               auto [r0, _g0] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_first_invoke,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1179,7 +1179,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                }
 
                Calldata args_second_invoke = {5, 10};
-               auto [r1, _g1] = ctx.handler().invoke(
+               auto [r1, _g1] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_second_invoke,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1203,7 +1203,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
 
                Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
-               auto [r0, _g0] = ctx.handler().invoke(
+               auto [r0, _g0] = syscall_invoke(ctx, 
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), args_invoke,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
@@ -1434,7 +1434,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
       {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
          // First, try_invoke method 1 (should fail)
          auto [r1, _g1] =
-             ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+             syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                   ctx.runtime().get_available_gas(), {},
                                   std::to_underlying(
                                       InvokeFlag::kInvokeFlagTryInvoke));
@@ -1447,7 +1447,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
          }
          // Then, try_invoke method 0 (should succeed)
          auto [r0, _g0] =
-             ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+             syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                   ctx.runtime().get_available_gas(), {},
                                   std::to_underlying(
                                       InvokeFlag::kInvokeFlagTryInvoke));
@@ -1583,7 +1583,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
           {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 0
              auto [r0, _g0] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -1593,7 +1593,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              }
              // Try invoke method 1
              auto [r1, _g1] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -1603,7 +1603,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              }
              // Try invoke method 2 (should fail)
              auto [r2, _g2] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 2,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -1759,7 +1759,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
       {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
          // Try invoke method 0 (short)
          auto [r0, _g0] =
-             ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+             syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                   ctx.runtime().get_available_gas(), {},
                                   std::to_underlying(
                                       InvokeFlag::kInvokeFlagTryInvoke));
@@ -1769,7 +1769,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
          }
          // Try invoke method 1 (medium)
          auto [r1, _g1] =
-             ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+             syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                   ctx.runtime().get_available_gas(), {},
                                   std::to_underlying(
                                       InvokeFlag::kInvokeFlagTryInvoke));
@@ -1779,7 +1779,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
          }
          // Try invoke method 2 (long) -- should fail
          auto [r2, _g2] =
-             ctx.handler().invoke(ctx.handler().get_current_address(), 2,
+             syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
                                   ctx.runtime().get_available_gas(), {},
                                   std::to_underlying(
                                       InvokeFlag::kInvokeFlagTryInvoke));
@@ -1901,7 +1901,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
           {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 0 (long)
              auto [r0, _g0] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -1911,7 +1911,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
              }
              // Try invoke method 1 (short)
              auto [r1, _g1] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -2036,7 +2036,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 1 (short write)
              auto [r1, _g1] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -2051,7 +2051,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
           {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 0 (long write)
              auto [r0, _g0] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -2062,7 +2062,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 
              // Regular invoke on method 2
              auto [r2, _g2] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 2,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagNone));
@@ -2189,7 +2189,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              }
 
              // Invoke receiver contract to use the tokens
-             auto [r_receive, g_receive] = ctx.handler().invoke(
+             auto [r_receive, g_receive] = syscall_invoke(ctx, 
                  receiver_addr, 0, ctx.runtime().get_available_gas(), {},
                  std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
@@ -2368,7 +2368,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                       .value();
 
           auto [r0, _g0] =
-              ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+              syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                    ctx.runtime().get_available_gas(), calldata0,
                                    std::to_underlying(
                                        InvokeFlag::kInvokeFlagTryInvoke));
@@ -2383,7 +2383,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                       .value();
 
           auto [r1, _g1] =
-              ctx.handler().invoke(ctx.handler().get_current_address(), 0,
+              syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
                                    ctx.runtime().get_available_gas(), calldata1,
                                    std::to_underlying(
                                        InvokeFlag::kInvokeFlagTryInvoke));
@@ -2743,7 +2743,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
            [key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 1
              auto [r1, _g1] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 1,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
@@ -2783,7 +2783,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 2
              auto [r2, _g2] =
-                 ctx.handler().invoke(ctx.handler().get_current_address(), 2,
+                 syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
                                       ctx.runtime().get_available_gas(), {},
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagTryInvoke));
