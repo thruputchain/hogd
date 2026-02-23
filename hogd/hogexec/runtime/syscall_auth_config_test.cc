@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/rust/contract_types/bindings.h"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"

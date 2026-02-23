@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "precompiles.hh"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
