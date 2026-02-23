@@ -33,31 +33,11 @@
 #include "syscall_error.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
-
-// Convert a HostFnError from a syscall result to an InvokeError.
-InvokeError
-to_invoke_error(HostFnError const &err)
-{
-  switch (err.code()) {
-  case HostFnErrorCode::kHostOutOfGas:
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-  case HostFnErrorCode::kHostUnrecoverable:
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-  case HostFnErrorCode::kHostAbortTransaction:
-    return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-  case HostFnErrorCode::kHostValidationFailure:
-    return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-  case HostFnErrorCode::kHostExit:
-  case HostFnErrorCode::kHostReturn:
-  case HostFnErrorCode::kHostNoneOrRecoverable:
-    break;
-  }
-  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-}
 
 // Emit an event through the kLogEvent syscall.
 // The event_buf must contain topics concatenated with data (as produced by
@@ -88,7 +68,7 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
   auto data = buf.subspan(NumTopics * sizeof(Topic));
   auto r = ctx.syscall<SyscallNo::kLogEvent>(t0, t1, t2, data);
   if (!r.has_value()) {
-    return to_invoke_error(r.error());
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -103,7 +83,7 @@ get_msg_sender(NativeSyscallContext &ctx)
   ContractAddress sender{};
   auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
   if (!r.has_value()) {
-    return to_invoke_error(r.error());
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -129,11 +109,10 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
-                                                 output_set_opt, output_add);
+  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      allow_key, true, output_set, output_set_opt, output_add);
   if (!r.has_value()) {
-    return to_invoke_error(r.error());
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return false;
@@ -150,7 +129,7 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
       allow_key, &output_set, new_add,
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   if (!r2.has_value()) {
-    return to_invoke_error(r2.error());
+    return NativeContractBuilder::host_fn_error_conversion(r2.error());
   }
   return *r2 == SyscallErrorCode::kSyscallErrorCodeNone;
 }
@@ -269,7 +248,8 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   }
 
   // subtract amount from spender's allowance
-  auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
+  auto allow_res =
+      adjust_allowance(ctx, owner, *spender, -amount_signed_int);
   if (!allow_res.has_value()) {
     return allow_res.error();
   }
@@ -347,11 +327,10 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
-                                                 output_set_opt, output_add);
+  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      allow_key, true, output_set, output_set_opt, output_add);
   if (!r.has_value()) {
-    return to_invoke_error(r.error());
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -402,7 +381,8 @@ make_native_token_contract()
         if (!ctx.runtime().consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
-        auto balance = ctx.handler().get_native_token_balance(contract_address);
+        auto balance =
+            ctx.handler().get_native_token_balance(contract_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }
@@ -429,7 +409,8 @@ make_native_token_contract()
           return caller_address.error();
         }
 
-        auto balance = ctx.handler().get_native_token_balance(*caller_address);
+        auto balance =
+            ctx.handler().get_native_token_balance(*caller_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }

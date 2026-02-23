@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -227,6 +228,29 @@ public:
       }
     }
     return true;
+  }
+
+  static InvokeError host_fn_error_conversion(HostFnError const& err) {
+    switch (err.code()) {
+    case HostFnErrorCode::kHostOutOfGas:
+      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    case HostFnErrorCode::kHostUnrecoverable:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostAbortTransaction:
+      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+    case HostFnErrorCode::kHostValidationFailure:
+      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    case HostFnErrorCode::kHostExit:
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    case HostFnErrorCode::kHostReturn:
+      error("unrecoverable: contracts using the NativeContractBuilder should not call the Return syscall directly");
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostNoneOrRecoverable:
+      error("unrecoverable: host_fn_error_conversion: kHostNoneOrRecoverable when error expected");
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    }
+    error("unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}", err.code());
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   }
 
 private:

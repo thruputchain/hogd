@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -34,27 +35,6 @@
 namespace hogd {
 
 namespace {
-
-// Convert a HostFnError from a syscall result to an InvokeError.
-InvokeError
-to_invoke_error(HostFnError const &err)
-{
-  switch (err.code()) {
-  case HostFnErrorCode::kHostOutOfGas:
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-  case HostFnErrorCode::kHostUnrecoverable:
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-  case HostFnErrorCode::kHostAbortTransaction:
-    return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-  case HostFnErrorCode::kHostValidationFailure:
-    return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-  case HostFnErrorCode::kHostExit:
-  case HostFnErrorCode::kHostReturn:
-  case HostFnErrorCode::kHostNoneOrRecoverable:
-    break;
-  }
-  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-}
 
 StorageKeyContractData
 calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
@@ -101,7 +81,7 @@ load_allocation(NativeSyscallContext &ctx,
                                                  output_set, output_set_opt,
                                                  output_add);
   if (!r.has_value()) {
-    return to_invoke_error(r.error());
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -128,7 +108,7 @@ delete_storage_key(NativeSyscallContext &ctx,
       contract_data_key,
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   if (!r.has_value()) {
-    return to_invoke_error(r.error());
+    return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -197,7 +177,7 @@ make_native_initial_token_claim_contract()
         auto deploy_res =
             ctx.syscall<SyscallNo::kDeployContract>(nonce, hash, deployed_addr);
         if (!deploy_res.has_value()) {
-          return to_invoke_error(deploy_res.error());
+          return NativeContractBuilder::host_fn_error_conversion(deploy_res.error());
         }
         if (*deploy_res != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -214,7 +194,7 @@ make_native_initial_token_claim_contract()
             output_return_buffer_len);
 
         if (!invoke_result.has_value()) {
-          return to_invoke_error(invoke_result.error());
+          return NativeContractBuilder::host_fn_error_conversion(invoke_result.error());
         }
         if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
