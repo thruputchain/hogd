@@ -53,12 +53,15 @@ protected:
   }
 
   static DecoratedSignature make_signature(SecretKey sk, Transaction const &tx,
-                                           uint32_t pk_id)
+                                           uint32_t auth_claim_idx,
+                                           uint32_t public_key_id)
   {
     Signature sig(CryptographicScheme::Ed25519);
     assert(sk.scheme() == CryptographicScheme::Ed25519);
     sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
-    return {.public_key_id = pk_id, .signature = sig};
+    return {.auth_claim_idx = auth_claim_idx,
+            .public_key_id = public_key_id,
+            .signature = sig};
   }
 
   static std::pair<PublicKey, SecretKey> make_key_pair()
@@ -81,11 +84,10 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});
-  DecoratedSignature sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
 
-  SignedTransaction stx =
-      SignedTransaction{.tx = make_transaction({claim}),
-                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
+  SignedTransaction stx{.tx = make_transaction({claim}), .signatures = {sig}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -131,11 +133,10 @@ TEST_F(AuthClaimTests, GasAllSponsored)
       GasClaim{.sponsored_contract = aux_contract, .amount = 100});
   tx.invocation.gas_limit = 100;
 
-  DecoratedSignature sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
 
-  SignedTransaction stx =
-      SignedTransaction{.tx = tx,
-                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -177,11 +178,10 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
       GasClaim{.sponsored_contract = aux_contract, .amount = 100});
   tx.invocation.gas_limit = 200;
 
-  DecoratedSignature sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
 
-  SignedTransaction stx =
-      SignedTransaction{.tx = tx,
-                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -222,11 +222,10 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});
-  DecoratedSignature sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
 
-  SignedTransaction stx =
-      SignedTransaction{.tx = make_transaction({claim}),
-                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
+  SignedTransaction stx{.tx = make_transaction({claim}), .signatures = {sig}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -244,11 +243,10 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
     EXPECT_TRUE(signature_verifier.verify());
   }
   auto [pk2, sk2] = make_key_pair();
-  DecoratedSignature sig2 = make_signature(sk2, tx, 0);
+  DecoratedSignature sig2 =
+      make_signature(sk2, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
 
-  SignedTransaction stx2 =
-      SignedTransaction{.tx = make_transaction({claim}),
-                        .signatures = {DecoratedSignatureList{.list = {sig2}}}};
+  SignedTransaction stx2{.tx = make_transaction({claim}), .signatures = {sig2}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx2).has_value());
 

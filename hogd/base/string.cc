@@ -12,6 +12,7 @@
 
 #include "hogd/base/bits.h"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -126,9 +127,10 @@ encode_hex(std::span<const std::byte> buf)
 std::vector<std::byte>
 decode_hex(std::string_view str)
 {
+  CHECK(str.size() % 2 == 0);
   std::vector<std::byte> out;
   out.reserve(str.size() / 2);
-  for (size_t i = 0; i < str.size(); i += 2) {
+  for (size_t i = 0; i + 1 < str.size(); i += 2) {
     std::byte byte =
         hex_digit_to_nibble(str[i]) << 4 | hex_digit_to_nibble(str[i + 1]);
     out.push_back(byte);

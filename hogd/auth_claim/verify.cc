@@ -10,6 +10,7 @@
 #include "auth_claim.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -134,16 +135,16 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_individual_key_claim_internal(
     uint32_t key_id, const AddressAuthData *auth_data,
-    x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
+    x23::Vec<const DecoratedSignature *> const &sigs,
     x23::BufView serialized_tx, Ed25519SignatureVerifier *signature_verifier)
 {
   if (sigs.size() != 1) {
     trace("Auth malformed: expected 1 signature, got {}", sigs.size());
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  if (sigs[0].public_key_id != key_id) {
+  if (sigs[0]->public_key_id != key_id) {
     trace("Auth malformed: signature id mismatch: expected {}, got {}", key_id,
-          sigs[0].public_key_id);
+          sigs[0]->public_key_id);
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
@@ -157,7 +158,7 @@ verify_individual_key_claim_internal(
 
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
-    return verify_decorated_signature(sigs[0], *auth_data, serialized_tx,
+    return verify_decorated_signature(*sigs[0], *auth_data, serialized_tx,
                                       signature_verifier);
   }
   return {};
@@ -168,15 +169,15 @@ AuthVerifyStatus<void>
 verify_weight_key_claim_internal(
     BitMap accepted_keys, Weight required_weight,
     const AddressAuthData *auth_data,
-    x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
+    const x23::Vec<const DecoratedSignature *> &sigs,
     x23::BufView serialized_tx, Ed25519SignatureVerifier *signature_verifier)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
-  for (const DecoratedSignature &sig : sigs) {
-    if (!bitmap_accepts_key(accepted_keys, sig.public_key_id)) {
+  for (const DecoratedSignature *sig : sigs) {
+    if (!bitmap_accepts_key(accepted_keys, sig->public_key_id)) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
   }
@@ -184,11 +185,11 @@ verify_weight_key_claim_internal(
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     size_t w = 0;
-    for (const DecoratedSignature &sig : sigs) {
-      if (!has_public_key(*auth_data, sig.public_key_id)) {
+    for (const DecoratedSignature *sig : sigs) {
+      if (!has_public_key(*auth_data, sig->public_key_id)) {
         return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
-      w += auth_data->public_keys[sig.public_key_id]->max_weight;
+      w += auth_data->public_keys[sig->public_key_id]->max_weight;
     }
     if (w < required_weight) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
@@ -198,8 +199,8 @@ verify_weight_key_claim_internal(
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
 
-    for (const DecoratedSignature &sig : sigs) {
-      if (auto r = verify_decorated_signature(sig, *auth_data, serialized_tx,
+    for (const DecoratedSignature *sig : sigs) {
+      if (auto r = verify_decorated_signature(*sig, *auth_data, serialized_tx,
                                               signature_verifier);
           !r) {
         return r;
@@ -212,7 +213,7 @@ verify_weight_key_claim_internal(
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
-                           DecoratedSignatureList const &sigs,
+                           x23::Vec<DecoratedSignature const *> const &sigs,
                            const AddressAuthData *auth_data,
                            x23::BufView serialized_tx,
                            Ed25519SignatureVerifier *signature_verifier)
@@ -227,22 +228,22 @@ verify_auth_claim_internal(AuthClaim const &claim,
   switch (claim.claim_type()) {
   case AuthClaimType::kInvokedAddressSignature:
     return verify_individual_key_claim_internal<VerfType>(
-        claim.invoked_address_signature_id(), auth_data, sigs.list,
-        serialized_tx, signature_verifier);
+        claim.invoked_address_signature_id(), auth_data, sigs, serialized_tx,
+        signature_verifier);
   case AuthClaimType::kInvokedAddressSignedWeight:
     return verify_weight_key_claim_internal<VerfType>(
         claim.invoked_address_signed_weight().accepted_keys,
-        claim.invoked_address_signed_weight().required_weight, auth_data,
-        sigs.list, serialized_tx, signature_verifier);
+        claim.invoked_address_signed_weight().required_weight, auth_data, sigs,
+        serialized_tx, signature_verifier);
   case AuthClaimType::kOtherAddressSignature:
     return verify_individual_key_claim_internal<VerfType>(
-        claim.other_address_signature_id().key_id, auth_data, sigs.list,
+        claim.other_address_signature_id().key_id, auth_data, sigs,
         serialized_tx, signature_verifier);
   case AuthClaimType::kOtherAddressSignedWeight:
     return verify_weight_key_claim_internal<VerfType>(
         claim.other_address_signed_weight().accepted_keys,
-        claim.other_address_signed_weight().required_weight, auth_data,
-        sigs.list, serialized_tx, signature_verifier);
+        claim.other_address_signed_weight().required_weight, auth_data, sigs,
+        serialized_tx, signature_verifier);
   default:
     // This kind of claim should not have been parseable
     panic("Unsupported auth claim type: {}", claim.claim_type());
@@ -261,19 +262,18 @@ validate_nonce(const SignedTransaction &stx, const AddressAuthData &auth_data,
   Weight total_weight = 0;
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const x23::Vec<DecoratedSignature, 0xffffffff> &sigs =
-        stx.signatures[i].list;
-    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
+    const DecoratedSignature &sig = stx.signatures[i];
+    if (sig.auth_claim_idx >= stx.tx.auth_claims.size()) {
+      continue;
+    }
+    const AuthClaim &auth_claim = stx.tx.auth_claims[sig.auth_claim_idx];
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kInvokedAddressSignature:
     case AuthClaimType::kInvokedAddressSignedWeight:
-      for (const DecoratedSignature &sig : sigs) {
-        if (!bitmap_accepts_key(nonce_config.accepted_keys,
-                                sig.public_key_id)) {
-          return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
-        }
-        total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
+      if (!bitmap_accepts_key(nonce_config.accepted_keys, sig.public_key_id)) {
+        return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
+      total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
       break;
     case AuthClaimType::kOtherAddressSignature:
     case AuthClaimType::kOtherAddressSignedWeight:
@@ -300,9 +300,11 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
                                                0);
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const DecoratedSignatureList &sigs = stx.signatures[i];
-    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
-
+    const DecoratedSignature &sig = stx.signatures[i];
+    if (sig.auth_claim_idx >= stx.tx.auth_claims.size()) {
+      continue;
+    }
+    const AuthClaim &auth_claim = stx.tx.auth_claims[sig.auth_claim_idx];
     const ContractAddress &claim_addr = [&auth_claim, &stx]() {
       switch (auth_claim.claim_type()) {
       case AuthClaimType::kInvokedAddressSignature:
@@ -319,15 +321,13 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
     if (claim_addr != gas_claim.sponsored_contract) {
       continue;
     }
-    for (const DecoratedSignature &sig : sigs.list) {
-      for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
-        if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
-                                sig.public_key_id)) {
-          continue;
-        }
-        assert(has_public_key(auth_data, sig.public_key_id));
-        gas_weights[i] += auth_data.public_keys[sig.public_key_id]->max_weight;
+    for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
+      if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
+                              sig.public_key_id)) {
+        continue;
       }
+      assert(has_public_key(auth_data, sig.public_key_id));
+      gas_weights[i] += auth_data.public_keys[sig.public_key_id]->max_weight;
     }
   }
   GasAmount approved_amount = 0;
@@ -368,9 +368,16 @@ verify_auth_claims_internal(
   }
 
   // Verify that each claimed auth has a corresponding set of valid signatures.
+  static PerThread<
+      std::unordered_map<size_t, x23::Vec<const DecoratedSignature *>>>
+      sig_map;
+  sig_map->clear();
+  for (const DecoratedSignature &sig : stx.signatures) {
+    (*sig_map)[sig.auth_claim_idx].push_back(&sig);
+  }
   for (size_t i = 0; i < stx.tx.auth_claims.size(); i++) {
     const AuthClaim &auth_claim = stx.tx.auth_claims[i];
-    const DecoratedSignatureList &sigs = stx.signatures[i];
+    const x23::Vec<const DecoratedSignature *> &sigs = (*sig_map)[i];
     const AddressAuthData *auth_data = nullptr;
 
     if constexpr (verify_weights_against_auth_data(VerfType)) {

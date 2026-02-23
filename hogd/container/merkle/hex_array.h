@@ -42,6 +42,10 @@ public:
   static constexpr size_t kMaxNumHexDigits = 196;
   static_assert(kMaxNumHexDigits % 2 == 0);
 
+  static_assert(kMaxNumHexDigits < 256,
+                "Reminder: if kMaxNumHexDigits increases past 256, add tests "
+                "to ensure hex array size de/serializes correctly");
+
   HexArray() { init(); }
 
   HexArray(const std::string &s)
@@ -83,16 +87,6 @@ public:
 
     memcpy(backing_store_.data(), &hash, hash.size() * sizeof(hash[0]));
     size_ = hash.size() * 2;
-  }
-
-  HexArray(size_t bytes)
-  {
-    CHECK_LE(sizeof(bytes), kArrayLength);
-
-    init();
-
-    memcpy(backing_store_.data(), &bytes, sizeof(bytes));
-    size_ = sizeof(bytes) * 2;
   }
 
   bool operator==(const HexArray &a) const

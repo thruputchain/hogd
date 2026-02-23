@@ -21,6 +21,7 @@ target_link_libraries(
 )
 
 add_library(base_test_objects OBJECT
+  atomic_test.cc
   base_test.cc
   bits_test.cc
   cpputil_test.cc

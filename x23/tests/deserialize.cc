@@ -9,6 +9,7 @@
 #include <x23/vec.h>
 
 #include "tests/xdrtest.hh"
+#include "x23/x23.h"
 
 namespace x23 {
 
@@ -118,6 +119,247 @@ TEST(Deserialize, CxsVectorTooLarge)
   input.insert(input.end(), {0, 1, 2, 3, 4, 5, 6, 7});
   std::span<const uint8_t> sp(input);
   EXPECT_THROW(x23::deserialize_cxs(&vec, sp), x23::CxsBadInput);
+}
+
+// xdr_size(BorrowedPtr<T>) previously returned 0 for null, but xdr_serialize
+// writes a 4-byte discriminant.  serialize_to uses xdr_size to allocate, so
+// this triggers a heap-buffer-overflow under ASAN.
+TEST(Serialize, NullBorrowedPtrSize)
+{
+  BorrowedPtr<uint32_t> bp;
+  ASSERT_FALSE(bp);
+  Buf buf = serialize(bp);
+  // A null optional should serialize as a 4-byte zero discriminant.
+  EXPECT_EQ(buf.size(), 4UZ);
+}
+
+namespace {
+test_recursive
+make_recursive_chain(size_t depth)
+{
+  test_recursive root;
+  root.elem = "x";
+  test_recursive *current = &root;
+  for (size_t i = 1; i < depth; ++i) {
+    current->next.emplace();
+    current = &*current->next;
+    current->elem = "x";
+  }
+  return root;
+}
+} // namespace
+
+TEST(Deserialize, CxsRecursionLimit)
+{
+  size_t limit = deserialization_recursion_limit;
+
+  // At exactly the limit, deserialization should succeed.
+  {
+    auto chain = make_recursive_chain(limit);
+    auto buf = serialize_cxs(chain);
+    test_recursive out;
+    EXPECT_NO_THROW(deserialize_cxs(&out, BufView(buf)));
+  }
+
+  // One beyond the limit, deserialization should throw.
+  {
+    auto chain = make_recursive_chain(limit + 1);
+    auto buf = serialize_cxs(chain);
+    test_recursive out;
+    EXPECT_THROW(deserialize_cxs(&out, BufView(buf)), CxsBadInput);
+  }
+}
+
+TEST(Deserialize, XdrRecursionLimit)
+{
+  size_t limit = deserialization_recursion_limit;
+
+  // At exactly the limit, deserialization should succeed.
+  {
+    auto chain = make_recursive_chain(limit);
+    auto buf = serialize(chain);
+    test_recursive out;
+    EXPECT_NO_THROW(deserialize(&out, BufView(buf)));
+  }
+
+  // One beyond the limit, deserialization should throw.
+  {
+    auto chain = make_recursive_chain(limit + 1);
+    auto buf = serialize(chain);
+    test_recursive out;
+    EXPECT_THROW(deserialize(&out, BufView(buf)), XdrBadInput);
+  }
+}
+
+// Non-recursive types: CxsDeserializer<false> path (no recursion checker).
+TEST(Deserialize, NonRecursiveRoundtrip)
+{
+  // Simple struct
+  {
+    fix_12 f{.i = 42, .d = 3.14};
+    auto cxs_buf = serialize_cxs(f);
+    fix_12 cxs_out;
+    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_EQ(f, cxs_out);
+
+    auto xdr_buf = serialize(f);
+    fix_12 xdr_out;
+    EXPECT_NO_THROW(deserialize(&xdr_out, BufView(xdr_buf)));
+    EXPECT_EQ(f, xdr_out);
+  }
+  // Union with data arm
+  {
+    StorageDelta sd(StorageDelta::kNonnegativeInt64SetAdd);
+    sd.nnint64().set_value = 100;
+    sd.nnint64().add_value = 200;
+    auto cxs_buf = serialize_cxs(sd);
+    StorageDelta cxs_out;
+    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_EQ(sd, cxs_out);
+
+    auto xdr_buf = serialize(sd);
+    StorageDelta xdr_out;
+    EXPECT_NO_THROW(deserialize(&xdr_out, BufView(xdr_buf)));
+    EXPECT_EQ(sd, xdr_out);
+  }
+  // Nested non-recursive struct
+  {
+    outer_struct os;
+    os.mid.inner.x = 7;
+    os.mid.inner.y = 2.5;
+    os.mid.tag = "hello";
+    os.count = 99;
+    auto cxs_buf = serialize_cxs(os);
+    outer_struct cxs_out;
+    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+    EXPECT_EQ(os, cxs_out);
+
+    auto xdr_buf = serialize(os);
+    outer_struct xdr_out;
+    EXPECT_NO_THROW(deserialize(&xdr_out, BufView(xdr_buf)));
+    EXPECT_EQ(os, xdr_out);
+  }
+}
+
+// Struct that contains a recursive type: recursion checking is enabled.
+TEST(Deserialize, ContainsRecursiveLimit)
+{
+  size_t limit = deserialization_recursion_limit;
+
+  // At the limit through the wrapper: wrapper is non-recursive so doesn't
+  // consume a recursion slot, but the inner test_recursive chain does.
+  {
+    contains_test_recursive ct;
+    ct.t = make_recursive_chain(limit);
+    auto cxs_buf = serialize_cxs(ct);
+    contains_test_recursive cxs_out;
+    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+
+    auto xdr_buf = serialize(ct);
+    contains_test_recursive xdr_out;
+    EXPECT_NO_THROW(deserialize(&xdr_out, BufView(xdr_buf)));
+  }
+  // One beyond the limit.
+  {
+    contains_test_recursive ct;
+    ct.t = make_recursive_chain(limit + 1);
+    auto cxs_buf = serialize_cxs(ct);
+    contains_test_recursive cxs_out;
+    EXPECT_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)), CxsBadInput);
+
+    auto xdr_buf = serialize(ct);
+    contains_test_recursive xdr_out;
+    EXPECT_THROW(deserialize(&xdr_out, BufView(xdr_buf)), XdrBadInput);
+  }
+}
+
+// Branching recursion via nextvec (tree, not just linked list).
+// Each child in nextvec is a separate recursive entry.
+TEST(Deserialize, BranchingRecursionLimit)
+{
+  size_t limit = deserialization_recursion_limit;
+
+  // Root + (limit-1) children via nextvec = limit total entries.
+  {
+    test_recursive root;
+    root.elem = "root";
+    root.nextvec.resize(limit - 1);
+    for (auto &child : root.nextvec)
+      child.elem = "leaf";
+
+    auto cxs_buf = serialize_cxs(root);
+    test_recursive cxs_out;
+    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+
+    auto xdr_buf = serialize(root);
+    test_recursive xdr_out;
+    EXPECT_NO_THROW(deserialize(&xdr_out, BufView(xdr_buf)));
+  }
+  // Root + limit children = limit+1 entries, exceeds limit.
+  {
+    test_recursive root;
+    root.elem = "root";
+    root.nextvec.resize(limit);
+    for (auto &child : root.nextvec)
+      child.elem = "leaf";
+
+    auto cxs_buf = serialize_cxs(root);
+    test_recursive cxs_out;
+    EXPECT_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)), CxsBadInput);
+
+    auto xdr_buf = serialize(root);
+    test_recursive xdr_out;
+    EXPECT_THROW(deserialize(&xdr_out, BufView(xdr_buf)), XdrBadInput);
+  }
+}
+
+// Mutually recursive types: MutualFrame -> MutualBody -> MutualFrame.
+TEST(Deserialize, MutuallyRecursiveLimit)
+{
+  size_t limit = deserialization_recursion_limit;
+
+  // Build a chain: Frame -> Body(success, child=Frame) -> Body(success,
+  // child=Frame) -> ... Each MutualFrame and MutualBody are both recursive,
+  // so each step consumes two recursion slots (one for the struct, one for the
+  // union).
+  auto make_mutual_chain = [](size_t depth) {
+    MutualFrame root;
+    root.body.which(0);
+    root.body.success().x = 1;
+    MutualFrame *cur = &root;
+    for (size_t i = 1; i < depth; ++i) {
+      cur->body.success().child.emplace();
+      cur = &*cur->body.success().child;
+      cur->body.which(0);
+      cur->body.success().x = static_cast<int>(i);
+    }
+    return root;
+  };
+
+  // Each frame in the chain consumes 3 recursion slots: MutualFrame
+  // (recursive struct) + MutualBody (recursive union) + the anonymous
+  // success struct (also recursive). So limit/3 frames should fit.
+  {
+    auto chain = make_mutual_chain(limit / 3);
+    auto cxs_buf = serialize_cxs(chain);
+    MutualFrame cxs_out;
+    EXPECT_NO_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)));
+
+    auto xdr_buf = serialize(chain);
+    MutualFrame xdr_out;
+    EXPECT_NO_THROW(deserialize(&xdr_out, BufView(xdr_buf)));
+  }
+  // One too many should fail.
+  {
+    auto chain = make_mutual_chain((limit / 3) + 1);
+    auto cxs_buf = serialize_cxs(chain);
+    MutualFrame cxs_out;
+    EXPECT_THROW(deserialize_cxs(&cxs_out, BufView(cxs_buf)), CxsBadInput);
+
+    auto xdr_buf = serialize(chain);
+    MutualFrame xdr_out;
+    EXPECT_THROW(deserialize(&xdr_out, BufView(xdr_buf)), XdrBadInput);
+  }
 }
 
 // NOLINTEND(modernize-type-traits)

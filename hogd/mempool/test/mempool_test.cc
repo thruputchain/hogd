@@ -62,9 +62,8 @@ TEST(Mempool, SubmitUnvetted)
 
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
-  DecoratedSignatureList decorated_signatures;
-  decorated_signatures.list.push_back(make_signature(sk, tx, 0));
-  txs[0].signatures.push_back(decorated_signatures);
+  txs[0].signatures.push_back(
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -704,17 +703,15 @@ TEST(Mempool, AuthChanged)
   for (SignedTransaction &stx : txs) {
     stx.tx.auth_claims.push_back(make_sign_claim(0));
 
-    DecoratedSignatureList decorated_signatures;
-    decorated_signatures.list.push_back(make_signature(sk, stx.tx, 0));
-    stx.signatures.push_back(decorated_signatures);
+    stx.signatures.push_back(
+        make_signature(sk, stx.tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
   }
   {
     // Handle [auth_tx].
     auth_tx.tx.auth_claims.push_back(make_sign_claim(0));
-
-    DecoratedSignatureList decorated_signatures;
-    decorated_signatures.list.push_back(make_signature(sk, auth_tx.tx, 0));
-    auth_tx.signatures.push_back(decorated_signatures);
+    auth_tx.signatures.push_back(make_signature(sk, auth_tx.tx,
+                                                /*auth_claim_idx=*/0,
+                                                /*public_key_id=*/0));
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{auth_tx})())();

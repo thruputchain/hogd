@@ -106,8 +106,10 @@ add_library(runtime_test_objects OBJECT
   return_fault_test_wasm_test.cc
   native_contract_test.cc
   nnint_add_test.cc
+  propose_validate_roundtrip_test.cc
   nnint_get_test.cc
   rcq_delete_test.cc
+  rcq_read_test.cc
   rcq_test.cc
   read_only_test.cc
   reference_leak_test.cc

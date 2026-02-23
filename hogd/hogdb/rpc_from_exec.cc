@@ -257,6 +257,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
   {
     out.type(StorageItemType::kItemTypeNonnegativeInt);
     int128_t nnint;
+    CHECK(item->value.size() == sizeof(int128_t));
     std::ranges::copy(item->value, writable_byte_view(nnint).begin());
     out.nnint() = to_xdr(nnint);
     break;

@@ -212,6 +212,12 @@ public:
     return event_server_.get_events(block_id, tx_id);
   }
 
+  std::optional<TxEventLog> get_events_by_hash(BlockID block_id,
+                                               SHA256Hash const &tx_hash)
+  {
+    return event_server_.get_events_by_hash(block_id, tx_hash);
+  }
+
   // Blocking control for testing delays
   void block_emit_events() { event_server_.block_emit_events(); }
   void unblock_emit_events() { event_server_.unblock_emit_events(); }
@@ -310,6 +316,18 @@ public:
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ProposalModeCtor{}, runtime_context);
+  }
+
+  SystemCallHandler make_new_system_call_handler_validation(
+      Transaction const &tx, RuntimeContext &runtime_context,
+      NondeterministicProposalData proposal_data)
+  {
+    auto txid = allocate_txid();
+    return SystemCallHandler(tx, *storage_snapshot_cache_,
+                             make_new_per_tx_db_proxy(txid),
+                             make_new_per_tx_event_server_proxy(txid),
+                             ValidationModeCtor{std::move(proposal_data)},
+                             runtime_context);
   }
 
   // keeps a reference to the storage snapshot cache to avoid invalidating it

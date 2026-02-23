@@ -179,6 +179,16 @@ public:
     }
   }
 
+  void reset()
+  {
+    // This struct is used inside a Node struct, which (in the bump allocator
+    // path) does not run the constructor.  When the allocator is reused, we
+    // need to reset the lock to the unlocked state (or else we possibly could
+    // be reading from uninitialized memory)
+    lock_.store(kUnlocked, std::memory_order_relaxed);
+    writer_waiting_for_upgrade_.store(false, std::memory_order_release);
+  }
+
 private:
   // A sentinel value that indicates the lock is unlocked.
   static constexpr int64_t kUnlocked = 0;

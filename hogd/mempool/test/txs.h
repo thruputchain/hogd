@@ -98,10 +98,12 @@ make_sign_claim(uint32_t idx)
 }
 
 inline DecoratedSignature
-make_signature(const SecretKey &sk, const Transaction &tx, uint8_t id)
+make_signature(const SecretKey &sk, const Transaction &tx,
+               unsigned int auth_claim_idx, unsigned int public_key_id)
 {
   DecoratedSignature signature;
-  signature.public_key_id = id;
+  signature.auth_claim_idx = auth_claim_idx;
+  signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
       ed25519_sign(sk.ed25519(), x23::serialize(tx));

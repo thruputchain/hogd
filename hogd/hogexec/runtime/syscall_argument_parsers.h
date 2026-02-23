@@ -126,15 +126,4 @@ check_user_span_argument(std::span<std::byte> contract_memory,
   return contract_memory.subspan(user_offset, user_len);
 }
 
-// Convert arguments passed as parameters to the wasm host function to the
-// required type (i.e. the primitive_type in the syscall spec).. Infallible,
-// but the requires clause checks at least that we did not misconfigure our
-// syscall definitions.
-template<typename T> requires (std::is_integral_v<T> || std::is_enum_v<T>)
-T
-check_user_primitive_argument(uint64_t user_value)
-{
-  return static_cast<T>(user_value);
-}
-
 } // namespace hogd

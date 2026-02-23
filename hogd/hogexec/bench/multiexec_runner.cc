@@ -172,7 +172,7 @@ struct BlockValidationQueue {
   const size_t batch_size;
   std::atomic<uint64_t> offset{0};
 
-  std::span<const SignedTransaction> next_batch()
+  x23::span<const SignedTransaction> next_batch()
   {
     auto start = offset.fetch_add(batch_size);
     return {txs_.begin() + std::min<size_t>(start, txs_.size()),
@@ -288,14 +288,9 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
         }
         co_return;
       }
-      x23::Vec<SignedTransaction> batch_vec;
-      batch_vec.reserve(batch.size());
-      for (auto const &tx : batch) {
-        batch_vec.push_back(tx);
-      }
 
-      auto r = co_await exec_client.executorsched_propose_batch(block_number,
-                                                                batch_vec);
+      auto r =
+          co_await exec_client.executorsched_propose_batch(block_number, batch);
       assert(r.size() == batch.size());
       for (auto const &result : r) {
         if (result.result() != ExecResult::ExecResultOK) {

@@ -52,6 +52,7 @@ RetrocausalQueue::RetrocausalQueue(
                                      .cumulative_prior_size_ =
                                          parent.total_size_}));
   assert(res.second);
+  assert(current_block_number_ == parent.current_block_number_ + 1);
   assert(current_block_number_ > parent.current_block_number_);
 }
 
@@ -75,6 +76,16 @@ const RetrocausalQueueBlock *
 RetrocausalQueue::try_get_next_block(uint64_t search_start_number) const
 {
   auto it = blocks_.lower_bound(search_start_number);
+  if (it == blocks_.end()) {
+    return nullptr;
+  }
+  return &it->second->block_;
+}
+
+const RetrocausalQueueBlock *
+RetrocausalQueue::try_get_block(uint64_t block_number) const
+{
+  auto it = blocks_.find(block_number);
   if (it == blocks_.end()) {
     return nullptr;
   }

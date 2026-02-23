@@ -18,6 +18,7 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+  CARGO_BUILD_JOBS: "6"
 
 jobs:
   # Fast format check - gates all other jobs

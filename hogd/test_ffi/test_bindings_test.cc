@@ -272,11 +272,14 @@ make_key_pair()
 }
 
 DecoratedSignature
-make_signature(SecretKey sk, Transaction const &tx, uint32_t pk_id)
+make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
+               uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
   sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
-  return {.public_key_id = pk_id, .signature = sig};
+  return {.auth_claim_idx = auth_claim_idx,
+          .public_key_id = public_key_id,
+          .signature = sig};
 }
 
 constexpr NonceConfig kAnyKeyNonceConfig =
@@ -330,13 +333,11 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaims)
   tx.auth_claims = {invoked_claim, aux_claim};
 
   // Sign the transaction
-  DecoratedSignature invoked_sig = make_signature(invoked_sk, tx, 0);
-  DecoratedSignature aux_sig = make_signature(aux_sk, tx, 0);
-
-  SignedTransaction stx{
-      .tx = tx,
-      .signatures = {DecoratedSignatureList{.list = {invoked_sig}},
-                     DecoratedSignatureList{.list = {aux_sig}}}};
+  DecoratedSignature invoked_sig =
+      make_signature(invoked_sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+  DecoratedSignature aux_sig =
+      make_signature(aux_sk, tx, /*auth_claim_idx=*/1, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {{invoked_sig}, {aux_sig}}};
 
   // Create auth data for both addresses
   AddressAuthData invoked_auth_data{
@@ -442,13 +443,11 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
   tx.auth_claims = {invoked_claim, aux_claim};
 
   // Sign the transaction
-  DecoratedSignature invoked_sig = make_signature(invoked_sk, tx, 0);
-  DecoratedSignature aux_sig = make_signature(aux_sk, tx, 0);
-
-  SignedTransaction stx{
-      .tx = tx,
-      .signatures = {DecoratedSignatureList{.list = {invoked_sig}},
-                     DecoratedSignatureList{.list = {aux_sig}}}};
+  DecoratedSignature invoked_sig =
+      make_signature(invoked_sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+  DecoratedSignature aux_sig =
+      make_signature(aux_sk, tx, /*auth_claim_idx=*/1, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {{invoked_sig}, {aux_sig}}};
 
   // Create auth data for both addresses
   AddressAuthData invoked_auth_data{
@@ -505,13 +504,12 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
     tx.auth_claims = {invoked_claim, missing_aux_claim};
 
     // Sign the transaction
-    DecoratedSignature invoked_sig = make_signature(invoked_sk, tx, 0);
-    DecoratedSignature aux_sig = make_signature(aux_sk, tx, 0);
-
-    SignedTransaction stx{
-        .tx = tx,
-        .signatures = {DecoratedSignatureList{.list = {invoked_sig}},
-                       DecoratedSignatureList{.list = {aux_sig}}}};
+    DecoratedSignature invoked_sig =
+        make_signature(invoked_sk, tx, /*auth_claim_idx=*/0,
+                       /*public_key_id=*/0);
+    DecoratedSignature aux_sig =
+        make_signature(aux_sk, tx, /*auth_claim_idx=*/1, /*public_key_id=*/0);
+    SignedTransaction stx{.tx = tx, .signatures = {{invoked_sig}, {aux_sig}}};
 
     auto serialized_stx = x23::serialize(stx);
 

@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -87,7 +88,7 @@ BytestringItem::validate() const
   // allocate a bytestring long enough to exhaust memory resources and/or cause
   // malloc to fail, but a contract could still adversarially waste system
   // resources.
-  assert(bytestring_.size() <= kBytestringMaxLen);
+  CHECK_LE(bytestring_.size(), static_cast<size_t>(kBytestringMaxLen));
 
   return {};
 }

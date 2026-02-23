@@ -1,10 +1,10 @@
+#include <gtest/gtest.h>
+
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <future>
-#include <gtest/gtest.h>
 #include <iostream>
-
 #include <map>
 #include <memory>
 #include <print>
@@ -18,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
@@ -968,7 +969,7 @@ prove(T &trie)
   {
     // Change the path in the leaf node.
     std::vector<std::byte> copy = node_encodings;
-    copy[1 + sizeof(size_t)] = std::byte{0x00};
+    copy[1 + sizeof(uint64_t)] = std::byte{0x00};
     EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
@@ -995,7 +996,7 @@ prove(T &trie)
     {
       // Change the path in an extension node.
       std::vector<std::byte> copy = node_encodings;
-      copy[idx + 1 + sizeof(size_t)] = std::byte{0x00};
+      copy[idx + 1 + sizeof(uint64_t)] = std::byte{0x00};
       EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
     }
 
@@ -1653,6 +1654,169 @@ TEST(MerkleTriePrefix, Multithread128)
 {
   run_multithread(/*num_threads=*/128);
 }
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+// Tests for node encoding/decoding roundtrip.
+// Verifies that size_to_bytes always produces exactly 8 bytes
+// (sizeof(uint64_t)) and that the decoder properly reads all 8 bytes back.
+TEST(MerkleNode, LeafEncodingRoundtrip)
+{
+  Allocator<Node> allocator(Allocator<Node>::kDefault);
+  Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
+
+  leaf->path = HexArray("1234abcd");
+  std::string value = "test_value";
+  leaf->value_hash = sha256(value);
+
+  // Encode the node.
+  auto encoding = leaf->get_node_encoding();
+
+  // Decode the node.
+  size_t idx = 0;
+  Node::Raw raw;
+  ASSERT_TRUE(Node::get_node_from_encoding(encoding, idx, raw));
+
+  // Verify all bytes were consumed.
+  EXPECT_EQ(idx, encoding.size());
+
+  // Verify roundtrip fidelity.
+  EXPECT_EQ(raw.type, Node::Type::kLeaf);
+  EXPECT_EQ(raw.path, leaf->path);
+  ASSERT_TRUE(raw.value_hash.has_value());
+  EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
+
+  // Verify the hash matches.
+  EXPECT_EQ(raw.hash, leaf->compute_node_hash());
+
+  allocator.free(leaf);
+}
+
+TEST(MerkleNode, ExtensionEncodingRoundtrip)
+{
+  Allocator<Node> allocator(Allocator<Node>::kDefault);
+  Node *extension = Node::create_extension(/*parent=*/nullptr, allocator);
+  Node *child_leaf = Node::create_leaf(extension, allocator);
+
+  extension->path = HexArray("abcdef01");
+  child_leaf->path = HexArray("23");
+  std::string value = "child_value";
+  child_leaf->value_hash = sha256(value);
+  child_leaf->hash = child_leaf->compute_node_hash();
+  extension->child[0] = child_leaf;
+  extension->hash = extension->compute_node_hash();
+
+  // Encode the extension node.
+  const std::vector<std::byte> &encoding = extension->get_node_encoding();
+  std::vector<std::byte> encoding_copy(encoding.begin(), encoding.end());
+
+  // Decode the node.
+  size_t idx = 0;
+  Node::Raw raw;
+  ASSERT_TRUE(Node::get_node_from_encoding(encoding_copy, idx, raw));
+
+  // Verify all bytes were consumed.
+  EXPECT_EQ(idx, encoding_copy.size());
+
+  // Verify roundtrip fidelity.
+  EXPECT_EQ(raw.type, Node::Type::kExtension);
+  EXPECT_EQ(raw.path, extension->path);
+  EXPECT_EQ(raw.child_hashes[0], child_leaf->hash);
+  EXPECT_EQ(raw.hash, extension->compute_node_hash());
+
+  allocator.free(child_leaf);
+  allocator.free(extension);
+}
+
+// Verifies the encoded path size field is exactly 8 bytes (sizeof(uint64_t)),
+// ensuring platform-independent consensus-critical hashing.
+TEST(MerkleNode, PathSizeEncodingIsExactly8Bytes)
+{
+  Allocator<Node> allocator(Allocator<Node>::kDefault);
+  Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
+
+  leaf->path = HexArray("ab");
+  std::string value = "v";
+  leaf->value_hash = sha256(value);
+
+  const std::vector<std::byte> &encoding = leaf->get_node_encoding();
+
+  // Encoding format for a leaf: [type(1 byte)] [path_size(8 bytes)] [path
+  // bytes] [value_present(1 byte)] [value_hash] The path size field should
+  // start at offset 1 and be exactly 8 bytes.
+  ASSERT_GT(encoding.size(), 1U + sizeof(uint64_t));
+
+  // Read the path size as a uint64_t from the encoding at offset 1.
+  uint64_t path_size = 0;
+  for (size_t i = 0; i < sizeof(uint64_t); i++) {
+    path_size |= static_cast<uint64_t>(static_cast<uint8_t>(encoding[1 + i]))
+                 << (8 * i);
+  }
+  // HexArray("ab") has 2 hex digits.
+  EXPECT_EQ(path_size, 2U);
+
+  // Verify the upper bytes of path_size are zero (this ensures all 8 bytes are
+  // properly written, not just the lower bytes).
+  EXPECT_EQ(path_size >> 32, 0U);
+
+  allocator.free(leaf);
+}
+
+// Tests encoding/decoding roundtrip for a leaf node with an odd-length path.
+TEST(MerkleNode, LeafEncodingRoundtripOddPath)
+{
+  Allocator<Node> allocator(Allocator<Node>::kDefault);
+  Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
+
+  leaf->path = HexArray("123"); // odd number of hex digits
+  std::string value = "odd_path_value";
+  leaf->value_hash = sha256(value);
+
+  const std::vector<std::byte> &encoding = leaf->get_node_encoding();
+  std::vector<std::byte> encoding_copy(encoding.begin(), encoding.end());
+
+  size_t idx = 0;
+  Node::Raw raw;
+  ASSERT_TRUE(Node::get_node_from_encoding(encoding_copy, idx, raw));
+
+  EXPECT_EQ(idx, encoding_copy.size());
+  EXPECT_EQ(raw.type, Node::Type::kLeaf);
+  EXPECT_EQ(raw.path, leaf->path);
+  ASSERT_TRUE(raw.value_hash.has_value());
+  EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
+  EXPECT_EQ(raw.hash, leaf->compute_node_hash());
+
+  allocator.free(leaf);
+}
+
+// Tests encoding/decoding roundtrip for a leaf node with an empty path.
+TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
+{
+  Allocator<Node> allocator(Allocator<Node>::kDefault);
+  Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
+
+  leaf->path = HexArray(); // empty path
+  std::string value = "empty_path_value";
+  leaf->value_hash = sha256(value);
+
+  const std::vector<std::byte> &encoding = leaf->get_node_encoding();
+  std::vector<std::byte> encoding_copy(encoding.begin(), encoding.end());
+
+  size_t idx = 0;
+  Node::Raw raw;
+  ASSERT_TRUE(Node::get_node_from_encoding(encoding_copy, idx, raw));
+
+  EXPECT_EQ(idx, encoding_copy.size());
+  EXPECT_EQ(raw.type, Node::Type::kLeaf);
+  EXPECT_EQ(raw.path, leaf->path);
+  ASSERT_TRUE(raw.value_hash.has_value());
+  EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
+  EXPECT_EQ(raw.hash, leaf->compute_node_hash());
+
+  allocator.free(leaf);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
 

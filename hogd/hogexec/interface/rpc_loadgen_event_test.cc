@@ -2,6 +2,7 @@
 
 #include <format>
 #include <memory>
+#include <set>
 #include <utility>
 
 #include "db_sched.hh"
@@ -13,6 +14,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -26,6 +28,7 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -162,12 +165,6 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   const auto &init_blocks = result.success().initialization_txs;
   BlockID current_block_id = 1;
 
-  // Count total initialization transactions to calculate work transaction IDs
-  size_t num_init_txs = 0;
-  for (const InitializationBlock &init_block : init_blocks) {
-    num_init_txs += init_block.size();
-  }
-
   for (const InitializationBlock &init_block : init_blocks) {
     open_block(current_block_id, current_block_id - 1);
 
@@ -195,6 +192,13 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   const SignedTransactionBatch &txs = ext_result.success().work_txs;
   ASSERT_EQ(txs.size(), kNumTxs);
 
+  // Verify all transaction hashes are unique
+  std::set<SHA256Hash> tx_hashes;
+  for (const auto &tx : txs) {
+    ASSERT_TRUE(tx_hashes.insert(sha256(tx.tx)).second)
+        << "Duplicate transaction hash detected";
+  }
+
   // Propose each transaction
   for (const auto &tx : txs) {
     auto propose_res =
@@ -208,13 +212,10 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   close_block(test_block_id);
   // Now all the events should be emitted
 
-  // Calculate transaction IDs: executor_id=1, so tx_id = base + (1 << 48)
-  // Work transactions start after all initialization transactions
-  constexpr uint64_t kExecutorId = 1;
-  constexpr uint64_t kExecutorIdShift = kExecutorId << 48;
-  for (size_t i = 0; i < txs.size(); ++i) {
-    TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
-    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+  // Look up events by transaction hash
+  for (const auto &tx : txs) {
+    SHA256Hash tx_hash = sha256(tx.tx);
+    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
     ASSERT_TRUE(events.has_value()) << "Events should be present";
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_GT(events->events.size(), 0)
@@ -254,11 +255,6 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Run initialization transactions
   const auto &init_blocks = result.success().initialization_txs;
   BlockID current_block_id = 1;
-  // Count total initialization transactions to calculate work transaction IDs
-  size_t num_init_txs = 0;
-  for (const InitializationBlock &init_block : init_blocks) {
-    num_init_txs += init_block.size();
-  }
 
   for (const InitializationBlock &init_block : init_blocks) {
     open_block(current_block_id, current_block_id - 1);
@@ -281,11 +277,6 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Block event emission before proposing transactions
   event_wrapper_.block_emit_events();
 
-  // Calculate transaction IDs: executor_id=1, so tx_id = base + (1 << 48)
-  // Work transactions start after all initialization transactions
-  constexpr uint64_t kExecutorId = 1;
-  constexpr uint64_t kExecutorIdShift = kExecutorId << 48;
-
   // Get payment transactions from loadgen
   constexpr size_t kNumTxs = 3;
   LoadgenExtensionResult ext_result =
@@ -295,6 +286,13 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   const SignedTransactionBatch &txs = ext_result.success().work_txs;
   ASSERT_EQ(txs.size(), kNumTxs);
 
+  // Verify all transaction hashes are unique
+  std::set<SHA256Hash> tx_hashes;
+  for (const auto &tx : txs) {
+    ASSERT_TRUE(tx_hashes.insert(sha256(tx.tx)).second)
+        << "Duplicate transaction hash detected";
+  }
+
   // Propose transactions while events are blocked
   for (const auto &tx : txs) {
     auto propose_res =
@@ -303,9 +301,9 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   }
 
   // Verify events haven't been emitted yet (they're blocked)
-  for (size_t i = 0; i < txs.size(); ++i) {
-    TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
-    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+  for (const auto &tx : txs) {
+    SHA256Hash tx_hash = sha256(tx.tx);
+    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
     // Events should not be present yet since emission is blocked
     ASSERT_FALSE(events.has_value()) << "Events should be blocked";
   }
@@ -316,12 +314,11 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Finish the block
   close_block(test_block_id);
 
-  // Check that events were emitted using the calculated transaction IDs
+  // Check that events were emitted using hash-based lookup
   bool found_events = false;
-  for (size_t i = 0; i < txs.size(); ++i) {
-    auto tx_id =
-        static_cast<TransactionID>(num_init_txs + i + kExecutorIdShift);
-    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+  for (const auto &tx : txs) {
+    SHA256Hash tx_hash = sha256(tx.tx);
+    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
     if (events.has_value() && !events->events.empty()) {
       found_events = true;
       break;
