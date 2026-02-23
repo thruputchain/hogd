@@ -230,7 +230,8 @@ public:
     return true;
   }
 
-  static InvokeError host_fn_error_conversion(HostFnError const& err) {
+  static InvokeError host_fn_error_conversion(HostFnError const &err)
+  {
     switch (err.code()) {
     case HostFnErrorCode::kHostOutOfGas:
       return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
@@ -243,13 +244,17 @@ public:
     case HostFnErrorCode::kHostExit:
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     case HostFnErrorCode::kHostReturn:
-      error("unrecoverable: contracts using the NativeContractBuilder should not call the Return syscall directly");
+      error("unrecoverable: contracts using the NativeContractBuilder should "
+            "not call the Return syscall directly");
       return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
     case HostFnErrorCode::kHostNoneOrRecoverable:
-      error("unrecoverable: host_fn_error_conversion: kHostNoneOrRecoverable when error expected");
+      error("unrecoverable: host_fn_error_conversion: kHostNoneOrRecoverable "
+            "when error expected");
       return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
     }
-    error("unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}", err.code());
+    error(
+        "unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}",
+        err.code());
     return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   }
 

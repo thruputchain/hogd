@@ -281,7 +281,7 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
 
              auto [r, gas] =
                  syscall_invoke(ctx, target_addr, 0,
-                                      ctx.runtime().get_available_gas(), {}, 0);
+                                ctx.runtime().get_available_gas(), {}, 0);
 
              ctx.handler().finish_syscall_trace(
                  r, ctx.runtime().get_available_gas());
@@ -368,7 +368,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
 
              auto [r, gas] =
                  syscall_invoke(ctx, callee_addr, 0,
-                                      ctx.runtime().get_available_gas(), {}, 0);
+                                ctx.runtime().get_available_gas(), {}, 0);
 
              ctx.handler().finish_syscall_trace(
                  r, ctx.runtime().get_available_gas());
@@ -476,9 +476,9 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                Calldata args = {'t', 'e', 's', 't'};
                auto [r, gas] =
                    syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                        ctx.runtime().get_available_gas(), args,
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagTryInvoke));
+                                  ctx.runtime().get_available_gas(), args,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
 
                ctx.handler().finish_syscall_trace(
                    r, ctx.runtime().get_available_gas());

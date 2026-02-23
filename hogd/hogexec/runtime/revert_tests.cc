@@ -147,9 +147,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              // Try invoke method 1
              auto [r1, _g1] =
                  syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                      ctx.runtime().get_available_gas(), {},
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagTryInvoke));
+                                ctx.runtime().get_available_gas(), {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -187,9 +187,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              // Try invoke method 2
              auto [r2, _g2] =
                  syscall_invoke(ctx, ctx.handler().get_current_address(), 2,
-                                      ctx.runtime().get_available_gas(), {},
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagTryInvoke));
+                                ctx.runtime().get_available_gas(), {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -218,9 +218,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              // Try invoke method 3
              auto [r3, _g3] =
                  syscall_invoke(ctx, ctx.handler().get_current_address(), 3,
-                                      ctx.runtime().get_available_gas(), {},
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagTryInvoke));
+                                ctx.runtime().get_available_gas(), {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -312,9 +312,9 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
              // Call method 0, which will fault
              auto [r0, _g0] =
                  syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                      ctx.runtime().get_available_gas(), {},
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagNone));
+                                ctx.runtime().get_available_gas(), {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagNone));
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }

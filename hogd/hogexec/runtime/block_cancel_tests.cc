@@ -101,10 +101,10 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                // Invoke method 1 using try_invoke
                auto [r0, _g0] =
                    syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
-                                        ctx.runtime().get_available_gas(),
-                                        ctx.handler().get_calldata(),
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagTryInvoke));
+                                  ctx.runtime().get_available_gas(),
+                                  ctx.handler().get_calldata(),
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
 
                if (r0.has_value() ||
                    r0.error().code() !=

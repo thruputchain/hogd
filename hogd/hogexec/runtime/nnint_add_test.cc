@@ -36,9 +36,10 @@ public:
 protected:
   void SetUp() override {}
 
-  static InvokeStatus<void> check_nnint_get_result(std::optional<int128_t> res_base,
-                                                   int128_t res_add,
-      std::optional<int128_t> expected_base, int128_t expected_add)
+  static InvokeStatus<void>
+  check_nnint_get_result(std::optional<int128_t> res_base, int128_t res_add,
+                         std::optional<int128_t> expected_base,
+                         int128_t expected_add)
   {
     if (res_base != expected_base) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -61,7 +62,8 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
              auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
                  key, static_cast<int128_t const *>(nullptr), 200,
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-             if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+             if (!r.has_value() ||
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

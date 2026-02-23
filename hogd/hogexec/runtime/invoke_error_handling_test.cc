@@ -93,7 +93,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
           {6,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [r, _gas] = syscall_invoke(ctx, native_contract_address, 0,
-                                                   UINT64_MAX, {}, 0);
+                                             UINT64_MAX, {}, 0);
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Invoke 0 did not return success";
@@ -101,7 +101,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto [r2, _gas2] = syscall_invoke(ctx, native_contract_address, 1,
-                                                     UINT64_MAX, {}, 0);
+                                               UINT64_MAX, {}, 0);
              if (!r2.has_value() ||
                  r2.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -112,7 +112,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              // Out of gas in child becomes deterministic (handleable) error in
              // caller
              auto [r3, _gas3] = syscall_invoke(ctx, native_contract_address, 2,
-                                                     UINT64_MAX, {}, 0);
+                                               UINT64_MAX, {}, 0);
              if (!r3.has_value() ||
                  r3.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -121,7 +121,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto [r4, _gas4] = syscall_invoke(ctx, native_contract_address, 3,
-                                                     UINT64_MAX, {}, 0);
+                                               UINT64_MAX, {}, 0);
              if (r4.has_value() ||
                  r4.error() !=
                      HostFnError{HostFnErrorCode::kHostAbortTransaction}) {
@@ -130,7 +130,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto [r5, _gas5] = syscall_invoke(ctx, native_contract_address, 4,
-                                                     UINT64_MAX, {}, 0);
+                                               UINT64_MAX, {}, 0);
              if (r5.has_value() ||
                  r5.error() !=
                      HostFnError{HostFnErrorCode::kHostValidationFailure}) {
@@ -139,7 +139,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto [r6, _gas6] = syscall_invoke(ctx, native_contract_address, 5,
-                                                     UINT64_MAX, {}, 0);
+                                               UINT64_MAX, {}, 0);
              if (r6.has_value() ||
                  r6.error() !=
                      HostFnError{HostFnErrorCode::kHostUnrecoverable}) {
@@ -202,8 +202,8 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              // Valid flags should succeed
              auto [r1, _g1] =
                  syscall_invoke(ctx, target_address, 0, UINT64_MAX, {},
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagTryInvoke));
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Valid flag TryInvoke should succeed";
@@ -212,8 +212,8 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              auto [r2, _g2] =
                  syscall_invoke(ctx, target_address, 0, UINT64_MAX, {},
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagReadOnly));
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagReadOnly));
              if (!r2.has_value() ||
                  r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Valid flag ReadOnly should succeed";
@@ -221,8 +221,8 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              // Combined valid flags should succeed
-             auto [r3, _g3] = syscall_invoke(ctx, 
-                 target_address, 0, UINT64_MAX, {},
+             auto [r3, _g3] = syscall_invoke(
+                 ctx, target_address, 0, UINT64_MAX, {},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke) |
                      std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
              if (!r3.has_value() ||
@@ -253,8 +253,8 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              // High bits set
-             auto [r6, _g6] = syscall_invoke(ctx, target_address, 0,
-                                                   UINT64_MAX, {}, 0x7FFF'FFFF);
+             auto [r6, _g6] = syscall_invoke(ctx, target_address, 0, UINT64_MAX,
+                                             {}, 0x7FFF'FFFF);
              if (!r6.has_value() ||
                  r6.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {

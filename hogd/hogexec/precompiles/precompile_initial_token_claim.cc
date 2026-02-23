@@ -177,7 +177,8 @@ make_native_initial_token_claim_contract()
         auto deploy_res =
             ctx.syscall<SyscallNo::kDeployContract>(nonce, hash, deployed_addr);
         if (!deploy_res.has_value()) {
-          return NativeContractBuilder::host_fn_error_conversion(deploy_res.error());
+          return NativeContractBuilder::host_fn_error_conversion(
+              deploy_res.error());
         }
         if (*deploy_res != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -194,7 +195,8 @@ make_native_initial_token_claim_contract()
             output_return_buffer_len);
 
         if (!invoke_result.has_value()) {
-          return NativeContractBuilder::host_fn_error_conversion(invoke_result.error());
+          return NativeContractBuilder::host_fn_error_conversion(
+              invoke_result.error());
         }
         if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};

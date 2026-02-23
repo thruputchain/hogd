@@ -109,8 +109,9 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      allow_key, true, output_set, output_set_opt, output_add);
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
+                                                 output_set_opt, output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -248,8 +249,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   }
 
   // subtract amount from spender's allowance
-  auto allow_res =
-      adjust_allowance(ctx, owner, *spender, -amount_signed_int);
+  auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
   if (!allow_res.has_value()) {
     return allow_res.error();
   }
@@ -327,8 +327,9 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      allow_key, true, output_set, output_set_opt, output_add);
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
+                                                 output_set_opt, output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -381,8 +382,7 @@ make_native_token_contract()
         if (!ctx.runtime().consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
-        auto balance =
-            ctx.handler().get_native_token_balance(contract_address);
+        auto balance = ctx.handler().get_native_token_balance(contract_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }
@@ -409,8 +409,7 @@ make_native_token_contract()
           return caller_address.error();
         }
 
-        auto balance =
-            ctx.handler().get_native_token_balance(*caller_address);
+        auto balance = ctx.handler().get_native_token_balance(*caller_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }

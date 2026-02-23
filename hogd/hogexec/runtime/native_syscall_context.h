@@ -13,9 +13,9 @@
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
-#include "transaction.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "transaction.hh"
 
 // Include the generated syscall_meta.h
 #include "hogd/hogexec/runtime/syscall_meta.h"
@@ -40,13 +40,11 @@ public:
     static_assert(sizeof...(Args) == syscall_t::kNumArgs);
 
     auto parsed = [&]<size_t... Is>(std::index_sequence<Is...>) {
-      return std::tuple{
-          to_parsed<typename syscall_t::template arg_i<Is>>(
-              std::forward<Args>(args))...};
+      return std::tuple{to_parsed<typename syscall_t::template arg_i<Is>>(
+          std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    return wrap_after_parse<Meta>(handler_, runtime_, Meta::kSyscallNo,
-                                  parsed);
+    return wrap_after_parse<Meta>(handler_, runtime_, Meta::kSyscallNo, parsed);
   }
 
   SystemCallHandler &handler() { return handler_; }
@@ -64,8 +62,7 @@ private:
   // Optional pointers (const T*): wrap in OptionalInputParseResult.
   //
   // Everything else (values, input refs, spans): wrap in std::optional.
-  template<typename ArgParam, typename Arg>
-  static auto to_parsed(Arg &&arg)
+  template<typename ArgParam, typename Arg> static auto to_parsed(Arg &&arg)
   {
     if constexpr (std::is_lvalue_reference_v<ArgParam> &&
                   !std::is_const_v<std::remove_reference_t<ArgParam>>) {
@@ -74,7 +71,7 @@ private:
       return WritableOutput<T>(static_cast<void *>(&arg));
     }
     else if constexpr (std::is_pointer_v<ArgParam> &&
-                      std::is_const_v<std::remove_pointer_t<ArgParam>>) {
+                       std::is_const_v<std::remove_pointer_t<ArgParam>>) {
       // Optional input pointer: const T*
       using T = std::remove_const_t<std::remove_pointer_t<ArgParam>>;
       return typename SyscallArgParams<ArgParam>::OptionalInputParseResult{
@@ -86,7 +83,6 @@ private:
       return std::optional{std::forward<Arg>(arg)};
     }
   }
-
 };
 
 // Helper used by native-contract tests: invoke via syscall routing while
@@ -97,10 +93,11 @@ syscall_invoke(NativeSyscallContext &ctx, ContractAddress const &input_address,
                Calldata input_calldata, InvokeFlagSet input_flags)
 {
   RuntimeMemoryLength output_return_buffer_len{};
-  auto status = ctx.syscall<SyscallNo::kInvoke>(
-      input_address, input_entrypoint_id, input_gas_limit,
-      std::as_bytes(std::span(input_calldata)), input_flags,
-      output_return_buffer_len);
+  auto status =
+      ctx.syscall<SyscallNo::kInvoke>(input_address, input_entrypoint_id,
+                                      input_gas_limit,
+                                      std::as_bytes(std::span(input_calldata)),
+                                      input_flags, output_return_buffer_len);
   // `ctx.syscall` already applies gas accounting; return 0 to keep test call
   // sites that still consume `gas` from double-charging.
   return {status, 0};

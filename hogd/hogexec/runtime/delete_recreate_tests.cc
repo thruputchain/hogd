@@ -124,30 +124,32 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                // Call method 0 (read empty, then write)
                auto [r0, _g0] =
                    syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                        ctx.runtime().get_available_gas(),
-                                        ctx.handler().get_calldata(),
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagNone));
+                                  ctx.runtime().get_available_gas(),
+                                  ctx.handler().get_calldata(),
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r0.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 1 (delete)
-               auto [r1, _g1] = syscall_invoke(ctx, 
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r1, _g1] =
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
+                                  ctx.runtime().get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 0 again (read empty, then write)
-               auto [r2, _g2] = syscall_invoke(ctx, 
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r2, _g2] =
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
+                                  ctx.runtime().get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r2.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -278,30 +280,32 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                // Call method 0 (read empty, then write)
                auto [r0, _g0] =
                    syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                        ctx.runtime().get_available_gas(),
-                                        ctx.handler().get_calldata(),
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagNone));
+                                  ctx.runtime().get_available_gas(),
+                                  ctx.handler().get_calldata(),
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r0.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 1 (delete)
-               auto [r1, _g1] = syscall_invoke(ctx, 
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r1, _g1] =
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
+                                  ctx.runtime().get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 0 again (read empty, then write)
-               auto [r2, _g2] = syscall_invoke(ctx, 
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r2, _g2] =
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
+                                  ctx.runtime().get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r2.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -430,30 +434,32 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                // Call method 0 (consume empty, then insert)
                auto [r0, _g0] =
                    syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
-                                        ctx.runtime().get_available_gas(),
-                                        ctx.handler().get_calldata(),
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagNone));
+                                  ctx.runtime().get_available_gas(),
+                                  ctx.handler().get_calldata(),
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r0.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 1 (delete)
-               auto [r1, _g1] = syscall_invoke(ctx, 
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r1, _g1] =
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 1,
+                                  ctx.runtime().get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r1.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                // Call method 0 again (consume empty, then insert)
-               auto [r2, _g2] = syscall_invoke(ctx, 
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r2, _g2] =
+                   syscall_invoke(ctx, ctx.handler().get_current_address(), 0,
+                                  ctx.runtime().get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
                if (!r2.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
