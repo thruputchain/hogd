@@ -134,15 +134,6 @@ TEST(Serialize, NullBorrowedPtrSize)
   EXPECT_EQ(buf.size(), 4UZ);
 }
 
-TEST(Vec, ResizeAndOverwriteCountWraps)
-{
-  Str s;
-  EXPECT_THROW(
-      s.resize_and_overwrite(std::numeric_limits<size_t>::max(),
-                             [](char *, size_t) { return 0UZ; }),
-      XdrLengthError);
-}
-
 namespace {
 test_recursive
 make_recursive_chain(size_t depth)

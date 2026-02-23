@@ -48,6 +48,7 @@
 #include <format>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -539,10 +540,7 @@ public:
   template<typename Op>
   void resize_and_overwrite(this auto &self, size_type count, Op op)
   {
-    if (count > max_size()) [[unlikely]]
-      throw XdrLengthError{
-          std::format("{} exceeds max size in Vec<{}, {}>", count, tname(),
-                      max_size())};
+    x23assert(count != std::numeric_limits<size_type>::max());
     self.resize_uninitialized(count + 1);
     self.resize(std::move(op)(self.data(), count));
   }
