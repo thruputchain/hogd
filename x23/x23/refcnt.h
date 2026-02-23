@@ -52,6 +52,8 @@ protected:
   }
 };
 
+// Specialized for a two-argument decref that requires we supply the
+// return value of incref when dropping a reference.
 template<typename Ptr, typename Ops>
 requires requires(Ptr p) { Ops::decref(p, Ops::incref(p)); }
 class RefTag<Ptr, Ops> {
@@ -130,14 +132,23 @@ public:
     self.reset();
     return (self);
   }
-  decltype(auto) operator=(this is_mutable auto &&self,
-                           RefPtr &&other) noexcept // NOLINT
+  RefPtr &operator=(const RefPtr &other)
   {
-    if (&self != &other) {
-      self.reset();
-      self.movefrom(other);
+    if (p_ != other.p_) {
+      if (p_)
+        unref(p_);
+      if ((p_ = other.p_)) // NOLINT
+        ref();
     }
-    return (self);
+    return *this;
+  }
+  RefPtr &operator=(RefPtr &&other) noexcept
+  {
+    if (this != &other) {
+      reset();
+      movefrom(other);
+    }
+    return *this;
   }
   auto get() const noexcept { return ops::get(this->p_); }
   decltype(auto) operator*() const noexcept { return *get(); }
