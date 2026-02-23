@@ -100,7 +100,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 BUILD_TAG=$(echo ${BUILD_TYPE} | tr '[:upper:]' '[:lower:]')
 
 PKG_NAME=hog-${ARCH}-${OS}-${BUILD_TAG}-${GIT_COMMIT}
-echo ${PKG_NAME} > ${PKG_DIR}/PKG_ID
+echo ${PKG_NAME} >${PKG_DIR}/PKG_ID
 
 tar -czvf ${BUILD_DIR}/${PKG_NAME}.tar.gz -C ${PKG_DIR} .
 

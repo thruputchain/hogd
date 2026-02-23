@@ -267,7 +267,7 @@ inline std::compare_three_way_result_t<T>
 operator<=>(const Ptr<T> &a, const Ptr<T> &b)
 {
   if (a && b)
-    return a.get() <=> b.get();
+    return *a <=> *b;
   return bool(a) <=> bool(b);
 }
 
