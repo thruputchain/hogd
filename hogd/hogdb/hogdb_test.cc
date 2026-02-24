@@ -591,23 +591,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   ASSERT_TRUE(db_.write_retrocausal_queue_block(rcq_key, modified_block));
   ASSERT_TRUE(db_.commit());
 
-  // Re-read the RCQ metadata - it should be UNCHANGED (same counts, same
-  // hashes)
-  auto new_meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
-  ASSERT_TRUE(new_meta_result);
-  auto new_meta = *new_meta_result;
-
-  // Serialize both metadata to compare them
-  auto original_meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
-  ASSERT_TRUE(original_meta_result);
-  auto original_meta_serialized = x23::serialize(*original_meta_result);
-  auto new_meta_serialized = x23::serialize(new_meta);
-
-  // The metadata serialization should be IDENTICAL (same counts, same
-  // structure)
-  bool metadata_unchanged = (original_meta_serialized == new_meta_serialized);
-  ASSERT_TRUE(metadata_unchanged);
-
   // Verify the block content was actually modified
   auto modified_block_result =
       db_.read_retrocausal_queue_block(rcq_key, target_block_number);
@@ -632,21 +615,11 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   db_.load_trie(trie_);
   SHA256Hash new_trie_hash = trie_.get_root_hash();
 
-  info("Recomputed merkle trie root hash after reload: {}", new_trie_hash);
-
-  // We modified block contents (proven by different block hashes)
-  // But metadata is unchanged (proven by identical serialization)
-  // Therefore the trie root is also unchanged (since only metadata is in trie)
-  //
-  // In a CORRECT implementation:
-  // - Block content hashes would be stored IN the metadata
-  // - Modifying a block would change its hash in the metadata
-  // - This would change the metadata serialization
-  // - This would change the trie root
-  // - So: original_trie_hash != new_trie_hash -> TEST WOULD PASS
+  // Blocks are stored directly in the trie, so tampering with block contents
+  // in ramdb causes the reloaded trie hash to differ from the original.
   EXPECT_NE(original_trie_hash, new_trie_hash)
-      << "Modifying RCQ block contents did NOT change "
-      << "the merkle trie root hash! ";
+      << "Modifying RCQ block contents did NOT change the merkle trie root "
+         "hash!";
 }
 
 // Test that consuming blocks removes them from the trie
