@@ -505,7 +505,7 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 
 HogDBStatus<void>
 RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
-                                          MerkleTriePrefix *trie)
+                                          MerkleTriePrefix &trie)
 {
   assert(ctx.dao);
 
@@ -524,34 +524,27 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
   // Remove all unconsumed blocks from both the DAO and the merkle trie
   uint64_t start_block = meta.consume_state.max_fully_consumed_block_number + 1;
   for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
-    // Remove block from DAO
     auto block_remove = ctx.dao->remove_retrocausal_queue_block(ctx.key, b);
     if (!block_remove.has_value()) {
       return block_remove.error();
     }
 
-    // Remove block from merkle trie (if trie access provided)
-    if (trie) {
-      auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
-      std::span<const std::byte> merkle_key =
-          MerkleTrieHelpers::add_type_to_merkle_key(
-              std::as_bytes(std::span(block_key)).subspan(1), 0);
-      CHECK(trie->remove(merkle_key));
-    }
+    auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
+    std::span<const std::byte> merkle_key =
+        MerkleTrieHelpers::add_type_to_merkle_key(
+            std::as_bytes(std::span(block_key)).subspan(1), 0);
+    CHECK(trie.remove(merkle_key));
   }
 
-  // Remove the metadata from the DAO
+  // Remove the metadata from the DAO and trie
   auto meta_remove = ctx.dao->remove_retrocausal_queue_metadata(ctx.key);
   if (!meta_remove.has_value()) {
     return meta_remove.error();
   }
 
-  // Remove the metadata from the merkle trie (if trie access provided)
-  if (trie) {
-    CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(*trie, ctx.key,
-                                                      kRetrocausalQueue)
-              .has_value());
-  }
+  CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
+                                                    kRetrocausalQueue)
+            .has_value());
 
   return {};
 }
