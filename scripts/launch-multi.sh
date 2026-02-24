@@ -278,7 +278,8 @@ ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
 
 remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --copy-file "$SCPD_BINARY" \
-  -l info --stack --config "$logdir"/config-chuckd.json \
+  -l debug --stack --config "$logdir"/config-chuckd.json \
+  --rpc-log-stats \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
