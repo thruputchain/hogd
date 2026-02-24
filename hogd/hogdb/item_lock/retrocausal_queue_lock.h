@@ -45,8 +45,8 @@ public:
 
   // Cleanup all RCQ-specific storage (blocks and metadata) when an RCQ is
   // deleted. Removes all blocks and the metadata key from both DAO and trie.
-  static HogDBStatus<void>
-  cleanup_on_deletion(const LockContext &ctx, MerkleTriePrefix &trie);
+  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx,
+                                               MerkleTriePrefix &trie);
 
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.
