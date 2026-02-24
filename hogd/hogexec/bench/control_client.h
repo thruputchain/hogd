@@ -26,38 +26,43 @@ public:
     : client_(std::move(client))
   {}
 
+  const x23::Buf kHogdGitHash = []() {
+    auto str = std::string(version::kHogdGitHash);
+    return x23::Buf{str.begin(), str.end()};
+  }();
+
   void start_server(std::string const &program_name,
                     std::vector<std::string> const &program_args)
   {
     ServerConfig config;
-    config.program_name = x23::BoundedStr{program_name.c_str()};
+    config.program_name = x23::Buf{program_name.begin(), program_name.end()};
     for (auto const &arg : program_args) {
-      config.program_args.push_back(x23::BoundedStr{arg.c_str()});
+      config.program_args.push_back(x23::Buf{arg.begin(), arg.end()});
     }
 
-    if (client_.ciserver_start(version::kHogdGitHash, config) !=
+    if (client_.ciserver_start(kHogdGitHash, config) !=
         CIServerErrorCode::kCIServerErrorCodeOK) {
       throw std::runtime_error("Failed to start server");
     }
   }
 
-  void stop_server() { client_.ciserver_stop(version::kHogdGitHash); }
+  void stop_server() { client_.ciserver_stop(kHogdGitHash); }
 
-  void shutdown_server() { client_.ciserver_shutdown(version::kHogdGitHash); }
+  void shutdown_server() { client_.ciserver_shutdown(kHogdGitHash); }
 
   CIProcStatus query_proc_status()
   {
-    return client_.ciserver_query_proc_status(version::kHogdGitHash);
+    return client_.ciserver_query_proc_status(kHogdGitHash);
   }
 
   CIWorkDirStatus query_work_dir()
   {
-    return client_.ciserver_query_work_dir(version::kHogdGitHash);
+    return client_.ciserver_query_work_dir(kHogdGitHash);
   }
 
   CIServerErrorCode clear_work_dir()
   {
-    return client_.ciserver_clear_work_dir(version::kHogdGitHash);
+    return client_.ciserver_clear_work_dir(kHogdGitHash);
   }
 
 private:

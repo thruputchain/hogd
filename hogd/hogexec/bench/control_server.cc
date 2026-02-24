@@ -13,6 +13,7 @@
 #include <print>
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
+#include <string_view>
 #include <sys/wait.h>
 #include <thread>
 #include <type_traits>
@@ -29,6 +30,7 @@
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "x23/fastclock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -259,18 +261,19 @@ public:
 
   CIControlRpc(std::string work_dir) : work_dir_(std::move(work_dir)) {}
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~CIControlRpc()
   {
     // ensure all subprocesses are stopped
-    ciserver_stop(version::kHogdGitHash);
+    ciserver_stop(hogd_git_hash_);
   }
 
   CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
                                    ServerConfig const &config)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -298,8 +301,8 @@ public:
   CIServerErrorCode ciserver_stop(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -322,8 +325,8 @@ public:
   CIServerErrorCode ciserver_shutdown(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -339,8 +342,8 @@ public:
   CIProcStatus ciserver_query_proc_status(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
     }
 
@@ -355,8 +358,8 @@ public:
   CIWorkDirStatus ciserver_query_work_dir(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIWorkDirStatus(
           CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
     }
@@ -368,8 +371,8 @@ public:
   CIServerErrorCode ciserver_clear_work_dir(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
     info("clearing work directory: {}", work_dir_);
@@ -393,9 +396,18 @@ public:
   }
 
 private:
+  static std::string_view hash_sv(HogdGitHash const &h)
+  {
+    return {reinterpret_cast<const char *>(h.data()), h.size()};
+  }
+
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
-    return std::string(hogd_git_hash) == version::kHogdGitHash;
+    static HogdGitHash expected_hash = []() {
+      auto str = std::string(version::kHogdGitHash);
+      return x23::Buf{str.begin(), str.end()};
+    }();
+    return hogd_git_hash == expected_hash;
   }
 
   CIProcStatus check_pid_status(pid_t pid,
@@ -416,6 +428,11 @@ private:
     info("pid: {} is still running", pid);
     return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
   }
+
+  const HogdGitHash hogd_git_hash_ = []() {
+    auto str = std::string(version::kHogdGitHash);
+    return HogdGitHash{str.begin(), str.end()};
+  }();
 
   std::atomic<bool> waiting_for_shutdown_ = false;
 

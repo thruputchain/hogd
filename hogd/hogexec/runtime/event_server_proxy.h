@@ -6,7 +6,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/format.h"
 #include "x23/rpc.h"

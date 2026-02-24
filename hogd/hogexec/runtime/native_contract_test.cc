@@ -141,7 +141,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
   auto context = make_context();
 
-  Transaction tx;
+  Transaction tx{};
   tx.contracts_to_deploy.push_back(contract);
 
   SystemCallHandler handler = make_handler(tx, snapshot, 0, 0, *context);
