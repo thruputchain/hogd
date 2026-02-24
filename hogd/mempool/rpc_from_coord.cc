@@ -73,6 +73,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 {
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
+  std::chrono::milliseconds delta_raw =
+      std::chrono::duration_cast<std::chrono::milliseconds>(delta);
+  int64_t delta_count = delta_raw.count();
 
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
@@ -154,12 +157,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await add_txs_handle;
   record_stage(stage_add_txs);
 
-  info("submit_unvetted() stages: delta={:.6f}, deserialize_batch={:.6f}, "
+  info("submit_unvetted() stages: delta={}, deserialize_batch={:.6f}, "
        "capture_verify_height={:.6f}, auth_verify={:.6f}, "
        "wait_commit_lock_before_add={:.6f}, filter_invalid={:.6f}, "
        "add_txs={:.6f}, prepare_response_and_notify={:.6f}, "
        "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
-       delta, stage_deserialize_batch, stage_capture_verify_height,
+       delta_count, stage_deserialize_batch, stage_capture_verify_height,
        stage_auth_verify, stage_wait_commit_lock_before_add,
        stage_filter_invalid, stage_add_txs, stage_prepare_response_and_notify,
        timer.elapsed(), scheduler_->size(), num_submitted_txs, txs.size());
