@@ -566,6 +566,7 @@ public:
         }
       }
     }
+    terminate();
   }
   template<std::random_access_iterator IterIn>
   constexpr void append(IterIn first, size_t num)
@@ -617,7 +618,7 @@ public:
   {
     using new_type = OVec::value_type;
     constexpr int aadj = OVec::kExtraAlloc - kExtraAlloc;
-    if (aadj > 0)
+    if constexpr (aadj > 0)
       ensure(aadj);
     OVec ret{typename OVec::Buf{
                  .begin = reinterpret_cast<new_type *>(b_.begin),
@@ -651,6 +652,14 @@ protected:
 
   static constexpr std::string_view tname() { return type_name<T>(); }
 
+  constexpr void terminate()
+  {
+    if constexpr (kExtraAlloc > 0 &&
+                  std::is_trivially_destructible_v<value_type>)
+      if (!empty())
+        std::construct_at(b_.end, value_type{});
+  }
+
   constexpr void shrink(size_type new_size) noexcept
   {
     if (new_size >= size())
@@ -658,6 +667,7 @@ protected:
     pointer new_end = b_.begin + new_size;
     std::destroy(new_end, b_.end);
     b_.end = new_end;
+    terminate();
   }
 
   template<std::ranges::range R> constexpr void do_copy(const R &other)
@@ -687,12 +697,13 @@ protected:
       pointer new_end = b_.begin + new_size;
       init(b_.end, new_end);
       b_.end = new_end;
+      terminate();
     }
   }
 
   constexpr void ensure(size_type n = 1)
   {
-    if (size_type(b_.bufend - b_.end) >= n)
+    if (size_type(b_.bufend - b_.end) >= n + kExtraAlloc)
       return;
     size_type old_cap = capacity();
     size_type new_cap = std::max(size() + n, std::min(2 * old_cap, max_size()));
@@ -846,10 +857,12 @@ public:
 
   constexpr ~BoundedStr() {}
 
-  // Warning:  Technically non-reentrant and illegally uses
-  // indeterminate value, but good enough in practice.
   constexpr const char *c_str(this const auto &self)
   {
+    if (self.empty())
+      return "";
+    // Shouldn't be needed, but just in case we forgot some code path
+    // that doesn't NUL-terminate the string.
     if (*self.b_.end)
       *self.b_.end = '\0';
     return self.data();
