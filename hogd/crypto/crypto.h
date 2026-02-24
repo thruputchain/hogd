@@ -21,6 +21,13 @@ extern "C" {
 #include <vector>
 #include <version>
 
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#define MSAN_UNPOISON(ptr, size) __msan_unpoison(ptr, size)
+#else
+#define MSAN_UNPOISON(ptr, size) ((void)0)
+#endif
+
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -41,6 +48,7 @@ read_random(std::span<std::byte> buf)
     perror("Failed to read random bytes");
     exit(EXIT_FAILURE);
   }
+  MSAN_UNPOISON(buf.data(), buf.size());
 }
 
 // sha256 returns the SHA256 hash of buf.
@@ -57,6 +65,7 @@ sha256(x23::BufView buf)
   SHA256_Init(&ctx);
   SHA256_Update(&ctx, buf.data(), buf.size());
   SHA256_Final(out.data(), &ctx);
+  MSAN_UNPOISON(out.data(), out.size());
   return out;
 }
 
@@ -77,6 +86,7 @@ blake3(x23::BufView buf)
   blake3_hasher_init(&hasher);
   blake3_hasher_update(&hasher, buf.data(), buf.size());
   blake3_hasher_finalize(&hasher, out.data(), sizeof(out));
+  MSAN_UNPOISON(out.data(), out.size());
   return out;
 }
 
