@@ -111,7 +111,7 @@ make_logdir() {
 # Kills all of the processes on all of the servers.
 kill_everything() {
   local do_wait=$1
-  local all_procs=("${procs[@]}" "go" "hog_lock")
+  local all_procs=("${procs[@]}" "go")
 
   for s in "${all_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "killall -9 -q -e ${all_procs[@]}" || :
@@ -151,31 +151,6 @@ cleanup() {
   exit $status
 }
 trap cleanup EXIT INT TERM
-
-# Acquire per-host locks before launching services. hog_lock stays running in
-# the background and holds locks until this script exits.
-hog_lock_args=(-i "launch-multi")
-for s in "${all_servers[@]}"; do
-  hog_lock_args+=(--host "$s")
-done
-
-hog_lock_log=$(mktemp /tmp/launch-multi-hog-lock.XXXXXX.log)
-echo "Acquiring host locks..."
-echo "hog_lock ${hog_lock_args[@]}"
-hog_lock "${hog_lock_args[@]}" >"$hog_lock_log" 2>&1 &
-hog_lock_pid=$!
-while true; do
-  if grep -qi "locks acquired" "$hog_lock_log"; then
-    echo "Host locks acquired."
-    break
-  fi
-  if ! kill -0 "$hog_lock_pid" 2>/dev/null; then
-    echo "hog_lock exited before acquiring locks."
-    cat "$hog_lock_log"
-    exit 1
-  fi
-  sleep 0.2
-done
 
 make -C "$HOGD_BUILD_DIR" -j$(nproc)
 # These build scripts place the binaries in the current working directory, so we
