@@ -235,6 +235,22 @@ TEST(StrCstr, ReinterpretFromVecU8)
   check_cstr(s, 5);
 }
 
+// Construct a Str directly via the Buf-based constructor with a
+// poisoned byte at *b_.end.  Verifies the constructor itself calls
+// terminate(), rather than relying on callers.
+TEST(StrCstr, BufConstructorTerminates)
+{
+  using A = x23::Str::allocator_type;
+  A a;
+  constexpr size_t n = 5;
+  auto *raw = a.allocate(n + x23::Str::kExtraAlloc);
+  auto *p = reinterpret_cast<char *>(raw);
+  std::memcpy(p, "hello", n);
+  p[n] = 'X'; // poison the terminator position
+  x23::Str s(x23::Str::Buf{.begin = p, .end = p + n, .bufend = p + n}, a);
+  check_cstr(s, 5);
+}
+
 TEST(StrCstr, EmplaceBackReturnValue)
 {
   x23::Str s;

@@ -356,7 +356,9 @@ public:
   explicit Vec(const Buf &b,
                const std::same_as<allocator_type> auto &a) noexcept
     : a_(a), b_(b)
-  {}
+  {
+    terminate();
+  }
 
   constexpr ~Vec() { realloc(0); }
 
@@ -628,7 +630,7 @@ public:
                  .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
              },
              std::move(a_)};
-    ret.terminate();
+    // ctor calls terminate(), so no need to call it here
     b_ = {};
     return ret;
   }
