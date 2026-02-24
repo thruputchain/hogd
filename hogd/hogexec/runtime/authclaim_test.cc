@@ -91,12 +91,12 @@ TEST_F(AuthClaimTestFixture, TestInvokedAddressSignature)
   auto auth_claims = make_auth_claims();
 
   {
-    SignedTransaction stx;
-    stx.tx.invocation =
+    Transaction tx{};
+    tx.invocation =
         client.make_invocation<"test_invoked_address_signature">(UINT64_MAX);
-    stx.tx.auth_claims = auth_claims;
+    tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, *context_);
+    auto handler = make_new_system_call_handler(tx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -116,13 +116,13 @@ TEST_F(AuthClaimTestFixture, TestInvokedAddressSignedWeight)
   auto auth_claims = make_auth_claims();
 
   {
-    SignedTransaction stx;
-    stx.tx.invocation =
+    Transaction tx{};
+    tx.invocation =
         client.make_invocation<"test_invoked_address_signed_weight">(
             UINT64_MAX);
-    stx.tx.auth_claims = auth_claims;
+    tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, *context_);
+    auto handler = make_new_system_call_handler(tx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -142,12 +142,12 @@ TEST_F(AuthClaimTestFixture, TestOtherAddressSignature)
   auto auth_claims = make_auth_claims();
 
   {
-    SignedTransaction stx;
-    stx.tx.invocation =
+    Transaction tx{};
+    tx.invocation =
         client.make_invocation<"test_other_address_signature">(UINT64_MAX);
-    stx.tx.auth_claims = auth_claims;
+    tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, *context_);
+    auto handler = make_new_system_call_handler(tx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -167,12 +167,12 @@ TEST_F(AuthClaimTestFixture, TestOtherAddressSignedWeight)
   auto auth_claims = make_auth_claims();
 
   {
-    SignedTransaction stx;
-    stx.tx.invocation =
+    Transaction tx{};
+    tx.invocation =
         client.make_invocation<"test_other_address_signed_weight">(UINT64_MAX);
-    stx.tx.auth_claims = auth_claims;
+    tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, *context_);
+    auto handler = make_new_system_call_handler(tx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
