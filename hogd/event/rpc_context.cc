@@ -1,5 +1,6 @@
 #include "hogd/event/rpc_context.h"
 
+#include <atomic>
 #include <cassert>
 #include <memory>
 #include <mutex>
