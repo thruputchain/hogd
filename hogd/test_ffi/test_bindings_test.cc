@@ -968,6 +968,36 @@ test_ffi_invoke(const ContractAddress &input_address,
   return static_cast<SyscallErrorCode>(result.result_code);
 }
 
+HostFnStatus<SyscallErrorCode>
+test_ffi_get_msg_sender(ContractAddress &output_sender)
+{
+  auto result =
+      mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetMsgSender),
+                              reinterpret_cast<uint64_t>(output_sender.data()),
+                              0, 0, 0, 0, 0, 0);
+
+  if (result.panic !=
+      std::to_underlying(HostFnErrorCode::kHostNoneOrRecoverable))
+    return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
+
+  return static_cast<SyscallErrorCode>(result.result_code);
+}
+
+HostFnStatus<SyscallErrorCode>
+test_ffi_get_current_address(ContractAddress &output_address)
+{
+  auto result =
+      mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetCurrentAddress),
+                              reinterpret_cast<uint64_t>(output_address.data()),
+                              0, 0, 0, 0, 0, 0);
+
+  if (result.panic !=
+      std::to_underlying(HostFnErrorCode::kHostNoneOrRecoverable))
+    return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
+
+  return static_cast<SyscallErrorCode>(result.result_code);
+}
+
 // Helper: set up a mocked syscall handler and return it
 OpenSyscallHandlerResult
 make_mocked_handler(void *db, void *rc)
@@ -1191,6 +1221,7 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   // Set expected values: sender should be frame_addr (A), self should be
   // contract_addr (B)
@@ -1213,6 +1244,7 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
       << "get_current_address() should return the contract's deployment "
          "address";
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1256,6 +1288,7 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0;
@@ -1267,6 +1300,7 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
   EXPECT_TRUE(check_data.check_passed)
       << "get_current_address() should match the contract's deployment address";
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1300,20 +1334,63 @@ TEST(TestBindingsTest, MockFrameGetMsgSenderAtRootTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  ASSERT_NE(SyscallHandlerContext::get_context(), nullptr);
 
   // At root frame, get_msg_sender should return an error
-  auto sender =
-      SyscallHandlerContext::get_context()->to_handler().get_msg_sender();
-  EXPECT_FALSE(sender.has_value())
-      << "get_msg_sender() at root mock frame should return error";
-  EXPECT_EQ(sender.error().code(),
-            SyscallErrorCode::kSyscallErrorCodeIsRootTransaction);
+  ContractAddress sender;
+  auto sender_res = test_ffi_get_msg_sender(sender);
+  ASSERT_TRUE(sender_res.has_value());
+  EXPECT_EQ(*sender_res, SyscallErrorCode::kSyscallErrorCodeIsRootTransaction);
 
   // get_current_address should return the frame's address
-  auto current =
-      SyscallHandlerContext::get_context()->to_handler().get_current_address();
+  ContractAddress current;
+  auto current_res = test_ffi_get_current_address(current);
+  ASSERT_TRUE(current_res.has_value());
+  EXPECT_EQ(*current_res, SyscallErrorCode::kSyscallErrorCodeNone);
   EXPECT_EQ(current, frame_addr);
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(finish_res.serialized_output);
+}
+
+// Gracefully handle syscalls without a context pushed
+TEST(TestBindingsTest, MockFrameSyscallWithoutContextTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  ContractAddress frame_addr{99};
+  Invocation invocation = {
+      .invoked_address = frame_addr,
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 1'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(SyscallHandlerContext::get_context(), nullptr);
+
+  ContractAddress addr;
+  auto sender_res = test_ffi_get_current_address(addr);
+  ASSERT_FALSE(sender_res.has_value());
+  ASSERT_EQ(sender_res.error().code(), HostFnErrorCode::kHostUnrecoverable);
+
+  ASSERT_NE(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1362,6 +1439,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   // Invoke contract B from the mock frame (A -> B -> C)
   Calldata calldata;
@@ -1377,6 +1455,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
   EXPECT_TRUE(inner_check.self_check_passed)
       << "Nested contract C should see C as current_address";
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1415,6 +1494,7 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   // Create specific calldata
   Calldata calldata = {0x01, 0x02, 0x03, 0xFF};
@@ -1431,6 +1511,7 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
   EXPECT_EQ(check_data.received_calldata[2], 0x03);
   EXPECT_EQ(check_data.received_calldata[3], 0xFF);
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1467,6 +1548,7 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0;
@@ -1488,6 +1570,7 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
   EXPECT_EQ((*return_buf)[2], 30);
   EXPECT_EQ((*return_buf)[3], 40);
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1525,6 +1608,7 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0;
@@ -1546,6 +1630,7 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
   EXPECT_EQ((*return_buf)[2], 0xBE);
   EXPECT_EQ((*return_buf)[3], 0xEF);
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1604,6 +1689,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0;
@@ -1615,6 +1701,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   EXPECT_TRUE(inner_check.sender_check_passed);
   EXPECT_TRUE(inner_check.self_check_passed);
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1798,12 +1885,14 @@ TEST(TestBindingsTest, MockFrameManualRevertTest)
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
             kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   // Manually call set_return_buffer with revert=true
   ReturnBuffer revert_buf = {0xCA, 0xFE, 0xBA, 0xBE};
   SyscallHandlerContext::get_context()->to_handler().set_return_buffer(
       std::move(revert_buf), /*revert_frame=*/true);
 
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
@@ -1855,7 +1944,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
       .calldata = {},
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, inv_a), kTestFFIErrorCodeNone);
-
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
   // At root frame A: get_msg_sender() should return root error
   auto sender_a =
       SyscallHandlerContext::get_context()->to_handler().get_msg_sender();
@@ -1874,7 +1963,8 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
       .calldata = {},
   };
   ASSERT_EQ(open_frame(handler.syscall_handler, inv_b), kTestFFIErrorCodeNone);
-
+  ASSERT_EQ(push_context(handler.syscall_handler),
+            kTestFFIErrorCodeUnrecoverableError);
   // Inside B: msg_sender should be A, current_address should be B
   auto sender_b =
       SyscallHandlerContext::get_context()->to_handler().get_msg_sender();
@@ -1935,6 +2025,8 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
     EXPECT_EQ(c_output.status_code(),
               InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
   }
+
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
 
   // Close frame A with success
   auto finish_a =

@@ -122,13 +122,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // Push context if this is the first mock frame
-  if (get_context() == nullptr) {
-    if (!push_context()) {
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
-  }
-
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
   if (auto const *runtime = get_mock_runtime()) {
     current_gas = runtime->get_available_gas();
@@ -234,11 +227,6 @@ SyscallHandlerContext::finish_mock_invocation_frame(
       return kMakeFFIError(s.error());
     }
     serialized_trace = s.value();
-  }
-
-  // Pop context if the mock runtime stack is now empty (last frame finished)
-  if (mock_runtime_stack_.empty()) {
-    pop_context();
   }
 
   return ForeignTracedInvokeResult{

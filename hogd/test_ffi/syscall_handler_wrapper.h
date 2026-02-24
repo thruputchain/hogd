@@ -84,7 +84,6 @@ public:
       return false;
     }
 
-    CHECK(mock_runtime_stack_.empty());
     current_context_ = this;
     return true;
   }
@@ -92,9 +91,8 @@ public:
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void pop_context()
   {
-    assert(get_context() == this);
+    CHECK(get_context() == this);
     current_context_ = nullptr;
-    assert(mock_runtime_stack_.empty());
   }
 
   void push_mock_runtime(Runtime *runtime)
