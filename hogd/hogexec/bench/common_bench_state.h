@@ -152,8 +152,7 @@ private:
         "hogd/event/event_exec",
         {"--mempool-addr", std::format("{}:{}", hostname, event_server_port),
          "--work-dir",
-         std::string(work_dir.work_dir().begin(),
-                     work_dir.work_dir().end())});
+         std::string(work_dir.work_dir().begin(), work_dir.work_dir().end())});
 
     return mock_sched_event_server_->impl()->await_event_card();
   }
