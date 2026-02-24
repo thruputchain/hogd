@@ -62,6 +62,8 @@ cat >.git/info/sparse-checkout <<'EOF'
 /libunwind
 /llvm/cmake
 /llvm/utils/llvm-lit
+/libc/shared
+/libc/src/__support
 /third-party
 EOF
 git fetch --depth 1 origin "${LLVM_BRANCH}"
@@ -77,11 +79,10 @@ cmake -G "Unix Makefiles" \
   -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
   -DCMAKE_C_COMPILER=clang \
   -DCMAKE_CXX_COMPILER=clang++ \
-  -DCMAKE_C_FLAGS="-fuse-ld=lld" \
-  -DCMAKE_CXX_FLAGS="-fuse-ld=lld" \
   -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
+  -DLLVM_USE_LINKER=lld \
   -DLLVM_USE_SANITIZER=MemoryWithOrigins \
   -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
   -DLIBCXX_ENABLE_SHARED=OFF \
