@@ -54,16 +54,21 @@ if(FEATURES_TO_ENABLE)
 endif()
 
 
-# If we want asan:
-#
-# Use nightly toolchain for Rust builds
-#set(CARGO_BUILD_COMMAND "cargo +nightly build")
-#set(CARGO_TEST_COMMAND "cargo +nightly test")
-#set(CARGO_RUN_COMMAND "cargo +nightly run")
-
-#corrosion_set_env_vars(unified_lib RUSTFLAGS="-Zsanitizer=address")
-#corrosion_set_env_vars(unified_lib ASAN_OPTIONS=detect_stack_use_after_return=1:abort_on_error=1)
-#set_property(TARGET unified_lib PROPERTY CARGO_BUILD_FLAGS "+nightly -Zsanitizer=address")
+# Sanitizer support (requires nightly toolchain + rust-src component).
+# Enabled automatically when MSAN_LIBCXX_PATH is set (MSan build).
+# Install prerequisites:
+#   rustup install nightly
+#   rustup component add rust-src --toolchain nightly
+if(MSAN_LIBCXX_PATH)
+  message(STATUS "Enabling MSan for Rust code (nightly + -Zbuild-std)")
+  corrosion_set_env_vars(unified_lib RUSTUP_TOOLCHAIN=nightly)
+  corrosion_add_target_rustflags(unified_lib
+    "-Zsanitizer=memory"
+    "-Zsanitizer-memory-track-origins=2"
+  )
+  # Recompile std with MSan instrumentation to avoid false positives.
+  corrosion_set_cargo_flags(unified_lib -Zbuild-std=std,panic_abort)
+endif()
 
 # Add cargo tests to ctest
 add_test(
