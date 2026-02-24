@@ -33,7 +33,8 @@ template<> struct formatter<TestFFIErrorCode> {
   static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
   static auto format(const TestFFIErrorCode &error_code, auto &ctx)
   {
-    return format_to(ctx.out(), "TestFFIErrorCode{{{}}}", error_code);
+    return format_to(ctx.out(), "TestFFIErrorCode{{{}}}",
+                     std::to_underlying(error_code));
   }
 };
 
