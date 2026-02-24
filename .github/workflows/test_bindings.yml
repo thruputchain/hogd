@@ -1,58 +1,129 @@
-name: Build Test Bindings for Contract SDK (hog_sched)
+name: Build Test Bindings for Contract SDK (Namespace)
 
 on:
-    push:
-        branches: ["main"]
-    workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
 
 env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
-    build:
-        runs-on: self-hosted
-        permissions:
-            contents: read
-            actions: read
+  build:
+    runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
 
-        steps:
-            - name: Clean up .gitconfig
-              run: |
-                  echo "Cleaning up .gitconfig"
-                  rm -f /home/hogci/.gitconfig
-            - uses: webfactory/ssh-agent@v0.9.1
-              with:
-                  ssh-private-key: |
-                      ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-                      ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-                      ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-                      ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-                      ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-                      ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-                      ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-                      ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-                      ${{ secrets.HOGD_TO_SCP_KEY }}
-                      ${{ secrets.HOGD_TO_XDR_RPC }}
-                      ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-                      ${{ secrets.HOGD_TO_HOGX_KEY }}
-            - uses: actions/checkout@v4
-            - name: Run hog schedule
-              run: |
-                  hog_sched \
-                  --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
-                  --key=github_repo --value=${{ github.repository }} \
-                  --key=git_commit --value=${{ github.sha }} \
-                  --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                  --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                  ./scripts/schedules/test_bindings.toml
-            - name: Print Log Download Instructions
-              if: always()
-              uses: ./.github/actions/print-log-instructions
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+            ${{ secrets.HOGD_TO_HOGX_KEY }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+            else
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: |
+          git submodule update --init --recursive \
+            protocol \
+            external/rocksdb \
+            external/model-checker \
+            external/googletest \
+            external/benchmark \
+            external/crc32c \
+            external/blake3 \
+            external/corrosion \
+            built_contracts/integration_test_contracts
+
+      - name: Cargo Fetch
+        run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
+
+      - name: Configure Environment
+        run: |
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          echo 'NPROC=30' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
+
+      - name: Configure Build
+        run: |
+          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
+
+      - name: Build test_ffi_test
+        run: make -C build -j "$(nproc)" test_ffi_test
+
+      - name: Run test_ffi_test
+        run: |
+          export LSAN_OPTIONS=suppressions="$(pwd)/.lsan_suppress:print_suppressions=1"
+          ./build/hogd/test_ffi/test_ffi_test
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
