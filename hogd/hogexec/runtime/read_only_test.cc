@@ -496,6 +496,88 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   }
 }
 
+// Verifies that read-only enforcement works when a WASM contract invokes the
+// native token precompile with the read-only flag. get_balance_of should
+// succeed; transfer should fail because modify_native_token_balance is blocked
+// in read-only mode.
+TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
+{
+  using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
+
+  constexpr ContractAddress kObserverAddr = make_contract_address(12);
+  constexpr ContractAddress kReceiverAddr = make_contract_address(13);
+
+  // Deploy the native token precompile so the WASM contract can invoke it
+  auto token_contract_xdr = make_native_contract(std::to_underlying(
+      HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+  write_contract(token_contract_xdr);
+  write_deployment(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+                   token_contract_xdr);
+
+  setup_grant_storage_token(kObserverAddr, 12345);
+
+  // Set up multiplexed context with WASM and native runtimes
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kWasmi, {wasm_context.get(), false}},
+          {ContractType::kNative, {native_context.get(), false}},
+      });
+
+  {
+    // WASM contract read-only invokes get_balance_of — should succeed
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = contract_addr_,
+                                   .entrypoint = meta::entrypoint<
+                                       "read_only_native_get_balance">(),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = meta::make_calldata<
+                                       "read_only_native_get_balance">(
+                                       kObserverAddr)},
+                }},
+        *multiplexed_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  {
+    // WASM contract read-only invokes transfer — should fail (frame reverts),
+    // but the WASM method handles the error and returns normally
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_addr_,
+                            .entrypoint =
+                                meta::entrypoint<"read_only_native_transfer">(),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = meta::make_calldata<
+                                "read_only_native_transfer">(kReceiverAddr)},
+                }},
+        *multiplexed_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
