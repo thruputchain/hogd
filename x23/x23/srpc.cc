@@ -133,7 +133,8 @@ SRpcFd::read_worker(const CpuSet *cpus) noexcept
       // might as well ask for the full message if we know the size
       uint32_t msglen = getbe<uint32_t>(rdbuf.data()) & 0x7fffffffU;
       if (msglen > max_message_size_) {
-        fail("read_worker: message size {} exceeds maximum {}", msglen, max_message_size_);
+        fail("read_worker: message size {} exceeds maximum {}", msglen,
+             max_message_size_);
         return;
       }
       rdsz = std::max(rdsz, 4UZ + msglen - rdbuf.size());
