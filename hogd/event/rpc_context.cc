@@ -134,12 +134,15 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
     auto it = event.event_block_contexts_.find(block_id);
     CHECK(it != event.event_block_contexts_.end());
-    auto &context = it->second;
+    PerThreadARC<EventBlockContext> context = it->second;
+    g.reset();
 
     co_await file_wait;
     co_await context.get().finish_file(out_hash);
     co_await context.get().send_events_to_indexers(block_height,
                                                    event.indexers_);
+    x23::CoroGuard cg;
+    co_await cg(event.lock_);
     if (it->second.initiate_shutdown()) {
       event.gc_context_internal(it);
     }
