@@ -148,7 +148,8 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
     it = event.event_block_contexts_.find(block_id);
     CHECK(it != event.event_block_contexts_.end());
-    if (it->second.release_reference()) {
+    bool released = it->second.release_reference();
+    if (released || it->second.initiate_shutdown()) {
       event.gc_context_internal(it);
     }
     co_return;
