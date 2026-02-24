@@ -788,7 +788,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // vectors static and clear them on each call to [nominate()] so to avoid
   // memory allocation/free overhead.
   x23::XdrVec<SignedTransaction> tmp = std::move(nominated_block_cache_.txs);
-  [](x23::XdrVec<SignedTransaction> to_clear) {
+  [](x23::XdrVec<SignedTransaction> to_clear) -> x23::Detached {
+    co_await default_coropoll().pool_.bg();
     to_clear.clear();
   }(std::move(tmp));
 
