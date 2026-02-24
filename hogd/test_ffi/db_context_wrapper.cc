@@ -2,9 +2,12 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <format>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -14,6 +17,8 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/loadgen/loadgen_server.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "x23/sockio.h"
@@ -51,10 +56,8 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   auth_mempool_server_.start_server(/*port=*/0);
 
   {
-    x23::BoundedStr address_for_db =
-        x23::HostPort{"localhost", auth_db_server_.port()}.show();
-    x23::BoundedStr address_for_mempool =
-        x23::HostPort{"localhost", auth_mempool_server_.port()}.show();
+    std::string address_for_db = std::format("localhost:{}", auth_db_server_.port());
+    std::string address_for_mempool = std::format("localhost:{}", auth_mempool_server_.port());
     AuthCard auth_card = {.protocol = version::kHogdProtocol(),
                           .upid = {},
                           .address_for_db = address_for_db.c_str(),

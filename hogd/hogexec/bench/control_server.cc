@@ -29,6 +29,7 @@
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "x23/fastclock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -259,10 +260,11 @@ public:
 
   CIControlRpc(std::string work_dir) : work_dir_(std::move(work_dir)) {}
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~CIControlRpc()
   {
     // ensure all subprocesses are stopped
-    ciserver_stop(version::kHogdGitHash);
+    ciserver_stop(hogd_git_hash_);
   }
 
   CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
@@ -395,7 +397,8 @@ public:
 private:
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
-    return std::string(hogd_git_hash) == version::kHogdGitHash;
+    static HogdGitHash expected_hash = []() { auto str = std::string(version::kHogdGitHash); return x23::Buf{str.begin(), str.end()}; }();
+    return hogd_git_hash == expected_hash;
   }
 
   CIProcStatus check_pid_status(pid_t pid,
@@ -416,6 +419,8 @@ private:
     info("pid: {} is still running", pid);
     return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
   }
+
+  const HogdGitHash hogd_git_hash_ = []() { auto str = std::string(version::kHogdGitHash); return HogdGitHash{str.begin(), str.end()}; }();
 
   std::atomic<bool> waiting_for_shutdown_ = false;
 
