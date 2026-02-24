@@ -136,7 +136,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     CHECK(it != event.event_block_contexts_.end());
     PerThreadARC<EventBlockContext> *context = &it->second;
     CHECK(context->try_acquire_reference());
-    g.reset();
+    g = nullptr;
 
     co_await file_wait;
     co_await context->get().finish_file(out_hash);

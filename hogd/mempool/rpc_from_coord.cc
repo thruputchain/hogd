@@ -7,7 +7,6 @@
 #include <ctime>
 #include <future>
 #include <memory>
-#include <set>
 #include <span>
 #include <unordered_set>
 #include <utility>
@@ -72,8 +71,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 {
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
-  std::chrono::milliseconds delta_raw =
-      std::chrono::duration_cast<std::chrono::milliseconds>(delta);
+  auto delta_raw = std::chrono::duration_cast<std::chrono::milliseconds>(delta);
   int64_t delta_count = delta_raw.count();
 
   ElapsedTimer timer;
