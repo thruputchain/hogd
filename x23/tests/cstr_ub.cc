@@ -14,7 +14,7 @@
 #include <cassert>
 #include <cstring>
 #include <print>
-#include <malloc/malloc.h>
+#include <cstdlib>
 
 #include "x23/vec.h"
 
