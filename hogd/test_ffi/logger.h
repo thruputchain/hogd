@@ -11,9 +11,9 @@ namespace hogd {
 
 class ThreadsafeLogger : public Logger {
 public:
-  ThreadsafeLogger() : max_level_(LogLevel::kInfo) {}
+  ThreadsafeLogger(LogLevel log_level) : max_level_(log_level) {}
 
-  ~ThreadsafeLogger() = default;
+  ~ThreadsafeLogger() override = default;
 
   void vlog(LogLevel level, std::string_view fmt,
             const std::source_location &loc, std::format_args args) override;
