@@ -397,7 +397,10 @@ public:
 private:
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
-    static HogdGitHash expected_hash = []() { auto str = std::string(version::kHogdGitHash); return x23::Buf{str.begin(), str.end()}; }();
+    static HogdGitHash expected_hash = []() {
+      auto str = std::string(version::kHogdGitHash);
+      return x23::Buf{str.begin(), str.end()};
+    }();
     return hogd_git_hash == expected_hash;
   }
 
@@ -420,7 +423,10 @@ private:
     return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
   }
 
-  const HogdGitHash hogd_git_hash_ = []() { auto str = std::string(version::kHogdGitHash); return HogdGitHash{str.begin(), str.end()}; }();
+  const HogdGitHash hogd_git_hash_ = []() {
+    auto str = std::string(version::kHogdGitHash);
+    return HogdGitHash{str.begin(), str.end()};
+  }();
 
   std::atomic<bool> waiting_for_shutdown_ = false;
 

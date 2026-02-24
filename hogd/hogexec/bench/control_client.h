@@ -26,7 +26,10 @@ public:
     : client_(std::move(client))
   {}
 
-  const x23::Buf kHogdGitHash = []() { auto str = std::string(version::kHogdGitHash); return x23::Buf{str.begin(), str.end()}; }();
+  const x23::Buf kHogdGitHash = []() {
+    auto str = std::string(version::kHogdGitHash);
+    return x23::Buf{str.begin(), str.end()};
+  }();
 
   void start_server(std::string const &program_name,
                     std::vector<std::string> const &program_args)

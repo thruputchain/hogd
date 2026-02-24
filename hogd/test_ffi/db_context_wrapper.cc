@@ -56,8 +56,10 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   auth_mempool_server_.start_server(/*port=*/0);
 
   {
-    std::string address_for_db = std::format("localhost:{}", auth_db_server_.port());
-    std::string address_for_mempool = std::format("localhost:{}", auth_mempool_server_.port());
+    std::string address_for_db =
+        std::format("localhost:{}", auth_db_server_.port());
+    std::string address_for_mempool =
+        std::format("localhost:{}", auth_mempool_server_.port());
     AuthCard auth_card = {.protocol = version::kHogdProtocol(),
                           .upid = {},
                           .address_for_db = address_for_db.c_str(),
