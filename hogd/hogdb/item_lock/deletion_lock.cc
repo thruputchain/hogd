@@ -44,8 +44,9 @@ DeletionLock::write_committed_change(LockContext const &ctx,
   assert(ctx.dao);
 
   if (type == kRetrocausalQueue) {
-    // Delegate to RCQ-specific cleanup: removes metadata + all blocks from DAO.
-    auto cleanup_ret = RetrocausalQueueLock::cleanup_on_deletion(ctx);
+    // Delegate to RCQ-specific cleanup: removes metadata + all blocks from both
+    // DAO and trie. This is fully self-contained.
+    auto cleanup_ret = RetrocausalQueueLock::cleanup_on_deletion(ctx, &trie);
     if (!cleanup_ret.has_value()) {
       return cleanup_ret.error();
     }
@@ -56,16 +57,15 @@ DeletionLock::write_committed_change(LockContext const &ctx,
     if (!remove_ret) {
       return remove_ret;
     }
+
+    // Remove the metadata/item key from the merkle trie.
+    // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
+    // will never attempt to remove a key that does not exist. We already
+    // checked above that the key exists when we removed it from the database.
+    CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key, type)
+              .has_value());
   }
 
-  // Remove ctx.key (the metadata/item key) from the merkle trie.
-  // TODO(stutsman): RCQ blocks are not in the trie, which is a severe bug
-  // to be fixed in an upcoming patch.
-  // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
-  // will never attempt to remove a key that does not exist. We already checked
-  // above that the key exists when we removed it from the database.
-  CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key, type)
-            .has_value());
   return {};
 }
 

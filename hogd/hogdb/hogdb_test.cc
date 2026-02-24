@@ -513,8 +513,6 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 }
 
 // Test that RCQ block contents are integrity-protected by the Merkle trie.
-// This test currently FAILS because block contents are NOT committed to the
-// trie - only metadata is. This is a known critical security issue.
 //
 // The test:
 // 1. Creates an RCQ with entries that span multiple blocks
@@ -524,7 +522,6 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 // 5. Asserts that the root hash changed
 //
 // Expected behavior: Root hash SHOULD change (integrity protected)
-// Current behavior: Root hash DOES NOT change (bug!)
 TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
 {
   constexpr size_t kEntriesPerBlock = 100;
@@ -576,8 +573,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   trie_.generate_top_level_hashes();
   SHA256Hash original_trie_hash = trie_.get_root_hash();
 
-  info("Original merkle trie root hash: {}", original_trie_hash);
-
   // Read block 1's data
   uint64_t target_block_number = 1;
   auto block_result =
@@ -585,9 +580,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   ASSERT_TRUE(block_result);
   RetrocausalQueueBlock original_block = *block_result;
 
-  info("Original block {} has {} entries, first entry value = {}",
-       target_block_number, original_block.entries.size(),
-       original_block.entries[0][0]);
   ASSERT_GT(original_block.entries.size(), 0);
 
   // Now directly modify block 1's data in ramdb (simulating an attacker)
@@ -599,9 +591,6 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   // Write the modified block directly to ramdb, bypassing trie
   ASSERT_TRUE(db_.write_retrocausal_queue_block(rcq_key, modified_block));
   ASSERT_TRUE(db_.commit());
-
-  info("Modified block {} entry 0 from {} to 255", target_block_number,
-       original_block.entries[0][0]);
 
   // Re-read the RCQ metadata - it should be UNCHANGED (same counts, same
   // hashes)
@@ -618,7 +607,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   // The metadata serialization should be IDENTICAL (same counts, same
   // structure)
   bool metadata_unchanged = (original_meta_serialized == new_meta_serialized);
-  info("Metadata serialization unchanged: {}", metadata_unchanged);
+  ASSERT_TRUE(metadata_unchanged);
 
   // Verify the block content was actually modified
   auto modified_block_result =
@@ -635,16 +624,16 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
       sha256(std::as_bytes(std::span(original_block_serialized)));
   SHA256Hash modified_block_hash =
       sha256(std::as_bytes(std::span(modified_block_serialized)));
+  ASSERT_NE(original_block_hash, modified_block_hash);
 
-  info("Block content hash changed: {} -> {}", original_block_hash,
-       modified_block_hash);
-
-  // Recompute the trie root by generating hashes again
-  // Since metadata is unchanged, the trie root should be identical
-  trie_.generate_top_level_hashes();
+  // Reload the trie from ramdb to detect the inconsistency
+  // If blocks are properly integrity-protected in the trie, reloading from
+  // the tampered ramdb will produce a different trie hash
+  trie_.clear();
+  db_.load_trie(trie_);
   SHA256Hash new_trie_hash = trie_.get_root_hash();
 
-  info("Recomputed merkle trie root hash: {}", new_trie_hash);
+  info("Recomputed merkle trie root hash after reload: {}", new_trie_hash);
 
   // We modified block contents (proven by different block hashes)
   // But metadata is unchanged (proven by identical serialization)
@@ -656,15 +645,256 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   // - This would change the metadata serialization
   // - This would change the trie root
   // - So: original_trie_hash != new_trie_hash -> TEST WOULD PASS
-  //
-  // In the BUGGY implementation (current):
-  // - Block contents are NOT in metadata
-  // - Metadata is unchanged after block modification
-  // - Trie root is unchanged
-  // - So: original_trie_hash == new_trie_hash -> TEST FAILS!
   EXPECT_NE(original_trie_hash, new_trie_hash)
       << "Modifying RCQ block contents did NOT change "
       << "the merkle trie root hash! ";
+}
+
+// Test that consuming blocks removes them from the trie
+TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
+{
+  // Setup: create contract with enough storage tokens
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 2);
+
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("consume"))),
+                           .contract_size = 10}));
+
+  constexpr size_t kEntriesPerBlock = 100;
+  constexpr size_t kNumBlocks = 3;
+
+  // Create blocks
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.resize(kEntriesPerBlock);
+    for (size_t i = 0; i < kEntriesPerBlock; i++) {
+      delta.insert.added_entries[i] =
+          QueueEntry{static_cast<uint8_t>(block_idx)};
+    }
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  trie_.generate_top_level_hashes();
+  SHA256Hash trie_hash_before_consume = trie_.get_root_hash();
+
+  // Consume the first block completely
+  {
+    BlockHeight height = kNumBlocks + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Verify trie hash changed after consuming block 1
+  trie_.generate_top_level_hashes();
+  SHA256Hash trie_hash_after_consume = trie_.get_root_hash();
+
+  EXPECT_NE(trie_hash_before_consume, trie_hash_after_consume)
+      << "Trie hash did not change after consuming block - block may not have "
+         "been removed from trie";
+
+  // Verify block 1 is not in ramdb anymore
+  auto block_result = db_.read_retrocausal_queue_block(rcq_key, 1);
+  EXPECT_FALSE(block_result.has_value())
+      << "Block 1 should be removed from ramdb after consume";
+}
+
+// Test that deleting an RCQ removes all blocks from the trie
+TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
+{
+  // Setup: create contract with enough storage tokens
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 3);
+
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
+                           .contract_size = 10}));
+
+  constexpr size_t kEntriesPerBlock = 100;
+  constexpr size_t kNumBlocks = 3;
+
+  // Create blocks
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.resize(kEntriesPerBlock);
+    for (size_t i = 0; i < kEntriesPerBlock; i++) {
+      delta.insert.added_entries[i] =
+          QueueEntry{static_cast<uint8_t>(block_idx)};
+    }
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  trie_.generate_top_level_hashes();
+  SHA256Hash trie_hash_before_delete = trie_.get_root_hash();
+
+  // Delete the entire RCQ by consuming all entries
+  {
+    BlockHeight height = kNumBlocks + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    // Consume all blocks
+    RetrocausalQueueDelta delta;
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number =
+        kNumBlocks;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Verify trie hash changed after deleting all blocks
+  trie_.generate_top_level_hashes();
+  SHA256Hash trie_hash_after_delete = trie_.get_root_hash();
+
+  EXPECT_NE(trie_hash_before_delete, trie_hash_after_delete)
+      << "Trie hash did not change after deleting RCQ - blocks may not have "
+         "been removed from trie";
+
+  // Verify all blocks are removed from ramdb
+  for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
+    auto block_result = db_.read_retrocausal_queue_block(rcq_key, block_num);
+    EXPECT_FALSE(block_result.has_value())
+        << "Block " << block_num
+        << " should be removed from ramdb after delete";
+  }
+}
+
+TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
+{
+  // Test that explicit deletion via request_deletion (DeletionLock path)
+  // properly removes all RCQ blocks from both DAO and merkle trie.
+
+  // Setup: create contract with enough storage tokens
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 4);
+
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
+                           .contract_size = 10}));
+
+  constexpr size_t kEntriesPerBlock = 100;
+  constexpr size_t kNumBlocks = 3;
+
+  // Create blocks
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.resize(kEntriesPerBlock);
+    for (size_t i = 0; i < kEntriesPerBlock; i++) {
+      delta.insert.added_entries[i] =
+          QueueEntry{static_cast<uint8_t>(block_idx)};
+    }
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  trie_.generate_top_level_hashes();
+  SHA256Hash trie_hash_before_delete = trie_.get_root_hash();
+
+  // Explicitly delete the RCQ using request_deletion (goes through
+  // DeletionLock)
+  {
+    BlockHeight height = kNumBlocks + 1;
+    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                   background_commit_worker_, height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        rcq_key, std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Verify trie hash changed after deleting all blocks
+  trie_.generate_top_level_hashes();
+  SHA256Hash trie_hash_after_delete = trie_.get_root_hash();
+
+  EXPECT_NE(trie_hash_before_delete, trie_hash_after_delete)
+      << "Trie hash did not change after explicit deletion - blocks may not "
+         "have been removed from trie";
+
+  // Verify all blocks are removed from ramdb
+  for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
+    auto block_result = db_.read_retrocausal_queue_block(rcq_key, block_num);
+    EXPECT_FALSE(block_result.has_value())
+        << "Block " << block_num
+        << " should be removed from ramdb after explicit deletion";
+  }
+
+  // Verify metadata is also removed
+  auto meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  EXPECT_FALSE(meta_result.has_value())
+      << "Metadata should be removed from ramdb after explicit deletion";
 }
 
 } // namespace hogd
