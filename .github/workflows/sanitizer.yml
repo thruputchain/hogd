@@ -53,7 +53,7 @@ jobs:
                   --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                   --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                   --timeout-sec=3600 \
-                  ./scripts/schedules/memory_sanitizer.toml
+                  ./scripts/schedules/sanitizer.toml
             - name: Print Log Download Instructions
               if: always()
               uses: ./.github/actions/print-log-instructions

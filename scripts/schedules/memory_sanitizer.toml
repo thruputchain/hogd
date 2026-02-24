@@ -20,7 +20,7 @@ echo 'build msan-instrumented libc++'
 
 echo 'build clang msan'
 ./scripts/build.sh -d build/llvm_msan -c clang \
-  -f "-fsanitize=memory -fsanitize-memory-track-origins=2 -fno-omit-frame-pointer" \
+  -f "-fsanitize=memory -fsanitize-memory-track-origins=2 -fno-omit-frame-pointer -fsanitize-ignorelist=$(pwd)/.msan_ignorelist" \
   -t Debug \
   -x "-DMSAN_LIBCXX_PATH=$HOME/msan-libcxx" \
   -x "-DENABLE_TEST_FFI=ON" \

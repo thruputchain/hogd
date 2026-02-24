@@ -1,0 +1,17 @@
+# Compile-time MSan ignorelist.
+#
+# Unlike runtime suppressions (which only suppress reports),
+# this tells the compiler to NOT INSTRUMENT matching functions/sources.
+# This means MSan won't track or report taint flowing through them,
+# which is exactly what we need for wrappers around uninstrumented libraries.
+#
+# Pass to clang via: -fsanitize-ignorelist=/path/to/.msan_ignorelist
+
+# Wrappers around uninstrumented OpenSSL
+fun:*read_random*
+fun:*hogd*sha256*
+fun:*hogd*blake3*
+fun:*SipHash24*
+
+# crc32c — uninstrumented system library
+fun:*crc32c*
