@@ -61,6 +61,7 @@ cat >.git/info/sparse-checkout <<'EOF'
 /libcxxabi
 /libunwind
 /llvm/cmake
+/llvm/utils/llvm-lit
 /third-party
 EOF
 git fetch --depth 1 origin "${LLVM_BRANCH}"
