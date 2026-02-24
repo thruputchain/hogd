@@ -63,7 +63,7 @@ public:
   x23::Async<void> add_indexer(indexer_event_client_t &&indexer)
   {
     x23::CoroGuard cg;
-    co_await cg(lock_);
+    co_await cg(indexers_lock_);
     indexers_.push_back(std::move(indexer));
     co_await cg.reset_and_return();
   }
@@ -96,7 +96,7 @@ private:
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
-  // TODO(jhumphri): Protect indexers_ with a rw lock.
+  x23::CoroLock indexers_lock_;
   std::vector<indexer_event_client_t> indexers_;
 
   PerThread<ContextCache> cache_;

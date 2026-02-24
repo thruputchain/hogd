@@ -140,8 +140,12 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
     co_await file_wait;
     co_await context->get().finish_file(out_hash);
-    co_await context->get().send_events_to_indexers(block_height,
-                                                    event.indexers_);
+    {
+      x23::CoroGuard cg;
+      co_await cg(event.indexers_lock_);
+      co_await context->get().send_events_to_indexers(block_height,
+                                                      event.indexers_);
+    }
 
     x23::CoroGuard cg;
     co_await cg(event.lock_);
