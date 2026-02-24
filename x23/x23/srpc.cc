@@ -130,18 +130,13 @@ SRpcFd::read_worker(const CpuSet *cpus) noexcept
     size_t rdsz =
         std::max(rdbuf.capacity(), kReadSize + 1UZ) - 1 - rdbuf.size();
     if (rdbuf.size() >= 4) {
-      // If we have a full-fragment record header, avoid repeated small reads
-      // by asking for the rest of that record, but never exceed
-      // max_message_size_.
-      uint32_t hdr = getbe<uint32_t>(rdbuf.data());
-      if (hdr & 0x80000000U) {
-        size_t msglen = hdr & 0x7fffffffU;
-        if (msglen > max_message_size_) {
-          fail("read_worker: message size {} too big", msglen);
-          return;
-        }
-        rdsz = std::max(rdsz, 4UZ + msglen - rdbuf.size());
+      // might as well ask for the full message if we know the size
+      uint32_t msglen = getbe<uint32_t>(rdbuf.data()) & 0x7fffffffU;
+      if (msglen > max_message_size_) {
+        fail("read_worker: message size {} exceeds maximum {}", msglen, max_message_size_);
+        return;
       }
+      rdsz = std::max(rdsz, 4UZ + msglen - rdbuf.size());
     }
     auto res = read(fd_, &rdbuf, rdsz);
     if (!res || !*res) {
