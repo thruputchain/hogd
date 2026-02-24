@@ -1,3 +1,4 @@
+#define X23_CSTRING_DEBUG
 
 #include <cstdint>
 #include <cstring>
