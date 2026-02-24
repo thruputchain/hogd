@@ -84,7 +84,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     last_stage_ts = now;
   };
   double stage_deserialize_batch = 0.0;
-  double stage_capture_verify_height = 0.0;
   double stage_auth_verify = 0.0;
   double stage_wait_commit_lock_before_add = 0.0;
   double stage_filter_invalid = 0.0;
@@ -102,8 +101,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   const BlockHeight verify_height = scheduler_->current_block();
   info("submit_unvetted will check if the txs are valid for height {}",
        verify_height);
-  record_stage(stage_capture_verify_height);
-
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                              txs);
@@ -141,14 +138,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   record_stage(stage_add_txs);
 
   info("submit_unvetted() stages: delta={}, deserialize_batch={:.6f}, "
-       "capture_verify_height={:.6f}, auth_verify={:.6f}, "
+       "auth_verify={:.6f}, "
        "wait_commit_lock_before_add={:.6f}, filter_invalid={:.6f}, "
        "add_txs={:.6f}, prepare_response_and_notify={:.6f}, "
        "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
-       delta_count, stage_deserialize_batch, stage_capture_verify_height,
-       stage_auth_verify, stage_wait_commit_lock_before_add,
-       stage_filter_invalid, stage_add_txs, stage_prepare_response_and_notify,
-       timer.elapsed(), scheduler_->size(), num_submitted_txs, txs.size());
+       delta_count, stage_deserialize_batch, stage_auth_verify,
+       stage_wait_commit_lock_before_add, stage_filter_invalid, stage_add_txs,
+       stage_prepare_response_and_notify, timer.elapsed(), scheduler_->size(),
+       num_submitted_txs, txs.size());
   co_return;
 }
 
@@ -1264,16 +1261,35 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
-  static SignedTransactionHashBatch tx_hashes_to_remove;
-  tx_hashes_to_remove.clear();
+  static SignedTransactionHashBatch tx_hashes;
+  static SignedTransactionBatch txs;
+  tx_hashes.clear();
+  txs.clear();
   for (const KeyChange &change : key_changes) {
-    account_last_auth_change_height_[change.address] = height;
-    scheduler_->get_txs_for_account(change.address, tx_hashes_to_remove);
+    // Get all txs for [change.address] and re-verify them. Remove any that fail
+    // verification.
+    static SignedTransactionHashBatch change_tx_hashes;
+    static SignedTransactionBatch change_txs;
+    change_tx_hashes.clear();
+    change_txs.clear();
+    scheduler_->get_txs_for_account(change.address, change_tx_hashes,
+                                    change_txs);
+    tx_hashes += change_tx_hashes;
+    txs += change_txs;
   }
-
+  AuthErrorCodeBatch auth_ret =
+      co_await auth_client_->authmempool_verify_transactions(
+          scheduler_->current_block(), txs);
+  x23::Vec<SignedTransactionHash> to_remove;
+  for (size_t i = 0; i < auth_ret.size(); i++) {
+    const AuthErrorCode &code = auth_ret[i];
+    if (code != AuthErrorCode::kAuthSuccess) {
+      to_remove.push_back(tx_hashes[i]);
+    }
+  }
   // The txs are on the runqueue and need to be removed, so we set
   // [validated_block] to true.
-  co_await scheduler_->remove_from_scheduler(tx_hashes_to_remove,
+  co_await scheduler_->remove_from_scheduler(to_remove,
                                              /*validated_block=*/true);
   auth_data_height_.store(height);
   auth_data_height_.broadcast(&default_threadpool());
