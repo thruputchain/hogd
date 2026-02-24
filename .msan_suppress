@@ -27,10 +27,22 @@ fun:*hogd*blake3*
 # These are broad but necessary — MSan checks frame #0 for suppressions,
 # and when memcmp/bcmp are called from uninstrumented OpenSSL internals,
 # the only matching frame is the interceptor itself.
+# We list both the public name and the __interceptor_ internal name
+# because MSan may match on either depending on symbolization.
 fun:memcmp
 fun:bcmp
 fun:memcpy
 fun:fopen64
+fun:strcmp
+fun:strncmp
+fun:strlen
+fun:__interceptor_memcmp
+fun:__interceptor_bcmp
+fun:__interceptor_memcpy
+fun:__interceptor_fopen64
+fun:__interceptor_strcmp
+fun:__interceptor_strncmp
+fun:__interceptor_strlen
 
 # System compression libraries — uninstrumented
 fun:*snappy*
