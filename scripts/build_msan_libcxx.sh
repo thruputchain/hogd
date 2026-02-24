@@ -61,6 +61,7 @@ cat >.git/info/sparse-checkout <<'EOF'
 /libcxxabi
 /libunwind
 /llvm/cmake
+/third-party
 EOF
 git fetch --depth 1 origin "${LLVM_BRANCH}"
 git checkout FETCH_HEAD
@@ -84,7 +85,12 @@ cmake -G "Unix Makefiles" \
   -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
   -DLIBCXX_ENABLE_SHARED=OFF \
   -DLIBCXXABI_ENABLE_SHARED=OFF \
-  -DLIBUNWIND_ENABLE_SHARED=OFF
+  -DLIBUNWIND_ENABLE_SHARED=OFF \
+  -DLIBCXX_ENABLE_BENCHMARKS=OFF \
+  -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+  -DLIBCXX_INCLUDE_TESTS=OFF \
+  -DLIBCXXABI_INCLUDE_TESTS=OFF \
+  -DLIBUNWIND_INCLUDE_TESTS=OFF
 
 echo ""
 echo "Building (this may take a few minutes)..."
