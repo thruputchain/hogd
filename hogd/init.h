@@ -20,6 +20,8 @@ extern GStatus<void> crypto_init();
 // Call this in your main() function.
 //
 // Returns 0 if successful, otherwise failure.
-extern int hogd_init(int argc, char *argv[], bool do_print_version = true, LogLevel log_level = is_debug_build() ? LogLevel::kDebug : LogLevel::kInfo);
+extern int hogd_init(int argc, char *argv[], bool do_print_version = true,
+                     LogLevel log_level = is_debug_build() ? LogLevel::kDebug
+                                                           : LogLevel::kInfo);
 
 } // namespace hogd

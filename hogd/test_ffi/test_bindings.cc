@@ -105,27 +105,37 @@ enable_syscall_logging(int32_t level) noexcept
   LogLevel log_level;
   switch (static_cast<LogLevel>(level)) {
   case LogLevel::kCritical:
-    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelCritical) == static_cast<int32_t>(LogLevel::kCritical));
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelCritical) ==
+        static_cast<int32_t>(LogLevel::kCritical));
     log_level = LogLevel::kCritical;
     break;
   case LogLevel::kError:
-    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelError) == static_cast<int32_t>(LogLevel::kError));
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelError) ==
+        static_cast<int32_t>(LogLevel::kError));
     log_level = LogLevel::kError;
     break;
   case LogLevel::kWarn:
-    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelWarn) == static_cast<int32_t>(LogLevel::kWarn));
+    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelWarn) ==
+                  static_cast<int32_t>(LogLevel::kWarn));
     log_level = LogLevel::kWarn;
     break;
   case LogLevel::kInfo:
-    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelInfo) == static_cast<int32_t>(LogLevel::kInfo));
+    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelInfo) ==
+                  static_cast<int32_t>(LogLevel::kInfo));
     log_level = LogLevel::kInfo;
     break;
   case LogLevel::kDebug:
-    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelDebug) == static_cast<int32_t>(LogLevel::kDebug));
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelDebug) ==
+        static_cast<int32_t>(LogLevel::kDebug));
     log_level = LogLevel::kDebug;
     break;
   case LogLevel::kTrace:
-    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelTrace) == static_cast<int32_t>(LogLevel::kTrace));
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelTrace) ==
+        static_cast<int32_t>(LogLevel::kTrace));
     log_level = LogLevel::kTrace;
     break;
   default:
