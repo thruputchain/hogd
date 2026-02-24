@@ -8,6 +8,7 @@
 #include <x23/srpc.h>
 
 #include "tests/xdrtest.hh"
+#include "x23/vec.h"
 
 namespace x23 {
 
@@ -46,6 +47,13 @@ TEST(SockioRegression, HostPortParseBracketedIpv6)
   ASSERT_TRUE(hp.parse("[::1]:443"));
   EXPECT_EQ(std::string_view(hp.host), "::1");
   EXPECT_EQ(std::string_view(hp.port), "443");
+}
+
+TEST(SockioRegression, DISABLED_BoundedStrCStr)
+{
+  BoundedStr<12> bs = "Hello, world";
+  ASSERT_EQ(bs.size(), 12);
+  const char *p = bs.c_str();
 }
 
 } // namespace x23
