@@ -972,7 +972,7 @@ MerkleTrie::remove(const Key &k)
   Node *branch;
   size_t num_children;
   Node *locked_through;
-  std::byte remaining_child_hex;
+  std::byte remaining_child_hex{};
 
   while (true) {
     idx = 0;
