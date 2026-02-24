@@ -13,6 +13,7 @@
 #include <print>
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
+#include <string_view>
 #include <sys/wait.h>
 #include <thread>
 #include <type_traits>
