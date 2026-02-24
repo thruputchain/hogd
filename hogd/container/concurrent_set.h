@@ -244,9 +244,6 @@ private:
         if (v == value) {
           bool r = true;
           if (erase) {
-            if (v == Traits::kTombstone) {
-              return false;
-            }
             // This is subtle. Note here the only overwrites allowed on an entry
             // are for ones that are non-empty and non-tombstone. Hence, if we
             // see CAS failure, it must be because another thread erased the

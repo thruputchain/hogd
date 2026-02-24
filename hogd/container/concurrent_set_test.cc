@@ -257,7 +257,7 @@ TEST(ConcurrentSet, ParallelInsertAndErase)
     threads.emplace_back([i, &s]() {
       for (size_t j = 1; j <= kKeysPerThread; ++j) {
         ASSERT_TRUE(s.erase((i * kKeysPerThread) + j));
-        ASSERT_TRUE(s.try_insert(((i * kKeysPerThread) + j)) * 2);
+        ASSERT_TRUE(s.try_insert((i * kKeysPerThread) + j));
       }
     });
   }
@@ -269,8 +269,8 @@ TEST(ConcurrentSet, ParallelInsertAndErase)
   for (size_t i = 0; i < kNThreads; ++i) {
     threads.emplace_back([i, &s]() {
       for (size_t j = 1; j <= kKeysPerThread; ++j) {
-        ASSERT_TRUE(s.contains((i * kKeysPerThread) + j) * 2);
-        ASSERT_TRUE(s.erase((i * kKeysPerThread) + j) * 2);
+        ASSERT_TRUE(s.contains((i * kKeysPerThread) + j));
+        ASSERT_TRUE(s.erase((i * kKeysPerThread) + j));
       }
     });
   }
