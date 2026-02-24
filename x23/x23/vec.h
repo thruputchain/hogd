@@ -268,7 +268,8 @@ template<typename T> constexpr size_t kMaxArraySize = PTRDIFF_MAX / sizeof(T);
 constexpr size_t kMaxXdrSize = 0xffffffff;
 
 template<typename T, size_t MaxSize = kMaxArraySize<T>,
-         typename Allocator = detail::merged_allocator<T>::type>
+         typename Allocator = detail::merged_allocator<T>::type,
+         uint8_t ExtraAlloc = 0>
 class Vec {
 public:
   using value_type = T;
@@ -293,6 +294,7 @@ public:
   using Buf = detail::VecBuf<T *>;
 
   static constexpr size_type kMaxSize = MaxSize;
+  static constexpr int kExtraAlloc = ExtraAlloc;
 
 protected:
   [[no_unique_address]] allocator_type a_{};
@@ -307,8 +309,9 @@ public:
   constexpr Vec(const Vec &other) : Vec(std::from_range, other) {}
 
   template<size_t MS>
-  constexpr Vec(Vec<value_type, MS, allocator_type> &&other)
-      noexcept(max_size() >= Vec<value_type, MS, allocator_type>::max_size())
+  constexpr Vec(Vec<value_type, MS, allocator_type, ExtraAlloc> &&other)
+      noexcept(max_size() >=
+               Vec<value_type, MS, allocator_type, ExtraAlloc>::max_size())
   {
     if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
                   max_size())
@@ -600,22 +603,26 @@ public:
   // as Str) in which the pointers have been reinterpret_casted to a
   // new value_type of the same size and no greater alignment.  For
   // instance, you can cast between Vec<unsigned char> and Str.
-  template<typename Vec> requires requires(typename Vec::value_type *p) {
-    typename Vec::value_type;
-    typename Vec::Buf{.begin = p, .end = p, .bufend = p};
-    requires sizeof(typename Vec::value_type) == sizeof(value_type);
-    requires alignof(value_type) % alignof(typename Vec::value_type) == 0;
-    Vec{typename Vec::Buf{}, allocator_type{}};
+  template<typename OVec> requires requires(typename OVec::value_type *p) {
+    typename OVec::value_type;
+    typename OVec::Buf{.begin = p, .end = p, .bufend = p};
+    requires sizeof(typename OVec::value_type) == sizeof(value_type);
+    requires alignof(value_type) % alignof(typename OVec::value_type) == 0;
+    OVec{typename OVec::Buf{}, allocator_type{}};
+    { OVec::kExtraAlloc } -> decays_to<int>;
   }
-  Vec reinterpret() && noexcept
+  OVec reinterpret() && noexcept(OVec::kExtraAlloc <= kExtraAlloc)
   {
-    using new_type = Vec::value_type;
-    Vec ret{typename Vec::Buf{
-                .begin = reinterpret_cast<new_type *>(b_.begin),
-                .end = reinterpret_cast<new_type *>(b_.end),
-                .bufend = reinterpret_cast<new_type *>(b_.bufend),
-            },
-            std::move(a_)};
+    using new_type = OVec::value_type;
+    constexpr int aadj = OVec::kExtraAlloc - kExtraAlloc;
+    if (aadj > 0)
+      ensure(aadj);
+    OVec ret{typename OVec::Buf{
+                 .begin = reinterpret_cast<new_type *>(b_.begin),
+                 .end = reinterpret_cast<new_type *>(b_.end),
+                 .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
+             },
+             std::move(a_)};
     b_ = {};
     return ret;
   }
@@ -638,7 +645,7 @@ public:
   }
 
 protected:
-  template<typename, size_t, typename> friend class Vec;
+  template<typename, size_t, typename, uint8_t> friend class Vec;
 
   static constexpr std::string_view tname() { return type_name<T>(); }
 
@@ -702,7 +709,7 @@ protected:
     Buf newb{};
     if (n) {
       size_t new_size = std::min(size(), n);
-      newb.begin = a.allocate(n);
+      newb.begin = a.allocate(n + ExtraAlloc);
       newb.end = newb.begin + new_size;
       newb.bufend = newb.begin + n;
       for (size_t i = 0; i < new_size; ++i)
@@ -711,7 +718,7 @@ protected:
     if (b_.begin) {
       for (value_type *p = b_.begin; p != b_.end; ++p)
         std::destroy_at(p);
-      a.deallocate(b_.begin, capacity());
+      a.deallocate(b_.begin, capacity() + ExtraAlloc);
     }
     b_ = newb;
   }
@@ -728,12 +735,13 @@ protected:
     Buf newb{};
     if (n) {
       if constexpr (requires { a_.allocate_at_least(n); }) {
-        auto ar = a_.allocate_at_least(n);
+        auto ar = a_.allocate_at_least(n + ExtraAlloc);
         newb.end = newb.begin = reinterpret_cast<value_type *>(ar.ptr);
-        newb.bufend = newb.begin + ar.count;
+        newb.bufend = newb.begin + ar.count - ExtraAlloc;
       }
       else {
-        newb.end = newb.begin = reinterpret_cast<value_type *>(a_.allocate(n));
+        newb.end = newb.begin =
+            reinterpret_cast<value_type *>(a_.allocate(n + ExtraAlloc));
         newb.bufend = newb.begin + n;
       }
     }
@@ -747,7 +755,7 @@ protected:
       }();
       std::destroy(b_.begin, b_.end);
       a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
-                    b_.bufend - b_.begin);
+                    (b_.bufend - b_.begin) + ExtraAlloc);
     }
 
     b_ = newb;
@@ -817,9 +825,10 @@ struct BufView : span<const uint8_t> {
 };
 
 template<size_t MaxSize = kMaxArraySize<char> - 1>
-class BoundedStr : public Vec<char, MaxSize> {
+class BoundedStr
+  : public Vec<char, MaxSize, detail::merged_allocator<char>::type, 1> {
 public:
-  using super = Vec<char, MaxSize>;
+  using super = Vec<char, MaxSize, detail::merged_allocator<char>::type, 1>;
   using super::super;
   using typename super::size_type;
 
@@ -835,10 +844,10 @@ public:
 
   constexpr ~BoundedStr() {}
 
-  // Warning: non-const, non-reentrant
-  constexpr const char *c_str(this auto &self)
+  // Warning:  Technically non-reentrant and illegally uses
+  // indeterminate value, but good enough in practice.
+  constexpr const char *c_str(this const auto &self)
   {
-    self.ensure();
     if (*self.b_.end)
       *self.b_.end = '\0';
     return self.data();

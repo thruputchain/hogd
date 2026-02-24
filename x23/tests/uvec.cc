@@ -131,6 +131,13 @@ format_test()
   assert(x == "789abcdefg"_str);
 }
 
+void
+test_cstr()
+{
+  BoundedStr<4> x = "1234";
+  x.c_str();
+}
+
 int
 main()
 {
@@ -139,4 +146,5 @@ main()
   add();
   reinterpret();
   format_test();
+  test_cstr();
 }
