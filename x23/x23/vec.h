@@ -868,11 +868,12 @@ public:
   {
     if (self.empty())
       return "";
-// Shouldn't be needed, but just in case we forgot some code path
-// that doesn't NUL-terminate the string.
+
 #ifdef X23_CSTRING_DEBUG
     x23assert(*self.b_.end == '\0');
 #endif
+    // Shouldn't be needed, but just in case we forgot some code path
+    // that doesn't NUL-terminate the string.
     if (*self.b_.end)
       *self.b_.end = '\0';
     return self.data();
