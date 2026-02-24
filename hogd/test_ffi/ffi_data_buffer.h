@@ -17,28 +17,6 @@
 // Utility methods for working with objects serialized to pass across the FFI
 // boundary.
 
-namespace std {
-
-template<> struct formatter<FFIDataBuffer> {
-  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
-
-  static auto format(const FFIDataBuffer &buffer, auto &ctx)
-  {
-    if (buffer.data == nullptr) {
-      return format_to(ctx.out(), "FFIDataBuffer{{data=nullptr, len={}}}",
-                       buffer.len);
-    }
-    if (buffer.len == 0) {
-      return format_to(ctx.out(), "FFIDataBuffer{{data=empty, len=0}}");
-    }
-    auto hex = hogd::encode_hex(
-        std::as_bytes(std::span<const uint8_t>(buffer.data, buffer.len)));
-    return format_to(ctx.out(), "FFIDataBuffer{{data={}, len={}}}", hex,
-                     buffer.len);
-  }
-};
-} // namespace std
-
 namespace hogd {
 
 constexpr FFIDataBuffer kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};

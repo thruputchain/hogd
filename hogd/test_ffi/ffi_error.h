@@ -4,6 +4,7 @@
 #include <format>
 
 #include "hogd/base/log.h"
+#include "hogd/test_ffi/test_bindings.h"
 
 namespace hogd {
 

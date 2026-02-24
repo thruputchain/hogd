@@ -11,7 +11,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -34,6 +33,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
 #include "hogd/test_ffi/ffi_error.h"
+#include "hogd/test_ffi/formatter.h" // IWYU pragma: keep
 #include "hogd/test_ffi/logger.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
@@ -72,6 +72,17 @@ make_ffi_result_type(TestFFIErrorCode ffi_error_code)
 ThreadsafeLogger *global_logger = nullptr;
 x23::DebugFd<"TEST_FFI_TRACE"> ffi_trace;
 
+template<typename... Args>
+void
+do_ffi_trace(std::format_string<Args...> fmt, Args &&...args) noexcept
+{
+  try {
+    ffi_trace(fmt, std::forward<Args>(args)...);
+  } catch (std::exception const &e) {
+    log_error("error tracing ffi: {}", e);
+  }
+}
+
 void
 lazy_init()
 {
@@ -91,7 +102,6 @@ lazy_init()
 void
 enable_syscall_logging() noexcept
 {
-  ffi_trace("FFI: enable_syscall_logging() -> ()");
   lazy_init();
   assert(global_logger != nullptr);
   global_logger->set_log_level(LogLevel::kTrace);
@@ -117,7 +127,6 @@ make_new_db(const uint8_t *serialized_cost_model,
       }
     }
     auto *db = new DBContext(cost_model_xdr);
-    ffi_trace("FFI: make_new_db() -> (db={})", static_cast<void *>(db));
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
@@ -157,7 +166,6 @@ TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
   try {
-    ffi_trace("FFI: free_db(db={}) -> ()", static_cast<void *>(ptr));
     delete ptr;
   } catch (std::exception const &e) {
     log_error("error freeing db context: {}", e);
@@ -169,7 +177,6 @@ free_db(DBContext *ptr) noexcept
 TestFFIErrorCode
 advance_new_block(void *db) noexcept
 {
-  ffi_trace("FFI: advance_new_block(db={}) -> ()", db);
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
     return kTestFFIErrorCodeInvalidPointer;
@@ -197,8 +204,6 @@ open_runtime_context() noexcept
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
   CHECK(*out != nullptr);
-  ffi_trace("FFI: open_runtime_context() -> (context={})",
-            static_cast<void *>(out));
   return {.context = out, .ffi_error_code = kTestFFIErrorCodeNone};
 }
 
@@ -206,7 +211,6 @@ TestFFIErrorCode
 close_runtime_context(void *context) noexcept
 {
   try {
-    ffi_trace("FFI: close_runtime_context(context={}) -> ()", context);
     delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
@@ -220,10 +224,6 @@ register_new_contract(void *context, int32_t mock_contract_id,
                       ForeignEntryPoint entry_point,
                       void *foreign_context) noexcept
 {
-  ffi_trace("FFI: register_new_contract(context={}, mock_contract_id={}, "
-            "entry_point={}, foreign_context={})",
-            context, mock_contract_id, reinterpret_cast<void *>(entry_point),
-            foreign_context);
   if (context == nullptr || entry_point == nullptr)
     return kTestFFIErrorCodeInvalidPointer;
 
@@ -242,9 +242,6 @@ open_syscall_handler(void *db, void *rc,
 {
   constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
       kTestFFIErrorCodeInvalidPointer);
-  ffi_trace(
-      "FFI: open_syscall_handler(db={}, rc={}, signed_tx={}, signed_tx_len={})",
-      db, rc, static_cast<const void *>(signed_tx.data), signed_tx.len);
 
   if (!db) {
     return kNullptrError;
@@ -285,10 +282,6 @@ open_mocked_syscall_handler(void *db, void *rc,
 {
   constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
       kTestFFIErrorCodeInvalidPointer);
-  ffi_trace("FFI: open_mocked_syscall_handler(db={}, rc={}, "
-            "auth_claim_data=(data={}, len={}), source_tx_hash={})",
-            db, rc, static_cast<const void *>(auth_claim_data.data),
-            auth_claim_data.len, static_cast<const void *>(source_tx_hash));
 
   if (!db) {
     return kNullptrError;
@@ -330,8 +323,6 @@ TestFFIErrorCode
 close_syscall_handler(void *syscall_handler) noexcept
 {
   try {
-    ffi_trace("FFI: close_syscall_handler(syscall_handler={}) -> ()",
-              syscall_handler);
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
@@ -345,16 +336,6 @@ constexpr ForeignTracedInvokeResult kUnrecoverableError = {
     .gas_consumed = 0,
     .serialized_trace = kNullBuffer,
     .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
-
-std::string
-format_foreign_traced_invoke_result(const ForeignTracedInvokeResult &result)
-{
-  return std::format("serialized_output=[{}], gas_consumed={}, "
-                     "serialized_trace=[{}], ffi_error_code={}",
-                     result.serialized_output, result.gas_consumed,
-                     result.serialized_trace,
-                     std::to_underlying(result.ffi_error_code));
-}
 
 ForeignTracedInvokeResult
 root_invoke(void *syscall_handler, bool enable_tracing) noexcept
@@ -386,8 +367,6 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
         res.serialized_trace = buffer.value();
       }
     }
-    ffi_trace("FFI: root_invoke(syscall_handler={}) -> ({})", syscall_handler,
-              format_foreign_traced_invoke_result(res));
     return res;
   } catch (std::exception const &e) {
     log_error("unhandled error during root_invoke: {}", e);
@@ -400,11 +379,6 @@ open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            int32_t invoke_flags) noexcept
 {
-  ffi_trace("FFI: open_mock_invocation_frame(syscall_handler={}, "
-            "invocation={}, invoke_flags={}) -> ()",
-            syscall_handler, static_cast<const void *>(invocation.data),
-            invoke_flags);
-
   if (!syscall_handler) {
     error("open_mock_invocation_frame error: no syscall handler!");
     return kTestFFIErrorCodeInvalidPointer;
@@ -434,10 +408,6 @@ ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler,
                              int32_t invoke_error_code) noexcept
 {
-  ffi_trace("FFI: finish_mock_invocation_frame(syscall_handler={}, "
-            "invoke_error_code={}) -> ()",
-            syscall_handler, invoke_error_code);
-
   if (!syscall_handler) {
     error("finish_mock_invocation_frame error: no syscall handler!");
     return make_ffi_result_type<ForeignTracedInvokeResult>(
@@ -476,13 +446,6 @@ pop_context()
   return kTestFFIErrorCodeNone;
 }
 
-std::string
-format_foreign_try_commit_result(const ForeignTryCommitResult &result)
-{
-  return std::format("result_code={}, ffi_error_code={}", result.result_code,
-                     std::to_underlying(result.ffi_error_code));
-}
-
 ForeignTryCommitResult
 try_commit_transaction(void *syscall_handler) noexcept
 {
@@ -509,10 +472,7 @@ try_commit_transaction(void *syscall_handler) noexcept
                 SystemCallHandler::to_exec_result(events_res.error().code()))};
       }
     }
-    auto out = ForeignTryCommitResult{.result_code = std::to_underlying(res)};
-    ffi_trace("FFI: try_commit_transaction(syscall_handler={}) -> (result={})",
-              syscall_handler, format_foreign_try_commit_result(out));
-    return out;
+    return ForeignTryCommitResult{.result_code = std::to_underlying(res)};
   } catch (std::exception const &e) {
     log_error("error during try_commit_transaction: {}", e);
     return kUnrecoverableError;
@@ -529,8 +489,6 @@ abort_transaction(void *syscall_handler) noexcept
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
   auto res = context->to_handler().abort_transaction();
   context->mark_committed_or_aborted();
-  ffi_trace("FFI: abort_transaction(syscall_handler={}) -> ()",
-            syscall_handler);
   if (!res.has_value()) {
     try {
       error("failed to abort transaction: {}", res.error());
@@ -549,9 +507,6 @@ TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens) noexcept
 {
-  ffi_trace("FFI: setup_grant_contract_storage_tokens(db={}, contract_addr={}, "
-            "tokens={})",
-            db, static_cast<const void *>(contract_addr), tokens);
   if (db == nullptr || contract_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
@@ -573,8 +528,6 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 TestFFIErrorCode
 get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
 {
-  ffi_trace("FFI: get_event_log(syscall_handler={}, buffer={}, buffer_len={})",
-            syscall_handler, static_cast<const void *>(buffer), buffer_len);
   if (!syscall_handler) {
     error("get_event_log error: no syscall handler!");
     return kTestFFIErrorCodeInvalidPointer;
@@ -617,18 +570,12 @@ get_event_log_len(void *syscall_handler)
 {
   if (!syscall_handler) {
     error("get_event_log_len error: no syscall handler!");
-    ffi_trace(
-        "FFI: get_event_log_len(syscall_handler={}) -> (ffi_error_code={})",
-        syscall_handler, std::to_underlying(kTestFFIErrorCodeInvalidPointer));
     return make_ffi_result_type<GetEventLogLenResult>(
         kTestFFIErrorCodeInvalidPointer);
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
   auto event_log = context->get_tx_event_log();
   if (!event_log) {
-    ffi_trace(
-        "FFI: get_event_log_len(syscall_handler={}) -> (ffi_error_code={})",
-        syscall_handler, std::to_underlying(kTestFFIErrorCodeEventLogNotFound));
     return make_ffi_result_type<GetEventLogLenResult>(
         kTestFFIErrorCodeEventLogNotFound);
   }
@@ -636,8 +583,6 @@ get_event_log_len(void *syscall_handler)
   try {
     auto serialized_event_log = x23::serialize(event_log.value());
     uint32_t len = serialized_event_log.size();
-    ffi_trace("FFI: get_event_log_len(syscall_handler={}) -> (len={})",
-              syscall_handler, len);
     return {.len = len, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException &e) {
     log_error("error serializing event log: {}", e);
@@ -654,10 +599,6 @@ TestFFIErrorCode
 setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
                       uint32_t contract_len) noexcept
 {
-  ffi_trace("FFI: setup_create_contract(context={}, db={}, contract_bytes={}, "
-            "contract_len={}) -> ()",
-            context, db, static_cast<const void *>(contract_bytes),
-            contract_len);
   if (context == nullptr || db == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
@@ -694,11 +635,6 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
                       const uint8_t *contract_hash,
                       uint32_t contract_size) noexcept
 {
-  ffi_trace("FFI: setup_deploy_contract(db={}, deployment_addr={}, "
-            "contract_hash={}, contract_size={}) -> ()",
-            db, static_cast<const void *>(deployment_addr),
-            static_cast<const void *>(contract_hash), contract_size);
-
   if (db == nullptr || contract_hash == nullptr || deployment_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
@@ -775,13 +711,6 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
 
-  ffi_trace("FFI: verify_signed_transaction_auth(signed_tx={}, "
-            "source_auth_data={}, aux_auth_data={}, count={})",
-            static_cast<const void *>(signed_tx.data),
-            static_cast<const void *>(source_auth_data.data),
-            static_cast<const void *>(aux_auth_data.auth_data),
-            aux_auth_data.count);
-
   VerifyAuthResult error_result;
   auto stx_opt = deserialize_signed_transaction(signed_tx, &error_result);
   if (!stx_opt) {
@@ -851,10 +780,6 @@ verify_signed_transaction_auth_from_db_impl(
       make_ffi_result_type<VerifyAuthResultFromDBResult>(
           kTestFFIErrorCodeInvalidPointer);
 
-  ffi_trace("FFI: verify_signed_transaction_auth_from_db(db={}, signed_tx={}, "
-            "signed_tx_len={})",
-            db, static_cast<const void *>(signed_tx.data), signed_tx.len);
-
   VerifyAuthResultFromDBResult error_result;
   auto stx_opt = deserialize_signed_transaction(signed_tx, &error_result);
   if (!stx_opt) {
@@ -894,67 +819,134 @@ CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
           uint32_t serialized_cost_model_len)
 {
-  return hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
+  hogd::do_ffi_trace("FFI (start): create_db(serialized_cost_model={}, "
+                     "serialized_cost_model_len={})",
+                     static_cast<const void *>(serialized_cost_model),
+                     serialized_cost_model_len);
+  auto result =
+      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
+  hogd::do_ffi_trace("FFI (end): create_db(serialized_cost_model={}, "
+                     "serialized_cost_model_len={}) -> {}",
+                     static_cast<const void *>(serialized_cost_model),
+                     serialized_cost_model_len, result);
+  return result;
 }
 
 GetCostModelResult
 get_cost_model(void *db)
 {
-  return hogd::get_cost_model(db);
+  hogd::do_ffi_trace("FFI (start): get_cost_model(db={})", db);
+  auto result = hogd::get_cost_model(db);
+  hogd::do_ffi_trace("FFI (end): get_cost_model(db={}) -> {}", db, result);
+  return result;
 }
 
 TestFFIErrorCode
 free_db(void *ptr)
 {
-  return hogd::free_db(static_cast<hogd::DBContext *>(ptr));
+  hogd::do_ffi_trace("FFI (start): free_db(ptr={})", ptr);
+  auto result = hogd::free_db(static_cast<hogd::DBContext *>(ptr));
+  hogd::do_ffi_trace("FFI (end): free_db(ptr={}) -> {}", ptr, result);
+  return result;
 }
 
 TestFFIErrorCode
 advance_new_block(void *db)
 {
-  return hogd::advance_new_block(db);
+  hogd::do_ffi_trace("FFI (start): advance_new_block(db={})", db);
+  auto result = hogd::advance_new_block(db);
+  hogd::do_ffi_trace("FFI (end): advance_new_block(db={}) -> {}", db, result);
+  return result;
 }
 
 OpenRuntimeContextResult
 open_runtime_context()
 {
-  return hogd::open_runtime_context();
+  hogd::do_ffi_trace("FFI (start): open_runtime_context()");
+  auto result = hogd::open_runtime_context();
+  hogd::do_ffi_trace("FFI (end): open_runtime_context() -> {}", result);
+  return result;
 }
 
 TestFFIErrorCode
 close_runtime_context(void *context)
 {
-  return hogd::close_runtime_context(context);
+  hogd::do_ffi_trace("FFI (start): close_runtime_context(context={})", context);
+  auto result = hogd::close_runtime_context(context);
+  hogd::do_ffi_trace("FFI (end): close_runtime_context(context={}) -> {}",
+                     context, result);
+  return result;
 }
 
 TestFFIErrorCode
 register_new_contract(void *context, int32_t mock_contract_id,
                       ForeignEntryPoint entry_point, void *foreign_context)
 {
-  return hogd::register_new_contract(context, mock_contract_id, entry_point,
-                                     foreign_context);
+  hogd::do_ffi_trace(
+      "FFI (start): register_new_contract(context={}, mock_contract_id={}, "
+      "entry_point={}, foreign_context={})",
+      context, mock_contract_id, reinterpret_cast<void *>(entry_point),
+      foreign_context);
+  auto result = hogd::register_new_contract(context, mock_contract_id,
+                                            entry_point, foreign_context);
+  hogd::do_ffi_trace(
+      "FFI (end): register_new_contract(context={}, mock_contract_id={}, "
+      "entry_point={}, foreign_context={}) -> {}",
+      context, mock_contract_id, reinterpret_cast<void *>(entry_point),
+      foreign_context, result);
+  return result;
 }
 
 TestFFIErrorCode
 setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
                       uint32_t contract_len)
 {
-  return hogd::setup_create_contract(context, db, contract_bytes, contract_len);
+  hogd::do_ffi_trace("FFI (start): setup_create_contract(context={}, db={}, "
+                     "contract_bytes={}, contract_len={})",
+                     context, db, static_cast<const void *>(contract_bytes),
+                     contract_len);
+  auto result =
+      hogd::setup_create_contract(context, db, contract_bytes, contract_len);
+  hogd::do_ffi_trace("FFI (end): setup_create_contract(context={}, db={}, "
+                     "contract_bytes={}, contract_len={}) -> {}",
+                     context, db, static_cast<const void *>(contract_bytes),
+                     contract_len, result);
+  return result;
 }
 
 TestFFIErrorCode
 setup_deploy_contract(void *db, const uint8_t *deployment_addr,
                       const uint8_t *contract_hash, uint32_t contract_size)
 {
-  return hogd::setup_deploy_contract(db, deployment_addr, contract_hash,
-                                     contract_size);
+  hogd::do_ffi_trace(
+      "FFI (start): setup_deploy_contract(db={}, deployment_addr={}, "
+      "contract_hash={}, contract_size={})",
+      db, static_cast<const void *>(deployment_addr),
+      static_cast<const void *>(contract_hash), contract_size);
+  auto result = hogd::setup_deploy_contract(db, deployment_addr, contract_hash,
+                                            contract_size);
+  hogd::do_ffi_trace(
+      "FFI (end): setup_deploy_contract(db={}, deployment_addr={}, "
+      "contract_hash={}, contract_size={}) -> {}",
+      db, static_cast<const void *>(deployment_addr),
+      static_cast<const void *>(contract_hash), contract_size, result);
+  return result;
 }
 
 OpenSyscallHandlerResult
 open_syscall_handler(void *db, void *rc,
                      FFISerializedSignedTransaction signed_tx)
 {
-  return hogd::open_syscall_handler(db, rc, signed_tx);
+  hogd::do_ffi_trace("FFI (start): open_syscall_handler(db={}, rc={}, "
+                     "signed_tx={}, signed_tx_len={})",
+                     db, rc, static_cast<const void *>(signed_tx.data),
+                     signed_tx.len);
+  auto result = hogd::open_syscall_handler(db, rc, signed_tx);
+  hogd::do_ffi_trace("FFI (end): open_syscall_handler(db={}, rc={}, "
+                     "signed_tx={}, signed_tx_len={}) -> {}",
+                     db, rc, static_cast<const void *>(signed_tx.data),
+                     signed_tx.len, result);
+  return result;
 }
 
 OpenSyscallHandlerResult
@@ -962,15 +954,35 @@ open_mocked_syscall_handler(void *db, void *rc,
                             struct FFISerializedAuthClaimData auth_claim_data,
                             const uint8_t source_tx_hash[32])
 {
-  return hogd::open_mocked_syscall_handler(db, rc, auth_claim_data,
-                                           source_tx_hash);
+  hogd::do_ffi_trace("FFI (start): open_mocked_syscall_handler(db={}, rc={}, "
+                     "auth_claim_data=({}, len={}), source_tx_hash={})",
+                     db, rc, static_cast<const void *>(auth_claim_data.data),
+                     auth_claim_data.len,
+                     static_cast<const void *>(source_tx_hash));
+  auto result = hogd::open_mocked_syscall_handler(db, rc, auth_claim_data,
+                                                  source_tx_hash);
+  hogd::do_ffi_trace("FFI (end): open_mocked_syscall_handler(db={}, rc={}, "
+                     "auth_claim_data=({}, len={}), source_tx_hash={}) -> {}",
+                     db, rc, static_cast<const void *>(auth_claim_data.data),
+                     auth_claim_data.len,
+                     static_cast<const void *>(source_tx_hash), result);
+  return result;
 }
 
 TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens)
 {
-  return hogd::setup_grant_contract_storage_tokens(db, contract_addr, tokens);
+  hogd::do_ffi_trace("FFI (start): setup_grant_contract_storage_tokens(db={}, "
+                     "contract_addr={}, tokens={})",
+                     db, static_cast<const void *>(contract_addr), tokens);
+  auto result =
+      hogd::setup_grant_contract_storage_tokens(db, contract_addr, tokens);
+  hogd::do_ffi_trace("FFI (end): setup_grant_contract_storage_tokens(db={}, "
+                     "contract_addr={}, tokens={}) -> {}",
+                     db, static_cast<const void *>(contract_addr), tokens,
+                     result);
+  return result;
 }
 
 TestFFIErrorCode
@@ -978,50 +990,103 @@ open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            int32_t invoke_flags)
 {
-  return hogd::open_mock_invocation_frame(syscall_handler, invocation,
-                                          invoke_flags);
+  hogd::do_ffi_trace(
+      "FFI (start): open_mock_invocation_frame(syscall_handler={}, "
+      "invocation=({}, len={}), invoke_flags={})",
+      syscall_handler, static_cast<const void *>(invocation.data),
+      invocation.len, invoke_flags);
+  auto result = hogd::open_mock_invocation_frame(syscall_handler, invocation,
+                                                 invoke_flags);
+  hogd::do_ffi_trace(
+      "FFI (end): open_mock_invocation_frame(syscall_handler={}, "
+      "invocation=({}, len={}), invoke_flags={}) -> {}",
+      syscall_handler, static_cast<const void *>(invocation.data),
+      invocation.len, invoke_flags, result);
+  return result;
 }
 
 ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code)
 {
-  return hogd::finish_mock_invocation_frame(syscall_handler, invoke_error_code);
+  hogd::do_ffi_trace(
+      "FFI (start): finish_mock_invocation_frame(syscall_handler={}, "
+      "invoke_error_code={})",
+      syscall_handler, invoke_error_code);
+  auto result =
+      hogd::finish_mock_invocation_frame(syscall_handler, invoke_error_code);
+  hogd::do_ffi_trace(
+      "FFI (end): finish_mock_invocation_frame(syscall_handler={}, "
+      "invoke_error_code={}) -> {}",
+      syscall_handler, invoke_error_code, result);
+  return result;
 }
 
 TestFFIErrorCode
 push_context(void *syscall_handler)
 {
-  return hogd::push_context(syscall_handler);
+  hogd::do_ffi_trace("FFI (start): push_context(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::push_context(syscall_handler);
+  hogd::do_ffi_trace("FFI (end): push_context(syscall_handler={}) -> {}",
+                     syscall_handler, result);
+  return result;
 }
 
 TestFFIErrorCode
 pop_context()
 {
-  return hogd::pop_context();
+  hogd::do_ffi_trace("FFI (start): pop_context()");
+  auto result = hogd::pop_context();
+  hogd::do_ffi_trace("FFI (end): pop_context() -> {}", result);
+  return result;
 }
 
 TestFFIErrorCode
 close_syscall_handler(void *syscall_handler)
 {
-  return hogd::close_syscall_handler(syscall_handler);
+  hogd::do_ffi_trace("FFI (start): close_syscall_handler(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::close_syscall_handler(syscall_handler);
+  hogd::do_ffi_trace(
+      "FFI (end): close_syscall_handler(syscall_handler={}) -> {}",
+      syscall_handler, result);
+  return result;
 }
 
 struct ForeignTracedInvokeResult
 root_invoke(void *syscall_handler, uint8_t enable_tracing)
 {
-  return hogd::root_invoke(syscall_handler, enable_tracing == 1);
+  hogd::do_ffi_trace(
+      "FFI (start): root_invoke(syscall_handler={}, enable_tracing={})",
+      syscall_handler, enable_tracing);
+  auto result = hogd::root_invoke(syscall_handler, enable_tracing == 1);
+  hogd::do_ffi_trace(
+      "FFI (end): root_invoke(syscall_handler={}, enable_tracing={}) -> {}",
+      syscall_handler, enable_tracing, result);
+  return result;
 }
 
 struct ForeignTryCommitResult
 try_commit_transaction(void *syscall_handler)
 {
-  return hogd::try_commit_transaction(syscall_handler);
+  hogd::do_ffi_trace("FFI (start): try_commit_transaction(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::try_commit_transaction(syscall_handler);
+  hogd::do_ffi_trace(
+      "FFI (end): try_commit_transaction(syscall_handler={}) -> {}",
+      syscall_handler, result);
+  return result;
 }
 
 TestFFIErrorCode
 abort_transaction(void *syscall_handler)
 {
-  return hogd::abort_transaction(syscall_handler);
+  hogd::do_ffi_trace("FFI (start): abort_transaction(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::abort_transaction(syscall_handler);
+  hogd::do_ffi_trace("FFI (end): abort_transaction(syscall_handler={}) -> {}",
+                     syscall_handler, result);
+  return result;
 }
 
 struct ForeignHostFnResult
@@ -1029,26 +1094,48 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
                         uint64_t arg3, uint64_t arg4, uint64_t arg5,
                         uint64_t arg6, uint64_t arg7)
 {
-  return hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4, arg5,
-                                       arg6, arg7);
+  hogd::do_ffi_trace(
+      "FFI (start): mock_syscall_entrypoint(syscall={}, arg1={}, arg2={}, "
+      "arg3={}, arg4={}, arg5={}, arg6={}, arg7={})",
+      syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+  auto result = hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4,
+                                              arg5, arg6, arg7);
+  hogd::do_ffi_trace("FFI (end): mock_syscall_entrypoint(syscall={}) -> {}",
+                     syscall, result);
+  return result;
 }
 
 void
 enable_syscall_logging()
 {
+  hogd::do_ffi_trace("FFI (start): enable_syscall_logging()");
   hogd::enable_syscall_logging();
+  hogd::do_ffi_trace("FFI (end): enable_syscall_logging()");
 }
 
 TestFFIErrorCode
 get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
 {
-  return hogd::get_event_log(syscall_handler, buffer, buffer_len);
+  hogd::do_ffi_trace("FFI (start): get_event_log(syscall_handler={}, "
+                     "buffer={}, buffer_len={})",
+                     syscall_handler, static_cast<void *>(buffer), buffer_len);
+  auto result = hogd::get_event_log(syscall_handler, buffer, buffer_len);
+  hogd::do_ffi_trace("FFI (end): get_event_log(syscall_handler={}, buffer={}, "
+                     "buffer_len={}) -> {}",
+                     syscall_handler, static_cast<void *>(buffer), buffer_len,
+                     result);
+  return result;
 }
 
 GetEventLogLenResult
 get_event_log_len(void *syscall_handler)
 {
-  return hogd::get_event_log_len(syscall_handler);
+  hogd::do_ffi_trace("FFI (start): get_event_log_len(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::get_event_log_len(syscall_handler);
+  hogd::do_ffi_trace("FFI (end): get_event_log_len(syscall_handler={}) -> {}",
+                     syscall_handler, result);
+  return result;
 }
 
 VerifyAuthResult
@@ -1056,21 +1143,44 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
                                FFISourceAuthData source_auth_data,
                                FFIAuxiliaryAuthData aux_auth_data)
 {
-  return hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
-                                                   aux_auth_data);
+  hogd::do_ffi_trace(
+      "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
+      "source_auth_data={}, aux_auth_data={})",
+      signed_tx, source_auth_data, aux_auth_data);
+  auto result =
+      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
+                                                aux_auth_data);
+  hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
+                     "source_auth_data={}, aux_auth_data={}) -> {}",
+                     signed_tx, source_auth_data, aux_auth_data, result);
+  return result;
 }
 
 VerifyAuthResultFromDBResult
 verify_signed_transaction_auth_from_db(void *db,
                                        FFISerializedSignedTransaction signed_tx)
 {
-  return hogd::verify_signed_transaction_auth_from_db_impl(db, signed_tx);
+  hogd::do_ffi_trace(
+      "FFI (start): verify_signed_transaction_auth_from_db(db={}, "
+      "signed_tx={}, signed_tx_len={})",
+      db, static_cast<const void *>(signed_tx.data), signed_tx.len);
+  auto result =
+      hogd::verify_signed_transaction_auth_from_db_impl(db, signed_tx);
+  hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth_from_db(db={}, "
+                     "signed_tx={}, signed_tx_len={}) -> {}",
+                     db, static_cast<const void *>(signed_tx.data),
+                     signed_tx.len, result);
+  return result;
 }
 
 TestFFIErrorCode
 free_ffi_data_buffer(struct FFIDataBuffer buffer)
 {
-  return hogd::free_ffi_data_buffer(buffer);
+  hogd::do_ffi_trace("FFI (start): free_ffi_data_buffer(buffer={})", buffer);
+  auto result = hogd::free_ffi_data_buffer(buffer);
+  hogd::do_ffi_trace("FFI (end): free_ffi_data_buffer(buffer={}) -> {}", buffer,
+                     result);
+  return result;
 }
 
 #ifdef __cplusplus
