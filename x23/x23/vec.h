@@ -841,7 +841,8 @@ public:
   constexpr const char *c_str(this auto &self)
   {
     self.ensure();
-    *self.b_.end = '\0';
+    if (*self.b_.end)
+      *self.b_.end = '\0';
     return self.data();
   }
 

@@ -52,8 +52,8 @@ TEST(SockioRegression, HostPortParseBracketedIpv6)
 TEST(SockioRegression, DISABLED_BoundedStrCStr)
 {
   BoundedStr<12> bs = "Hello, world";
-  ASSERT_EQ(bs.size(), 12);
-  const char *p = bs.c_str();
+  ASSERT_EQ(bs.size(), 12U);
+  bs.c_str();
 }
 
 } // namespace x23
