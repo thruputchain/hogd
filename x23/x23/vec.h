@@ -48,6 +48,7 @@
 #include <format>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -542,6 +543,7 @@ public:
   template<typename Op>
   void resize_and_overwrite(this auto &self, size_type count, Op op)
   {
+    x23assert(count != std::numeric_limits<size_type>::max());
     self.resize_uninitialized(count + 1);
     self.resize(std::move(op)(self.data(), count));
   }

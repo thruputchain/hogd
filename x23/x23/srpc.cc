@@ -130,8 +130,13 @@ SRpcFd::read_worker(const CpuSet *cpus) noexcept
     size_t rdsz =
         std::max(rdbuf.capacity(), kReadSize + 1UZ) - 1 - rdbuf.size();
     if (rdbuf.size() >= 4) {
-      // Might as well ask for full message if we know the size
-      size_t msglen = getbe<uint32_t>(rdbuf.data()) & 0x7fffffff;
+      // might as well ask for the full message if we know the size
+      uint32_t msglen = getbe<uint32_t>(rdbuf.data()) & 0x7fffffffU;
+      if (msglen > max_message_size_) {
+        fail("read_worker: message size {} exceeds maximum {}", msglen,
+             max_message_size_);
+        return;
+      }
       rdsz = std::max(rdsz, 4UZ + msglen - rdbuf.size());
     }
     auto res = read(fd_, &rdbuf, rdsz);
@@ -180,7 +185,7 @@ SRpcFd::input(BufView bytes) noexcept
     if (SRpcService *s = srvmap_.lookup(msg, &msg))
       resp = s->serve(msg, bytes.subspan(n));
     else
-      resp = serialize(msg);
+      resp = make_record(msg);
     auto q = write_queue_.take();
     bool need_wake = q->empty();
     q->emplace_back(std::move(resp), nullptr);

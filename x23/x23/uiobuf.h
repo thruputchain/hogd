@@ -203,6 +203,7 @@ struct BufVec {
 
   void append(BufView b, size_t offset = 0)
   {
+    x23assert(b.size() >= offset);
     const size_t nbytes = b.size() - offset;
     if (storage_.empty())
       storage_.emplace_back().bytes_.reserve(
