@@ -71,6 +71,8 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  std::chrono::steady_clock::duration delta = end - last_;
+
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
   auto record_stage = [&](double &stage_out) {
@@ -151,15 +153,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await add_txs_handle;
   record_stage(stage_add_txs);
 
-  info("submit_unvetted() stages: deserialize_batch={:.6f}, "
+  info("submit_unvetted() stages: delta={:.6f}, deserialize_batch={:.6f}, "
        "capture_verify_height={:.6f}, auth_verify={:.6f}, "
        "wait_commit_lock_before_add={:.6f}, filter_invalid={:.6f}, "
        "add_txs={:.6f}, prepare_response_and_notify={:.6f}, "
        "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
-       stage_deserialize_batch, stage_capture_verify_height, stage_auth_verify,
-       stage_wait_commit_lock_before_add, stage_filter_invalid, stage_add_txs,
-       stage_prepare_response_and_notify, timer.elapsed(), scheduler_->size(),
-       num_submitted_txs, txs.size());
+       delta, stage_deserialize_batch, stage_capture_verify_height,
+       stage_auth_verify, stage_wait_commit_lock_before_add,
+       stage_filter_invalid, stage_add_txs, stage_prepare_response_and_notify,
+       timer.elapsed(), scheduler_->size(), num_submitted_txs, txs.size());
   co_return;
 }
 
