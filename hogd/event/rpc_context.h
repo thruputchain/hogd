@@ -96,6 +96,7 @@ private:
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
+  // TODO(jhumphri): Protect indexers_ with a rw lock.
   std::vector<indexer_event_client_t> indexers_;
 
   PerThread<ContextCache> cache_;
