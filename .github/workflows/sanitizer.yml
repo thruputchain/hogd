@@ -52,8 +52,8 @@ jobs:
                   --key=git_commit --value=${{ github.sha }} \
                   --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                   --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                  --timeout-sec=1800 \
-                  ./scripts/schedules/sanitizer.toml
+                  --timeout-sec=3600 \
+                  ./scripts/schedules/memory_sanitizer.toml
             - name: Print Log Download Instructions
               if: always()
               uses: ./.github/actions/print-log-instructions
