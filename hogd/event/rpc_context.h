@@ -28,10 +28,9 @@ public:
 
   ~EventRPCContext()
   {
-    [](EventRPCContext &event) -> x23::Async<void> {
-      x23::CoroGuard cg;
-      co_await cg(event.lock_);
-    } (*this)();
+    while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
   }
 
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
@@ -63,7 +62,7 @@ public:
   x23::Async<void> add_indexer(indexer_event_client_t &&indexer)
   {
     x23::CoroGuard cg;
-    co_await cg(lock_);
+    co_await cg(indexers_lock_);
     indexers_.push_back(std::move(indexer));
     co_await cg.reset_and_return();
   }
@@ -93,9 +92,11 @@ private:
     std::unordered_map<BlockID, PerThreadARC<EventBlockContext> *> contexts_;
   };
 
+  std::atomic<ssize_t> pending_detached_coroutines_ = 0;
   x23::CoroLock lock_;
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
+  x23::CoroLock indexers_lock_;
   std::vector<indexer_event_client_t> indexers_;
 
   PerThread<ContextCache> cache_;

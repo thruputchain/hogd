@@ -47,7 +47,7 @@ namespace {
 
 template<typename T>
 void
-remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
+remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
 {
   size_t write_idx = 0;
   size_t num_erased = 0;
@@ -69,6 +69,11 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::duration delta = end - last_;
+  auto delta_raw = std::chrono::duration_cast<std::chrono::milliseconds>(delta);
+  int64_t delta_count = delta_raw.count();
+
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
   auto record_stage = [&](double &stage_out) {
@@ -77,11 +82,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     last_stage_ts = now;
   };
   double stage_deserialize_batch = 0.0;
-  double stage_wait_commit_lock = 0.0;
   double stage_auth_verify = 0.0;
+  double stage_wait_commit_lock_before_add = 0.0;
   double stage_filter_invalid = 0.0;
+  double stage_add_txs = 0.0;
   double stage_prepare_response_and_notify = 0.0;
-  double stage_await_add_txs = 0.0;
 
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
@@ -90,11 +95,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
-  record_stage(stage_wait_commit_lock);
 
+  const BlockHeight verify_height = scheduler_->current_block();
+  info("submit_unvetted will check if the txs are valid for height {}",
+       verify_height);
   AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
+      co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                             txs);
   record_stage(stage_auth_verify);
 
   x23::Vec<size_t> to_remove_indices;
@@ -104,6 +111,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       to_remove_indices.push_back(i);
     }
   }
+  info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
@@ -121,17 +129,20 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
   record_stage(stage_prepare_response_and_notify);
-
+  // TODO(jhumphri): It would be better to call [cg.reset()] as soon as
+  // [add_txs()] completes so that we do not hold the lock while
+  // [t_to_parallel_batch()] and [coordscheduler_notify_vetted()] run above.
   co_await add_txs_handle;
-  record_stage(stage_await_add_txs);
+  record_stage(stage_add_txs);
 
-  info("submit_unvetted() stages: deserialize_batch={:.6f}, "
-       "wait_commit_lock={:.6f}, auth_verify={:.6f}, filter_invalid={:.6f}, "
-       "prepare_response_and_notify={:.6f}, await_add_txs={:.6f}, "
+  info("submit_unvetted() stages: delta={}, deserialize_batch={:.6f}, "
+       "auth_verify={:.6f}, "
+       "wait_commit_lock_before_add={:.6f}, filter_invalid={:.6f}, "
+       "add_txs={:.6f}, prepare_response_and_notify={:.6f}, "
        "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
-       stage_deserialize_batch, stage_wait_commit_lock, stage_auth_verify,
-       stage_filter_invalid, stage_prepare_response_and_notify,
-       stage_await_add_txs, timer.elapsed(), scheduler_->size(),
+       delta_count, stage_deserialize_batch, stage_auth_verify,
+       stage_wait_commit_lock_before_add, stage_filter_invalid, stage_add_txs,
+       stage_prepare_response_and_notify, timer.elapsed(), scheduler_->size(),
        num_submitted_txs, txs.size());
   co_return;
 }
@@ -389,10 +400,26 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
 x23::Async<bool>
 MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 {
+  ElapsedTimer timer;
+  double last_stage_ts = 0.0;
+  auto record_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out = now - last_stage_ts;
+    last_stage_ts = now;
+  };
+  double stage_spawn_snapshot = 0.0;
+  double stage_open_event_block = 0.0;
+  double stage_spawn_open_proposal_blocks = 0.0;
+  double stage_await_snapshot = 0.0;
+  double stage_await_open_proposal_blocks = 0.0;
+  double stage_cleanup_failures = 0.0;
+  double stage_finalize = 0.0;
+
   // Create snapshot.
   x23::Async<DbSchedResult> create_snapshot_handler =
       create_snapshot(/*prev_block_id=*/cache.db_tip.id, cache.block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
+  record_stage(stage_spawn_snapshot);
 
   // Open block (on event server). [open_proposal_block()] below ultimately
   // causes RPCs to be sent to the server event server. When the event server
@@ -400,6 +427,7 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
   // [co_await eventsched_open_block()] below before doing
   // [open_proposal_block()] to prevent a race.
   CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
+  record_stage(stage_open_event_block);
 
   // Open proposal blocks.
   x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
@@ -408,9 +436,11 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
         open_proposal_block(cache.block_id,
                             /*executor_idx=*/i));
   }
+  record_stage(stage_spawn_open_proposal_blocks);
 
   // [co_await] the block initialization RPCs.
   DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
+  record_stage(stage_await_snapshot);
 
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
@@ -420,6 +450,7 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
       open_proposal_block_success = false;
     }
   }
+  record_stage(stage_await_open_proposal_blocks);
 
   if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
       !open_proposal_block_success) {
@@ -437,9 +468,35 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
                               /*executor_idx=*/i);
       }
     }
+    record_stage(stage_cleanup_failures);
+    record_stage(stage_finalize);
+
+    info("initialize_block() stages: spawn_snapshot={:.6f}, "
+         "open_event_block={:.6f}, spawn_open_proposal_blocks={:.6f}, "
+         "await_snapshot={:.6f}, await_open_proposal_blocks={:.6f}, "
+         "cleanup_failures={:.6f}, finalize={:.6f}, total={:.6f}, "
+         "snapshot_success={}, open_proposal_success={}, executors={}",
+         stage_spawn_snapshot, stage_open_event_block,
+         stage_spawn_open_proposal_blocks, stage_await_snapshot,
+         stage_await_open_proposal_blocks, stage_cleanup_failures,
+         stage_finalize, timer.elapsed(),
+         create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK,
+         open_proposal_block_success, open_proposal_block_handlers.size());
 
     co_return false;
   }
+  record_stage(stage_finalize);
+  info("initialize_block() stages: spawn_snapshot={:.6f}, "
+       "open_event_block={:.6f}, spawn_open_proposal_blocks={:.6f}, "
+       "await_snapshot={:.6f}, await_open_proposal_blocks={:.6f}, "
+       "cleanup_failures={:.6f}, finalize={:.6f}, total={:.6f}, "
+       "snapshot_success={}, open_proposal_success={}, executors={}",
+       stage_spawn_snapshot, stage_open_event_block,
+       stage_spawn_open_proposal_blocks, stage_await_snapshot,
+       stage_await_open_proposal_blocks, stage_cleanup_failures, stage_finalize,
+       timer.elapsed(),
+       create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK,
+       open_proposal_block_success, open_proposal_block_handlers.size());
   co_return true;
 }
 
@@ -466,6 +523,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
+  double total_schedule_time = 0.0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     if (i > 0) {
       // The first call to [schedule()] is done in [schedulercoord_nominate()]
@@ -473,8 +531,9 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
       ElapsedTimer timer;
       scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                            cache.tx_hashes, cache.txs);
-      info("schedule() took {}, scheduler size is {}", timer.elapsed(),
-           scheduler_->size());
+      total_schedule_time += timer.elapsed();
+      info("schedule() iteration took {}, scheduler size is {}",
+           timer.elapsed(), scheduler_->size());
     }
     size_t num_scheduled_this_iteration = cache.txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {
@@ -502,6 +561,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
       info("schedule() propose_batch_in_chunks() took {}", timer.elapsed());
     }
   }
+  info("schedule(), total schedule time is {}", total_schedule_time);
   record_stage(stage_schedule_loop);
 
   for (size_t i = 0; i < handles.size(); i++) {
@@ -661,6 +721,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double stage_precheck = 0.0;
   double stage_wait_transfers = 0.0;
   double stage_wait_auth_data = 0.0;
+  double stage_clear_a = 0.0;
+  double stage_clear_b = 0.0;
+  double stage_clear_c = 0.0;
+  double stage_clear_d = 0.0;
+  double stage_clear = 0.0;
   double stage_initialize_overlap = 0.0;
   double stage_schedule_remaining = 0.0;
   double stage_process_outcomes = 0.0;
@@ -706,10 +771,21 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
   // memory allocation/free overhead.
-  nominated_block_cache_.txs.clear();
+  x23::XdrVec<SignedTransaction> tmp = std::move(nominated_block_cache_.txs);
+  [](x23::XdrVec<SignedTransaction> to_clear) -> x23::Detached {
+    co_await default_coropoll().pool_.bg();
+    to_clear.clear();
+  }(std::move(tmp));
+
+  nominated_block_cache_.txs = {};
+  nominated_block_cache_.txs.reserve(kMaxBlockSize);
+  record_stage(stage_clear_a);
   nominated_block_cache_.tx_hashes.clear();
+  record_stage(stage_clear_b);
   nominated_block_cache_.result_tx_hashes.clear();
+  record_stage(stage_clear_c);
   nominated_block_cache_.result_tx_nominations.clear();
+  record_stage(stage_clear_d);
   nominated_block_cache_.txs.reserve(kMaxBlockSize);
   nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
   nominated_block_cache_.result_tx_hashes.reserve(kMaxBlockSize);
@@ -720,6 +796,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // preserved.
   nominated_block_cache_.nomination_result.outcome(
       SchedulerNominationOutcome::SchedulerNominationOK);
+  record_stage(stage_clear);
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
@@ -789,12 +866,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
   info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
-       "wait_auth_data={:.6f}, initialize_overlap={:.6f}, "
+       "wait_auth_data={:.6f}, clear_a={:.6f}, clear_b={:.6f}, clear_c={:.6f}, "
+       "clear_d={:.6f}, clear={:.6f}, initialize_overlap={:.6f}, "
        "schedule_remaining={:.6f}, process_outcomes={:.6f}, "
        "add_failed_txs={:.6f}, finish_nominating={:.6f}, "
        "finalize_result={:.6f}, total={:.6f}, num tx hashes {}, "
        "num tx nominations {}",
        stage_precheck, stage_wait_transfers, stage_wait_auth_data,
+       stage_clear_a, stage_clear_b, stage_clear_c, stage_clear_d, stage_clear,
        stage_initialize_overlap, stage_schedule_remaining,
        stage_process_outcomes, stage_add_failed_txs, stage_finish_nominating,
        stage_finalize_result, timer.elapsed(),

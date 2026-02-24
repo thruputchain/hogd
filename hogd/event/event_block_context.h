@@ -123,6 +123,9 @@ public:
   send_events_to_indexers(BlockHeight block_height,
                           std::vector<indexer_event_client_t> &indexers);
 
+  void set_closing() { closing_.store(true, std::memory_order_release); }
+  bool closing() { return closing_.load(std::memory_order_acquire); }
+
 private:
   x23::Async<void> write_event(std::span<const uint8_t> data);
 
@@ -151,6 +154,8 @@ private:
     }
     return *threadpool;
   }
+
+  std::atomic<bool> closing_ = false;
 
   x23::Async<void> await_pending_writes_done();
   void open_events_file();

@@ -88,7 +88,6 @@ template<typename T>
 inline x23::Async<bool>
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 {
-  ElapsedTimer timer;
   CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
 
   std::vector<size_t> byte_offsets;
@@ -152,8 +151,6 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     // remaining handles in [handles] due to short-circuiting.
     ret = (co_await handle) && ret;
   }
-  info("parallel_batch_to_t took {}, parallel.segment_tokens.size() is {}",
-       timer.elapsed(), parallel.segment_tokens.size());
   co_return ret;
 }
 
@@ -163,7 +160,6 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
-  ElapsedTimer timer;
   // [ParallelBatch] is a struct, and the caller likely allocated it without
   // zeroing it out. Thus, we zero it out here.
   parallel = {};
@@ -202,7 +198,6 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
     co_await handles[i];
     parallel.xdr += xdrs[i];
   }
-  info("t_to_parallel_batch took {}", timer.elapsed());
   co_return;
 }
 
