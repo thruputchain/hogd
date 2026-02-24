@@ -219,6 +219,10 @@ include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 # Enable Corrosion
 # The rust toolchain must be set FIRST!
 set(Rust_TOOLCHAIN "1.90.0" CACHE STRING "Rust toolchain to use")
+if(MSAN_LIBCXX_PATH)
+  # MSan requires nightly for -Zsanitizer=memory and -Zbuild-std
+  set(Rust_TOOLCHAIN "nightly" CACHE STRING "" FORCE)
+endif()
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)

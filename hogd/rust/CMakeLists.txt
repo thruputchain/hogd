@@ -61,7 +61,6 @@ endif()
 #   rustup component add rust-src --toolchain nightly
 if(MSAN_LIBCXX_PATH)
   message(STATUS "Enabling MSan for Rust code (nightly + -Zbuild-std)")
-  corrosion_set_env_vars(unified_lib RUSTUP_TOOLCHAIN=nightly)
   corrosion_add_target_rustflags(unified_lib
     "-Zsanitizer=memory"
     "-Zsanitizer-memory-track-origins=2"
