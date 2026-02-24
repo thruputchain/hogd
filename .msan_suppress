@@ -1,0 +1,8 @@
+# MSan false positives from uninstrumented system libraries
+fun:OPENSSL_init_crypto
+fun:BIO_new_file
+fun:CONF_modules_load_file_ex
+fun:ossl_config_int
+fun:ossl_init_config
+fun:def_load
+fun:openssl_fopen

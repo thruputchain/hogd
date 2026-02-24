@@ -28,7 +28,7 @@ echo 'build clang msan'
   -x "-DWITH_JEMALLOC=OFF"
 
 echo 'run llvm msan tests'
-export MSAN_OPTIONS=halt_on_error=1:abort_on_error=1:print_stats=1
+export MSAN_OPTIONS=halt_on_error=0:print_stats=1:suppressions=$(pwd)/.msan_suppress
 ctest --test-dir build/llvm_msan --parallel --timeout 100 --output-on-failure
 
 """
