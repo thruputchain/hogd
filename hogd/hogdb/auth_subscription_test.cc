@@ -206,7 +206,7 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   grant_storage_token(addr, kStorageTokens);
 
   // Write auth data directly to the database
-  AddressAuthData initial_auth_data;
+  AddressAuthData initial_auth_data{};
   initial_auth_data.public_keys[0] = make_test_pk_config(42);
   HogDBStatus<void> write_ret =
       db_.write_address_auth_data(addr, initial_auth_data);
