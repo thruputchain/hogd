@@ -737,6 +737,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double stage_precheck = 0.0;
   double stage_wait_transfers = 0.0;
   double stage_wait_auth_data = 0.0;
+  double stage_clear_a = 0.0;
+  double stage_clear_b = 0.0;
+  double stage_clear_c = 0.0;
+  double stage_clear_d = 0.0;
+  double stage_clear = 0.0;
   double stage_initialize_overlap = 0.0;
   double stage_schedule_remaining = 0.0;
   double stage_process_outcomes = 0.0;
@@ -782,10 +787,20 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
   // memory allocation/free overhead.
-  nominated_block_cache_.txs.clear();
+  x23::XdrVec<SignedTransaction> tmp = std::move(nominated_block_cache_.txs);
+  [](x23::XdrVec<SignedTransaction> to_clear) {
+    to_clear.clear();
+  }(std::move(tmp));
+
+  nominated_block_cache_.txs = {};
+  nominated_block_cache_.txs.reserve(kMaxBlockSize);
+  record_stage(stage_clear_a);
   nominated_block_cache_.tx_hashes.clear();
+  record_stage(stage_clear_b);
   nominated_block_cache_.result_tx_hashes.clear();
+  record_stage(stage_clear_c);
   nominated_block_cache_.result_tx_nominations.clear();
+  record_stage(stage_clear_d);
   nominated_block_cache_.txs.reserve(kMaxBlockSize);
   nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
   nominated_block_cache_.result_tx_hashes.reserve(kMaxBlockSize);
@@ -796,6 +811,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // preserved.
   nominated_block_cache_.nomination_result.outcome(
       SchedulerNominationOutcome::SchedulerNominationOK);
+  record_stage(stage_clear);
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
@@ -865,12 +881,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
   info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
-       "wait_auth_data={:.6f}, initialize_overlap={:.6f}, "
+       "wait_auth_data={:.6f}, clear_a={:.6f}, clear_b={:.6f}, clear_c={:.6f}, "
+       "clear_d={:.6f}, clear={:.6f}, initialize_overlap={:.6f}, "
        "schedule_remaining={:.6f}, process_outcomes={:.6f}, "
        "add_failed_txs={:.6f}, finish_nominating={:.6f}, "
        "finalize_result={:.6f}, total={:.6f}, num tx hashes {}, "
        "num tx nominations {}",
        stage_precheck, stage_wait_transfers, stage_wait_auth_data,
+       stage_clear_a, stage_clear_b, stage_clear_c, stage_clear_d, stage_clear,
        stage_initialize_overlap, stage_schedule_remaining,
        stage_process_outcomes, stage_add_failed_txs, stage_finish_nominating,
        stage_finalize_result, timer.elapsed(),
