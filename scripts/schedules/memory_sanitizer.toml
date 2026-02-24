@@ -1,0 +1,53 @@
+name = "memory_sanitizer_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+echo 'build msan-instrumented libc++'
+./scripts/build_msan_libcxx.sh $HOME/msan-libcxx
+
+echo 'build clang msan'
+./scripts/build.sh -d build/llvm_msan -c clang \
+  -f "-fsanitize=memory -fsanitize-memory-track-origins=2 -fno-omit-frame-pointer" \
+  -t Debug \
+  -x "-DMSAN_LIBCXX_PATH=$HOME/msan-libcxx" \
+  -x "-DENABLE_TEST_FFI=ON" \
+  -x "-DBUILD_BENCHMARKS=OFF" \
+  -x "-DWITH_JEMALLOC=OFF"
+
+echo 'run llvm msan tests'
+export MSAN_OPTIONS=halt_on_error=1:abort_on_error=1:print_stats=1
+ctest --test-dir build/llvm_msan --parallel --timeout 100 --output-on-failure
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+
+[jobs.host]
+memory_sanitizer_1 = "?"

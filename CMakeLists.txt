@@ -77,6 +77,16 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(CMAKE_AR llvm-ar)
   set(CMAKE_RANLIB llvm-ranlib)
 endif()
+
+# MSan-instrumented libc++.  Build with scripts/build_msan_libcxx.sh, then
+# pass -DMSAN_LIBCXX_PATH=$HOME/msan-libcxx to use it.
+set(MSAN_LIBCXX_PATH "" CACHE PATH "Path to MSan-instrumented libc++ (built by scripts/build_msan_libcxx.sh)")
+if(MSAN_LIBCXX_PATH)
+  message(STATUS "Using MSan-instrumented libc++ from: ${MSAN_LIBCXX_PATH}")
+  add_compile_options(-nostdinc++ "SHELL:-isystem ${MSAN_LIBCXX_PATH}/include/c++/v1")
+  link_directories(${MSAN_LIBCXX_PATH}/lib)
+  add_link_options("-Wl,-rpath,${MSAN_LIBCXX_PATH}/lib")
+endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-interference-size")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library

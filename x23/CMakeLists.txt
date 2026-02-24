@@ -23,6 +23,15 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
 
+# MSan-instrumented libc++ (see scripts/build_msan_libcxx.sh)
+set(MSAN_LIBCXX_PATH "" CACHE PATH "Path to MSan-instrumented libc++")
+if(MSAN_LIBCXX_PATH)
+  message(STATUS "Using MSan-instrumented libc++ from: ${MSAN_LIBCXX_PATH}")
+  add_compile_options(-nostdinc++ "SHELL:-isystem ${MSAN_LIBCXX_PATH}/include/c++/v1")
+  link_directories(${MSAN_LIBCXX_PATH}/lib)
+  add_link_options("-Wl,-rpath,${MSAN_LIBCXX_PATH}/lib")
+endif()
+
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(X23_IS_TOP_LEVEL TRUE)
 endif()
