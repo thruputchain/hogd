@@ -271,8 +271,8 @@ public:
                                    ServerConfig const &config)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -300,8 +300,8 @@ public:
   CIServerErrorCode ciserver_stop(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -324,8 +324,8 @@ public:
   CIServerErrorCode ciserver_shutdown(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -341,8 +341,8 @@ public:
   CIProcStatus ciserver_query_proc_status(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
     }
 
@@ -357,8 +357,8 @@ public:
   CIWorkDirStatus ciserver_query_work_dir(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIWorkDirStatus(
           CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
     }
@@ -370,8 +370,8 @@ public:
   CIServerErrorCode ciserver_clear_work_dir(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}",
+            hash_sv(hogd_git_hash), version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
     info("clearing work directory: {}", work_dir_);
@@ -395,6 +395,11 @@ public:
   }
 
 private:
+  static std::string_view hash_sv(HogdGitHash const &h)
+  {
+    return {reinterpret_cast<const char *>(h.data()), h.size()};
+  }
+
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
     static HogdGitHash expected_hash = []() {
