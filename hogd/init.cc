@@ -86,7 +86,7 @@ print_version(const char *process, bool do_print_binary_hash)
 } // namespace
 
 int
-hogd_init(int argc, char *argv[], bool do_print_version)
+hogd_init(int argc, char *argv[], bool do_print_version, LogLevel log_level)
 {
   // record command line
   cmdline.clear();
@@ -95,7 +95,7 @@ hogd_init(int argc, char *argv[], bool do_print_version)
 
   // initialize logging
   // NOTE: this must come before any use of the CHECK macros
-  log_init(std::make_unique<ConsoleLogger>());
+  log_init(std::make_unique<ConsoleLogger>(log_level));
 
   // Ensure we have a pathname for our executable
   if (x23::getprogpath().empty()) {

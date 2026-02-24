@@ -91,8 +91,8 @@ lazy_init()
   static bool initialized = false;
   ffi_trace("lazy_init: initialized={}", initialized);
   if (!initialized) {
-    hogd_init(0, nullptr, false);
-    auto logger = std::make_unique<ThreadsafeLogger>();
+    hogd_init(0, nullptr, false, LogLevel::kCritical);
+    auto logger = std::make_unique<ThreadsafeLogger>(LogLevel::kCritical);
     global_logger = logger.get();
     hogd::swap_logger(std::move(logger));
     initialized = true;
@@ -100,11 +100,52 @@ lazy_init()
 }
 
 void
-enable_syscall_logging() noexcept
+enable_syscall_logging(int32_t level) noexcept
 {
+  LogLevel log_level;
+  switch (static_cast<LogLevel>(level)) {
+  case LogLevel::kCritical:
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelCritical) ==
+        static_cast<int32_t>(LogLevel::kCritical));
+    log_level = LogLevel::kCritical;
+    break;
+  case LogLevel::kError:
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelError) ==
+        static_cast<int32_t>(LogLevel::kError));
+    log_level = LogLevel::kError;
+    break;
+  case LogLevel::kWarn:
+    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelWarn) ==
+                  static_cast<int32_t>(LogLevel::kWarn));
+    log_level = LogLevel::kWarn;
+    break;
+  case LogLevel::kInfo:
+    static_assert(static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelInfo) ==
+                  static_cast<int32_t>(LogLevel::kInfo));
+    log_level = LogLevel::kInfo;
+    break;
+  case LogLevel::kDebug:
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelDebug) ==
+        static_cast<int32_t>(LogLevel::kDebug));
+    log_level = LogLevel::kDebug;
+    break;
+  case LogLevel::kTrace:
+    static_assert(
+        static_cast<int32_t>(TestFFILogLevel::kTestFFILogLevelTrace) ==
+        static_cast<int32_t>(LogLevel::kTrace));
+    log_level = LogLevel::kTrace;
+    break;
+  default:
+    log_level = LogLevel::kInfo;
+    break;
+  }
+
   lazy_init();
   assert(global_logger != nullptr);
-  global_logger->set_log_level(LogLevel::kTrace);
+  global_logger->set_log_level(log_level);
 }
 
 CreateDBResult
@@ -1106,11 +1147,11 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 }
 
 void
-enable_syscall_logging()
+enable_syscall_logging(int32_t level)
 {
-  hogd::do_ffi_trace("FFI (start): enable_syscall_logging()");
-  hogd::enable_syscall_logging();
-  hogd::do_ffi_trace("FFI (end): enable_syscall_logging()");
+  hogd::do_ffi_trace("FFI (start): enable_syscall_logging(level={})", level);
+  hogd::enable_syscall_logging(level);
+  hogd::do_ffi_trace("FFI (end): enable_syscall_logging(level={})", level);
 }
 
 TestFFIErrorCode

@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 8
+#define TEST_FFI_VERSION_MINOR 9
 #define TEST_FFI_VERSION_PATCH 0
 
 enum TestFFIErrorCode {
@@ -28,6 +28,15 @@ enum TestFFIErrorCode {
   // The queried transaction either does not exist or did not produce any
   // events.
   kTestFFIErrorCodeEventLogNotFound = 6,
+};
+
+enum TestFFILogLevel {
+  kTestFFILogLevelCritical = 0,
+  kTestFFILogLevelError = 1,
+  kTestFFILogLevelWarn = 2,
+  kTestFFILogLevelInfo = 3,
+  kTestFFILogLevelDebug = 4,
+  kTestFFILogLevelTrace = 5,
 };
 
 // A buffer of data that can be passed across the FFI boundary.
@@ -219,7 +228,7 @@ struct ForeignTracedInvokeResult root_invoke(void *syscall_handler,
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
-void enable_syscall_logging();
+void enable_syscall_logging(int32_t level);
 
 struct FFISourceAuthData {
   const uint8_t *data;
