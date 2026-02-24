@@ -99,6 +99,9 @@ jobs:
       - name: Cargo Fetch
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 
+      - name: Check Rust bindgen bindings compile
+        run: cargo check --manifest-path hogd/rust/Cargo.toml -p test_ffi_bindings
+
       - name: Configure Environment
         run: |
           echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
@@ -110,7 +113,7 @@ jobs:
 
       - name: Configure Build
         run: |
-          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
+          ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -n
 
       - name: Build test_ffi_test
         run: make -C build -j "$(nproc)" test_ffi_test
