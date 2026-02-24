@@ -44,6 +44,11 @@ fun:__interceptor_strcmp
 fun:__interceptor_strncmp
 fun:__interceptor_strlen
 
+# wasmtime ValRaw union — reads wider than the stored wasm type (e.g. get_i64
+# on an i32 value).  Upper bytes are intentionally uninitialized for performance.
+fun:*ValRaw*get_i64*
+fun:*ValRaw*get_u64*
+
 # System compression libraries — uninstrumented
 fun:*snappy*
 fun:*LZ4*
