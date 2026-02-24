@@ -3,7 +3,9 @@
 # Suppressions match any function name that appears anywhere in the stack.
 # Use wildcards to cover the breadth of OpenSSL internals.
 
-# OpenSSL — entirely uninstrumented
+# OpenSSL — entirely uninstrumented.
+# MSan can only match on instrumented frames, so we suppress our wrapper
+# functions that call into OpenSSL rather than the OpenSSL symbols themselves.
 fun:*ossl_*
 fun:*OPENSSL_*
 fun:*openssl_*
@@ -15,6 +17,11 @@ fun:*CRYPTO_*
 fun:*BIO_*
 fun:*CONF_*
 fun:*drbg_*
+# Our instrumented wrappers around OpenSSL
+fun:*read_random*
+fun:*SipHash24*
+fun:*sha256*
+fun:*hogd*blake3*
 
 # System compression libraries — uninstrumented
 fun:*snappy*
