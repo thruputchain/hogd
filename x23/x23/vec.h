@@ -628,6 +628,7 @@ public:
                  .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
              },
              std::move(a_)};
+    ret.terminate();
     b_ = {};
     return ret;
   }
