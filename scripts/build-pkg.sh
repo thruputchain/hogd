@@ -48,6 +48,7 @@ if [[ -n "${BUILD_DIR_FLAG}" ]]; then
   BUILD_DIR="${BUILD_DIR_FLAG}"
 fi
 BUILD_DIR=$(realpath "${BUILD_DIR}")
+mkdir -p ${BUILD_DIR}
 BUILD_ARGS+=(-d "${BUILD_DIR}")
 
 if [[ -n "${BUILD_TYPE_FLAG}" ]]; then
@@ -70,6 +71,9 @@ echo 'building chuckd & scpd'
 pushd ${BUILD_DIR} >/dev/null
 ${SCRIPT_DIR}/../groundhog-go/chuckd/scripts/build_chuckd.sh >build_chuckd.log 2>&1 || (cat build_chuckd.log && exit 1)
 ${SCRIPT_DIR}/../groundhog-go/chuckd/scripts/build_scpd.sh >build_scpd.log 2>&1 || (cat build_scpd.log && exit 1)
+
+echo 'building hogx'
+${SCRIPT_DIR}/build-hogx.sh >build_hogx.log 2>&1 || (cat build_hogx.log && exit 1)
 popd >/dev/null
 
 # package
@@ -81,6 +85,8 @@ mkdir -p ${PKG_DIR}
 
 cp ${BUILD_DIR}/chuckd.dev ${PKG_DIR}/chuckd
 cp ${BUILD_DIR}/scpd.dev ${PKG_DIR}/scpd
+cp ${BUILD_DIR}/hogx-agent ${PKG_DIR}/hogx-agent
+cp ${BUILD_DIR}/hogx ${PKG_DIR}/hogx
 
 cp ${BUILD_DIR}/hogd/hogdb/hogdb ${PKG_DIR}/hogdb
 cp ${BUILD_DIR}/hogd/hogexec/hogexec ${PKG_DIR}/hogexec
