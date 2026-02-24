@@ -48,13 +48,12 @@ namespace {
 
 template<typename T>
 void
-remove_indices(x23::XdrVec<T> &remove_from,
-               const std::unordered_set<size_t> &indices)
+remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
 {
   size_t write_idx = 0;
   size_t num_erased = 0;
   for (size_t read_idx = 0; read_idx < remove_from.size(); read_idx++) {
-    if (num_erased < indices.size() && indices.count(read_idx)) {
+    if (num_erased < indices.size() && read_idx == indices[num_erased]) {
       // We are erasing this element, so skip it.
       ++num_erased;
     }
@@ -97,14 +96,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   size_t num_submitted_txs = txs.size();
   record_stage(stage_deserialize_batch);
 
-  // TODO(jhumphri): Move this to somewhere below [verify_transactions] once we
-  // update the auth server.
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
-  // It is safe to do a relaxed load of the current block height because we
-  // acquire [commit_lock_] below when we check if any accounts have changed
-  // their auth data.
   const BlockHeight verify_height = scheduler_->current_block();
   info("submit_unvetted will check if the txs are valid for height {}",
        verify_height);
@@ -115,25 +109,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
                                                              txs);
   record_stage(stage_auth_verify);
 
-  std::unordered_set<size_t> to_remove_indices;
+  x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove_indices.insert(i);
+      to_remove_indices.push_back(i);
     }
   }
   info("{} txs were invalid", to_remove_indices.size());
-
-  record_stage(stage_wait_commit_lock_before_add);
-  size_t num = 0;
-  for (size_t i = 0; i < txs.size(); i++) {
-    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
-    if (get_account_last_auth_change_height(account) >= verify_height) {
-      to_remove_indices.insert(i);
-      num++;
-    }
-  }
-  info("{} txs were removed because auth height changed", num);
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
   }
