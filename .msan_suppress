@@ -23,6 +23,15 @@ fun:*SipHash24*
 fun:*sha256*
 fun:*hogd*blake3*
 
+# MSan interceptors that fire inside uninstrumented code.
+# These are broad but necessary — MSan checks frame #0 for suppressions,
+# and when memcmp/bcmp are called from uninstrumented OpenSSL internals,
+# the only matching frame is the interceptor itself.
+fun:memcmp
+fun:bcmp
+fun:memcpy
+fun:fopen64
+
 # System compression libraries — uninstrumented
 fun:*snappy*
 fun:*LZ4*
