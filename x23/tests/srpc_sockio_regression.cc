@@ -4,10 +4,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <utility>
 #include <x23/sockio.h>
 #include <x23/srpc.h>
 
 #include "tests/xdrtest.hh"
+#include "x23/cleanup.h"
+#include "x23/refcnt.h"
+#include "x23/rpc_msg.hh"
+#include "x23/utility.h"
 #include "x23/vec.h"
 
 namespace x23 {
@@ -49,7 +54,7 @@ TEST(SockioRegression, HostPortParseBracketedIpv6)
   EXPECT_EQ(std::string_view(hp.port), "443");
 }
 
-TEST(SockioRegression, DISABLED_BoundedStrCStr)
+TEST(SockioRegression, BoundedStrCStr)
 {
   BoundedStr<12> bs = "Hello, world";
   ASSERT_EQ(bs.size(), 12U);
