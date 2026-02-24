@@ -1,8 +1,25 @@
-# MSan false positives from uninstrumented system libraries
-fun:OPENSSL_init_crypto
-fun:BIO_new_file
-fun:CONF_modules_load_file_ex
-fun:ossl_config_int
-fun:ossl_init_config
-fun:def_load
-fun:openssl_fopen
+# MSan false positives from uninstrumented system libraries.
+#
+# Suppressions match any function name that appears anywhere in the stack.
+# Use wildcards to cover the breadth of OpenSSL internals.
+
+# OpenSSL — entirely uninstrumented
+fun:*ossl_*
+fun:*OPENSSL_*
+fun:*openssl_*
+fun:*EVP_*
+fun:*evp_*
+fun:*RAND_*
+fun:*rand_*
+fun:*CRYPTO_*
+fun:*BIO_*
+fun:*CONF_*
+fun:*drbg_*
+
+# System compression libraries — uninstrumented
+fun:*snappy*
+fun:*LZ4*
+fun:*ZSTD*
+fun:*BZ2*
+fun:*deflate*
+fun:*inflate*
