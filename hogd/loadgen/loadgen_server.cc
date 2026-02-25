@@ -11,7 +11,7 @@
 
 namespace hogd {
 
-LoadgenResult
+x23::Async<LoadgenResult>
 LoadgenRpc::generate_experiment(ExperimentConfig config)
 {
   switch (config.experiment_type()) {
@@ -21,14 +21,14 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
         std::make_shared<ERC20ExperimentState>(config.erc20_payments());
     auto res = state->generate_experiment();
     if (!res) {
-      return LoadgenResult(res.error().code());
+      co_return LoadgenResult(res.error().code());
     }
     LoadgenResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
     out.success() = std::move(res.value());
     uint64_t context_id = context_id_counter_++;
     out.success().context_id = context_id;
     experiment_states_.take()->emplace(context_id, state);
-    return out;
+    co_return out;
   }
   case ExperimentType::kExperimentTypeERC20BasicAuthPayments:
   {
@@ -36,7 +36,7 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
         config.erc20_payments());
     auto res = state->generate_experiment();
     if (!res) {
-      return LoadgenResult(res.error().code());
+      co_return LoadgenResult(res.error().code());
     }
 
     LoadgenResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
@@ -44,10 +44,10 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
     uint64_t context_id = context_id_counter_++;
     out.success().context_id = context_id;
     experiment_states_.take()->emplace(context_id, state);
-    return out;
+    co_return out;
   }
   default:
-    return LoadgenResult(LoadgenRPCError::kLoadgenRPCErrorInvalidConfig);
+    co_return LoadgenResult(LoadgenRPCError::kLoadgenRPCErrorInvalidConfig);
   }
 }
 
