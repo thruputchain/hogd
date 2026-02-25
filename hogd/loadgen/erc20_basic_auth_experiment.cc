@@ -181,7 +181,7 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
   const static AuthClaim self_auth_claim = [] {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
     claim.invoked_address_signature_id() = 0;
-    co_return claim;
+    return claim;
   }();
 
   if (!check_config_valid()) {

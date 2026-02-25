@@ -194,7 +194,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
             while (receiver == sender) {
               receiver = dist(gen);
             }
-            co_return std::make_pair(sender, receiver);
+            return std::make_pair(sender, receiver);
           };
 
           using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
