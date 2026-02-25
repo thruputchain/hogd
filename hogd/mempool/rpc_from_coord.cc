@@ -99,18 +99,18 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   const BlockHeight verify_height = scheduler_->current_block();
   info("submit_unvetted will check if the txs are valid for height {}",
        verify_height);
-  // AuthErrorCodeBatch auth_ret =
-  //     co_await auth_client_->authmempool_verify_transactions(verify_height,
-  //                                                            txs);
+  AuthErrorCodeBatch auth_ret =
+      co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                             txs);
   record_stage(stage_auth_verify);
 
   x23::Vec<size_t> to_remove_indices;
-  // for (size_t i = 0; i < auth_ret.size(); i++) {
-  //   const AuthErrorCode &code = auth_ret[i];
-  //   if (code != AuthErrorCode::kAuthSuccess) {
-  //     to_remove_indices.push_back(i);
-  //   }
-  // }
+  for (size_t i = 0; i < auth_ret.size(); i++) {
+    const AuthErrorCode &code = auth_ret[i];
+    if (code != AuthErrorCode::kAuthSuccess) {
+      to_remove_indices.push_back(i);
+    }
+  }
   info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
     remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
