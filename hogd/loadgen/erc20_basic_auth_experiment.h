@@ -19,7 +19,7 @@ public:
     : config_(config)
   {}
 
-  LoadgenStatus<LoadgenSuccessResult> generate_experiment();
+  x23::Async<LoadgenStatus<LoadgenSuccessResult>> generate_experiment();
 
   x23::Async<LoadgenStatus<LoadgenExtension>>
   extend_experiment(uint64_t num_txs, BlockHeight expiry_height) override;

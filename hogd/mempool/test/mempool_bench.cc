@@ -279,8 +279,7 @@ loadgen_validate(benchmark::State &state)
     }
 
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            t_to_parallel_batch(
-                                                                txs)())();
+                                                            txs)();
     state.ResumeTiming();
 
     auto res_validate =
@@ -308,8 +307,7 @@ loadgen_nominate_throughput(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            t_to_parallel_batch(
-                                                                txs)();
+                                                            txs)();
     state.ResumeTiming();
 
     size_t txs_so_far = 0;

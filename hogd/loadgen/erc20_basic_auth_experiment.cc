@@ -74,7 +74,7 @@ ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
   });
 }
 
-LoadgenStatus<LoadgenSuccessResult>
+x23::Async<LoadgenStatus<LoadgenSuccessResult>>
 ERC20BasicAuthExperimentState::generate_experiment()
 {
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -95,7 +95,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
   initialize_wallets(sha256(*wallet_contract));
 
   if (!check_config_valid()) {
-    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+    co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   const ContractAddress owner_address = get_owner_address();
@@ -168,7 +168,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
   initialization_txs.emplace_back(std::move(unfurl_txs));
   initialization_txs.emplace_back(std::move(mint_txs));
 
-  return LoadgenSuccessResult{
+  co_return LoadgenSuccessResult{
       .genesis_configuration =
           builder.build(StorageCostModel::default_cost_model()),
       .initialization_txs = std::move(initialization_txs),

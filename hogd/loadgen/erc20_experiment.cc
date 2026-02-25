@@ -57,7 +57,7 @@ ERC20ExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
   }
 }
 
-LoadgenStatus<LoadgenSuccessResult>
+x23::Async<LoadgenStatus<LoadgenSuccessResult>>
 ERC20ExperimentState::generate_experiment()
 {
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -71,7 +71,7 @@ ERC20ExperimentState::generate_experiment()
   initialize_wallets(sha256(*wallet_contract));
 
   if (!check_config_valid()) {
-    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+    co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   const ContractAddress owner_address = get_owner_address();
@@ -149,7 +149,7 @@ ERC20ExperimentState::generate_experiment()
   LoadgenSuccessResult result;
   result.genesis_configuration = std::move(genesis_config);
   result.initialization_txs = std::move(initialization_txs);
-  return result;
+  co_return result;
 }
 
 x23::Async<LoadgenStatus<LoadgenExtension>>

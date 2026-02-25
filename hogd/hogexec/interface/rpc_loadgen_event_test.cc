@@ -190,8 +190,8 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
       loadgen_client_->extend_experiment(context_id, kNumTxs, 1'000'000'000)();
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
-  const SignedTransactionBatch &txs =
-      parallel_batch_to_t(ext_result.success().work_txs);
+  SignedTransactionBatch txs;
+  parallel_batch_to_t(ext_result.success().work_txs, txs);
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Verify all transaction hashes are unique
@@ -285,8 +285,8 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
       loadgen_client_->extend_experiment(context_id, kNumTxs, 1'000'000'000)();
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
-  const SignedTransactionBatch &txs =
-      parallel_batch_to_t(ext_result.success().work_txs);
+  SignedTransactionBatch txs;
+  parallel_batch_to_t(ext_result.success().work_txs, txs);
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Verify all transaction hashes are unique

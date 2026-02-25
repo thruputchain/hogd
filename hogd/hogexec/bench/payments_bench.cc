@@ -55,7 +55,7 @@ struct BenchmarkState : public CommonBenchState {
     auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
         .num_addresses = num_accounts_,
     });
-    auto result = exp.generate_experiment();
+    auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to generate erc20 payments experiment");
     }
