@@ -12,8 +12,11 @@
 #include <version>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
+#include "parallel.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -101,6 +104,153 @@ xdr_cpu_to_be(T value)
   value.highbits = cpu_to_be(value.highbits);
   value.lowbits = cpu_to_be(value.lowbits);
   return value;
+}
+
+// The number of coroutines to use (one coroutine per thread) when converting
+// to/from a parallel batch.
+constexpr size_t kNumThreadsForParallelBatch = 20;
+
+template<typename T>
+inline x23::Async<bool>
+parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
+{
+  CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
+
+  std::vector<size_t> byte_offsets;
+  byte_offsets.reserve(parallel.segment_bytes.size());
+  size_t total_segment_bytes = 0;
+  for (unsigned int segment_bytes : parallel.segment_bytes) {
+    byte_offsets.push_back(total_segment_bytes);
+    total_segment_bytes += segment_bytes;
+  }
+  CHECK_EQ(total_segment_bytes, parallel.xdr.size());
+
+  std::vector<size_t> obj_offsets;
+  obj_offsets.reserve(parallel.segment_tokens.size());
+  size_t total_segment_tokens = 0;
+  for (unsigned int segment_tokens : parallel.segment_tokens) {
+    obj_offsets.push_back(total_segment_tokens);
+    total_segment_tokens += segment_tokens;
+  }
+  objs.resize(total_segment_tokens, {});
+
+  const std::vector<ChunkRange> chunks =
+      make_chunks(parallel.segment_tokens.size(), kNumThreadsForParallelBatch);
+  x23::Vec<x23::Async<bool>> handles;
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back([](const ChunkRange &chunk, const ParallelBatch &parallel,
+                         x23::XdrVec<T> &objs,
+                         const std::vector<size_t> &byte_offsets,
+                         const std::vector<size_t> &obj_offsets) noexcept
+                          -> x23::Async<bool> {
+      co_await default_coropoll().pool_.bg();
+
+      for (size_t i = chunk.start; i < chunk.end; i++) {
+        const unsigned int num_segment_tokens = parallel.segment_tokens[i];
+        const unsigned int num_segment_bytes = parallel.segment_bytes[i];
+
+        size_t inner_obj_offset = 0;
+        size_t inner_xdr_offset = 0;
+        for (size_t j = 0; j < num_segment_tokens; j++) {
+          try {
+            size_t num_consumed = x23::deserialize_from(
+                &objs[obj_offsets[i] + inner_obj_offset++],
+                x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
+                             num_segment_bytes - inner_xdr_offset));
+            inner_xdr_offset += num_consumed;
+          } catch (const x23::XdrBadInput &e) {
+            info("failed to deserialize: {}", e.what());
+            co_return false;
+          }
+        }
+      }
+      co_return true;
+    }(chunk, parallel, objs, byte_offsets, obj_offsets));
+  }
+  bool ret = true;
+  for (x23::Async<bool> &handle : handles) {
+    // Careful, we deliberately have [co_await handle] as the first operand of
+    // the AND statement to avoid short-circuiting. If we did it the other way
+    // around ([ret && (co_await handle)]), then if any of the handles return
+    // false and we set [ret] to false, we would fail to [co_await] the
+    // remaining handles in [handles] due to short-circuiting.
+    ret = (co_await handle) && ret;
+  }
+  co_return ret;
+}
+
+template<typename T>
+inline x23::Async<void>
+t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
+{
+  // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
+  // serialize each object individually rather than serialize [objs] once.
+  // [ParallelBatch] is a struct, and the caller likely allocated it without
+  // zeroing it out. Thus, we zero it out here.
+  parallel = {};
+  const std::vector<ChunkRange> chunks =
+      make_chunks(objs.size(), kNumThreadsForParallelBatch);
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(chunks.size());
+  x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
+  xdrs.resize(chunks.size(), {});
+  parallel.segment_bytes.resize(chunks.size(), 0);
+  parallel.segment_tokens.resize(chunks.size(), 0);
+  for (size_t i = 0; i < chunks.size(); i++) {
+    const ChunkRange &chunk = chunks[i];
+    handles.push_back([](const ChunkRange &chunk, size_t i,
+                         ParallelBatch &parallel,
+                         x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
+                         x23::span<T> &objs) noexcept -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+
+      parallel.segment_tokens[i] = chunk.end - chunk.start;
+      // This is just an educated guess, but hopefully it lowers/eliminates the
+      // resize overhead of the vector.
+      xdrs[i].reserve(parallel.segment_tokens[i] * sizeof(SignedTransaction) *
+                      3);
+      for (size_t j = chunk.start; j < chunk.end; j++) {
+        xdrs[i] += x23::serialize(objs[j]);
+      }
+      parallel.segment_bytes[i] = xdrs[i].size();
+      co_return;
+    }(chunk, i, parallel, xdrs, objs));
+  }
+  // This is just an educated guess, but hopefully it lowers/eliminates the
+  // resize overhead of the vector.
+  parallel.xdr.reserve(objs.size() * sizeof(SignedTransaction) * 3);
+  for (size_t i = 0; i < chunks.size(); i++) {
+    co_await handles[i];
+    parallel.xdr += xdrs[i];
+  }
+  co_return;
+}
+
+template<typename T>
+inline x23::Async<ParallelBatch>
+t_to_parallel_batch(x23::span<T> objs)
+{
+  ParallelBatch parallel;
+  co_await t_to_parallel_batch(objs, parallel);
+  co_return parallel;
+}
+
+template<typename T>
+inline x23::Async<void>
+t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
+{
+  co_await t_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_return;
+}
+
+template<typename T>
+inline x23::Async<ParallelBatch>
+t_to_parallel_batch(const x23::XdrVec<T> &objs)
+{
+  ParallelBatch parallel;
+  co_await t_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_return parallel;
 }
 
 } // namespace hogd

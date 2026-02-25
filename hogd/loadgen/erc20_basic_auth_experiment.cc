@@ -271,9 +271,10 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
     future.wait();
   }
 
-  return LoadgenExtension{
-      .work_txs = std::move(work_txs),
-  };
+  LoadgenExtension ret;
+  ParallelBatch response;
+  co_await t_to_parallel_batch(work_txs, ret.work_txs);
+  return ret;
 }
 
 } // namespace hogd
