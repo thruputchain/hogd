@@ -648,8 +648,13 @@ struct Deserializer
 
   void check_trailing_zeros(size_t rem) const
   {
-    constexpr std::array<uint32_t, 4> masks{0, 0xffffff, 0xffff, 0xff};
-    if (getbe<uint32_t>(p - 4) & masks[rem]) [[unlikely]]
+    constexpr auto swaple = [](uint32_t v) consteval -> uint32_t {
+      return std::endian::native == std::endian::little ? std::byteswap(v) : v;
+    };
+    constexpr std::array<uint32_t, 4> masks{swaple(0), swaple(0xffffff), swaple(0xffff), swaple(0xff)};
+    uint32_t w;
+    std::memcpy(&w, p - 4, 4);
+    if (w & masks[rem]) [[unlikely]]
       raise("padding bytes are not zero deserializing XDR");
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kOpaqueArray> X> void go(X &x)
