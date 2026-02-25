@@ -310,20 +310,14 @@ public:
   {
     writer.buf_.clear();
   }
-  BufferedWriter &operator=(BufferedWriter &&writer) noexcept
-  {
-    if (this == &writer) [[unlikely]]
-      return *this;
-    out_ = writer.out_;
-    buf_ = std::move(writer.buf_);
-    writer.buf_.clear();
-    return *this;
-  }
+  BufferedWriter &operator=(BufferedWriter &&writer) = delete;
   BufferedWriter(const BufferedWriter &writer) = delete;
   BufferedWriter &operator=(const BufferedWriter &writer) = delete;
 
   // empty returns true if no bytes are buffered.
   bool empty() const { return buf_.empty(); }
+
+  ErrnoStatus<void> reset(File &out);
 
   // write performs buffered writes to a file. Returns the number of bytes
   // written if successful, which could be less than the number requested
