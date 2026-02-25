@@ -3,6 +3,7 @@
 #include <random>
 #include <ranges>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <sys/resource.h>
@@ -533,8 +534,8 @@ TEST(NMVec, MoveAssignDestroysOldElements)
     EXPECT_EQ(CountingT<0>::live(), 8);
 
     v1 = std::move(v2);
-    EXPECT_EQ(v1.size(), 3u);
-    EXPECT_EQ(v2.size(), 0u);
+    EXPECT_EQ(v1.size(), 3U);
+    EXPECT_EQ(v2.size(), 0U);
     EXPECT_EQ(CountingT<0>::live(), 3);
   }
   EXPECT_EQ(CountingT<0>::live(), 0);
