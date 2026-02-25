@@ -5,9 +5,11 @@
 #include <print>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
@@ -30,20 +32,22 @@ print_tx_size_stats()
   });
 
   std::println("Generating experiment...");
-  auto init_result = exp.generate_experiment();
+  auto init_result = exp.generate_experiment()();
   if (!init_result.has_value()) {
     std::println(stderr, "Failed to generate ERC20 experiment");
     return;
   }
 
   std::println("Extending experiment to generate {} transactions...", num_txs);
-  auto result = exp.extend_experiment(num_txs, expiry_height);
+  auto result = exp.extend_experiment(num_txs, expiry_height)();
   if (!result.has_value()) {
     std::println(stderr, "Failed to extend ERC20 experiment");
     return;
   }
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(result.value().work_txs, work_txs)();
 
-  std::println("Generated {} transactions\n", result.value().work_txs.size());
+  std::println("Generated {} transactions\n", work_txs.size());
 
   // Collect TXS size statistics
   std::map<size_t, uint64_t> txs_size_counts;
@@ -57,7 +61,7 @@ print_tx_size_stats()
   size_t cxs_max_size = 0;
   size_t cxs_total_size = 0;
 
-  for (const auto &tx : result.value().work_txs) {
+  for (const auto &tx : work_txs) {
     // TXS (default XDR) serialization
     size_t txs_size = x23::xdr_size(tx);
     txs_size_counts[txs_size]++;
@@ -74,7 +78,7 @@ print_tx_size_stats()
     cxs_total_size += cxs_size;
   }
 
-  size_t num_tx = result.value().work_txs.size();
+  size_t num_tx = work_txs.size();
 
   // Print TXS statistics
   std::println("TXS (XDR) Serialization Size Statistics:");

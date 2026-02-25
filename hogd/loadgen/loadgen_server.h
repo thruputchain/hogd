@@ -10,6 +10,7 @@
 #include "hogd/loadgen/experiment_state.h"
 #include "loadgen.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -22,10 +23,11 @@ public:
   // transfers a lot of data via individual RPC calls.
   static constexpr size_t kRpcMaxMessageSize = 0x7fffffffff;
 
-  LoadgenResult generate_experiment(ExperimentConfig config);
-  LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
-                                           uint64_t num_txs,
-                                           BlockHeight expiry_height);
+  x23::Async<LoadgenResult> generate_experiment(ExperimentConfig config);
+
+  x23::Async<LoadgenExtensionResult>
+  extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
+                    BlockHeight expiry_height);
 
   void shut_down()
   {
@@ -39,6 +41,6 @@ private:
   std::atomic<uint64_t> context_id_counter_;
 };
 
-static_assert(is_LoadgenInterfaceV1<LoadgenRpc *, std::type_identity_t>);
+static_assert(is_LoadgenInterfaceV1<LoadgenRpc *, x23::Async>);
 
 } // namespace hogd

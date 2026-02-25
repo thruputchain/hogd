@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
@@ -31,7 +32,7 @@ bm_erc20_generate_experiment(benchmark::State &state)
         .num_addresses = num_accounts,
     });
 
-    auto result = exp.generate_experiment();
+    auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       state.SkipWithError("Failed to generate ERC20 experiment");
       return;
@@ -58,20 +59,24 @@ bm_erc20_extend_experiment(benchmark::State &state)
       .num_addresses = num_accounts,
   });
 
-  auto init_result = exp.generate_experiment();
+  auto init_result = exp.generate_experiment()();
   if (!init_result.has_value()) {
     state.SkipWithError("Failed to initialize ERC20 experiment");
     return;
   }
 
   for (auto _ : state) {
-    auto result = exp.extend_experiment(num_txs, 100);
+    auto result = exp.extend_experiment(num_txs, 100)();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to extend ERC20 experiment");
     }
 
+    state.PauseTiming();
     // Verify we got the expected number of transactions
-    assert(result.value().work_txs.size() == num_txs);
+    SignedTransactionBatch work_txs;
+    parallel_batch_to_t(result.value().work_txs, work_txs)();
+    CHECK_EQ(work_txs.size(), num_txs);
+    state.ResumeTiming();
 
     // Prevent compiler optimizations
     benchmark::DoNotOptimize(result.value());

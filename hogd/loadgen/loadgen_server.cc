@@ -6,12 +6,14 @@
 #include "hogd/base/types.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
+#include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
-LoadgenResult
+x23::Async<LoadgenResult>
 LoadgenRpc::generate_experiment(ExperimentConfig config)
 {
   switch (config.experiment_type()) {
@@ -19,24 +21,24 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
   {
     auto state =
         std::make_shared<ERC20ExperimentState>(config.erc20_payments());
-    auto res = state->generate_experiment();
+    auto res = co_await state->generate_experiment();
     if (!res) {
-      return LoadgenResult(res.error().code());
+      co_return LoadgenResult(res.error().code());
     }
     LoadgenResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
     out.success() = std::move(res.value());
     uint64_t context_id = context_id_counter_++;
     out.success().context_id = context_id;
     experiment_states_.take()->emplace(context_id, state);
-    return out;
+    co_return out;
   }
   case ExperimentType::kExperimentTypeERC20BasicAuthPayments:
   {
     auto state = std::make_shared<ERC20BasicAuthExperimentState>(
         config.erc20_payments());
-    auto res = state->generate_experiment();
+    auto res = co_await state->generate_experiment();
     if (!res) {
-      return LoadgenResult(res.error().code());
+      co_return LoadgenResult(res.error().code());
     }
 
     LoadgenResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
@@ -44,30 +46,31 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
     uint64_t context_id = context_id_counter_++;
     out.success().context_id = context_id;
     experiment_states_.take()->emplace(context_id, state);
-    return out;
+    co_return out;
   }
   default:
-    return LoadgenResult(LoadgenRPCError::kLoadgenRPCErrorInvalidConfig);
+    co_return LoadgenResult(LoadgenRPCError::kLoadgenRPCErrorInvalidConfig);
   }
 }
 
-LoadgenExtensionResult
+x23::Async<LoadgenExtensionResult>
 LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
                               BlockHeight expiry_height)
 {
   auto st = experiment_states_.take();
   auto state = st->find(context_id);
   if (state == st->end()) {
-    return LoadgenExtensionResult(
+    co_return LoadgenExtensionResult(
         LoadgenRPCError::kLoadgenRPCErrorInvalidContext);
   }
   LoadgenExtensionResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
-  auto r = state->second->extend_experiment(num_txs, expiry_height);
+  LoadgenStatus<LoadgenExtension> r =
+      co_await state->second->extend_experiment(num_txs, expiry_height);
   if (!r) {
-    return LoadgenExtensionResult(r.error().code());
+    co_return LoadgenExtensionResult(r.error().code());
   }
   out.success() = std::move(r.value());
-  return out;
+  co_return out;
 }
 
 } // namespace hogd

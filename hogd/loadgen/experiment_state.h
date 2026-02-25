@@ -4,6 +4,7 @@
 #include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -11,7 +12,7 @@ namespace hogd {
 
 class ExperimentState {
 public:
-  virtual LoadgenStatus<LoadgenExtension>
+  virtual x23::Async<LoadgenStatus<LoadgenExtension>>
   extend_experiment(uint64_t num_txs, BlockHeight expiry_height) = 0;
 
   virtual ~ExperimentState() = default;

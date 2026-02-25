@@ -13,6 +13,7 @@
 #include "built_contracts/simple_wallet.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -21,6 +22,7 @@
 #include "loadgen.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -56,7 +58,7 @@ ERC20ExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
   }
 }
 
-LoadgenStatus<LoadgenSuccessResult>
+x23::Async<LoadgenStatus<LoadgenSuccessResult>>
 ERC20ExperimentState::generate_experiment()
 {
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -70,7 +72,7 @@ ERC20ExperimentState::generate_experiment()
   initialize_wallets(sha256(*wallet_contract));
 
   if (!check_config_valid()) {
-    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+    co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   const ContractAddress owner_address = get_owner_address();
@@ -148,15 +150,15 @@ ERC20ExperimentState::generate_experiment()
   LoadgenSuccessResult result;
   result.genesis_configuration = std::move(genesis_config);
   result.initialization_txs = std::move(initialization_txs);
-  return result;
+  co_return result;
 }
 
-LoadgenStatus<LoadgenExtension>
+x23::Async<LoadgenStatus<LoadgenExtension>>
 ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                         BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
-    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+    co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   x23::Vec<SignedTransaction> work_txs;
@@ -243,9 +245,10 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     future.wait();
   }
 
-  return LoadgenExtension{
-      .work_txs = std::move(work_txs),
-  };
+  LoadgenExtension ret;
+  co_await t_to_parallel_batch(x23::span<const SignedTransaction>(work_txs),
+                               ret.work_txs);
+  co_return ret;
 }
 
 } // namespace hogd

@@ -17,6 +17,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/metrics.h"
@@ -55,7 +56,7 @@ struct BenchmarkState : public CommonBenchState {
     auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
         .num_addresses = num_accounts_,
     });
-    auto result = exp.generate_experiment();
+    auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to generate erc20 payments experiment");
     }
@@ -64,12 +65,14 @@ struct BenchmarkState : public CommonBenchState {
     run_genesis_configuration(genesis_configuration,
                               result.value().initialization_txs);
 
-    auto work_txs = exp.extend_experiment(num_txs, 1'000'000);
-    if (!work_txs.has_value()) {
+    auto work_txs_raw = exp.extend_experiment(num_txs, 1'000'000)();
+    if (!work_txs_raw.has_value()) {
       throw std::runtime_error("Failed to extend experiment");
     }
 
-    return work_txs.value().work_txs;
+    x23::XdrVec<SignedTransaction> work_txs;
+    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+    return work_txs;
   }
 };
 

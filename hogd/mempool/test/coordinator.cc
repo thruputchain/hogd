@@ -4,7 +4,6 @@
 #include <print>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -49,22 +48,18 @@ coordinator_init(const std::string &mempool_address,
         std::format("Invalid mempool address: {}", mempool_address));
   }
 
-  std::vector<sched_coord_client_t> clients;
-  clients.reserve(LoadgenClientManager::kNumSchedClients);
-  for (size_t i = 0; i < LoadgenClientManager::kNumSchedClients; i++) {
-    clients.push_back(create_client<SchedulerCoord1>(
-        host_port, /*retry=*/true,
-        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)());
-  }
+  sched_coord_client_t client = create_client<SchedulerCoord1>(
+      host_port, /*retry=*/true,
+      /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)();
   std::string address_for_sched = create_address(kSchedulerServerPort);
   CoordCard card{.protocol = version::kHogdProtocol(),
                  .address_for_sched = address_for_sched.c_str()};
-  CHECK_EQ(clients[0].schedulercoord_intro_coord(card)(),
+  CHECK_EQ(client.schedulercoord_intro_coord(card)(),
            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
 
   // We are using loadgen to feed the mempool with traffic. Thus, we need to
   // connect to the loadgen server.
-  LoadgenClientManager loadgen(loadgen_address, clients, *sched->impl(),
+  LoadgenClientManager loadgen(loadgen_address, client, *sched->impl(),
                                /*num_accounts=*/10'000);
 
   info("coordinator initialization complete.");

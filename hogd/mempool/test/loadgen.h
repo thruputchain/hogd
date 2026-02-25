@@ -117,7 +117,7 @@ public:
     return ret;
   }
 
-  x23::Async<SignedTransactionBatch> get_transactions(size_t num_txs)
+  x23::Async<ParallelSignedTransactionBatch> get_transactions(size_t num_txs)
   {
     LoadgenExtensionResult result =
         co_await client_->extend_experiment(context_id_, num_txs,
@@ -138,60 +138,17 @@ public:
   static_assert(MempoolCoordinatorRpc::kMaxBlockSize % kNumSchedClients == 0);
 
   LoadgenClientManager(const std::string &loadgen_address,
-                       std::vector<sched_coord_client_t> &sched_coord_clients,
+                       sched_coord_client_t &sched_coord_client,
                        CoordinatorSchedRpc &coord_sched_rpc,
                        size_t num_accounts)
-    : sched_coord_clients_(sched_coord_clients),
+    : loadgen_client_(loadgen_address), sched_coord_client_(sched_coord_client),
       coord_sched_rpc_(coord_sched_rpc)
   {
-    CHECK_EQ(sched_coord_clients_.size(), kNumSchedClients);
-
-    for (size_t i = 0; i < kNumLoadgenClients; i++) {
-      loadgen_clients_.emplace_back(loadgen_address);
-    }
-
     info("Initializing loadgen experiment...");
     init_block_db_tip_ =
-        loadgen_clients_[0].init_experiment(sched_coord_clients_[0],
-                                            coord_sched_rpc_, num_accounts);
-    for (size_t i = 1; i < kNumLoadgenClients; i++) {
-      loadgen_clients_[i].context_id_ = loadgen_clients_[0].context_id_;
-    }
+        loadgen_client_.init_experiment(sched_coord_client_, coord_sched_rpc_,
+                                        num_accounts);
     info("Done initializing experiment. Now running.");
-  }
-
-  x23::Async<void> get_transactions(x23::Vec<SignedTransaction> &txs)
-  {
-    co_await default_coropoll().pool_.bg();
-
-    x23::Vec<x23::Async<SignedTransactionBatch>> handles;
-    for (size_t i = 0; i < kNumLoadgenClients; i++) {
-      handles.push_back(
-          loadgen_clients_[i].get_transactions(kLoadgenTxBatchSize));
-    }
-    for (size_t i = 0; i < kNumLoadgenClients; i++) {
-      txs += co_await handles[i];
-    }
-    co_return;
-  }
-
-  x23::Async<void> submit_vetted(x23::Vec<SignedTransaction> &txs)
-  {
-    co_await default_coropoll().pool_.bg();
-
-    constexpr ValidatorID kValidatorId{};
-    x23::Vec<x23::Async<void>> handles;
-    for (size_t i = 0; i < kNumSchedClients; i++) {
-      x23::span<const SignedTransaction> tx_chunk(
-          txs.begin() + (i * kSchedTxBatchSize),
-          txs.begin() + ((i + 1) * kSchedTxBatchSize));
-      handles.push_back(sched_coord_clients_[i].schedulercoord_submit_vetted(
-          kValidatorId, t_to_parallel_batch(tx_chunk)()));
-    }
-    for (size_t i = 0; i < kNumLoadgenClients; i++) {
-      co_await handles[i];
-    }
-    co_return;
   }
 
   x23::Detached run(bool print_stats)
@@ -204,9 +161,11 @@ public:
     std::chrono::steady_clock::time_point start;
     size_t total_transactions_nominated = 0;
 
-    x23::Vec<SignedTransaction> txs;
-    co_await get_transactions(txs);
-    co_await submit_vetted(txs);
+    ParallelSignedTransactionBatch txs =
+        co_await loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+    constexpr ValidatorID kValidatorId{};
+    co_await sched_coord_client_.schedulercoord_submit_vetted(kValidatorId,
+                                                              txs);
 
     size_t block_iteration_count = 0;
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
@@ -215,18 +174,17 @@ public:
           std::chrono::steady_clock::now();
 
       x23::Async<SchedulerNominationResult> nominate_handle =
-          sched_coord_clients_[0].schedulercoord_nominate(db_tip);
+          sched_coord_client_.schedulercoord_nominate(db_tip);
 
-      txs.clear();
-      co_await get_transactions(txs);
-
-      x23::Async<void> submit_vetted_handle = submit_vetted(txs);
+      txs = co_await loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+      x23::Async<void> submit_vetted_handle =
+          sched_coord_client_.schedulercoord_submit_vetted(kValidatorId, txs);
 
       SchedulerNominationResult res_nominate = co_await nominate_handle;
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
       x23::Async<SchedulerCommitOutcome> commit_handle =
-          sched_coord_clients_[0].schedulercoord_commit_block(
+          sched_coord_client_.schedulercoord_commit_block(
               res_nominate.nominated_block().block_id);
 
       co_await submit_vetted_handle;
@@ -295,17 +253,15 @@ public:
   }
 
 private:
-  static constexpr size_t kNumLoadgenClients = 10;
-  static_assert(MempoolCoordinatorRpc::kMaxBlockSize % kNumLoadgenClients == 0);
   // The number of txs we request at a time from loadgen.
   static constexpr size_t kLoadgenTxBatchSize =
-      MempoolCoordinatorRpc::kMaxBlockSize / kNumLoadgenClients;
+      MempoolCoordinatorRpc::kMaxBlockSize;
   // The number of txs we submit at a time to the mempool.
   static constexpr size_t kSchedTxBatchSize =
-      MempoolCoordinatorRpc::kMaxBlockSize / kNumSchedClients;
+      MempoolCoordinatorRpc::kMaxBlockSize;
 
-  std::vector<LoadgenClient> loadgen_clients_;
-  std::vector<sched_coord_client_t> &sched_coord_clients_;
+  LoadgenClient loadgen_client_;
+  sched_coord_client_t &sched_coord_client_;
   CoordinatorSchedRpc &coord_sched_rpc_;
   DbTip init_block_db_tip_;
 
