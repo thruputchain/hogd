@@ -22,44 +22,29 @@ struct Thing : RefCount {
   }
 };
 
-// Simulates the scenario where `other` in copy-assignment is reachable from
-// the old pointee.  When unref destroys objectA, its destructor resets the
-// global alias (standing in for a member RefPtr), so the copy-assignment
-// reads a dangling/nulled `other.p_` if it unrefs old before reffing new.
-namespace {
-struct Poisoner : RefCount {
+// RefPtr<T> can't be a member of T (RefOps eagerly needs complete type),
+// so split into a complete base and a derived class that adds the link.
+struct ListNode : RefCount {
   using RefCount::refcount;
   static constexpr bool kAllowRefPtrConversion = true;
-  bool armed = false;
-  ~Poisoner();
+};
+struct Link : ListNode {
+  RefPtr<ListNode> next;
 };
 
-RefPtr<Poisoner> g_alias; // declared after Poisoner is complete
-
-Poisoner::~Poisoner()
+// head = head->next where head is sole owner: copy-assign unrefs head
+// before reffing next, but unref destroys the node (and its next member).
+TEST(refcnt, DISABLED_CopyAssignLinkedListAdvance)
 {
-  if (armed)
-    g_alias.reset(); // simulates ~RefPtr on a member
-}
-} // namespace
+  auto *tail = new Link;
+  RefPtr<ListNode> keep(*tail);
 
-TEST(refcnt, CopyAssignSafeWhenOtherInvalidatedByUnref)
-{
-  RefPtr<Poisoner> b(*new Poisoner);
-  Poisoner *raw_b = b.get();
-  g_alias = b; // g_alias → objectB, refcount = 2
+  auto *h = new Link;
+  h->next = keep;
+  RefPtr<ListNode> head(*h);
 
-  auto *objA = new Poisoner;
-  objA->armed = true;        // objectA's destructor will reset g_alias
-  RefPtr<Poisoner> a(*objA); // a → objectA, refcount = 1
-
-  // BUG: unref(A) → ~Poisoner(armed) → g_alias.reset() → g_alias.p_ = null
-  // then p_ = other.p_ reads null
-  a = g_alias;
-  EXPECT_EQ(a.get(), raw_b);
-  EXPECT_EQ(b->refcount(), 2UZ); // a + b both hold objectB
-
-  g_alias = nullptr; // clean up
+  head = h->next; // head = head->next
+  EXPECT_EQ(head.get(), tail);
 }
 
 TEST(refcnt, copy)

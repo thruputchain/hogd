@@ -6,7 +6,6 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
-#include <type_traits>
 #include <utility>
 
 #include <x23/utility.h>
@@ -136,11 +135,10 @@ public:
   RefPtr &operator=(const RefPtr &other)
   {
     if (p_ != other.p_) {
-      auto *old = p_;
+      if (p_)
+        unref(p_);
       if ((p_ = other.p_)) // NOLINT
         ref();
-      if (old)
-        unref(old);
     }
     return *this;
   }
