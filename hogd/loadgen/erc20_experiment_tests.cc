@@ -13,6 +13,7 @@
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
+#include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -60,7 +61,7 @@ TEST_F(ERC20ExperimentTest, Basic)
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_addresses = 10,
   });
-  auto result = state->generate_experiment();
+  auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_configuration);
@@ -82,11 +83,14 @@ TEST_F(ERC20ExperimentTest, Basic)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(100, 10);
-  ASSERT_TRUE(work_txs.has_value());
-  ASSERT_EQ(work_txs.value().work_txs.size(), 100);
+  LoadgenStatus<LoadgenExtension> work_txs_raw =
+      state->extend_experiment(100, 10)();
+  ASSERT_TRUE(work_txs_raw.has_value());
 
-  for (auto &tx : work_txs.value().work_txs) {
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  ASSERT_EQ(work_txs.size(), 100);
+  for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();
@@ -107,7 +111,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
       std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
           .num_addresses = 10,
       });
-  auto result = state->generate_experiment();
+  auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_configuration);
@@ -129,11 +133,14 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(100, 10);
-  ASSERT_TRUE(work_txs.has_value());
-  ASSERT_EQ(work_txs.value().work_txs.size(), 100);
+  LoadgenStatus<LoadgenExtension> work_txs_raw =
+      state->extend_experiment(100, 10)();
+  ASSERT_TRUE(work_txs_raw.has_value());
 
-  for (auto &tx : work_txs.value().work_txs) {
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  ASSERT_EQ(work_txs.size(), 100);
+  for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();
@@ -153,7 +160,7 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_addresses = 1000,
   });
-  auto result = state->generate_experiment();
+  auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_configuration);
@@ -175,10 +182,13 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(10000, 10);
-  ASSERT_TRUE(work_txs.has_value());
+  LoadgenStatus<LoadgenExtension> work_txs_raw =
+      state->extend_experiment(10000, 10)();
+  ASSERT_TRUE(work_txs_raw.has_value());
 
-  for (auto &tx : work_txs.value().work_txs) {
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();

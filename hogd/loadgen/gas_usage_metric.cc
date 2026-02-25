@@ -8,6 +8,7 @@
 #include "exec_result.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -15,6 +16,7 @@
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -36,7 +38,7 @@ run_gas_usage_metric(uint32_t num_accounts)
   auto context = make_hogexec_context();
 
   // Generate experiment (creates genesis configuration and init txs)
-  auto init_result = exp.generate_experiment();
+  auto init_result = exp.generate_experiment()();
   if (!init_result.has_value()) {
     throw std::runtime_error("Failed to generate ERC20 experiment");
   }
@@ -65,17 +67,19 @@ run_gas_usage_metric(uint32_t num_accounts)
 
   // Extend experiment to get one work transaction
   const BlockHeight expiry_height = 1'000'000;
-  auto extend_result = exp.extend_experiment(1, expiry_height);
+  auto extend_result = exp.extend_experiment(1, expiry_height)();
   if (!extend_result.has_value()) {
     throw std::runtime_error("Failed to extend ERC20 experiment");
   }
 
-  if (extend_result.value().work_txs.empty()) {
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(extend_result.value().work_txs, work_txs)();
+  if (work_txs.empty()) {
     throw std::runtime_error("No transactions generated from extend");
   }
 
   // Execute the first transaction from extend()
-  auto const &tx = extend_result.value().work_txs[0];
+  auto const &tx = work_txs[0];
   std::println("Executing transaction...");
 
   // Create a new runtime context for the transaction (it's moved into handler)
