@@ -208,8 +208,7 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
       parallel.segment_tokens[i] = chunk.end - chunk.start;
       // This is just an educated guess, but hopefully it lowers/eliminates the
       // resize overhead of the vector.
-      xdrs[i].reserve(parallel.segment_tokens[i] * sizeof(SignedTransaction) *
-                      3);
+      xdrs[i].reserve(parallel.segment_tokens[i] * sizeof(T) * 3);
       for (size_t j = chunk.start; j < chunk.end; j++) {
         xdrs[i] += x23::serialize(objs[j]);
       }
@@ -219,7 +218,7 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   }
   // This is just an educated guess, but hopefully it lowers/eliminates the
   // resize overhead of the vector.
-  parallel.xdr.reserve(objs.size() * sizeof(SignedTransaction) * 3);
+  parallel.xdr.reserve(objs.size() * sizeof(T) * 3);
   for (size_t i = 0; i < chunks.size(); i++) {
     co_await handles[i];
     parallel.xdr += xdrs[i];
