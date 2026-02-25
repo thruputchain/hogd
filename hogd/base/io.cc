@@ -596,7 +596,8 @@ BufferedWriter::write_slowpath(std::span<const std::byte> src)
       if (!ret)
         return ret.error();
       bytes_written += *ret;
-      break;
+      src = src.subspan(*ret);
+      continue;
     }
 
     // append to the buffer
@@ -627,6 +628,18 @@ ErrnoStatus<void>
 BufferedWriter::flush_and_sync()
 {
   return flush().and_then([this] { return out_->sync(); });
+}
+
+ErrnoStatus<void>
+BufferedWriter::reset(File &out)
+{
+  ErrnoStatus<void> status = {};
+  if (!buf_.empty()) {
+    status = flush_and_sync();
+  }
+  buf_.clear();
+  out_ = &out;
+  return status;
 }
 
 ErrnoStatus<std::string>

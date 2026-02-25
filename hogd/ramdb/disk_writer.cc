@@ -146,7 +146,11 @@ DiskWriter::write_worker(const std::stop_token &stoken)
             signal_ioerror();
             return;
           }
-          w = BufferedWriter(*f);
+          if (auto flush_status = w.reset(*f); !flush_status) [[unlikely]] {
+            warn("couldn't flush buffer to disk: {}", flush_status.error());
+            signal_ioerror();
+            return;
+          }
           if (wal_grew_observer_)
             wal_grew_observer_();
         }
