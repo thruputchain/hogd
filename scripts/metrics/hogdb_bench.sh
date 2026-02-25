@@ -11,10 +11,10 @@ CWD=$(pwd)
 rm -rf $CWD/tmp
 mkdir -p $CWD/tmp
 
-$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp roundrobin_payments 1000000 24 0 | sed 's/^/Default: /'
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp roundrobin_payments -n 1000000 -w 24 | sed 's/^/Default: /'
 
 rm -rf $CWD/tmp
 mkdir -p $CWD/tmp
-$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp roundrobin_payments 1000000 24 1 | sed 's/^/ReplayCache: /'
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp roundrobin_payments -n 1000000 -w 24 -N | sed 's/^/ReplayCache: /'
 
 rm -rf $CWD/tmp
