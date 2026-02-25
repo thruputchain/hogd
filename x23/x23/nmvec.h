@@ -80,7 +80,7 @@ public:
   {
     n = round_size(n);
     auto it = std::ranges::lower_bound(freelists_, n, {}, &FreeList::size);
-    if (it != freelists_.end() && it->size != n)
+    if (it != freelists_.end() && it->size == n)
       if (void *head = it->head) {
         it->head = next(head);
         return head;
