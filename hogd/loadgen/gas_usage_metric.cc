@@ -8,6 +8,7 @@
 #include "exec_result.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -15,6 +16,7 @@
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {

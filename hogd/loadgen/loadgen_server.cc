@@ -6,8 +6,10 @@
 #include "hogd/base/types.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
+#include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

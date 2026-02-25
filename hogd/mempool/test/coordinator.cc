@@ -4,7 +4,6 @@
 #include <print>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"

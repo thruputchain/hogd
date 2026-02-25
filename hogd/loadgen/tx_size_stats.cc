@@ -9,6 +9,7 @@
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
@@ -44,7 +45,7 @@ print_tx_size_stats()
     return;
   }
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(result.value().work_txs, work_txs);
+  parallel_batch_to_t(result.value().work_txs, work_txs)();
 
   std::println("Generated {} transactions\n", work_txs.size());
 
