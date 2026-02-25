@@ -12,8 +12,8 @@
 #include <version>
 
 #include "hogd/base/bits.h"
-#include "hogd/base/log.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "parallel.hh"
 #include "types.hh"
