@@ -86,6 +86,7 @@ macro(add_x23_gtest TEST_NAME)
 endmacro()
 endif()
 
+add_x23_gtest(str_cstr)
 add_x23_gtest(cxs_serialize_test)
 add_x23_gtest(deserialize)
 add_x23_gtest(multiclient)

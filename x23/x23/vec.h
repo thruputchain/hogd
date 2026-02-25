@@ -356,7 +356,9 @@ public:
   explicit Vec(const Buf &b,
                const std::same_as<allocator_type> auto &a) noexcept
     : a_(a), b_(b)
-  {}
+  {
+    terminate();
+  }
 
   constexpr ~Vec() { realloc(0); }
 
@@ -487,7 +489,9 @@ public:
   {
     ensure();
     std::construct_at(b_.end, std::forward<Args>(args)...);
-    return *b_.end++;
+    auto &out = *b_.end++;
+    terminate();
+    return out;
   }
   constexpr void push_back(this auto &self, const value_type &v)
   {
@@ -626,6 +630,7 @@ public:
                  .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
              },
              std::move(a_)};
+    // ctor calls terminate(), so no need to call it here
     b_ = {};
     return ret;
   }
@@ -734,6 +739,7 @@ protected:
       a.deallocate(b_.begin, capacity() + ExtraAlloc);
     }
     b_ = newb;
+    terminate();
   }
 
   constexpr void realloc(size_type n)
@@ -772,6 +778,7 @@ protected:
     }
 
     b_ = newb;
+    terminate();
   }
 
   constexpr void check_size(size_type n)
@@ -855,12 +862,16 @@ public:
     std::copy_n(s, count, this->data());
   }
 
-  constexpr ~BoundedStr() {}
+  constexpr ~BoundedStr() = default;
 
   constexpr const char *c_str(this const auto &self)
   {
     if (self.empty())
       return "";
+
+#ifdef X23_CSTRING_DEBUG
+    x23assert(*self.b_.end == '\0');
+#endif
     // Shouldn't be needed, but just in case we forgot some code path
     // that doesn't NUL-terminate the string.
     if (*self.b_.end)
