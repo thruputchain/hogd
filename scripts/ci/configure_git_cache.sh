@@ -18,7 +18,7 @@ cache_repo() {
 
   if [[ ! -d "$cache_dir" ]]; then
     mkdir -p "$(dirname "$cache_dir")"
-    git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+    git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
   fi
 
   git config --global \

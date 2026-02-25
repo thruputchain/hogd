@@ -23,6 +23,8 @@ fi
 # Check if the working directory is dirty (tracked files only)
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "Working directory is dirty; cannot replicably run metrics"
+  echo "Dirty files:"
+  git status --porcelain --untracked-files=no
   exit 1
 fi
 

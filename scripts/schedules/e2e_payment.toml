@@ -9,9 +9,9 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
-git checkout {{ .git_commit }}
-git submodule update --init --recursive
+git fetch --quiet --depth 1 origin {{ .git_commit }}
+git checkout --quiet {{ .git_commit }}
+git submodule update --init --recursive --quiet
 
 source ./scripts/ci/prepare_env.sh
 
@@ -62,9 +62,9 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
-git checkout {{ .git_commit }}
-git submodule update --init --recursive
+git fetch --quiet --depth 1 origin {{ .git_commit }}
+git checkout --quiet {{ .git_commit }}
+git submodule update --init --recursive --quiet
 
 source ./scripts/ci/prepare_env.sh
 

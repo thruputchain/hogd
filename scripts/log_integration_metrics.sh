@@ -32,6 +32,8 @@ fi
 # Check if the working directory is dirty (tracked files only)
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "Working directory is dirty; cannot replicably run metrics"
+  echo "Dirty files:"
+  git status --porcelain --untracked-files=no
   exit 1
 fi
 
@@ -42,7 +44,7 @@ echo "Commit Timestamp: $commit_time"
 # Check if metrics_history/ is a git repo; if not, clone it
 if [ ! -d "metrics_history/.git" ]; then
   echo "Cloning groundhogchain/metrics_history.git into metrics_history/"
-  git clone https://github.com/groundhogchain/metrics_history.git metrics_history/
+  git clone --quiet https://github.com/groundhogchain/metrics_history.git metrics_history/
 else
   echo "metrics_history/ already exists and is a git repository."
 fi
