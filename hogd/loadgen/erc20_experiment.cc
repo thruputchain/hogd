@@ -151,12 +151,12 @@ ERC20ExperimentState::generate_experiment()
   return result;
 }
 
-LoadgenStatus<LoadgenExtension>
+x23::Async<LoadgenStatus<LoadgenExtension>>
 ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                         BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
-    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+    co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   x23::Vec<SignedTransaction> work_txs;
@@ -194,7 +194,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
             while (receiver == sender) {
               receiver = dist(gen);
             }
-            return std::make_pair(sender, receiver);
+            co_return std::make_pair(sender, receiver);
           };
 
           using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -243,9 +243,10 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     future.wait();
   }
 
-  return LoadgenExtension{
-      .work_txs = std::move(work_txs),
-  };
+  LoadgenExtension ret;
+  ParallelBatch response;
+  co_await t_to_parallel_batch(work_txs, ret.work_txs);
+  co_return ret;
 }
 
 } // namespace hogd

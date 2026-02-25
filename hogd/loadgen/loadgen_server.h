@@ -10,6 +10,7 @@
 #include "hogd/loadgen/experiment_state.h"
 #include "loadgen.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -23,9 +24,10 @@ public:
   static constexpr size_t kRpcMaxMessageSize = 0x7fffffffff;
 
   LoadgenResult generate_experiment(ExperimentConfig config);
-  LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
-                                           uint64_t num_txs,
-                                           BlockHeight expiry_height);
+
+  x23::Async<LoadgenExtensionResult>
+  extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
+                    BlockHeight expiry_height);
 
   void shut_down()
   {

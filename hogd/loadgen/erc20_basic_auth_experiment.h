@@ -9,6 +9,7 @@
 #include "loadgen.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -20,7 +21,7 @@ public:
 
   LoadgenStatus<LoadgenSuccessResult> generate_experiment();
 
-  LoadgenStatus<LoadgenExtension>
+  x23::Async<LoadgenStatus<LoadgenExtension>>
   extend_experiment(uint64_t num_txs, BlockHeight expiry_height) override;
 
   ~ERC20BasicAuthExperimentState() override = default;

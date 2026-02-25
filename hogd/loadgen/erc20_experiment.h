@@ -8,6 +8,7 @@
 #include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -17,7 +18,7 @@ public:
 
   LoadgenStatus<LoadgenSuccessResult> generate_experiment();
 
-  LoadgenStatus<LoadgenExtension>
+  x23::Async<LoadgenStatus<LoadgenExtension>>
   extend_experiment(uint64_t num_txs, BlockHeight expiry_height) override;
 
   ~ERC20ExperimentState() override = default;

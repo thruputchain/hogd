@@ -174,18 +174,18 @@ ERC20BasicAuthExperimentState::generate_experiment()
   };
 }
 
-LoadgenStatus<LoadgenExtension>
+x23::Async<LoadgenStatus<LoadgenExtension>>
 ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
                                                  BlockHeight expiry_height)
 {
   const static AuthClaim self_auth_claim = [] {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
     claim.invoked_address_signature_id() = 0;
-    return claim;
+    co_return claim;
   }();
 
   if (!check_config_valid()) {
-    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+    co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   x23::Vec<SignedTransaction> work_txs;
@@ -223,7 +223,7 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
             while (receiver == sender) {
               receiver = dist(gen);
             }
-            return std::make_pair(sender, receiver);
+            co_return std::make_pair(sender, receiver);
           };
 
           using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -274,7 +274,7 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
   LoadgenExtension ret;
   ParallelBatch response;
   co_await t_to_parallel_batch(work_txs, ret.work_txs);
-  return ret;
+  co_return ret;
 }
 
 } // namespace hogd

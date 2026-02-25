@@ -51,7 +51,7 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
   }
 }
 
-LoadgenExtensionResult
+x23::Async<LoadgenExtensionResult>
 LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
                               BlockHeight expiry_height)
 {
@@ -62,12 +62,13 @@ LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
         LoadgenRPCError::kLoadgenRPCErrorInvalidContext);
   }
   LoadgenExtensionResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
-  auto r = state->second->extend_experiment(num_txs, expiry_height);
+  LoadgenStatus<LoadgenExtension> r =
+      co_await state->second->extend_experiment(num_txs, expiry_height);
   if (!r) {
-    return LoadgenExtensionResult(r.error().code());
+    co_return LoadgenExtensionResult(r.error().code());
   }
   out.success() = std::move(r.value());
-  return out;
+  co_return out;
 }
 
 } // namespace hogd
