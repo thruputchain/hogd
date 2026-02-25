@@ -364,6 +364,14 @@ TestFFIErrorCode
 close_syscall_handler(void *syscall_handler) noexcept
 {
   try {
+    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    if (context == nullptr) {
+      return kTestFFIErrorCodeNone;
+    }
+    if (!context->can_be_closed()) {
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
