@@ -14,6 +14,7 @@
 #include "built_contracts/simple_wallet_authclaim.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -223,7 +224,7 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
             while (receiver == sender) {
               receiver = dist(gen);
             }
-            co_return std::make_pair(sender, receiver);
+            return std::make_pair(sender, receiver);
           };
 
           using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -272,8 +273,8 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
   }
 
   LoadgenExtension ret;
-  ParallelBatch response;
-  co_await t_to_parallel_batch(work_txs, ret.work_txs);
+  co_await t_to_parallel_batch(x23::span<const SignedTransaction>(work_txs),
+                               ret.work_txs);
   co_return ret;
 }
 

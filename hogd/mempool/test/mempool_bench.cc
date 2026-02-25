@@ -50,7 +50,7 @@ public:
                                     infra.coord_sched_rpc(), kNumAccounts);
   }
 
-  x23::Async<SignedTransactionBatch> get_transactions(size_t num_txs)
+  x23::Async<ParallelSignedTransactionBatch> get_transactions(size_t num_txs)
   {
     return client_->get_transactions(num_txs);
   }
@@ -185,12 +185,11 @@ loadgen_submit_unvetted(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs =
+    const ParallelSignedTransactionBatch txs =
         loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
     state.ResumeTiming();
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batch(txs)())();
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
   }
 }
 BENCHMARK(loadgen_submit_unvetted)->Unit(benchmark::kMillisecond);
@@ -204,14 +203,13 @@ loadgen_submit_vetted(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs =
+    const ParallelSignedTransactionBatch txs =
         loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
     state.ResumeTiming();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            t_to_parallel_batch(
-                                                                txs)())();
+                                                            txs)();
   }
 }
 BENCHMARK(loadgen_submit_vetted)->Unit(benchmark::kMicrosecond);
@@ -225,13 +223,12 @@ loadgen_nominate(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs =
+    const ParallelSignedTransactionBatch txs =
         loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            t_to_parallel_batch(
-                                                                txs)())();
+                                                            txs)();
     state.ResumeTiming();
 
     auto res_nominate =
@@ -251,13 +248,12 @@ loadgen_validate(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs =
+    const ParallelSignedTransactionBatch txs =
         loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            t_to_parallel_batch(
-                                                                txs)())();
+                                                            txs)();
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -303,7 +299,8 @@ loadgen_nominate_throughput(benchmark::State &state)
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
-  const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs)();
+  const ParallelSignedTransactionBatch txs =
+      loadgen.get_transactions(kNumLoadgenTxs)();
 
   for (auto _ : state) {
     state.PauseTiming();
@@ -311,7 +308,7 @@ loadgen_nominate_throughput(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs)())();
+                                                                txs)();
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
@@ -348,15 +345,15 @@ loadgen_validate_throughput(benchmark::State &state)
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
-  const SignedTransactionBatch txs = loadgen.get_transactions(kTotalTxsToRun)();
+  const ParallelSignedTransactionBatch txs =
+      loadgen.get_transactions(kTotalTxsToRun)();
 
   for (auto _ : state) {
     state.PauseTiming();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            t_to_parallel_batch(
-                                                                txs)())();
+                                                            txs)();
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -388,8 +385,8 @@ loadgen_validate_throughput(benchmark::State &state)
       }
 
       ValidatorID validator_id{};
-      server.mempool_coord_rpc().schedulercoord_submit_vetted(
-          validator_id, t_to_parallel_batch(txs)())();
+      server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                              txs)();
 
       auto res_validate =
           server.mempool_coord_rpc().schedulercoord_validate(db_tip,

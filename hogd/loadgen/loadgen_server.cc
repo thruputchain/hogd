@@ -58,7 +58,7 @@ LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
   auto st = experiment_states_.take();
   auto state = st->find(context_id);
   if (state == st->end()) {
-    return LoadgenExtensionResult(
+    co_return LoadgenExtensionResult(
         LoadgenRPCError::kLoadgenRPCErrorInvalidContext);
   }
   LoadgenExtensionResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
