@@ -44,6 +44,10 @@ BUILD_DIR=$1
 ./metrics_history/scripts/make_metric_file.sh hogdb-bench-new-storage $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/hogdb_bench_new_storage.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-new-storage/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
+## hogdb_bench_rcq (sequential insert+consume and concurrent insert+consume)
+./metrics_history/scripts/make_metric_file.sh hogdb-bench-rcq $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hogdb_bench_rcq.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-rcq/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
 ## mass fibonacci.wasm calls
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR >metrics_history/metrics/fibonacci-wasmonly/$GIT_branch/${GIT_commit_time}_$GIT_commit
