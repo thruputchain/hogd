@@ -65,7 +65,7 @@ run_gas_usage_metric(uint32_t num_accounts)
 
   // Extend experiment to get one work transaction
   const BlockHeight expiry_height = 1'000'000;
-  auto extend_result = exp.extend_experiment(1, expiry_height);
+  auto extend_result = exp.extend_experiment(1, expiry_height)();
   if (!extend_result.has_value()) {
     throw std::runtime_error("Failed to extend ERC20 experiment");
   }

@@ -487,7 +487,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   info("done initialization txs");
 
   auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
-                                            num_txs_per_block, 1000000);
+                                            num_txs_per_block, 1000000)();
   if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to extend loadgen experiment");
   }

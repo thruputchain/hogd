@@ -60,7 +60,7 @@ TEST_F(ERC20ExperimentTest, Basic)
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_addresses = 10,
   });
-  auto result = state->generate_experiment();
+  auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_configuration);
@@ -86,8 +86,8 @@ TEST_F(ERC20ExperimentTest, Basic)
       state->extend_experiment(100, 10)();
   ASSERT_TRUE(work_txs_raw.has_value());
 
-  SignedTransactionBatch work_txs =
-      parallel_batch_to_t(work_txs_raw.value().work_txs)();
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
   ASSERT_EQ(work_txs.size(), 100);
   for (auto &tx : work_txs.work_txs) {
     check_uniquifier(tx.tx.uniquifier);
