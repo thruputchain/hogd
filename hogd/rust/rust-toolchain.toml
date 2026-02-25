@@ -1,4 +1,4 @@
 [toolchain]
-channel = "1.90.0"
+channel = "nightly-2026-02-12-x86_64-unknown-linux-gnu"
 components = ["rustfmt", "clippy", "cargo"]
 
