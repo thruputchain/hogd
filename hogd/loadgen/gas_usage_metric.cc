@@ -36,7 +36,7 @@ run_gas_usage_metric(uint32_t num_accounts)
   auto context = make_hogexec_context();
 
   // Generate experiment (creates genesis configuration and init txs)
-  auto init_result = exp.generate_experiment();
+  auto init_result = exp.generate_experiment()();
   if (!init_result.has_value()) {
     throw std::runtime_error("Failed to generate ERC20 experiment");
   }

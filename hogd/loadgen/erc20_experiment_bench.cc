@@ -31,7 +31,7 @@ bm_erc20_generate_experiment(benchmark::State &state)
         .num_addresses = num_accounts,
     });
 
-    auto result = exp.generate_experiment();
+    auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       state.SkipWithError("Failed to generate ERC20 experiment");
       return;
@@ -58,14 +58,14 @@ bm_erc20_extend_experiment(benchmark::State &state)
       .num_addresses = num_accounts,
   });
 
-  auto init_result = exp.generate_experiment();
+  auto init_result = exp.generate_experiment()();
   if (!init_result.has_value()) {
     state.SkipWithError("Failed to initialize ERC20 experiment");
     return;
   }
 
   for (auto _ : state) {
-    auto result = exp.extend_experiment(num_txs, 100);
+    auto result = exp.extend_experiment(num_txs, 100)();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to extend ERC20 experiment");
     }

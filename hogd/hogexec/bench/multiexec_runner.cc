@@ -460,7 +460,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   };
 
   LoadgenRpc loadgen;
-  auto loadgen_result = co_await loadgen.generate_experiment(config);
+  auto loadgen_result = loadgen.generate_experiment(config)();
   if (loadgen_result.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to generate loadgen experiment");
   }

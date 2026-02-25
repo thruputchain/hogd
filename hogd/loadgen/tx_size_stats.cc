@@ -30,14 +30,14 @@ print_tx_size_stats()
   });
 
   std::println("Generating experiment...");
-  auto init_result = exp.generate_experiment();
+  auto init_result = exp.generate_experiment()();
   if (!init_result.has_value()) {
     std::println(stderr, "Failed to generate ERC20 experiment");
     return;
   }
 
   std::println("Extending experiment to generate {} transactions...", num_txs);
-  auto result = exp.extend_experiment(num_txs, expiry_height);
+  auto result = exp.extend_experiment(num_txs, expiry_height)();
   if (!result.has_value()) {
     std::println(stderr, "Failed to extend ERC20 experiment");
     return;
