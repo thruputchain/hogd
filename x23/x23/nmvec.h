@@ -80,7 +80,7 @@ public:
   {
     n = round_size(n);
     auto it = std::ranges::lower_bound(freelists_, n, {}, &FreeList::size);
-    if (it != freelists_.end() && it->size != n)
+    if (it != freelists_.end() && it->size == n)
       if (void *head = it->head) {
         it->head = next(head);
         return head;
@@ -206,13 +206,14 @@ public:
   {
     if (&other == this)
       return *this;
+    resize(0);
     for (unsigned i = 0; i < kNumChunks; ++i)
-      if (T *c = chunks_[i].exchange(
-              other.chunks_[i].exchange(nullptr, std::memory_order_relaxed),
-              std::memory_order_relaxed))
-        a.deallocate(c, chunk_size(i));
+      chunks_[i].store(other.chunks_[i].exchange(nullptr,
+                                                 std::memory_order_relaxed),
+                       std::memory_order_relaxed);
     size_.store(other.size_.exchange(0, std::memory_order_relaxed),
                 std::memory_order_release);
+    return *this;
   }
 
   // Thread-safe even while resizing.

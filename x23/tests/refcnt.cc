@@ -22,6 +22,31 @@ struct Thing : RefCount {
   }
 };
 
+// RefPtr<T> can't be a member of T (RefOps eagerly needs complete type),
+// so split into a complete base and a derived class that adds the link.
+struct ListNode : RefCount {
+  using RefCount::refcount;
+  static constexpr bool kAllowRefPtrConversion = true;
+};
+struct Link : ListNode {
+  RefPtr<ListNode> next;
+};
+
+// head = head->next where head is sole owner: copy-assign unrefs head
+// before reffing next, but unref destroys the node (and its next member).
+TEST(refcnt, DISABLED_CopyAssignLinkedListAdvance)
+{
+  auto *tail = new Link;
+  RefPtr<ListNode> keep(*tail);
+
+  auto *h = new Link;
+  h->next = keep;
+  RefPtr<ListNode> head(*h);
+
+  head = h->next; // head = head->next
+  EXPECT_EQ(head.get(), tail);
+}
+
 TEST(refcnt, copy)
 {
   RefPtr<Thing> c1(*new Thing), c2, c3;

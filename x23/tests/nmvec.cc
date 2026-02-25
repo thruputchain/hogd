@@ -3,6 +3,7 @@
 #include <random>
 #include <ranges>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <sys/resource.h>
@@ -518,4 +519,24 @@ TEST(NMVec, ExceptionSafetyResizeGrow)
   nm.resize(0);
   EXPECT_EQ(nm.size(), 0u);
   EXPECT_EQ(ThrowingT::live(), 0);
+}
+
+TEST(NMVec, MoveAssignDestroysOldElements)
+{
+  CountingT<0>::reset();
+  {
+    NMVec<CountingT<0>> v1;
+    v1.resize(5);
+    EXPECT_EQ(CountingT<0>::live(), 5);
+
+    NMVec<CountingT<0>> v2;
+    v2.resize(3);
+    EXPECT_EQ(CountingT<0>::live(), 8);
+
+    v1 = std::move(v2);
+    EXPECT_EQ(v1.size(), 3U);
+    EXPECT_EQ(v2.size(), 0U);
+    EXPECT_EQ(CountingT<0>::live(), 3);
+  }
+  EXPECT_EQ(CountingT<0>::live(), 0);
 }
