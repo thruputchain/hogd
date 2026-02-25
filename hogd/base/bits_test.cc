@@ -26,9 +26,13 @@ TEST(BitsTest, Alignment)
 
 TEST(BitsTest, DivideUp)
 {
-  EXPECT_EQ(divide_up(10, 8), 2);
-  EXPECT_EQ(divide_up(16, 8), 2);
-  EXPECT_EQ(divide_up(17, 8), 3);
+  EXPECT_EQ(divide_up(10U, 8U), 2U);
+  EXPECT_EQ(divide_up(16U, 8U), 2U);
+  EXPECT_EQ(divide_up(17U, 8U), 3U);
+  EXPECT_EQ(divide_up(0U, 8U), 0U);
+  EXPECT_EQ(divide_up(8U, 8U), 1U);
+
+  EXPECT_EQ(divide_up<uint8_t>(255, 2), 128U);
 }
 
 TEST(BitsTest, WrappingSequence)

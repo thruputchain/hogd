@@ -163,6 +163,7 @@ sys_accept(int sockfd, sockaddr_in *addr)
   if (!addr)
     return make_errno_status<int>(accept(sockfd, nullptr, nullptr));
   socklen_t len = sizeof(*addr); // NOLINT(misc-include-cleaner)
+  // TODO(geoff): this call discards &len
   return make_errno_status<int>(
       accept(sockfd, reinterpret_cast<sockaddr *>(addr), &len));
 }
@@ -229,7 +230,7 @@ File::open_temporary()
     return Errno{};
 
   // unlink the file so it is immediately deleted when the fd is closed.
-  std::ignore = sys_unlink(tmp);
+  std::ignore = sys_unlink(buf.data());
   return File(fd);
 }
 
@@ -270,12 +271,12 @@ File::close()
     return {};
 
   ErrnoStatus<void> ret = sys_close(fd_);
+  fd_ = kInvalidFD;
   if (!ret) {
     error("could not close fd {}: {}", fd_, ret.error());
     return ret.error();
   }
 
-  fd_ = kInvalidFD;
   return {};
 }
 

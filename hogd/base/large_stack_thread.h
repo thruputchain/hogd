@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "hogd/base/log.h"
+#include "x23/cleanup.h"
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -111,10 +113,11 @@ private:
 
     pthread_attr_t attr;
     int result = pthread_attr_init(&attr);
-    assert(result == 0 && "pthread_attr_init failed");
+    CHECK(result == 0);
+    x23::Defer _d([&] { pthread_attr_destroy(&attr); });
 
     result = pthread_attr_setstacksize(&attr, stack_size);
-    assert(result == 0 && "pthread_attr_setstacksize failed");
+    CHECK(result == 0);
 
     result = pthread_create(
         &thread_, &attr,
@@ -127,13 +130,10 @@ private:
         task);
 
     if (result != 0) {
-      pthread_attr_destroy(&attr);
-      delete task;
-      assert(false && "pthread_create failed");
+      panic("pthread_create failed");
     }
 
     valid_ = true;
-    pthread_attr_destroy(&attr);
   }
 };
 

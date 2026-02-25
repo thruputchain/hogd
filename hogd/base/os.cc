@@ -1,4 +1,5 @@
 #include "hogd/base/os.h"
+#include <print>
 
 extern "C" {
 #ifdef __linux__
@@ -29,8 +30,14 @@ get_constrained_threadpool_size()
   auto threadpool_size = x23::get_debug_env("DEFAULT_THREADPOOL_SIZE");
   if (threadpool_size.empty())
     return std::nullopt;
-  info("Restricting threadpool size to {}", threadpool_size);
-  return std::stoi(threadpool_size);
+  try {
+    return std::stoi(threadpool_size);
+  } catch (const std::exception &e) {
+    // cannot necessarily call error() here because the logging library may not
+    // have been initialized yet
+    std::println("Failed to parse DEFAULT_THREADPOOL_SIZE: {}", e.what());
+    return std::nullopt;
+  }
 }
 } // namespace
 

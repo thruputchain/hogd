@@ -8,10 +8,10 @@
 #include <cstdint>
 #include <functional>
 #include <string_view>
-#include <utility>
 #include <version>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 
@@ -154,8 +154,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
       case hogd::StorageKeyType::kStorageKeyTypeReplayCache:
         return std::string_view();
       }
-      assert(false);
-      std::unreachable();
+      hogd::panic("unhandled StorageKeyType: {}", key_disc);
     }();
 
     // This is the hash combine used in boost

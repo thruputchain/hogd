@@ -127,8 +127,11 @@ public:
   }
 
   // Initiates shutdown of the value.
-  // Returns true if the value should be destroyed immediately (no pending
+  // Returns true if the value can be destroyed immediately (no pending
   // references)
+  // Caller is responsible for ensuring that before the object is actually
+  // destroyed, other threads are eventually blocked from being able to try
+  // to acquire a reference.
   bool initiate_shutdown()
   {
     // already being shutdown
@@ -268,15 +271,7 @@ public:
   }
 
   // Move assignment
-  PerThreadARCRef &operator=(PerThreadARCRef &&other) noexcept
-  {
-    if (this != &other) {
-      arc_ = other.arc_;
-      active_ = other.active_;
-      other.active_ = false;
-    }
-    return *this;
-  }
+  PerThreadARCRef &operator=(PerThreadARCRef &&other) = delete;
 
   ~PerThreadARCRef() { assert(!active_); }
 
