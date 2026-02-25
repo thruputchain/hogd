@@ -91,10 +91,6 @@ impl WasmtimeInvokeResult {
             }
 
             // Component model related (which we should have off)
-            wasmtime::Trap::AlwaysTrapAdapter => {
-                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Always trap adapter (component model?)"));
-                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
-            }
             wasmtime::Trap::CannotEnterComponent => {
                 debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot enter component (component model?)"));
                 Self::error(InvokeErrorCode::kInvokeUnrecoverable)
