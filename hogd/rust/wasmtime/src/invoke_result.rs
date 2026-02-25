@@ -91,16 +91,54 @@ impl WasmtimeInvokeResult {
             }
 
             // Component model related (which we should have off)
-            wasmtime::Trap::AlwaysTrapAdapter => {
-                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Always trap adapter (component model?)"));
-                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
-            }
             wasmtime::Trap::CannotEnterComponent => {
                 debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot enter component (component model?)"));
                 Self::error(InvokeErrorCode::kInvokeUnrecoverable)
             }
             wasmtime::Trap::CannotLeaveComponent => {
                 debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot leave component (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::CannotBlockSyncTask => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot block sync task (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::InvalidChar => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Invalid char (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::StringOutOfBounds => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: String out of bounds (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::ListOutOfBounds => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: List out of bounds (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::InvalidDiscriminant => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Invalid discriminant (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::UnalignedPointer => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Unaligned pointer (component model?)"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+
+            // Debug assertions (should only fire in debug builds)
+            wasmtime::Trap::DebugAssertStringEncodingFinished => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Debug assert string encoding finished"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::DebugAssertEqualCodeUnits => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Debug assert equal code units"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::DebugAssertPointerAligned => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Debug assert pointer aligned"));
+                Self::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+            wasmtime::Trap::DebugAssertUpperBitsUnset => {
+                debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Debug assert upper bits unset"));
                 Self::error(InvokeErrorCode::kInvokeUnrecoverable)
             }
 
