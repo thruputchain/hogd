@@ -205,17 +205,20 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
             uint128_t amount = 10;
 
             // has to match the deserialized objects in simple_wallet::do_action
+            static auto entrypoint_transfer =
+                erc20_meta::entrypoint<"transfer">();
             Calldata internal_calldata =
-                x23::serialize(erc20_address_,
-                               erc20_meta::entrypoint<"transfer">(),
+                x23::serialize(erc20_address_, entrypoint_transfer,
                                GasAmount{1'000'000},
                                erc20_meta::make_calldata<"transfer">(
                                    wallets_[receiver].address,
                                    make_amount(amount)));
 
+            static auto entrypoint_do_action =
+                wallet_meta::entrypoint<"do_action">();
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
-                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .entrypoint = entrypoint_do_action,
                 .gas_limit = GasAmount{20'000},
                 .calldata = wallet_meta::make_calldata<"do_action">(
                     ed25519_sign(wallets_[sender].secret_key,
