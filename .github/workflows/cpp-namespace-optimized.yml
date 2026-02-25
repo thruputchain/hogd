@@ -145,7 +145,7 @@ jobs:
             if [[ ! -d "$cache_dir" ]]; then
               echo "HOGCACHE: Cloning fresh mirror for $repo_path"
               mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
             else
               echo "HOGCACHE: Using cached mirror for $repo_path"
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
@@ -275,7 +275,7 @@ jobs:
             if [[ ! -d "$cache_dir" ]]; then
               echo "HOGCACHE: Cloning fresh mirror for $repo_path"
               mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
             else
               echo "HOGCACHE: Using cached mirror for $repo_path"
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
@@ -386,7 +386,7 @@ jobs:
             if [[ ! -d "$cache_dir" ]]; then
               echo "HOGCACHE: Cloning fresh mirror for $repo_path"
               mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
             else
               echo "HOGCACHE: Using cached mirror for $repo_path"
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
