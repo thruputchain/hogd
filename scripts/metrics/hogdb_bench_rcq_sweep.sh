@@ -17,7 +17,7 @@ WORKERS=24
 QUEUE_COUNTS="4 16 64 256 1024 4096"
 
 for q in $QUEUE_COUNTS; do
-  n=$(( BLOCKS * q * ENTRIES_PER_BLOCK ))
+  n=$((BLOCKS * q * ENTRIES_PER_BLOCK))
 
   rm -rf $CWD/tmp
   mkdir -p $CWD/tmp
