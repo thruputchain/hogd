@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
@@ -73,7 +74,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
     state.PauseTiming();
     // Verify we got the expected number of transactions
     SignedTransactionBatch work_txs;
-    parallel_batch_to_t(result.value().work_txs.size(), work_txs)();
+    parallel_batch_to_t(result.value().work_txs, work_txs)();
     CHECK_EQ(work_txs.size(), num_txs);
     state.ResumeTiming();
 
