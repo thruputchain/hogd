@@ -89,7 +89,7 @@ TEST_F(ERC20ExperimentTest, Basic)
   SignedTransactionBatch work_txs;
   parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
   ASSERT_EQ(work_txs.size(), 100);
-  for (auto &tx : work_txs.work_txs) {
+  for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();

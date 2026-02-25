@@ -486,13 +486,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   info("done initialization txs");
 
-  auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
-                                            num_txs_per_block, 1000000)();
-  if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
+  auto work_txs_raw =
+      loadgen.extend_experiment(loadgen_result.success().context_id,
+                                num_txs_per_block, 1000000)();
+  if (work_txs_raw.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
-
-  assert(work_txs.success().work_txs.size() == num_txs_per_block);
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs)();
+  CHECK_EQ(work_txs.size(), num_txs_per_block);
 
   for (size_t i = 0; i < 5; i++) {
     std::println("Start trial {} with txs={} nexecutors={} nconnections={} "
@@ -500,9 +502,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  "batch_size={}",
                  i, num_txs_per_block, exec_cards.size(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
-    auto const &work = work_txs.success().work_txs;
     auto ts = x23::fastclock::get_ns();
-    run_block(&work, db_sched_client, event_sched_client, coro_exec_clients,
+    run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();

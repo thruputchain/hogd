@@ -70,12 +70,14 @@ run_gas_usage_metric(uint32_t num_accounts)
     throw std::runtime_error("Failed to extend ERC20 experiment");
   }
 
-  if (extend_result.value().work_txs.empty()) {
+  SignedTransactionBatch work_txs;
+  parallel_batch_to_t(extend_result.value().work_txs, work_txs)();
+  if (work_txs.empty()) {
     throw std::runtime_error("No transactions generated from extend");
   }
 
   // Execute the first transaction from extend()
-  auto const &tx = extend_result.value().work_txs[0];
+  auto const &tx = work_txs[0];
   std::println("Executing transaction...");
 
   // Create a new runtime context for the transaction (it's moved into handler)
