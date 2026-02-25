@@ -163,6 +163,7 @@ public:
 
     ParallelSignedTransactionBatch txs =
         co_await loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+    constexpr ValidatorID kValidatorId{};
     co_await sched_coord_client_.schedulercoord_submit_vetted(kValidatorId,
                                                               txs);
 
