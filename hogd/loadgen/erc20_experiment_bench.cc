@@ -70,8 +70,12 @@ bm_erc20_extend_experiment(benchmark::State &state)
       throw std::runtime_error("Failed to extend ERC20 experiment");
     }
 
+    state.PauseTiming();
     // Verify we got the expected number of transactions
-    assert(result.value().work_txs.size() == num_txs);
+    SignedTransactionBatch work_txs;
+    parallel_batch_to_t(result.value().work_txs.size(), work_txs)();
+    CHECK_EQ(work_txs.size(), num_txs);
+    state.ResumeTiming();
 
     // Prevent compiler optimizations
     benchmark::DoNotOptimize(result.value());
