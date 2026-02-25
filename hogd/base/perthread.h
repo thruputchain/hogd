@@ -55,6 +55,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 
@@ -151,7 +152,7 @@ private:
     items_.resize(n);
   }
 
-  static void remove(TLItems *items)
+  static void remove(TLItems *items) noexcept
   {
     if (items->empty())
       return;
@@ -166,9 +167,7 @@ private:
       try {
         threads_.resize(threads_.size() - 1);
       } catch (const std::exception &e) {
-        // TODO(geoff): If this occurs, we will then
-        // later dereference a null pointer in for_each().
-        threads_[i] = nullptr;
+        panic("unhandled exception in PerThread::remove: {}", e.what());
       }
       break;
     }
@@ -195,6 +194,10 @@ public:
   {}
   PerThread &operator=(PerThread &&pt) noexcept
   {
+    if (this == &pt) [[unlikely]]
+      return *this;
+    if (idx_ < std::numeric_limits<size_t>::max())
+      storage_.free_slot(idx_);
     idx_ = std::exchange(pt.idx_, std::numeric_limits<size_t>::max());
     return *this;
   }

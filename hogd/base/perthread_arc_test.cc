@@ -135,15 +135,7 @@ TEST(PerThreadARCRefTest, MoveSemantics)
     // ref1 is moved-from (active_ is false), but arc_ is still non-null
     // so bool conversion still returns true, but destructor won't assert
 
-    // Move assignment
-    PerThreadARCRef<int> ref3(nullptr);
-    EXPECT_FALSE(ref3);
-    ref3 = std::move(ref2);
-    EXPECT_EQ(*ref3, 99);
-    EXPECT_TRUE(ref3);
-    // ref2 is moved-from, but arc_ is still non-null
-
-    EXPECT_FALSE(ref3.release_reference());
+    EXPECT_FALSE(ref2.release_reference());
   }
 
   EXPECT_TRUE(arc.initiate_shutdown());

@@ -14,6 +14,7 @@
 #include <future>
 #include <iterator>
 #include <mutex>
+#include <new>
 #include <queue>
 #include <ranges>
 #include <stop_token>
@@ -157,38 +158,49 @@ public:
   {
     std::vector<std::future<void>> completions;
     completions.reserve(divide_up<size_t>(r.size(), width));
+    std::exception_ptr eptr;
     // The prior usage of std::views::chunk resulting in stack use-after-scope
     // bugs. Moving the range into the completion took references to elements
     // constructed in the temporary (the first argument into the
     // ranges::for_each).  Moving the range construction outside the for_each
     // fixes this.
+    try {
 #ifdef __cpp_lib_ranges_chunk
-    auto range = r | std::views::chunk(width);
-    std::ranges::for_each(range, [this, &f, proj, &completions](
-                                     std::ranges::viewable_range auto &&r) {
-      completions.emplace_back(
-          submit([proj, &f, r = std::forward<decltype(r)>(r)] {
-            for (auto &&v : r) {
-              f(std::invoke(proj, v));
-            }
-          }));
-    });
+      auto range = r | std::views::chunk(width);
+      std::ranges::for_each(range, [this, &f, proj, &completions](
+                                       std::ranges::viewable_range auto &&r) {
+        completions.emplace_back(
+            submit([proj, &f, r = std::forward<decltype(r)>(r)] {
+              for (auto &&v : r) {
+                f(std::invoke(proj, v));
+              }
+            }));
+      });
 #else  // defined(__cpp_lib_ranges_chunk)
-    // LLVM doesn't support std::views::chunk yet.
-    for (size_t i = 0; i < r.size(); i += width) {
-      size_t end = std::min<size_t>(i + width, r.size());
+      // LLVM doesn't support std::views::chunk yet.
+      for (size_t i = 0; i < r.size(); i += width) {
+        size_t end = std::min<size_t>(i + width, r.size());
 
-      completions.emplace_back(submit([proj, &f, i, end, &r]() {
-        for (size_t j = i; j < end; ++j) {
-          f(std::invoke(proj, r[j]));
-        }
-      }));
-    }
+        completions.emplace_back(submit([proj, &f, i, end, &r]() {
+          for (size_t j = i; j < end; ++j) {
+            f(std::invoke(proj, r[j]));
+          }
+        }));
+      }
 #endif // defined(__cpp_lib_ranges_chunk)
+    } catch (std::bad_alloc &e) {
+      eptr = std::current_exception();
+      error("Failed to allocate memory in worker_pool::for_each_parallel: {}",
+            e.what());
+    }
+
     for (std::future<void> &f : completions) {
       f.wait();
       // Rethrows the exception, if it exists.
       f.get();
+    }
+    if (eptr) [[unlikely]] {
+      std::rethrow_exception(eptr);
     }
   }
 

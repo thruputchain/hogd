@@ -49,6 +49,8 @@ constexpr std::optional<T>
 parse_integer(std::string_view str)
 {
   T ret;
+  // TODO(geoff): This allows trailing characters after the parsed int.
+  // Is that intended?
   auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), ret);
   if (ec != std::errc())
     return std::nullopt;

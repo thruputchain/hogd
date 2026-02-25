@@ -225,7 +225,8 @@ public:
   // Allow move, disable copy.
   BufferedReader(BufferedReader &&reader) noexcept
     : in_(reader.in_), buf_(std::move(reader.buf_)),
-      pos_(std::exchange(reader.pos_, std::span<const std::byte>()))
+      pos_(std::exchange(reader.pos_, std::span<const std::byte>())),
+      off_(reader.off_)
   {}
   BufferedReader &operator=(BufferedReader &&reader) noexcept
   {
@@ -311,6 +312,8 @@ public:
   }
   BufferedWriter &operator=(BufferedWriter &&writer) noexcept
   {
+    if (this == &writer) [[unlikely]]
+      return *this;
     out_ = writer.out_;
     buf_ = std::move(writer.buf_);
     writer.buf_.clear();

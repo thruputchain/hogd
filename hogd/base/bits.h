@@ -88,10 +88,11 @@ align_down(T val, size_t align) noexcept
 
 // divide_up performs division but rounds up to the next highest integer when
 // there is a remainder.
-template<std::integral T>
+template<std::unsigned_integral T>
 constexpr T
 divide_up(T dividend, T divisor) noexcept
 {
+  ASSERT_CONSTEXPR(divisor != 0);
   return (dividend + divisor - 1) / divisor;
 }
 

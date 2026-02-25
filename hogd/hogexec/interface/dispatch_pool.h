@@ -31,7 +31,7 @@ public:
   // across kBucketCount WorkerPools.
   explicit DispatchPool(int nthreads)
     : pools_(std::min<int>(kBucketCount, nthreads)), job_counts_(pools_.size()),
-      threads_per_pool_(divide_up(nthreads, static_cast<int>(pools_.size())))
+      threads_per_pool_(divide_up<size_t>(nthreads, pools_.size()))
   {
     int bucket_count = pools_.size();
 

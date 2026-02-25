@@ -102,6 +102,10 @@ public:
   {}
   OwningSpan &operator=(OwningSpan &&s) noexcept
   {
+    if (this == &s) [[unlikely]]
+      return *this;
+    if (cleanup_fn_)
+      cleanup_fn_();
     std::span<T, Extent>::operator=(s);
     cleanup_fn_ = std::move(s.cleanup_fn_);
     return *this;
@@ -127,20 +131,6 @@ public:
 private:
   UniqueFunction<void()> cleanup_fn_;
 };
-
-// string_as_bytes converts a string into a OwningSpan of read-only bytes
-// and transfers ownership of the underlying string.
-//
-// The is a useful conversion for legacy C++ code that stores byte buffers as
-// strings.
-inline OwningSpan<const std::byte>
-string_as_bytes(std::string str)
-{
-  std::span<const std::byte> span = {
-      reinterpret_cast<const std::byte *>(str.data()),
-      str.size() * sizeof(decltype(str)::value_type)};
-  return OwningSpan(span, [ref = std::move(str)] mutable {});
-}
 
 inline OwningSpan<const std::byte>
 vec_as_bytes(x23::Buf buf)
