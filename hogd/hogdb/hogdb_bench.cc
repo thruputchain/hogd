@@ -57,6 +57,13 @@ fail(HogDBError err)
   panic("Unexpected error: {}", err);
 }
 
+// Returns the number of buckets of size `bucket_size` needed to hold `n` items.
+constexpr size_t
+bucket_count(size_t n, size_t bucket_size)
+{
+  return (n + bucket_size - 1) / bucket_size;
+}
+
 // measure returns the execution time of fn in seconds (as a double)
 double
 measure(auto &&fn)
@@ -437,15 +444,10 @@ std::unique_ptr<RCQBenchmark>
 RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
                    bool concurrent, int num_producers)
 {
-  // Each queue has its own address. Each RCQ block stores up to 1000
-  // entries and is a single DB value, so the number of DB items is
-  // proportional to the number of blocks rather than entries.
-  // Add headroom for balances and metadata.
-  size_t num_blocks =
-      (num_entries + num_queues * 1000 - 1) / (num_queues * 1000);
-  size_t n = num_queues * (num_blocks + 4) + num_queues;
-  // Ensure sufficient heap for large entry payloads.
-  n = std::max(n, num_entries / 10);
+  // Estimate DB items for heap sizing: each queue needs its data blocks,
+  // a metadata item, and a balance entry.
+  size_t blocks_per_queue = bucket_count(num_entries, num_queues * 1000);
+  size_t n = num_queues * (blocks_per_queue + 2);
   auto bench = std::unique_ptr<RCQBenchmark>(
       new RCQBenchmark(open_ramdb(n), create_merkle(), num_workers, num_entries,
                        num_queues, concurrent, num_producers));
@@ -490,10 +492,8 @@ void
 RCQBenchmark::run_sequential()
 {
   constexpr size_t kEntriesPerBlock = kRetrocausalQueueBlockEntriesMaxLen;
-  size_t num_blocks = (num_entries_ + num_queues_ * kEntriesPerBlock - 1) /
-                      (num_queues_ * kEntriesPerBlock);
-  if (num_blocks == 0)
-    num_blocks = 1;
+  size_t num_blocks =
+      std::max(bucket_count(num_entries_, num_queues_ * kEntriesPerBlock), 1UL);
 
   // Phase 1: Insert
   size_t wb_before_insert = db_.disk_bytes_written();
@@ -636,10 +636,8 @@ void
 RCQBenchmark::run_concurrent()
 {
   constexpr size_t kEntriesPerBlock = kRetrocausalQueueBlockEntriesMaxLen;
-  size_t num_blocks = (num_entries_ + num_queues_ * kEntriesPerBlock - 1) /
-                      (num_queues_ * kEntriesPerBlock);
-  if (num_blocks == 0)
-    num_blocks = 1;
+  size_t num_blocks =
+      std::max(bucket_count(num_entries_, num_queues_ * kEntriesPerBlock), 1UL);
 
   int num_consumers = static_cast<int>(workers_.worker_count()) - num_producers_;
   int num_threads = num_producers_ + num_consumers;
