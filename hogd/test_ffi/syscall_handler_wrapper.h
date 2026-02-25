@@ -123,6 +123,13 @@ public:
     return db_.get_tx_event_log(identifier_);
   }
 
+  // Guard against destructor assetion -- don't close the handler before popping
+  // all frames off of the transaction.
+  [[nodiscard]] bool can_be_closed() const
+  {
+    return mock_runtime_stack_.empty();
+  }
+
   void mark_committed_or_aborted() { transaction_committed_or_aborted_ = true; }
 
 private:

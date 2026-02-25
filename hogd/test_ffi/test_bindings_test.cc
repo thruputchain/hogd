@@ -2090,4 +2090,80 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   EXPECT_EQ(c_trace.system_calls.size(), 0U);
 }
 
+// Regression test: closing a syscall handler with an unfinished outer
+// invocation frame should not crash.  Reproduces a panic in
+// ~SyscallHandlerContext where mock_runtime_stack_ is non-empty because
+// the caller opened two nested frames but only finished the inner one.
+//
+// Sequence from the original bug report:
+//   open_mock_invocation_frame  (frame A)
+//   push_context
+//   open_mock_invocation_frame  (frame B, nested inside A)
+//   pop_context
+//   finish_mock_invocation_frame (finishes B, kInvokeDeterministic)
+//   close_syscall_handler        → CHECK(mock_runtime_stack_.empty()) fails
+TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  ContractAddress addr_a{0x0A};
+  ContractAddress addr_b{0x0B};
+
+  // Open frame A (outer)
+  Invocation inv_a = {
+      .invoked_address = addr_a,
+      .entrypoint = entrypoint_from_method_id(0x1111),
+      .gas_limit = 10'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_a), kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+
+  // Open frame B (nested inside A)
+  Invocation inv_b = {
+      .invoked_address = addr_b,
+      .entrypoint = entrypoint_from_method_id(0x2222),
+      .gas_limit = 5'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, inv_b), kTestFFIErrorCodeNone);
+
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  // Finish only frame B (the inner frame)
+  auto finish_b =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeDeterministic));
+  ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(finish_b.serialized_output);
+  free_ffi_data_buffer(finish_b.serialized_trace);
+
+  // Frame A is still open — close_syscall_handler must not crash.
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeUnrecoverableError);
+
+  // Now properly close frame A, and tear down the test setup
+  auto finish_a =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  EXPECT_EQ(finish_a.ffi_error_code, kTestFFIErrorCodeNone);
+  free_ffi_data_buffer(finish_a.serialized_output);
+  free_ffi_data_buffer(finish_a.serialized_trace);
+
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+}
+
 } // namespace hogd
