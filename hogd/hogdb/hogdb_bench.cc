@@ -496,6 +496,7 @@ RCQBenchmark::run_sequential()
     num_blocks = 1;
 
   // Phase 1: Insert
+  size_t wb_before_insert = db_.disk_bytes_written();
   double insert_sec = measure([&] {
     size_t block_start_idx = 0;
     for (size_t block = 0; block < num_blocks; block++) {
@@ -546,8 +547,10 @@ RCQBenchmark::run_sequential()
       block_start_idx = block_end;
     }
   });
+  size_t wb_after_insert = db_.disk_bytes_written();
   std::println("insert: {} seconds ({} entries/sec)", insert_sec,
                num_entries_ / insert_sec);
+  std::println("insert disk_bytes_written: {}", wb_after_insert - wb_before_insert);
 
   // Phase 2: Consume past blocks
   double consume_sec = measure([&] {
@@ -615,8 +618,10 @@ RCQBenchmark::run_sequential()
       CHECK(block_tx.initiate_shutdown());
     }
   });
+  size_t wb_after_consume = db_.disk_bytes_written();
   std::println("consume: {} seconds ({} entries/sec)", consume_sec,
                num_entries_ / consume_sec);
+  std::println("consume disk_bytes_written: {}", wb_after_consume - wb_after_insert);
   std::println("total: {} seconds", insert_sec + consume_sec);
 
   // Validation: all queues should be empty.
@@ -792,6 +797,7 @@ RCQBenchmark::run_concurrent()
     });
   }
 
+  size_t wb_before_concurrent = db_.disk_bytes_written();
   double total_sec = measure([&] {
     for (size_t block = 0; block < num_blocks; block++) {
       PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
@@ -851,12 +857,15 @@ RCQBenchmark::run_concurrent()
   for (auto &t : threads)
     t.join();
 
+  size_t wb_after_concurrent = db_.disk_bytes_written();
   std::println("concurrent insert: {} seconds ({} entries/sec)",
                total_insert_sec, num_entries_ / total_insert_sec);
   std::println("concurrent consume: {} seconds ({} entries/sec)",
                total_consume_sec, num_entries_ / total_consume_sec);
   std::println("concurrent insert+consume: {} seconds ({} entries/sec)",
                total_sec, num_entries_ / total_sec);
+  std::println("concurrent disk_bytes_written: {}",
+               wb_after_concurrent - wb_before_concurrent);
 
   // Validation: all queues should be empty.
   for (size_t q = 0; q < num_queues_; q++) {
