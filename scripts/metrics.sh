@@ -70,4 +70,4 @@ BUILD_DIR=$1
 
 ## x23 metrics
 ./metrics_history/scripts/make_metric_file.sh x23-metrics $GIT_branch $GIT_commit $GIT_commit_time
-${BUILD_DIR:-.}/x23/test/bench >metrics_history/metrics/x23-metrics/$GIT_branch/${GIT_commit_time}_$GIT_commit
+${BUILD_DIR:-.}/x23/tests/bench >metrics_history/metrics/x23-metrics/$GIT_branch/${GIT_commit_time}_$GIT_commit
