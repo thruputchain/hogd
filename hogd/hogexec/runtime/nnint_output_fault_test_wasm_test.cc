@@ -55,13 +55,11 @@ TEST_F(NnintOutputFaultTestWasmTest, FaultValidFirst)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
-          .invocation = client_.make_invocation<"test_fault_valid_first">(
-              UINT64_MAX),
-          .uniquifier =
-              Uniquifier{
-                  .block_expiry_height =
-                      std::numeric_limits<BlockHeight>::max(),
-                  .nonce = nonce_++}},
+          .invocation =
+              client_.make_invocation<"test_fault_valid_first">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
@@ -72,13 +70,11 @@ TEST_F(NnintOutputFaultTestWasmTest, FaultInvalidFirst)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
-          .invocation = client_.make_invocation<"test_fault_invalid_first">(
-              UINT64_MAX),
-          .uniquifier =
-              Uniquifier{
-                  .block_expiry_height =
-                      std::numeric_limits<BlockHeight>::max(),
-                  .nonce = nonce_++}},
+          .invocation =
+              client_.make_invocation<"test_fault_invalid_first">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
@@ -87,13 +83,11 @@ TEST_F(NnintOutputFaultTestWasmTest, ValidationFailure)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
-          .invocation = client_.make_invocation<"test_validation_failure">(
-              UINT64_MAX),
-          .uniquifier =
-              Uniquifier{
-                  .block_expiry_height =
-                      std::numeric_limits<BlockHeight>::max(),
-                  .nonce = nonce_++}},
+          .invocation =
+              client_.make_invocation<"test_validation_failure">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }

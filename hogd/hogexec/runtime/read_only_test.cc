@@ -591,12 +591,11 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{
-                          .invoked_address = contract_addr_,
-                          .entrypoint = meta::entrypoint<
-                              "read_only_deploy_output_preserved">(),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {}},
+                      Invocation{.invoked_address = contract_addr_,
+                                 .entrypoint = meta::entrypoint<
+                                     "read_only_deploy_output_preserved">(),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
               }},
       *context);
 

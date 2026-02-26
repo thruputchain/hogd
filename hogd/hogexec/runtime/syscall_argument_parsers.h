@@ -21,15 +21,17 @@ public:
 
   WritableOutput() : value_(std::nullopt), original_pointer_(nullptr) {}
 
-  WritableOutput(WritableOutput &&other) noexcept 
-    : value_(std::move(other.value_)), original_pointer_(other.original_pointer_) {
+  WritableOutput(WritableOutput &&other) noexcept
+    : value_(std::move(other.value_)),
+      original_pointer_(other.original_pointer_)
+  {
     other.value_ = std::nullopt;
     other.original_pointer_ = nullptr;
   }
   WritableOutput(const WritableOutput &) = delete;
   WritableOutput &operator=(const WritableOutput &) = delete;
   WritableOutput &operator=(WritableOutput &&other) = delete;
-  
+
   T &get()
   {
     assert(value_.has_value());
@@ -39,7 +41,8 @@ public:
 
   bool has_value() const noexcept { return value_.has_value(); }
 
-  void disarm() noexcept {
+  void disarm() noexcept
+  {
     value_ = std::nullopt;
     original_pointer_ = nullptr;
   }

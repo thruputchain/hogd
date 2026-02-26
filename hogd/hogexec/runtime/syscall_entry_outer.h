@@ -425,14 +425,18 @@ set_syscall_trace_inputs(Target &target, std::tuple<Args...> const &parsed_args)
 }
 
 template<typename T>
-void disarm_output(T &output) {
+void
+disarm_output(T &output)
+{
   if constexpr (requires { output.disarm(); }) {
     output.disarm();
   }
 }
 
 template<typename... Args>
-void disarm_outputs(std::tuple<Args...> &args) {
+void
+disarm_outputs(std::tuple<Args...> &args)
+{
   [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
     (disarm_output(std::get<Is>(args)), ...);
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
