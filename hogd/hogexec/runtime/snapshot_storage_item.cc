@@ -155,7 +155,7 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
     if (index == concurrent_queue_entries_.size()) {
       concurrent_queue_entries_.push_back(*entry);
     }
-    else {
+    else if (concurrent_queue_entries_[index] != *entry) [[unlikely]] {
       error("unrecoverable: mismatch in concurrent rcq return results");
       return SystemError{SystemErrorCode::kSystemUnrecoverable};
     }
