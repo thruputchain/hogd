@@ -104,6 +104,10 @@ public:
     return db_->sync().transform_error(to_hogdb_error);
   }
 
+  // disk_bytes_written returns the total bytes written to WAL log files since
+  // the last database recovery.
+  size_t disk_bytes_written() const { return db_->disk_bytes_written(); }
+
   void get_each_parallel(GetEachCallback fn,
                          size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool())
@@ -257,6 +261,10 @@ public:
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }
+
+  // disk_bytes_written returns the total bytes written to WAL log files since
+  // the last database recovery.
+  size_t disk_bytes_written() const { return db_.disk_bytes_written(); }
 
   void enable_debug_invariants(StorageCostModel const &cost_model)
   {

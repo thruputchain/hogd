@@ -1,6 +1,8 @@
 // hogdb_bench.cc - benchmarks for hogdb
 
 #include <algorithm>
+#include <atomic>
+#include <barrier>
 #include <bit>
 #include <cassert>
 #include <chrono>
@@ -9,16 +11,21 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include <getopt.h> // NOLINT(misc-include-cleaner)
+
+#include "hogd/base/bits.h"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/background_commit_worker.h"
@@ -30,8 +37,8 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -49,6 +56,13 @@ void
 fail(HogDBError err)
 {
   panic("Unexpected error: {}", err);
+}
+
+// Returns the number of buckets of size `bucket_size` needed to hold `n` items.
+constexpr size_t
+bucket_count(size_t n, size_t bucket_size)
+{
+  return (n + bucket_size - 1) / bucket_size;
 }
 
 // measure returns the execution time of fn in seconds (as a double)
@@ -98,14 +112,7 @@ private:
   std::vector<Payment> ops_;
   AuthChangeSubscriptionManager subscription_manager_;
 
-  StorageCostModel cost_model_{StorageCostModelXdr{
-      .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(int128_t{12000}),
-      .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-      .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
-  }};
+  StorageCostModel cost_model_{StorageCostModel::default_cost_model()};
 };
 
 namespace {
@@ -153,7 +160,7 @@ populate_account_balances(HogDBDAO &db, size_t n,
                           int128_t val = kDefaultBalance)
 {
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus ret = db.write_address_balance(make_address(i), val); !ret)
+    if (auto ret = db.write_address_balance(make_address(i), val); !ret)
       fail(ret.error());
   }
 }
@@ -179,8 +186,8 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
                                            workers, std::move(ops));
 
   // set up initial DB state.
-  HogDBStatus<void> ret;
-  ret = bench->db_.write_nnint128(make_key(0, 0), static_cast<int128_t>(n));
+  auto ret =
+      bench->db_.write_nnint128(make_key(0, 0), static_cast<int128_t>(n));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
@@ -196,7 +203,7 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
                             (bench->cost_model_.kBaseItemCost +
                              bench->cost_model_.kReplayCacheCostPerEntry) *
                                 n);
-  HogDBStatus<uint64_t> lsn = bench->db_.commit();
+  auto lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
 
@@ -220,8 +227,8 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
                                            workers, std::move(ops));
 
   // set up initial DB state.
-  HogDBStatus<void> ret;
-  ret = bench->db_.write_nnint128(make_key(0, 0), static_cast<int128_t>(0));
+  auto ret =
+      bench->db_.write_nnint128(make_key(0, 0), static_cast<int128_t>(0));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
@@ -234,7 +241,7 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
   populate_account_balances(bench->db_, n,
                             bench->cost_model_.kBaseItemCost +
                                 bench->cost_model_.kReplayCacheCostPerEntry);
-  HogDBStatus<uint64_t> lsn = bench->db_.commit();
+  auto lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
 
@@ -259,8 +266,7 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(i, 0), 1);
-        !ret)
+    if (auto ret = bench->db_.write_nnint128(make_key(i, 0), 1); !ret)
       fail(ret.error());
   }
   // initial storage amount per account should be sufficient for replay cache
@@ -268,7 +274,7 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
   populate_account_balances(bench->db_, n,
                             bench->cost_model_.kBaseItemCost +
                                 bench->cost_model_.kReplayCacheCostPerEntry);
-  if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
+  if (auto lsn = bench->db_.commit(); !lsn)
     fail(lsn.error());
 
   return bench;
@@ -291,8 +297,7 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(i, 0), 1);
-        !ret)
+    if (auto ret = bench->db_.write_nnint128(make_key(i, 0), 1); !ret)
       fail(ret.error());
   }
   // initial storage amount per account should be sufficient for replay cache
@@ -300,7 +305,7 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
   populate_account_balances(bench->db_, n,
                             bench->cost_model_.kBaseItemCost +
                                 bench->cost_model_.kReplayCacheCostPerEntry);
-  if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
+  if (auto lsn = bench->db_.commit(); !lsn)
     fail(lsn.error());
 
   return bench;
@@ -318,37 +323,35 @@ Benchmark::run()
                               background_commit_worker, 1);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
-  if (HogDBStatus<void> ret = db_.write_dbtip(tip); !ret)
+  if (auto ret = db_.write_dbtip(tip); !ret)
     fail(ret.error());
 
   // invoke_tx simulates DB operations from a contract invocation.
   auto invoke_fn = [&block, &tip](const Payment &p) {
-    [[maybe_unused]]
-    auto ref = block.try_acquire_reference();
-    assert(ref);
+    CHECK(block.try_acquire_reference());
 
     InvokeTX tx(block);
     if (p.uniquifier) {
       CHECK(p.uniquifier->block_expiry_height >= tip.height);
-      HogDBStatus<void> ret = tx.request_consume_uniquifier(
+      auto ret = tx.request_consume_uniquifier(
           p.src.get_address(), *p.uniquifier,
           std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
       if (!ret)
         fail(ret.error());
     }
-    if (HogDBStatus<void> ret =
+    if (auto ret =
             tx.request_nnint128(p.src, -p.amount,
                                 std::to_underlying(
                                     StorageDeltaFlags::kStorageDeltaFlagNone));
         !ret)
       fail(ret.error());
-    if (HogDBStatus<void> ret =
+    if (auto ret =
             tx.request_nnint128(p.dst, p.amount,
                                 std::to_underlying(
                                     StorageDeltaFlags::kStorageDeltaFlagNone));
         !ret)
       fail(ret.error());
-    if (HogDBStatus<void> ret = tx.sync_balance_locks(); !ret)
+    if (auto ret = tx.sync_balance_locks(); !ret)
       fail(ret.error());
     tx.commit();
     tx.release_blocktx_reference();
@@ -360,7 +363,7 @@ Benchmark::run()
   workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
   // commit changes to the ramdb.
-  HogDBStatus<void> ret = block.get().commit(workers_).and_then([this] {
+  auto ret = block.get().commit(workers_).and_then([this] {
     // force merkle root generation so the cost is included.
     trie_->generate_top_level_hashes();
     std::ignore = trie_->get_root_hash();
@@ -371,9 +374,7 @@ Benchmark::run()
   if (!ret)
     fail(ret.error());
 
-  [[maybe_unused]]
-  auto r = block.initiate_shutdown();
-  assert(r);
+  CHECK(block.initiate_shutdown());
 }
 
 using bench_fn = std::unique_ptr<Benchmark> (*)(size_t n, int workers,
@@ -390,6 +391,475 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      Benchmark::make_new_storage_benchmark},
 };
 
+// Encode a 32-bit index as a 4-byte little-endian QueueEntry.
+QueueEntry
+make_rcq_entry(uint32_t index)
+{
+  QueueEntry entry;
+  uint32_t le = cpu_to_le(index);
+  auto bytes = std::as_bytes(std::span(&le, 1));
+  for (auto b : bytes)
+    entry.push_back(static_cast<uint8_t>(b));
+  return entry;
+}
+
+class RCQBenchmark {
+public:
+  static std::unique_ptr<RCQBenchmark> make(size_t num_entries, int num_workers,
+                                            size_t num_queues, bool concurrent,
+                                            int num_producers);
+
+  void run();
+
+private:
+  RCQBenchmark(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie,
+               int num_workers, size_t num_entries, size_t num_queues,
+               bool concurrent, int num_producers)
+    : db_(std::move(db)), trie_(std::move(trie)), workers_(num_workers),
+      num_entries_(num_entries), num_queues_(num_queues),
+      concurrent_(concurrent), num_producers_(num_producers)
+  {}
+
+  void run_sequential();
+  void run_concurrent();
+
+  HogDBDAO db_;
+  std::unique_ptr<MerkleTriePrefix> trie_;
+  WorkerPool workers_;
+  StorageCostModel cost_model_{StorageCostModel::default_cost_model()};
+  AuthChangeSubscriptionManager subscription_manager_;
+  BackgroundCommitWorker background_commit_worker_{subscription_manager_,
+                                                   nullptr};
+
+  size_t num_entries_;
+  size_t num_queues_;
+  bool concurrent_;
+  size_t num_producers_;
+
+  std::vector<ItemKey> queue_keys_;
+};
+
+std::unique_ptr<RCQBenchmark>
+RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
+                   bool concurrent, int num_producers)
+{
+  // Estimate DB items for heap sizing: each queue needs its data blocks,
+  // a metadata item, and a balance entry.
+  size_t blocks_per_queue = bucket_count(num_entries, num_queues * 1000);
+  size_t n = num_queues * (blocks_per_queue + 2);
+  auto bench = std::unique_ptr<RCQBenchmark>(
+      new RCQBenchmark(open_ramdb(n), create_merkle(), num_workers, num_entries,
+                       num_queues, concurrent, num_producers));
+
+  // Generate queue keys: queue i lives at address i, item slot 0.
+  bench->queue_keys_.reserve(num_queues);
+  for (size_t i = 0; i < num_queues; i++)
+    bench->queue_keys_.push_back(make_key(i, 0));
+
+  // Fund each queue-owning address with generous balance for storage costs.
+  // Worst case: all entries in one queue, plus blocks.
+  int128_t balance_per_addr =
+      (bench->cost_model_.kRCQCostPerEntry +
+       bench->cost_model_.kRCQCostPerBlock + bench->cost_model_.kBaseItemCost) *
+      static_cast<int128_t>(num_entries + 1000);
+  populate_account_balances(bench->db_, num_queues, balance_per_addr);
+
+  // Write initial dbtip.
+  DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
+  if (HogDBStatus<void> ret = bench->db_.write_dbtip(tip); !ret)
+    fail(ret.error());
+
+  if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
+    fail(lsn.error());
+
+  return bench;
+}
+
+void
+RCQBenchmark::run()
+{
+  swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
+  trace("trace logging enabled");
+
+  if (concurrent_)
+    run_concurrent();
+  else
+    run_sequential();
+}
+
+void
+RCQBenchmark::run_sequential()
+{
+  constexpr size_t kEntriesPerBlock = kRetrocausalQueueBlockEntriesMaxLen;
+  size_t num_blocks =
+      std::max(bucket_count(num_entries_, num_queues_ * kEntriesPerBlock), 1UL);
+
+  // Phase 1: Insert
+  size_t wb_before_insert = db_.disk_bytes_written();
+  double insert_sec = measure([&] {
+    size_t block_start_idx = 0;
+    for (size_t block = 0; block < num_blocks; block++) {
+      PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
+                                     background_commit_worker_,
+                                     static_cast<BlockHeight>(block + 1));
+
+      size_t block_end =
+          std::min(num_entries_,
+                   block_start_idx + (num_queues_ * kEntriesPerBlock));
+
+      std::vector<size_t> work_items;
+      work_items.reserve(block_end - block_start_idx);
+      for (size_t i = block_start_idx; i < block_end; i++)
+        work_items.push_back(i);
+
+      auto insert_fn = [&](size_t i) {
+        CHECK(block_tx.try_acquire_reference());
+
+        InvokeTX tx(block_tx);
+        RetrocausalQueueDelta delta;
+        delta.insert.added_entries.push_back(
+            make_rcq_entry(static_cast<uint32_t>(i)));
+        if (auto ret = tx.request_retrocausal_queue(
+                queue_keys_[i % num_queues_], delta,
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+            !ret)
+          fail(ret.error());
+        if (auto ret = tx.sync_balance_locks(); !ret)
+          fail(ret.error());
+        tx.commit();
+        tx.release_blocktx_reference();
+      };
+
+      constexpr size_t kBatchesPerWorker = 4;
+      size_t width =
+          work_items.size() / workers_.worker_count() / kBatchesPerWorker;
+      workers_.for_each_parallel(work_items, insert_fn, std::max(width, 1UL));
+
+      HogDBStatus<void> ret = block_tx.get().commit(workers_).and_then(
+          [this] { return db_.commit().transform([](uint64_t) {}); });
+      if (!ret)
+        fail(ret.error());
+      info("committed block {}/{}", block, num_blocks);
+
+      CHECK(block_tx.initiate_shutdown());
+
+      block_start_idx = block_end;
+    }
+  });
+  size_t wb_after_insert = db_.disk_bytes_written();
+  std::println("insert: {} seconds ({} entries/sec)", insert_sec,
+               num_entries_ / insert_sec);
+  std::println("insert disk_bytes_written: {}",
+               wb_after_insert - wb_before_insert);
+
+  // Phase 2: Consume past blocks
+  double consume_sec = measure([&] {
+    // Consume one block at a time per queue. Each BlockTX consumes one block
+    // from each queue in parallel.
+    std::atomic<bool> more = true;
+    while (more.load(std::memory_order_relaxed)) {
+      more.store(false, std::memory_order_relaxed);
+      PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
+                                     background_commit_worker_,
+                                     static_cast<BlockHeight>(num_blocks + 1));
+
+      std::vector<size_t> queue_indices;
+      queue_indices.reserve(num_queues_);
+      for (size_t q = 0; q < num_queues_; q++)
+        queue_indices.push_back(q);
+
+      auto consume_fn = [&](size_t q) {
+        auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
+        if (!meta_r) {
+          // Queue doesn't exist or is empty.
+          return;
+        }
+        auto &meta = *meta_r;
+        if (meta.live_entries == 0)
+          return;
+
+        // Find the next unconsumed block.
+        uint64_t next_block =
+            meta.consume_state.max_fully_consumed_block_number + 1;
+        if (next_block > meta.max_live_block_num)
+          return;
+
+        more.store(true, std::memory_order_relaxed);
+
+        CHECK(block_tx.try_acquire_reference());
+
+        InvokeTX tx(block_tx);
+        RetrocausalQueueDelta delta;
+        // NOLINTNEXTLINE(modernize-make-unique)
+        delta.consume.reset(new RetrocausalQueueConsumeDelta{
+            .past_block_consume =
+                {
+                    .max_fully_consumed_block_number = next_block,
+                    .partial_consumed_number = 0,
+                },
+        });
+        if (auto ret = tx.request_retrocausal_queue(
+                queue_keys_[q], delta,
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+            !ret)
+          fail(ret.error());
+        if (auto ret = tx.sync_balance_locks(); !ret)
+          fail(ret.error());
+        tx.commit();
+        tx.release_blocktx_reference();
+      };
+
+      workers_.for_each_parallel(queue_indices, consume_fn, 1);
+
+      auto ret = block_tx.get().commit(workers_).and_then(
+          [this] { return db_.commit().transform([](uint64_t) {}); });
+      if (!ret)
+        fail(ret.error());
+
+      CHECK(block_tx.initiate_shutdown());
+    }
+  });
+  size_t wb_after_consume = db_.disk_bytes_written();
+  std::println("consume: {} seconds ({} entries/sec)", consume_sec,
+               num_entries_ / consume_sec);
+  std::println("consume disk_bytes_written: {}",
+               wb_after_consume - wb_after_insert);
+  std::println("total: {} seconds", insert_sec + consume_sec);
+
+  // Validation: all queues should be empty.
+  for (size_t q = 0; q < num_queues_; q++) {
+    auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
+    CHECK(!meta_r.has_value() && (meta_r.error() == HogDBCode::kNotFound));
+  }
+  std::println("validation passed: all queues empty");
+}
+
+void
+RCQBenchmark::run_concurrent()
+{
+  constexpr size_t kEntriesPerBlock = kRetrocausalQueueBlockEntriesMaxLen;
+  size_t num_blocks =
+      std::max(bucket_count(num_entries_, num_queues_ * kEntriesPerBlock), 1UL);
+
+  size_t num_consumers = workers_.worker_count() - num_producers_;
+  size_t num_threads = num_producers_ + num_consumers;
+  info("concurrent benchmark: {}p / {}c, {} queues, {} blocks", num_producers_,
+       num_consumers, num_queues_, num_blocks);
+
+  // Shared block state written by main before the start barrier and read by
+  // workers after it.  Safe since the pointed-to objects always outlive the
+  // barrier phase in which they are accessed.
+  PerThreadARC<BlockTX> *block_tx_ptr = nullptr;
+  size_t block_start_idx = 0;
+  size_t block_end = 0;
+  std::vector<std::atomic<size_t>> *committed_counts_ptr = nullptr;
+  std::vector<size_t> *entries_per_queue_ptr = nullptr;
+  bool running = true;
+
+  std::barrier<> sync(num_threads + 1);
+  using hrc = std::chrono::high_resolution_clock;
+  std::atomic<int64_t> block_insert_done_ns{0};
+  std::atomic<int64_t> block_consume_done_ns{0};
+  double total_insert_sec = 0.0;
+  double total_consume_sec = 0.0;
+
+  auto atomic_fetch_max = [](std::atomic<int64_t> &a, int64_t val) {
+    int64_t prev = a.load(std::memory_order_relaxed);
+    while (val > prev &&
+           !a.compare_exchange_weak(prev, val, std::memory_order_relaxed))
+      ;
+  };
+
+  std::vector<std::thread> threads;
+  threads.reserve(num_threads);
+
+  // Producer threads: thread p handles entries p, p+P, p+2P, ...
+  for (size_t p = 0; p < num_producers_; p++) {
+    threads.emplace_back([&, p] {
+      while (true) {
+        sync.arrive_and_wait(); // phase 1: wait for start
+        bool should_exit = !running;
+        if (!should_exit) {
+          for (size_t i = block_start_idx + p; i < block_end;
+               i += num_producers_) {
+            CHECK(block_tx_ptr->try_acquire_reference());
+
+            InvokeTX tx(*block_tx_ptr);
+            size_t q = i % num_queues_;
+            RetrocausalQueueDelta delta;
+            delta.insert.added_entries.push_back(
+                make_rcq_entry(static_cast<uint32_t>(i)));
+            if (auto ret = tx.request_retrocausal_queue(
+                    queue_keys_[q], delta,
+                    std::to_underlying(
+                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                !ret)
+              fail(ret.error());
+            if (auto ret = tx.sync_balance_locks(); !ret)
+              fail(ret.error());
+            tx.commit();
+            tx.release_blocktx_reference();
+            committed_counts_ptr->at(q).fetch_add(1, std::memory_order_release);
+          }
+          atomic_fetch_max(block_insert_done_ns,
+                           hrc::now().time_since_epoch().count());
+        }
+        sync.arrive_and_wait(); // phase 2: signal done
+        if (should_exit)
+          break;
+      }
+    });
+  }
+
+  // Consumer threads: thread c handles queues c, c+C, c+2C, ...
+  for (size_t c = 0; c < num_consumers; c++) {
+    threads.emplace_back([&, c] {
+      while (true) {
+        sync.arrive_and_wait(); // phase 1: wait for start
+        bool should_exit = !running;
+        if (!should_exit) {
+          for (auto q = c; q < num_queues_; q += num_consumers) {
+            if ((*entries_per_queue_ptr)[q] == 0)
+              continue;
+
+            size_t expected = (*entries_per_queue_ptr)[q];
+
+            // Wait for first entry before polling.
+            while (committed_counts_ptr->at(q).load(
+                       std::memory_order_acquire) == 0)
+              cpu_relax();
+
+            // Collect all entries for this queue in this block.
+            std::vector<QueueEntry> collected;
+            collected.reserve(expected);
+            uint32_t next_index = 0;
+            while (collected.size() < expected) {
+              auto r =
+                  block_tx_ptr->get().get_concurrent_rcq_entry(queue_keys_[q],
+                                                               next_index);
+              if (!r)
+                fail(r.error());
+              if (*r) {
+                collected.push_back(std::move(**r));
+                next_index++;
+              }
+            }
+
+            CHECK(block_tx_ptr->try_acquire_reference());
+
+            InvokeTX tx(*block_tx_ptr);
+            RetrocausalQueueDelta delta;
+            auto *consume = new RetrocausalQueueConsumeDelta{};
+
+            auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
+            if (meta_r)
+              consume->past_block_consume = meta_r->consume_state;
+
+            for (auto &e : collected)
+              consume->current_block_consumed.push_back(std::move(e));
+            delta.consume.reset(consume);
+
+            if (auto ret = tx.request_retrocausal_queue(
+                    queue_keys_[q], delta,
+                    std::to_underlying(
+                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                !ret)
+              fail(ret.error());
+            if (auto ret = tx.sync_balance_locks(); !ret)
+              fail(ret.error());
+            tx.commit();
+            tx.release_blocktx_reference();
+          }
+          atomic_fetch_max(block_consume_done_ns,
+                           hrc::now().time_since_epoch().count());
+        }
+        sync.arrive_and_wait(); // phase 2: signal done
+        if (should_exit)
+          break;
+      }
+    });
+  }
+
+  size_t wb_before_concurrent = db_.disk_bytes_written();
+  double total_sec = measure([&] {
+    for (size_t block = 0; block < num_blocks; block++) {
+      PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
+                                     background_commit_worker_,
+                                     static_cast<BlockHeight>(block + 1));
+
+      size_t cur_block_end =
+          std::min(num_entries_,
+                   block_start_idx + (num_queues_ * kEntriesPerBlock));
+
+      std::vector<std::atomic<size_t>> committed_counts(num_queues_);
+      std::vector<size_t> entries_per_queue(num_queues_, 0);
+      for (size_t i = block_start_idx; i < cur_block_end; i++)
+        entries_per_queue[i % num_queues_]++;
+
+      // Reset per-block timing and record start before the phase 1 barrier so
+      // the barrier provides the necessary happens-before to workers.
+      block_insert_done_ns.store(0, std::memory_order_relaxed);
+      block_consume_done_ns.store(0, std::memory_order_relaxed);
+      int64_t block_start_ns = hrc::now().time_since_epoch().count();
+
+      // Publish block state for workers.
+      block_tx_ptr = &block_tx;
+      block_end = cur_block_end;
+      committed_counts_ptr = &committed_counts;
+      entries_per_queue_ptr = &entries_per_queue;
+
+      sync.arrive_and_wait(); // phase 1: start signal
+      sync.arrive_and_wait(); // phase 2: wait for workers to finish
+
+      // Accumulate per-phase elapsed time.  The phase 2 barrier ensures all
+      // worker writes to block_*_done_ns are visible here.
+      total_insert_sec +=
+          (block_insert_done_ns.load(std::memory_order_relaxed) -
+           block_start_ns) *
+          1e-9;
+      total_consume_sec +=
+          (block_consume_done_ns.load(std::memory_order_relaxed) -
+           block_start_ns) *
+          1e-9;
+
+      auto ret = block_tx.get().commit(workers_).and_then(
+          [this] { return db_.commit().transform([](uint64_t) {}); });
+      if (!ret)
+        fail(ret.error());
+      info("committed block {}/{}", block, num_blocks);
+
+      CHECK(block_tx.initiate_shutdown());
+
+      block_start_idx = cur_block_end;
+    }
+
+    // Signal workers to exit via a final two-phase barrier cycle.
+    running = false;
+    sync.arrive_and_wait(); // phase 1: exit signal
+    sync.arrive_and_wait(); // phase 2: exit done
+  });
+
+  for (auto &t : threads)
+    t.join();
+
+  size_t wb_after_concurrent = db_.disk_bytes_written();
+  std::println("concurrent insert: {} seconds ({} entries/sec)",
+               total_insert_sec, num_entries_ / total_insert_sec);
+  std::println("concurrent consume: {} seconds ({} entries/sec)",
+               total_consume_sec, num_entries_ / total_consume_sec);
+  std::println("concurrent insert+consume: {} seconds ({} entries/sec)",
+               total_sec, num_entries_ / total_sec);
+  std::println("concurrent disk_bytes_written: {}",
+               wb_after_concurrent - wb_before_concurrent);
+
+  // Validation: all queues should be empty.
+  for (size_t q = 0; q < num_queues_; q++) {
+    auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
+    CHECK(!meta_r.has_value());
+  }
+  std::println("validation passed: all queues empty");
+}
+
 } // namespace
 
 } // namespace hogd
@@ -403,23 +873,93 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting hogdb_bench!");
 
   auto print_usage = [] {
-    std::println("usage: <db_path> <command> <num> <workers> [use_nonces]");
-    std::println("commands");
+    std::println("usage: hogdb_bench <db_path> <command> [options]");
+    std::println("");
+    std::println("options:");
+    std::println("  -n, --num <N>          entries (default: 1000000)");
+    std::println("  -w, --workers <N>      worker threads (default: 128)");
+    std::println("  -q, --queues <N>       RCQ queues (default: 1)");
+    std::println("  -p, --producers <N>    rcq_concurrent producer threads "
+                 "(default: workers/2)");
+    std::println("  -N, --nonces           enable nonces (payment commands)");
+    std::println("  -h, --help             show this help");
+    std::println("");
+    std::println("commands:");
     for (const auto &[name, desc, ign] : hogd::benchmarks)
-      std::println("  {}: {}", name, desc);
+      std::println("  {:24s}{}", name, desc);
+    std::println("  {:24s}{}", "rcq", "sequential RCQ insert-then-consume");
+    std::println("  {:24s}{}", "rcq_concurrent",
+                 "concurrent RCQ insert+consume");
   };
 
-  if (argc < 5) {
+  if (argc < 3) {
     print_usage();
     return 1;
   }
+
   hogd::db_path = argv[1];
   std::string cmd = argv[2];
-  size_t n = std::stoul(argv[3], nullptr, 0);
-  int workers = std::stoi(argv[4], nullptr, 0);
+
+  // NOLINTBEGIN(misc-include-cleaner,modernize-use-designated-initializers)
+  // clang-format off
+  static const struct option long_opts[] = {
+      {"num",       required_argument, nullptr, 'n'},
+      {"workers",   required_argument, nullptr, 'w'},
+      {"queues",    required_argument, nullptr, 'q'},
+      {"producers", required_argument, nullptr, 'p'},
+      {"nonces",    no_argument,       nullptr, 'N'},
+      {"help",      no_argument,       nullptr, 'h'},
+      {nullptr, 0, nullptr, 0},
+  };
+  // clang-format on
+
+  size_t n = 1'000'000;
+  int workers = 128;
+  size_t num_queues = 1;
+  int num_producers = -1; // -1 means default to workers/2
   bool use_nonces = false;
-  if (argc > 5)
-    use_nonces = static_cast<bool>(std::stoul(argv[5], nullptr, 0));
+
+  // Skip past the two positional args before parsing opts.
+  optind = 3;
+  int opt;
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Nh", long_opts, nullptr)) !=
+         -1) {
+    switch (opt) {
+    case 'n':
+      n = std::stoul(optarg, nullptr, 0);
+      break;
+    case 'w':
+      workers = std::stoi(optarg, nullptr, 0);
+      break;
+    case 'q':
+      num_queues = std::stoul(optarg, nullptr, 0);
+      break;
+    case 'p':
+      num_producers = std::stoi(optarg, nullptr, 0);
+      break;
+    case 'N':
+      use_nonces = true;
+      break;
+    case 'h':
+      print_usage();
+      return 0;
+    default:
+      print_usage();
+      return 1;
+    }
+  }
+  // NOLINTEND(misc-include-cleaner,modernize-use-designated-initializers)
+
+  // RCQ benchmarks.
+  if (cmd == "rcq" || cmd == "rcq_concurrent") {
+    bool concurrent = (cmd == "rcq_concurrent");
+    if (num_producers < 0)
+      num_producers = workers / 2;
+    auto bench = hogd::RCQBenchmark::make(n, workers, num_queues, concurrent,
+                                          num_producers);
+    bench->run();
+    return 0;
+  }
 
   for (const auto &[name, ign, fn] : hogd::benchmarks) {
     if (cmd != name)
@@ -432,6 +972,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return 0;
   }
 
+  std::println("error: unknown command '{}'", cmd);
   print_usage();
   return 1;
 }

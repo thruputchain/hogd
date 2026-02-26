@@ -140,6 +140,10 @@ public:
 
   void register_metrics(MetricRegistry &registry);
 
+  // disk_bytes_written returns the total bytes written to WAL log files since
+  // the last database recovery.
+  size_t disk_bytes_written() const { return disk_writer_.get_bytes_out(); }
+
   // estimate_heap_size returns the heap size needed to store n items,
   // including overheads for compacting and buffering to disk.
   //
