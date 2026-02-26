@@ -8,6 +8,8 @@
 #include <utility>
 #include <variant>
 
+#include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -130,9 +132,15 @@ SnapshotStorageItem::get_next_rcq_block(uint64_t search_start_block) const
 SystemStatus<Nondeterministic<std::optional<QueueEntry>>>
 SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
 {
-  std::lock_guard ul(rcq_mtx_);
-  if (index < concurrent_queue_entries_.size()) {
-    return concurrent_queue_entries_[index];
+  {
+    std::lock_guard ul(rcq_mtx_);
+    if (index < concurrent_queue_entries_.size()) {
+      return concurrent_queue_entries_[index];
+    }
+    if (index != concurrent_queue_entries_.size()) [[unlikely]] {
+      error("unrecoverable: bad get_concurrent_rcq_entry access");
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    }
   }
 
   auto db_res =
@@ -143,7 +151,14 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
   }
   auto entry = db_res.value();
   if (entry.has_value()) {
-    concurrent_queue_entries_.push_back(*entry);
+    std::lock_guard ul(rcq_mtx_);
+    if (index == concurrent_queue_entries_.size()) {
+      concurrent_queue_entries_.push_back(*entry);
+    }
+    else if (concurrent_queue_entries_[index] != *entry) [[unlikely]] {
+      error("unrecoverable: mismatch in concurrent rcq return results");
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    }
   }
   return entry;
 }

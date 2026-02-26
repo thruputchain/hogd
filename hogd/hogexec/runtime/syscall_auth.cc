@@ -33,6 +33,7 @@ constexpr bool
 valid_accepted_keys_bitmap(BitMap bitmap)
 {
   static_assert(kMaxSigners <= 32);
+  static_assert(sizeof(BitMap) == sizeof(uint32_t));
   return (bitmap & (uint64_t{0xFFFF'FFFF} << kMaxSigners)) == 0;
 }
 } // namespace

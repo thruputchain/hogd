@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
@@ -118,7 +119,6 @@ TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
       };
 
   check_concurrent_entry(0, std::nullopt);
-  check_concurrent_entry(1, std::nullopt);
 
   server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
                                                  make_test_queue_entry(1));
@@ -143,5 +143,46 @@ TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
   check_concurrent_entry(3, make_test_queue_entry(4));
   check_concurrent_entry(4, make_test_queue_entry(5));
   check_concurrent_entry(5, std::nullopt);
+}
+
+TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
+{
+
+  SnapshotStorageItem test_item(WireStorageItem(
+                                    StorageItemType::kItemTypeRetrocausalQueue),
+                                AddressAndKey{}, BlockID{1}, *db_proxy_);
+  auto check_concurrent_entry =
+      [&](uint32_t index, std::optional<QueueEntry> const &expected_entry) {
+        auto entry = test_item.get_concurrent_rcq_entry(index);
+        ASSERT_TRUE(entry.has_value());
+        EXPECT_EQ(entry.value().get(), expected_entry);
+      };
+
+  auto check_concurrent_entry_bad = [&](uint32_t index) {
+    auto entry = test_item.get_concurrent_rcq_entry(index);
+    ASSERT_FALSE(entry.has_value());
+    EXPECT_EQ(entry.error().error_code(),
+              SystemErrorCode::kSystemUnrecoverable);
+  };
+
+  check_concurrent_entry_bad(1);
+
+  check_concurrent_entry(0, std::nullopt);
+
+  check_concurrent_entry_bad(1);
+
+  server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                 make_test_queue_entry(1));
+  server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                 make_test_queue_entry(2));
+  server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                 make_test_queue_entry(3));
+
+  check_concurrent_entry(0, make_test_queue_entry(1));
+  check_concurrent_entry(1, make_test_queue_entry(2));
+  check_concurrent_entry_bad(3);
+  check_concurrent_entry(2, make_test_queue_entry(3));
+  check_concurrent_entry(3, std::nullopt);
+  check_concurrent_entry_bad(4);
 }
 } // namespace hogd
