@@ -92,6 +92,7 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
     stash_snapshot_cache(it->second.context.get().extract_snapshot_cache(), g);
     active_blocks_.erase(it);
     co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+    panic("unreachable");
   }
 
   trace("Opened new block {} in mode {}", new_block_id, mode);
