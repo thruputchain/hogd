@@ -1,12 +1,15 @@
 #include "hogd/hogexec/runtime/item_view.h"
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <random>
 #include <utility>
 #include <variant>
 
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -405,6 +408,14 @@ AddressAuthDataItem::get_delta() const
     delta.auth_data_change().new_gas_config_change = GasConfigChange{
         .new_gas_permission_configs =
             internal_auth_data_->gas_permission_configs_.value()};
+  }
+  // In debug builds, we shuffle the order of public key changes,
+  // because the order of pk changes in the delta is not supposed to affect the
+  // result of the delta handling logic.
+  if constexpr (is_debug_build()) {
+    std::shuffle(delta.auth_data_change().auth_data_change_signers.begin(),
+                 delta.auth_data_change().auth_data_change_signers.end(),
+                 std::mt19937{std::random_device{}()});
   }
   return delta;
 }

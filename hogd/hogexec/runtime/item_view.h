@@ -1,14 +1,17 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <random>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -95,6 +98,15 @@ public:
     StorageDelta delta =
         StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
     delta.retrocausal_queue() = queue_delta_;
+    // In debug builds, we shuffle the order of entries in the concurrent
+    // consumes, as these are not supposed to affect the result of the db
+    // operation.
+    if constexpr (is_debug_build()) {
+      std::shuffle(
+          delta.retrocausal_queue().consume->current_block_consumed.begin(),
+          delta.retrocausal_queue().consume->current_block_consumed.end(),
+          std::mt19937{std::random_device{}()});
+    }
     return delta;
   }
 
