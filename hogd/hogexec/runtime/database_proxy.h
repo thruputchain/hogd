@@ -112,6 +112,10 @@ public:
 
   SystemStatus<bool> try_push_current_subtransaction()
   {
+    // In debug builds, we shuffle the batch of deltas before sending to the
+    // database because the order of deltas in a batch is supposed to not affect
+    // the result of the call.  Shuffling in tests helps catch bugs in the
+    // database delta handling logic.
     if constexpr (is_debug_build()) {
       std::shuffle(current_subtransaction_batch_.begin(),
                    current_subtransaction_batch_.end(),
