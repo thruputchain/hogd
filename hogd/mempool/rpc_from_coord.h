@@ -61,7 +61,12 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
-  ~MempoolCoordinatorRpc() { shut_down(); }
+  ~MempoolCoordinatorRpc()
+  {
+    while (pending_detached_coroutines_.load(std::memory_order_acquire)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -204,8 +209,6 @@ public:
   BlockHeight auth_data_height() { return auth_data_height_.load(); }
 
   void dump_stats() { scheduler_->dump_runqueue(); }
-
-  void shut_down() {}
 
   x23::Async<void> auth_data_changed(BlockHeight height,
                                      KeyChangeBatch key_changes);
@@ -361,6 +364,8 @@ private:
 
   x23::CoroFutex<int64_t> auth_data_height_{-1};
   x23::CoroFutex<int> auth_ready_{0};
+
+  std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
 
