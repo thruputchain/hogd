@@ -1155,6 +1155,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nnint_output_fault_test"
+version = "0.1.0"
+dependencies = [
+ "nnint_output_fault_test",
+ "sdk",
+]
+
+[[package]]
 name = "no_syscall_test"
 version = "0.1.0"
 dependencies = [
