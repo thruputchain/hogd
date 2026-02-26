@@ -57,7 +57,7 @@ public:
   x23::Async<DbSchedResult> dbsched_load_genesis_configuration(
       GenesisConfiguration const &genesis_configuration);
 
-  x23::Async<DbTipResult> dbsched_get_tip()
+  static x23::Async<DbTipResult> dbsched_get_tip()
   {
     co_return DbTipResult(DbSchedResult::DbSchedResultError);
   }
