@@ -63,6 +63,17 @@ public:
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
+  x23::Async<DbTipResult> dbsched_get_tip()
+  {
+    HogDBStatus<DbTip> ret = ctx_.get_db().read_dbtip();
+    if (!ret) {
+      co_return DbTipResult(DbSchedResult::DbSchedResultError);
+    }
+    DbTipResult result(DbSchedResult::DbSchedResultOK);
+    result.db_tip() = ret.value();
+    co_return result;
+  }
+
 private:
   std::atomic<bool> shutdown_flag_ = false;
   RPCContext &ctx_;
