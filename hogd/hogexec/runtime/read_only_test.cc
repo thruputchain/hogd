@@ -578,6 +578,32 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
   }
 }
 
+// Verifies that when a contract self-invokes in read-only mode and the
+// inner frame tries to deploy a contract, the output address is not zeroed.
+TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
+{
+  using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
+
+  auto context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = contract_addr_,
+                          .entrypoint = meta::entrypoint<
+                              "read_only_deploy_output_preserved">(),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {}},
+              }},
+      *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
