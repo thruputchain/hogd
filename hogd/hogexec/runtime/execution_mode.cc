@@ -22,7 +22,7 @@ offset_bit(uint32_t idx)
 void
 ProposalModeData::log_nondeterministic_bit(Nondeterministic<bool> bit)
 {
-  uint8_t byte_count = (proposal_data_.nondeterministic_bit_count / 8) + 1;
+  size_t byte_count = (proposal_data_.nondeterministic_bit_count / 8) + 1;
   if (byte_count != proposal_data_.nondeterministic_bits.size()) {
     assert(proposal_data_.nondeterministic_bits.size() + 1 == byte_count);
     proposal_data_.nondeterministic_bits.emplace_back(0);

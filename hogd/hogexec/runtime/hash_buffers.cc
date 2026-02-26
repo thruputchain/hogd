@@ -45,6 +45,10 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
+  if (data.size() > kSHA256BufferMaxSize) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   buffers_[index] = std::vector<std::byte>(data.begin(), data.end());
   return {};
 }

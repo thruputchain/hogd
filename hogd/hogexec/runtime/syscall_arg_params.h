@@ -292,7 +292,7 @@ struct SyscallArgParams<const T &> {
     return arg.has_value();
   }
 
-  constexpr static T &deref(std::optional<T> &value)
+  constexpr static const T &deref(std::optional<T> const &value)
   {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
@@ -371,7 +371,7 @@ struct SyscallArgParams<const T *> {
     return arg.is_valid;
   }
 
-  constexpr static const T *deref(OptionalInputParseResult &value)
+  constexpr static const T *deref(OptionalInputParseResult const &value)
   {
     return value.value.has_value() ? &(*value.value) : nullptr;
   }
