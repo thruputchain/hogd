@@ -78,7 +78,7 @@ TEST_F(IOTest, ReadString)
 
   // seek to beginning of file
   // NOLINTNEXTLINE(misc-include-cleaner)
-  ErrnoStatus<off_t> off = f_.lseek(SEEK_SET, 0);
+  ErrnoStatus<off_t> off = f_.lseek(0, SEEK_SET);
   EXPECT_TRUE(off);
   EXPECT_EQ(*off, 0);
 
@@ -115,7 +115,7 @@ TEST_P(IOTestP, BufferedWriteRead)
 
   // seek to beginning of file
   // NOLINTNEXTLINE(misc-include-cleaner)
-  ErrnoStatus<off_t> off = f_.lseek(SEEK_SET, 0);
+  ErrnoStatus<off_t> off = f_.lseek(0, SEEK_SET);
   EXPECT_TRUE(off);
   EXPECT_EQ(*off, 0);
 
