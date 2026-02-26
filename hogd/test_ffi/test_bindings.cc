@@ -550,7 +550,7 @@ abort_transaction(void *syscall_handler) noexcept
   return kTestFFIErrorCodeNone;
 }
 
-constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5, 1234);
+constexpr StorageCostModel kCostModel(12000, 1, 5, 5, 1234);
 
 TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
