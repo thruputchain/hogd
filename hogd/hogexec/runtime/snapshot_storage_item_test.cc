@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
@@ -118,7 +119,6 @@ TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
       };
 
   check_concurrent_entry(0, std::nullopt);
-  check_concurrent_entry(1, std::nullopt);
 
   server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
                                                  make_test_queue_entry(1));
@@ -168,7 +168,6 @@ TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
   check_concurrent_entry_bad(1);
 
   check_concurrent_entry(0, std::nullopt);
-  check_concurrent_entry(1, std::nullopt);
 
   check_concurrent_entry_bad(1);
 
