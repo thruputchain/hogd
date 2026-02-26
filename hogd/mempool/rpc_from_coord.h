@@ -143,7 +143,7 @@ public:
             "dbsched_get_tip gives us height {} block_hash {} db_hash {} id {}",
             db_res.db_tip().height, db_res.db_tip().block_hash,
             db_res.db_tip().db_hash, db_res.db_tip().id);
-        ret.db_tip() = db_res.db_tip();
+        // ret.db_tip() = db_res.db_tip();
       }
       else {
         info("dbsched_get_tip failed...");
