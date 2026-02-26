@@ -87,7 +87,7 @@ HogDBStatus<void>
 RPCContext::update_dbtip(BlockTXID bid)
 {
   trie_->generate_top_level_hashes();
-  tip_.hash = trie_->get_root_hash();
+  tip_.db_hash = trie_->get_root_hash();
   tip_.height = tip_.height + 1;
   tip_.id = bid;
   current_committed_height_.store(tip_.height);

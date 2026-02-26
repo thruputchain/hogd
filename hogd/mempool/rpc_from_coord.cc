@@ -630,11 +630,12 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     Nomination &nomination =
         cache.nomination_result.nominated_block().nomination;
     nomination.block_height = db_tip.height + 1;
-    nomination.block_hash = get_block_hash(cache.tx_hashes,
-                                           /*prev_block_hash=*/db_tip.hash);
+    nomination.block_hash =
+        get_block_hash(cache.tx_hashes,
+                       /*prev_block_hash=*/db_tip.block_hash);
     record_stage(stage_generate_block_hash);
 
-    nomination.prev_block_hash = db_tip.hash;
+    nomination.prev_block_hash = db_tip.block_hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
     co_await t_to_parallel_batch(cache.result_tx_hashes,
@@ -868,8 +869,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nominated_block_cache_.db_tip = {
       .height = nominated_block_cache_.nomination_result.nominated_block()
                     .nomination.block_height,
-      .hash = nominated_block_cache_.nomination_result.nominated_block()
-                  .nomination.block_hash,
+      .block_hash = nominated_block_cache_.nomination_result.nominated_block()
+                        .nomination.block_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
@@ -924,12 +925,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  if (db_tip.hash != nomination.prev_block_hash) {
+  if (db_tip.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  if (nomination.prev_block_hash != last_committed_block_.hash ||
+  if (nomination.prev_block_hash != last_committed_block_.block_hash ||
       nomination.block_height != last_committed_block_.height + 1) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
@@ -954,7 +955,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   PendingBlock cache{};
   cache.block_id = generate_block_id();
   cache.db_tip = {.height = nomination.block_height,
-                  .hash = nomination.block_hash,
+                  .block_hash = nomination.block_hash,
                   .id = cache.block_id};
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
@@ -1051,7 +1052,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await finish_all_executors(cache.block_id);
 
   cache.db_tip = DbTip{.height = nomination.block_height,
-                       .hash = nomination.block_hash,
+                       .block_hash = nomination.block_hash,
                        .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);

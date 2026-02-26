@@ -165,8 +165,8 @@ HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
   if (!lsn)
     return lsn.error();
 
-  info("committed block {}: hash='{}', height='{}', lsn='{}", id,
-       encode_base64(std::as_bytes(std::span(ctx_.get_tip().hash))),
+  info("committed block {}: db_hash='{}', height='{}', lsn='{}", id,
+       encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
        ctx_.get_tip().height, *lsn);
   assert(ctx_.get_tip().height != 0);
   return {};
@@ -209,7 +209,7 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
-  result.block_hash() = ctx_.get_tip().hash;
+  result.db_hash() = ctx_.get_tip().db_hash;
   co_return result;
 }
 
@@ -246,7 +246,7 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
   // hash is invalid. Discuss with Geoff and David about how to resolve this.
   ctx_.get_trie().generate_top_level_hashes();
-  ret.block_hash() = ctx_.get_trie().get_root_hash();
+  ret.db_hash() = ctx_.get_trie().get_root_hash();
   co_return ret;
 }
 

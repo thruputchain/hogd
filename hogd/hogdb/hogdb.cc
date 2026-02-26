@@ -111,9 +111,9 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
-    if (ctx.get_trie().get_root_hash() != tip->hash) {
+    if (ctx.get_trie().get_root_hash() != tip->db_hash) {
       critical("Root hash doesn't match DbTip: expected '{}', got '{}'",
-               ctx.get_trie().get_root_hash(), tip->hash);
+               ctx.get_trie().get_root_hash(), tip->db_hash);
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;

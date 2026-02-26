@@ -136,6 +136,19 @@ public:
       ret = SchedulerGetTipResult(SchedulerGetTipOutcome::SchedulerGetTipOK);
       ret.db_tip() = last_committed_block_;
     }
+    {
+      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      if (db_res.result() == DbSchedResult::DbSchedResultOK) {
+        info(
+            "dbsched_get_tip gives us height {} block_hash {} db_hash {} id {}",
+            db_res.db_tip().height, db_res.db_tip().block_hash,
+            db_res.db_tip().db_hash, db_res.db_tip().id);
+        ret.db_tip() = db_res.db_tip();
+      }
+      else {
+        info("dbsched_get_tip failed...");
+      }
+    }
     co_return ret;
   }
 
@@ -154,7 +167,7 @@ public:
         co_await db_sched_client_->dbsched_load_genesis_configuration(
             genesis_configuration);
     last_committed_block_ = {.height = 0,
-                             .hash = sha256(genesis_configuration),
+                             .block_hash = sha256(genesis_configuration),
                              .id = generate_block_id()};
     received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;
@@ -351,10 +364,10 @@ private:
   // Protects [validated_block_cache_].
   x23::CoroLock validated_block_cache_lock_;
   size_t num_validations_in_progress_ = 0;
-  // Ensures that a commit does not occur while txs are being verified. Txs are
-  // verified against a certain block height, so if they race with a block
-  // commit, we could add txs to the scheduler that are no longer verified as of
-  // the last committed block.
+  // Ensures that a commit does not occur while txs are being verified. Txs
+  // are verified against a certain block height, so if they race with a block
+  // commit, we could add txs to the scheduler that are no longer verified as
+  // of the last committed block.
   x23::CoroLock commit_lock_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
