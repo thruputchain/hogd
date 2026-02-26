@@ -157,4 +157,16 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   EXPECT_TRUE(validation.check_all_consumed());
 }
 
+// Guard against an overflow in bit count bug in an earlier version of hogd.
+TEST(ExecutionModeTest, NondeterministicBitOverflowGuard)
+{
+  ProposalModeData proposal;
+  for (size_t i = 0; i < (256 * 8); i++) {
+    proposal.log_nondeterministic_bit(false);
+  }
+
+  ValidationModeData validation(proposal.proposal_data());
+  ASSERT_TRUE(validation.validate());
+}
+
 } // namespace hogd
