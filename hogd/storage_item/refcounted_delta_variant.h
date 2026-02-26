@@ -194,10 +194,10 @@ public:
   int128_t
   get_current_committed_cost(StorageCostModel const *current_model,
                              StorageItemWrapper const *base_item) const;
-  int128_t
+  static int128_t
   get_marginal_cost_upper_bound(StorageDelta const &delta,
                                 StorageCostModel const *current_model,
-                                StorageItemWrapper const *base_item) const;
+                                StorageItemWrapper const *base_item);
 
   bool try_reserve_consume()
   {

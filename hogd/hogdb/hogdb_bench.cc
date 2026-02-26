@@ -459,8 +459,7 @@ RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
   // Fund each queue-owning address with generous balance for storage costs.
   // Worst case: all entries in one queue, plus blocks.
   int128_t balance_per_addr =
-      (bench->cost_model_.kRCQCostPerEntry +
-       bench->cost_model_.kRCQCostPerBlock + bench->cost_model_.kBaseItemCost) *
+      (bench->cost_model_.kRCQCostPerEntry + bench->cost_model_.kBaseItemCost) *
       static_cast<int128_t>(num_entries + 1000);
   populate_account_balances(bench->db_, num_queues, balance_per_addr);
 

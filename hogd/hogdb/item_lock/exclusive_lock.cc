@@ -44,7 +44,7 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     if (entries == 0) {
       return 0;
     }
-    return ctx.cost_model->get_retrocausal_queue_cost(entries, 1);
+    return ctx.cost_model->get_retrocausal_queue_cost(entries);
   }
   panic("unimplemented");
 }

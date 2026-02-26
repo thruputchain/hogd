@@ -641,12 +641,9 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         error("failed to deserialize rcq metadata: {}", e.what());
         return HogDBError(HogDBCode::kInternal);
       }
-      return std::make_pair(
-          cost_model->get_retrocausal_queue_cost(
-              meta.live_entries,
-              meta.max_live_block_num -
-                  meta.consume_state.max_fully_consumed_block_number),
-          ItemLockCacheData::from_none());
+      return std::make_pair(cost_model->get_retrocausal_queue_cost(
+                                meta.live_entries),
+                            ItemLockCacheData::from_none());
     }
     default:
       error("unknown item type loaded from db: key={} type={}", key,
