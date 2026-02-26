@@ -115,6 +115,7 @@ WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context)
 {
   wasmtime_context_ptr_ = new_wasmtime_context(&wasmtime_contract_get_fn,
                                                global_context.get_inner());
+  CHECK(wasmtime_context_ptr_ != nullptr);
 }
 
 WasmtimeContext::~WasmtimeContext()

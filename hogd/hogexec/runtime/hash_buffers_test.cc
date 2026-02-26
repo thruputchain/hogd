@@ -99,4 +99,21 @@ TEST(HashBuffersTest, InvalidBufferSizeUsage)
   ASSERT_EQ(r.error(), SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 }
 
+TEST(HashBuffersTest, InvalidSize)
+{
+  HashBuffers buffers;
+  std::vector<uint8_t> too_big_buffer =
+      std::vector<uint8_t>(kSHA256BufferMaxSize + 1, 0);
+  ASSERT_FALSE(
+      buffers.update(0, std::as_bytes(std::span<const uint8_t>(too_big_buffer)),
+                     false));
+  std::vector<uint8_t> not_too_big_buffer =
+      std::vector<uint8_t>(kSHA256BufferMaxSize, 0);
+  ASSERT_TRUE(buffers.update(
+      0, std::as_bytes(std::span<const uint8_t>(std::vector<uint8_t>{0})),
+      true));
+  ASSERT_FALSE(buffers.update(
+      0, std::as_bytes(std::span<const uint8_t>(not_too_big_buffer)), false));
+}
+
 } // namespace hogd
