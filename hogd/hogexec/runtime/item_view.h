@@ -102,10 +102,12 @@ public:
     // consumes, as these are not supposed to affect the result of the db
     // operation.
     if constexpr (is_debug_build()) {
-      std::shuffle(
-          delta.retrocausal_queue().consume->current_block_consumed.begin(),
-          delta.retrocausal_queue().consume->current_block_consumed.end(),
-          std::mt19937{std::random_device{}()});
+      if (delta.retrocausal_queue().consume) {
+        std::shuffle(
+            delta.retrocausal_queue().consume->current_block_consumed.begin(),
+            delta.retrocausal_queue().consume->current_block_consumed.end(),
+            std::mt19937{std::random_device{}()});
+      }
     }
     return delta;
   }
