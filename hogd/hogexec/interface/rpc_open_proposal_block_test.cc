@@ -159,8 +159,10 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   EXPECT_EQ(result2, ExecResult::ExecResultOK);
   EXPECT_EQ(result3, ExecResult::ExecResultOK);
 
-  client_.executorsched_finish_block(test_block_id);
-  client_.executorsched_finish_block(test_block_id);
+  ASSERT_EQ(client_.executorsched_finish_block(test_block_id),
+            ExecResult::ExecResultOK);
+  ASSERT_EQ(client_.executorsched_finish_block(test_block_id),
+            ExecResult::ExecResultOK);
 
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(test_block_id,
