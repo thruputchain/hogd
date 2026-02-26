@@ -255,43 +255,15 @@ RetrocausalQueueArgs::get_current_committed_cost(
   }
 
   auto stats = get_current_committed_stats(base_item);
-  return current_model->get_retrocausal_queue_cost(stats.active_size,
-                                                   stats.active_block_count);
+  return current_model->get_retrocausal_queue_cost(stats.active_size);
 }
 
 int128_t
 RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *current_model,
-    StorageItemWrapper const * /*base_item*/) const
+    StorageItemWrapper const * /*base_item*/)
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
-
-  // TODO(geoff): Because the queue is single-consumer,
-  // we can grant a refund to the consumer immediately;
-  // This doesn't mean returning a negative cost, but rather
-  // that a delta that consumes 100 entries and
-  // creates 100 entries can have a net cost of 0.
-  // this requires checking over the past stats, which we have not implemented
-  // yet here.
-  /*
-   auto past_stats = [&] {
-     if (base_item) {
-       assert(base_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
-       auto const &queue = base_item->queue();
-
-       if (past_consume_delta_) {
-         assert(!delta.retrocausal_queue().consume);
-         return queue.get_stats_after_consume(*past_consume_delta_);
-       }
-       if (delta.retrocausal_queue().consume) {
-         assert(consumer_lock_);
-         return
-   queue.get_stats_after_consume(delta.retrocausal_queue().consume->past_block_consume);
-       }
-       return queue.get_active_stats();
-     }
-     return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
-   }(); */
 
   int64_t new_inserted_entries =
       delta.retrocausal_queue().insert.added_entries.size();
@@ -300,18 +272,7 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
         delta.retrocausal_queue().consume->current_block_consumed.size();
   }
 
-  // We can only create a new block if we insert entries
-  bool new_block_maybe_created =
-      !delta.retrocausal_queue().insert.added_entries.empty();
-  if (past_consume_delta_.has_value() && !persistable_entries_.empty()) {
-    // if we've already done the consume for this block and still have a
-    // nonempty block to add, no need to reserve creating a new block
-    new_block_maybe_created = false;
-  }
-
-  RetrocausalQueueStats new_stats = {
-      .active_block_count = new_block_maybe_created ? 1U : 0U,
-      .active_size = std::max<int64_t>(0, new_inserted_entries)};
+  int64_t active_size = std::max<int64_t>(0, new_inserted_entries);
 
   int128_t base_cost = [&] -> int128_t {
     // If this delta inserts nothing, it shouldn't have to pay for the base
@@ -325,8 +286,7 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
     return current_model->kBaseItemCost;
   }();
 
-  return base_cost + (new_stats.active_size * current_model->kRCQCostPerEntry) +
-         (new_stats.active_block_count * current_model->kRCQCostPerBlock);
+  return base_cost + (active_size * current_model->kRCQCostPerEntry);
 }
 
 RetrocausalQueueStats
@@ -343,22 +303,14 @@ RetrocausalQueueArgs::get_current_committed_stats(
       }
       return queue.get_active_stats();
     }
-    return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
+    return RetrocausalQueueStats{.active_size = 0};
   }();
 
   int64_t current_block_size =
       persistable_entries_.size() - consumed_but_not_inserted_entries_.size();
 
-  RetrocausalQueueStats new_stats = {.active_block_count =
-                                         (persistable_entries_.empty()) ? 0U
-                                                                        : 1U,
-                                     .active_size = current_block_size};
-
-  return RetrocausalQueueStats{.active_block_count =
-                                   past_stats.active_block_count +
-                                   new_stats.active_block_count,
-                               .active_size = past_stats.active_size +
-                                              new_stats.active_size};
+  return RetrocausalQueueStats{.active_size =
+                                   past_stats.active_size + current_block_size};
 }
 
 void
@@ -681,10 +633,9 @@ ExclusiveLockedState::get_marginal_cost_upper_bound(
     return DeleteArgs::get_marginal_cost_upper_bound(delta, cost_model,
                                                      base_item);
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
-  {
-    RetrocausalQueueArgs args;
-    return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
-  }
+    return RetrocausalQueueArgs::get_marginal_cost_upper_bound(delta,
+                                                               cost_model,
+                                                               base_item);
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     return ReplayCacheArgs::get_marginal_cost_upper_bound_static(false, delta,
                                                                  cost_model,

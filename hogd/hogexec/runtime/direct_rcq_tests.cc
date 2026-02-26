@@ -495,18 +495,18 @@ TEST_F(DirectRCQTests, ConcurrentInsertAndConsume)
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
-// Per-block-cost analogue of consume/insert contention:
+// Consume/insert contention:
 // tx1 insert (current block), tx2 retrocausally consume, tx3 insert.
-// This exercises lock accounting when block count can both decrease (consume)
-// and increase/stay-live (inserts) within the same block.
-TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsertPerBlockCost)
+// This exercises lock accounting when entry count can both decrease (consume)
+// and increase (inserts) within the same block.
+TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsert)
 {
   GTEST_SKIP()
       << "Hogdb: assertion failure at retrocausal_queue_lock.cc line 264";
 
   constexpr int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(kContractAddress, kInitialBalance);
-  auto key = make_contract_data_addrkey(kContractAddress, "rcq_per_block_cost");
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_contention");
 
   // Same block:
   // tx1 inserts, tx2 consumes block 1, tx3 inserts.
@@ -554,9 +554,8 @@ TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsertPerBlockCost)
       make_free_native_token_balance_addrkey(kContractAddress));
   ASSERT_TRUE(bal_item.has_value());
   ASSERT_EQ(from_xdr(bal_item->nnint()),
-            kInitialBalance -
-                cost_model_->get_retrocausal_queue_cost(
-                    /*active_queue_size=*/1, /*active_block_count=*/1));
+            kInitialBalance - cost_model_->get_retrocausal_queue_cost(
+                                  /*active_queue_size=*/1));
 }
 
 // Repro harness for investigating HogDB invariant:

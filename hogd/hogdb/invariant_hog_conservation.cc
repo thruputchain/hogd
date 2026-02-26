@@ -14,7 +14,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "retrocausal_queue.hh"
@@ -147,9 +146,7 @@ HogConservationInvariant::handle_contract_data_item_change(
         return 0;
       }
 
-      return cost_model_.get_retrocausal_queue_cost(
-          metadata.live_entries,
-          RetrocausalQueueLock::live_block_count(metadata));
+      return cost_model_.get_retrocausal_queue_cost(metadata.live_entries);
     default:
       warn("unknown db item type: {}", item.value().type);
       assert(false);

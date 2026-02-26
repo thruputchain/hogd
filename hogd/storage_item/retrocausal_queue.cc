@@ -137,8 +137,7 @@ RetrocausalQueue::apply_consume_delta(
 RetrocausalQueueStats
 RetrocausalQueue::get_active_stats() const
 {
-  return RetrocausalQueueStats{.active_block_count = blocks_.size(),
-                               .active_size = total_size_ - consumed_size_};
+  return RetrocausalQueueStats{.active_size = total_size_ - consumed_size_};
 }
 
 RetrocausalQueueStats
@@ -150,13 +149,12 @@ RetrocausalQueue::get_stats_after_consume(
   if (it == blocks_.end()) {
     assert(delta.partial_consumed_number == 0);
 
-    return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
+    return RetrocausalQueueStats{.active_size = 0};
   }
   assert(it->first > delta.max_fully_consumed_block_number);
   assert(delta.partial_consumed_number <= std::numeric_limits<int64_t>::max());
 
   return RetrocausalQueueStats{
-      .active_block_count = current_block_number_ - it->first + 1,
       .active_size = total_size_ - it->second->cumulative_prior_size_ -
                      static_cast<int64_t>(delta.partial_consumed_number)};
 }

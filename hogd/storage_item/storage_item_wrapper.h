@@ -101,7 +101,7 @@ private:
     // We merely send over the fact that an RCQ exists.
     // Other subsystems can then query individual blocks within the RCQ.
     WireStorageItem to_wire_item() const;
-    // Returns storage cost based on total queue size and block count
+    // Returns storage cost based on total queue size
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
 

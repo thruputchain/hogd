@@ -20,7 +20,7 @@ namespace hogd {
 
 namespace {
 constexpr StorageCostModel kTestCostModel =
-    StorageCostModel(12000, 1, 1, 1, 1, 1234);
+    StorageCostModel(12000, 1, 1, 1, 1234);
 
 // Helper to create a PublicKey
 PublicKey

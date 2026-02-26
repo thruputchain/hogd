@@ -13,7 +13,6 @@ struct StorageCostModel {
   constexpr StorageCostModel(int128_t base_item_cost,
                              int128_t bytestring_cost_per_byte,
                              int128_t rcq_cost_per_entry,
-                             int128_t rcq_cost_per_block,
                              int128_t replay_cache_cost_per_entry,
                              int128_t balance_cost)
     : kBaseItemCost(base_item_cost),
@@ -21,7 +20,6 @@ struct StorageCostModel {
       kBaseContractDeploymentCost(kBaseItemCost),
       kContractDeploymentCostPerByte(1), kAuthPerKeyCost(1),
       kRCQCostPerEntry(rcq_cost_per_entry),
-      kRCQCostPerBlock(rcq_cost_per_block),
       kReplayCacheCostPerEntry(replay_cache_cost_per_entry),
       kBalanceCost(balance_cost)
   {}
@@ -37,7 +35,6 @@ struct StorageCostModel {
           from_xdr(model.contract_deployment_cost_per_byte)),
       kAuthPerKeyCost(from_xdr(model.auth_per_key_cost)),
       kRCQCostPerEntry(from_xdr(model.rcq_cost_per_entry)),
-      kRCQCostPerBlock(from_xdr(model.rcq_cost_per_block)),
       kReplayCacheCostPerEntry(from_xdr(model.replay_cache_cost_per_entry)),
       kBalanceCost(from_xdr(model.balance_cost))
   {}
@@ -49,8 +46,7 @@ struct StorageCostModel {
 
   constexpr int128_t get_nnint_cost() const { return kBaseItemCost; }
 
-  int128_t get_retrocausal_queue_cost(int64_t active_queue_size,
-                                      uint64_t active_block_count) const;
+  int128_t get_retrocausal_queue_cost(int64_t active_queue_size) const;
   int128_t get_replay_cache_cost(size_t replay_cache_size) const;
 
   constexpr int128_t get_contract_size_cost(size_t contract_size) const
@@ -72,7 +68,6 @@ struct StorageCostModel {
   const int128_t kAuthPerKeyCost;
 
   const int128_t kRCQCostPerEntry;
-  const int128_t kRCQCostPerBlock;
 
   const int128_t kReplayCacheCostPerEntry;
 
@@ -89,8 +84,7 @@ struct StorageCostModel {
         .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{12000}),
         .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{10}),
         .auth_per_key_cost = ::hogd::to_xdr(int128_t{1111}),
-        .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
-        .rcq_cost_per_block = ::hogd::to_xdr(int128_t{7}),
+        .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{8}),
         .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
         .balance_cost = ::hogd::to_xdr(int128_t{1234}),
     });
