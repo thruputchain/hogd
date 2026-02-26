@@ -73,16 +73,8 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   assert(db_proxy_);
   assert(event_server_proxy_);
 
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache;
-  if (!free_snapshot_caches_.empty()) {
-    snapshot_cache = std::move(free_snapshot_caches_.back());
-    snapshot_cache->set_block_id(new_block_id);
-    free_snapshot_caches_.pop_back();
-  }
-  else {
-    snapshot_cache =
-        std::make_unique<StorageSnapshotCache>(new_block_id, *db_proxy_);
-  }
+  std::unique_ptr<StorageSnapshotCache> snapshot_cache =
+      get_snapshot_cache(new_block_id, g);
 
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
@@ -95,9 +87,11 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   auto open_res = co_await event_server_proxy_->open_block(new_block_id);
   if (!open_res.has_value()) [[unlikely]] {
     error("Failed to notify event server of block open: {}", new_block_id);
-    active_blocks_.erase(new_block_id);
+    auto it = active_blocks_.find(new_block_id);
+    CHECK(it != active_blocks_.end());
+    stash_snapshot_cache(it->second.context.get().extract_snapshot_cache(), g);
+    active_blocks_.erase(it);
     co_await g.reset_and_return(ExecResult::ExecResultSystemError);
-    panic("unreachable");
   }
 
   trace("Opened new block {} in mode {}", new_block_id, mode);
@@ -131,6 +125,12 @@ ExecutorStateManager::remove_block(BlockID block_id)
       co_return ExecResult::ExecResultSystemError;
     }
     it->second.open_block_count--;
+    if (it->second.open_block_count < 0) [[unlikely]] {
+      error("Tried to remove block {} that has a negative open_block_count",
+            block_id);
+      co_return ExecResult::ExecResultSystemError;
+    }
+
     if (it->second.open_block_count == 0) {
       if (it->second.context.initiate_shutdown()) {
         do_gc = true;
@@ -190,10 +190,32 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
     cache.contexts_.erase(block_id);
   });
 
-  free_snapshot_caches_.emplace_back(
-      it->second.context.get().extract_snapshot_cache());
-
+  stash_snapshot_cache(it->second.context.get().extract_snapshot_cache(), g);
   active_blocks_.erase(it);
+}
+
+void
+ExecutorStateManager::stash_snapshot_cache(
+    std::unique_ptr<StorageSnapshotCache> snapshot_cache,
+    x23::CoroGuard const & /*unused*/)
+{
+  if (free_snapshot_caches_.size() < kMaxCachedSnapshotCaches) {
+    free_snapshot_caches_.emplace_back(std::move(snapshot_cache));
+  }
+}
+
+std::unique_ptr<StorageSnapshotCache>
+ExecutorStateManager::get_snapshot_cache(BlockID block_id,
+                                         x23::CoroGuard const & /*unused*/)
+{
+  if (free_snapshot_caches_.empty()) {
+    return std::make_unique<StorageSnapshotCache>(block_id, *db_proxy_);
+  }
+  auto out = std::move(free_snapshot_caches_.back());
+  CHECK(out != nullptr);
+  out->set_block_id(block_id);
+  free_snapshot_caches_.pop_back();
+  return out;
 }
 
 } // namespace hogd

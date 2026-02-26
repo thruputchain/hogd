@@ -22,6 +22,7 @@ add_library(exec_interface_test_objects OBJECT
   rpc_open_proposal_block_test.cc
   rpc_loadgen_payment_test.cc
   rpc_loadgen_event_test.cc
+  rpc_negative_test.cc
 )
 target_link_libraries(
   exec_interface_test_objects

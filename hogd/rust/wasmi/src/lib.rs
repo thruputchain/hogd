@@ -32,7 +32,7 @@ macro_rules! wasmi_debug_log {
 #[repr(C)]
 pub struct WasmiMemorySlice {
     mem: *mut u8,
-    sz: u32,
+    sz: u64,
 }
 
 /// # Safety
@@ -51,7 +51,7 @@ pub unsafe extern "C" fn wasmi_get_memory(
 
     match r.instance.get_memory(&r.store, "memory") {
         Some(mem) => {
-            let mem_sz = mem.data_size(&r.store) as u32;
+            let mem_sz = mem.data_size(&r.store) as u64;
             // wasmi docs say that _any_ call to data_ptr or use of store
             // can invalidate returned pointers
             WasmiMemorySlice {

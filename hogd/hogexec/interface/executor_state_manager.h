@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -7,6 +8,7 @@
 #include <vector>
 
 #include "exec_result.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
@@ -30,7 +32,9 @@ public:
     : db_proxy_(std::move(db_proxy)),
       event_server_proxy_(std::move(event_server_proxy)),
       worker_pool_(static_cast<int>(nthreads))
-  {}
+  {
+    CHECK(nthreads <= std::numeric_limits<int>::max());
+  }
 
   // This acquires a reference to the executor context, if the returned value is
   // not null. The caller must eventually release the reference and, if
@@ -56,6 +60,12 @@ private:
   x23::Async<PerThreadARC<ExecutorContext> *>
   get_executor_context_slow(BlockID block_id);
 
+  void
+  stash_snapshot_cache(std::unique_ptr<StorageSnapshotCache> snapshot_cache,
+                       x23::CoroGuard const &g);
+  std::unique_ptr<StorageSnapshotCache>
+  get_snapshot_cache(BlockID block_id, x23::CoroGuard const &g);
+
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
                 std::unique_ptr<StorageSnapshotCache> snapshot_cache,
@@ -70,6 +80,7 @@ private:
   x23::CoroLock active_blocks_lock_;
 
   std::unordered_map<BlockID, ActiveBlock> active_blocks_;
+  constexpr static size_t kMaxCachedSnapshotCaches = 16;
   std::vector<std::unique_ptr<StorageSnapshotCache>> free_snapshot_caches_;
 
   struct ContextCache {
