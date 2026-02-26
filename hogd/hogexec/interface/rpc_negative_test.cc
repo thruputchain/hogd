@@ -38,7 +38,7 @@ public:
     server_port_ = rpc_server_.start_server(0);
 
     client_ = make_srpc_multiclient<ExecutorSched1>(x23::HostPort{"localhost",
-                                                                    server_port_},
+                                                                  server_port_},
                                                     false);
 
     db_client_ = make_srpc_multiclient<DbSched1>(
@@ -167,8 +167,8 @@ TEST_F(RpcNegativeTest, TestProposeToNonExistentBlock)
   init_executor();
 
   // Block 999999 was never opened
-  auto result = client_.executorsched_propose_transaction(999999,
-                                                          SignedTransaction{});
+  auto result =
+      client_.executorsched_propose_transaction(999999, SignedTransaction{});
   EXPECT_EQ(result.result(), ExecResult::ExecResultSystemError);
 }
 
