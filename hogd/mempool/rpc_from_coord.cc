@@ -1,6 +1,7 @@
 #include "hogd/mempool/rpc_from_coord.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -86,11 +87,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   double stage_wait_commit_lock_before_add = 0.0;
   double stage_filter_invalid = 0.0;
   double stage_add_txs = 0.0;
-  double stage_prepare_response_and_notify = 0.0;
 
-  SignedTransactionBatch txs;
-  CHECK(co_await parallel_batch_to_t(batch, txs));
-  size_t num_submitted_txs = txs.size();
+  auto txs = std::make_shared<SignedTransactionBatch>();
+  CHECK(co_await parallel_batch_to_t(batch, *txs));
+  size_t num_submitted_txs = txs->size();
   record_stage(stage_deserialize_batch);
 
   x23::CoroGuard cg;
@@ -101,7 +101,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
        verify_height);
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                             txs);
+                                                             *txs);
   record_stage(stage_auth_verify);
 
   x23::Vec<size_t> to_remove_indices;
@@ -113,37 +113,45 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   }
   info("{} txs were invalid", to_remove_indices.size());
   if (!to_remove_indices.empty()) {
-    remove_indices(/*remove_from=*/txs, /*indices=*/to_remove_indices);
+    remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
   }
   record_stage(stage_filter_invalid);
+
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  [](MempoolCoordinatorRpc &coord,
+     std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
+    // We serialize and send the response in a detached coroutine so that we can
+    // release [commit_lock_] as soon as [add_txs()] is finished below.
+    // Serializing and sending the response takes longer than [add_txs()] and
+    // does not require holding [commit_lock_].
+
+    // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch] if we
+    // do not remove any txs above. I am not sure this is the common case
+    // though.
+    ElapsedTimer timer;
+    ParallelBatch response;
+    co_await t_to_parallel_batch(*txs, response);
+    co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+    coord.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
+    info("submit_unvetted() prepare response and notify = {}", timer.elapsed());
+  }(*this, txs);
+
   // Careful: it is tempting to overlap the overhead of
   // [authmempool_verify_transactions()] with that of [scheduler_->add_txs()]
   // (and then after remove any unverified txs from the scheduler). But this
   // would make the txs visible to nominate() and validate() before the txs have
   // been verified.
-  auto add_txs_handle = scheduler_->add_txs(txs);
-
-  // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch] if we do
-  // not remove any txs above. I am not sure this is the common case though.
-  ParallelBatch response;
-  co_await t_to_parallel_batch(txs, response);
-  co_await coord_client_->coordscheduler_notify_vetted(response);
-  record_stage(stage_prepare_response_and_notify);
-  // TODO(jhumphri): It would be better to call [cg.reset()] as soon as
-  // [add_txs()] completes so that we do not hold the lock while
-  // [t_to_parallel_batch()] and [coordscheduler_notify_vetted()] run above.
-  co_await add_txs_handle;
+  co_await scheduler_->add_txs(*txs);
   record_stage(stage_add_txs);
 
   info("submit_unvetted() stages: delta={}, deserialize_batch={:.6f}, "
        "auth_verify={:.6f}, "
        "wait_commit_lock_before_add={:.6f}, filter_invalid={:.6f}, "
-       "add_txs={:.6f}, prepare_response_and_notify={:.6f}, "
-       "total={:.6f}, scheduler_size={}, submitted_txs = {}, vetted_txs={}",
+       "add_txs={:.6f}, total={:.6f}, scheduler_size={}, submitted_txs = {}, "
+       "vetted_txs={}",
        delta_count, stage_deserialize_batch, stage_auth_verify,
        stage_wait_commit_lock_before_add, stage_filter_invalid, stage_add_txs,
-       stage_prepare_response_and_notify, timer.elapsed(), scheduler_->size(),
-       num_submitted_txs, txs.size());
+       timer.elapsed(), scheduler_->size(), num_submitted_txs, txs->size());
   co_return;
 }
 
@@ -1102,10 +1110,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          block_id, handles_size, reenqueue_size, remove_from_scheduler_size);
   };
 
-  x23::CoroGuard commit_cg;
-  co_await commit_cg(commit_lock_);
-  record_stage(stage_wait_commit_lock);
-
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last_;
   // NOLINTNEXTLINE(modernize-use-auto):
@@ -1113,6 +1117,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       std::chrono::duration_cast<std::chrono::milliseconds>(delta);
   int64_t delta_count = delta_raw.count();
   info("schedulercoord_commit_block, delta = {}", delta_count);
+
+  x23::CoroGuard commit_cg;
+  co_await commit_cg(commit_lock_);
+  record_stage(stage_wait_commit_lock);
+
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   record_stage(stage_wait_validated_lock);
