@@ -7,6 +7,7 @@ BUILD_DIR=bcheck
 PARALLEL=
 BUILD_PARALLEL=no
 SKIP_TIDY=no
+SKIP_PROTOCOL=no
 
 print_usage() {
   printf "usage: scripts/check.sh [OPTION]...\n"
@@ -14,16 +15,18 @@ print_usage() {
   printf -- "-p run tests in parallel\n"
   printf -- "-b do builds in parallel\n"
   printf -- "-s skip tidy check\n"
+  printf -- "-P skip protocol check\n"
   printf -- "-d <dir> specify build directory (default: $BUILD_DIR)\n"
 }
 
-while getopts 'epbd:s' flag; do
+while getopts 'epbd:sP' flag; do
   case "${flag}" in
   e) EXTRA=yes ;;
   p) PARALLEL=--parallel ;;
   b) BUILD_PARALLEL=yes ;;
   d) BUILD_DIR="$OPTARG" ;;
   s) SKIP_TIDY=yes ;;
+  P) SKIP_PROTOCOL=yes ;;
   *)
     print_usage
     exit 1
@@ -65,12 +68,16 @@ if ! ${SCRIPT_DIR}/format.sh -c; then
 fi
 printf "Format checking passed.\n"
 
-printf "${COLOR}\nSTEP 2: Check protocol\n${NC}"
-if ! ${SCRIPT_DIR}/check-protocol.sh -c; then
-  printf "protocol check failed! protocols do not match.\n"
-  exit 1
+if [ "$SKIP_PROTOCOL" = "yes" ]; then
+  printf "${COLOR}\nSTEP 2: Check protocol (skipped)\n${NC}"
+else
+  printf "${COLOR}\nSTEP 2: Check protocol\n${NC}"
+  if ! ${SCRIPT_DIR}/check-protocol.sh -c; then
+    printf "protocol check failed! protocols do not match.\n"
+    exit 1
+  fi
+  printf "Protocol check passed.\n"
 fi
-printf "Protocol check passed.\n"
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
   printf "${COLOR}Waiting for Step 3 (gcc debug) build to finish...\n${NC}"
