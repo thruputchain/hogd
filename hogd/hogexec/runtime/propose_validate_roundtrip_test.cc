@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -75,7 +76,7 @@ protected:
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> map;
     Runtime::MethodID id = 0;
-    for (auto &m : methods)
+    for (const auto &m : methods)
       map.emplace(id++, m);
     return std::make_unique<NativeContract>(std::move(map));
   }

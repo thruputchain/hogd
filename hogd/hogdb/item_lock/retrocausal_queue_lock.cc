@@ -371,7 +371,7 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     // that don't match any inserted entries.  Return an error instead of
     // crashing so the block can be rejected gracefully.
     if (!consumed_set.empty()) {
-      return std::unexpected(HogDBError(HogDBCode::kInternal));
+      return HogDBError{HogDBCode::kInternal};
     }
   }
   else {
