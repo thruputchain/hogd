@@ -1076,12 +1076,13 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   GTEST_SKIP()
-  << "HogDB bug: consuming a current-block entry that was never inserted "
-     "causes CHECK(consumed_set.empty()) failure at "
-     "retrocausal_queue_lock.cc:356";
-  for (auto mode : {BlockExecutionMode::kBlockExecutionModeValidation, BlockExecutionMode::kBlockExecutionModeProposal}) {
+      << "HogDB bug: consuming a current-block entry that was never inserted "
+         "causes CHECK(consumed_set.empty()) failure at "
+         "retrocausal_queue_lock.cc:356";
+  for (auto mode : {BlockExecutionMode::kBlockExecutionModeValidation,
+                    BlockExecutionMode::kBlockExecutionModeProposal}) {
     advance_block(mode);
- 
+
     auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_ghost");
 
     // TX1 inserts entry {10}
@@ -1104,7 +1105,8 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
       // conflict -- not a break
       ASSERT_TRUE(tx2.abort_transaction().has_value());
       ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-    } else {
+    }
+    else {
 
       // Both pushed successfully -- commit and advance to trigger finalization
       ASSERT_TRUE(tx1.commit_transaction({}).has_value());
