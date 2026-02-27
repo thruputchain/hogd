@@ -453,14 +453,15 @@ register_if_writable(AliasGuard &guard, T const &output) noexcept
                   T::kWriteSize;
                 }) {
     // WritableOutput<U>
-    CHECK(output.has_value());
+    assert(output.has_value());
     return guard.check_and_register(output.target_ptr(), T::kWriteSize);
   }
   else if constexpr (std::same_as<std::remove_cvref_t<T>,
                                   std::optional<std::span<std::byte>>>) {
     // Mutable output span
-    CHECK(output.has_value());
-    return guard.check_and_register(output->data(), output->size());
+    assert(output.has_value());
+    auto span = output.value();
+    return guard.check_and_register(span.data(), span.size());
   }
 
   return true;
