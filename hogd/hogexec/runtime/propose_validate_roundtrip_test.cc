@@ -757,7 +757,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   if (GetParam() == TestDB::kHogDB) {
     advance_block();
     auto validation_tip = get_db_tip();
-    EXPECT_EQ(proposal_tip.hash, validation_tip.hash)
+    EXPECT_EQ(proposal_tip.db_hash, validation_tip.db_hash)
         << "Proposal and validation trie root hashes must match";
   }
 }
