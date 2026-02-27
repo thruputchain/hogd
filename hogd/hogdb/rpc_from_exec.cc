@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <set>
 #include <span>
 #include <utility>
 
@@ -170,6 +171,16 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (!itx)
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
+
+  if constexpr (is_debug_build()) {
+    // Invariant: hogexec sends at most one delta per key per subtransaction.
+    std::set<AddressAndKey> seen_keys;
+    for (auto const &delta : batch) {
+      auto [_, inserted] = seen_keys.insert(delta.addrkey);
+      assert(inserted && "duplicate key in subtransaction batch");
+    }
+  }
+
   for (auto const &delta : batch) {
     if constexpr (is_debug_build()) {
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
