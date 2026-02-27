@@ -33,22 +33,6 @@ make_err(SystemErrorCode err)
                            .data_len = 0};
 }
 
-constexpr SystemError
-make_system_error(int32_t raw_code)
-{
-  switch (raw_code) {
-  case std::to_underlying(SystemErrorCode::kSystemUnrecoverable):
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
-  case std::to_underlying(SystemErrorCode::kSystemAbortTransaction):
-    return SystemError{SystemErrorCode::kSystemAbortTransaction};
-  case std::to_underlying(SystemErrorCode::kSystemValidationFailure):
-    return SystemError{SystemErrorCode::kSystemValidationFailure};
-  default:
-    error("Unrecoverable: Unknown system error code: {}", raw_code);
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
-  }
-}
-
 ContractGetResult
 wasmi_contract_get_fn(void *host_call_context_ptr,
                       const uint8_t *hash_ptr) noexcept
@@ -164,7 +148,7 @@ WasmiContext::make_new_runtime(
                         wasmi_context_ptr_);
 
   if (new_runtime_result.err_code != 0) {
-    return make_system_error(new_runtime_result.err_code);
+    return SystemError::from_raw_error_code(new_runtime_result.err_code);
   }
 
   void *wasmi_runtime_ptr = new_runtime_result.context_pointer;

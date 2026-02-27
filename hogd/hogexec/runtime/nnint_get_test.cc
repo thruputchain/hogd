@@ -549,6 +549,151 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
+// Test: DeletedItem + force_load=true.
+// Set a key, delete it, call kNonnegativeIntGet with force_load=true.
+// Should return kSyscallErrorCodeStorageKeyNotExist.
+TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("force_load_deleted");
+             // First, set a value
+             int128_t set_value = 100;
+             auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 50,
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!r.has_value() ||
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Then delete it
+             auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+                 key,
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!r2.has_value() ||
+                 *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Get with force_load_snapshot=true on deleted item
+             // should return kSyscallErrorCodeStorageKeyNotExist
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, true, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res !=
+                     SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+               ADD_FAILURE() << "force_load on deleted item should return "
+                                "kSyscallErrorCodeStorageKeyNotExist";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+
+  auto contract_addr = make_contract_address(0);
+  write_deployment(contract_addr, contract_0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+// Test: Non-NNInt type + force_load=true.
+// Write a bytestring at a key, call kNonnegativeIntGet with force_load=true.
+// Should return kSyscallErrorCodeInvalidSyscallInput.
+TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("force_load_bytestring");
+             // First, set a bytestring value
+             Bytestring bytestring_data = make_bytestring("test_data");
+             auto r = ctx.syscall<SyscallNo::kBytestringSet>(
+                 key, std::as_bytes(std::span(bytestring_data)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!r.has_value() ||
+                 *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Get with force_load_snapshot=true on bytestring item
+             // should return kSyscallErrorCodeInvalidSyscallInput
+             int128_t output_set{};
+             bool output_set_opt{};
+             int128_t output_add{};
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                 key, true, output_set, output_set_opt, output_add);
+             if (!res.has_value() ||
+                 *res !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "force_load on bytestring item should return "
+                                "kSyscallErrorCodeInvalidSyscallInput";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+
+  auto contract_addr = make_contract_address(0);
+  write_deployment(contract_addr, contract_0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, NNIntGetTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

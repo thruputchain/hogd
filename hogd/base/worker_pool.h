@@ -159,14 +159,15 @@ public:
     std::vector<std::future<void>> completions;
     completions.reserve(divide_up<size_t>(r.size(), width));
     std::exception_ptr eptr;
-    // The prior usage of std::views::chunk resulting in stack use-after-scope
-    // bugs. Moving the range into the completion took references to elements
-    // constructed in the temporary (the first argument into the
-    // ranges::for_each).  Moving the range construction outside the for_each
-    // fixes this.
+    // The chunk subranges captured in submit() lambdas contain
+    // transform_view iterators whose _M_parent points into |range|.
+    // |range| must therefore outlive the try block, because worker threads
+    // dereference those iterators while we wait on the futures below.
+#ifdef __cpp_lib_ranges_chunk
+    auto range = r | std::views::chunk(width);
+#endif
     try {
 #ifdef __cpp_lib_ranges_chunk
-      auto range = r | std::views::chunk(width);
       std::ranges::for_each(range, [this, &f, proj, &completions](
                                        std::ranges::viewable_range auto &&r) {
         completions.emplace_back(
