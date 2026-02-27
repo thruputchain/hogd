@@ -8,14 +8,14 @@ namespace hogd {
 TEST(AliasGuardTest, SingleRegistrationAlwaysSucceeds)
 {
   AliasGuard guard;
-  uint8_t buf[16];
+  uint8_t buf[16] = {};
   EXPECT_TRUE(guard.check_and_register(buf, sizeof(buf)));
 }
 
 TEST(AliasGuardTest, TwoNonOverlappingRangesSucceed)
 {
   AliasGuard guard;
-  uint8_t buf[32];
+  uint8_t buf[32] = {};
   EXPECT_TRUE(guard.check_and_register(buf, 16));
   EXPECT_TRUE(guard.check_and_register(buf + 16, 16));
 }
@@ -23,7 +23,7 @@ TEST(AliasGuardTest, TwoNonOverlappingRangesSucceed)
 TEST(AliasGuardTest, TwoIdenticalRangesFail)
 {
   AliasGuard guard;
-  uint8_t buf[16];
+  uint8_t buf[16] = {};
   EXPECT_TRUE(guard.check_and_register(buf, sizeof(buf)));
   EXPECT_FALSE(guard.check_and_register(buf, sizeof(buf)));
 }
@@ -31,7 +31,7 @@ TEST(AliasGuardTest, TwoIdenticalRangesFail)
 TEST(AliasGuardTest, PartialOverlapFails)
 {
   AliasGuard guard;
-  uint8_t buf[32];
+  uint8_t buf[32] = {};
   EXPECT_TRUE(guard.check_and_register(buf, 16));
   EXPECT_FALSE(guard.check_and_register(buf + 8, 16));
   EXPECT_FALSE(guard.check_and_register(buf - 8, 16));
@@ -40,7 +40,7 @@ TEST(AliasGuardTest, PartialOverlapFails)
 TEST(AliasGuardTest, ContainedRangeFails)
 {
   AliasGuard guard;
-  uint8_t buf[32];
+  uint8_t buf[32] = {};
   EXPECT_TRUE(guard.check_and_register(buf, 32));
   EXPECT_FALSE(guard.check_and_register(buf + 8, 8));
   EXPECT_FALSE(guard.check_and_register(buf - 8, 64));
@@ -49,7 +49,7 @@ TEST(AliasGuardTest, ContainedRangeFails)
 TEST(AliasGuardTest, AdjacentRangesSucceed)
 {
   AliasGuard guard;
-  uint8_t buf[32];
+  uint8_t buf[32] = {};
   EXPECT_TRUE(guard.check_and_register(buf, 16));
   EXPECT_TRUE(guard.check_and_register(buf + 16, 16));
 }
@@ -57,7 +57,7 @@ TEST(AliasGuardTest, AdjacentRangesSucceed)
 TEST(AliasGuardTest, MultipleNonOverlappingRegistrationsSucceed)
 {
   AliasGuard guard;
-  uint8_t buf[128];
+  uint8_t buf[128] = {};
   EXPECT_TRUE(guard.check_and_register(buf, 16));
   EXPECT_TRUE(guard.check_and_register(buf + 16, 16));
   EXPECT_TRUE(guard.check_and_register(buf + 32, 16));
