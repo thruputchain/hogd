@@ -87,7 +87,8 @@ public:
       SchedulerNominatedBlock nomination{};
       while (num_nominated_txs < init_tx.size()) {
         DbTip db_tip{.height = nomination.nomination.block_height,
-                     .hash = nomination.nomination.block_hash,
+                     .block_hash = nomination.nomination.block_hash,
+                     .db_hash = {},
                      .id = nomination.block_id};
         auto res_nominate =
             sched_coord_client.schedulercoord_nominate(db_tip)();
@@ -109,7 +110,8 @@ public:
       CHECK_EQ(num_nominated_txs, init_tx.size());
 
       ret = {.height = nomination.nomination.block_height,
-             .hash = nomination.nomination.block_hash,
+             .block_hash = nomination.nomination.block_hash,
+             .db_hash = {},
              .id = nomination.block_id};
     }
 
@@ -204,7 +206,8 @@ public:
       }
 
       db_tip = {.height = nomination.block_height,
-                .hash = nomination.block_hash,
+                .block_hash = nomination.block_hash,
+                .db_hash = {},
                 .id = res_nominate.nominated_block().block_id};
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {

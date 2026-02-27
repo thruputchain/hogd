@@ -136,7 +136,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
   MerkleTriePrefix trie;
   dao.load_trie(trie);
   EXPECT_EQ(trie.size(), 3UL);
-  ASSERT_EQ(trie.get_root_hash(), initial_tip.hash);
+  ASSERT_EQ(trie.get_root_hash(), initial_tip.db_hash);
 
   auto bal = dao.read_address_balance(ContractAddress{0});
   ASSERT_TRUE(bal.has_value());

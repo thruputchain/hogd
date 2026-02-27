@@ -72,7 +72,8 @@ public:
     out.error(RPCError::kRPCNone);
     out.db_tip() = DbTip{
         .height = static_cast<BlockHeight>(block_id_),
-        .hash = sha256(block_id_),
+        .block_hash = sha256(block_id_),
+        .db_hash = sha256(block_id_),
         .id = block_id_,
     };
     return out;
