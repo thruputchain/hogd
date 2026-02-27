@@ -313,6 +313,7 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   // get_delta should produce a bytestring delta (not NNInt)
   auto [delta, flags] = proxy.get_delta();
   ASSERT_TRUE(delta.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeBytestringSet);
 }
 
