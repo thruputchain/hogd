@@ -80,8 +80,7 @@ protected:
                uint8_t count = cd.empty() ? 1 : cd[0];
                auto key = make_storage_key("rcq0");
                for (uint8_t i = 0; i < count; i++) {
-                 auto res =
-                     ctx.handler().retrocausal_queue_consume(key, false);
+                 auto res = ctx.handler().retrocausal_queue_consume(key, false);
                  if (!res.has_value())
                    return res.error().to_invoke_error();
                }
@@ -93,31 +92,32 @@ protected:
     context_ = std::make_unique<NativeContext>(std::move(contract_map));
   }
 
-  SignedTransaction make_tx(uint32_t method,
-                           std::vector<uint8_t> const &calldata)
+  static SignedTransaction make_tx(uint32_t method,
+                                   std::vector<uint8_t> const &calldata)
   {
     return SignedTransaction{
         .tx = Transaction{
-            .invocation = Invocation{
-                .invoked_address = kAddr,
-                .entrypoint = entrypoint_from_method_id(method),
-                .gas_limit = UINT64_MAX,
-                .calldata = Calldata(calldata.begin(), calldata.end())}}};
+            .invocation =
+                Invocation{.invoked_address = kAddr,
+                           .entrypoint = entrypoint_from_method_id(method),
+                           .gas_limit = UINT64_MAX,
+                           .calldata =
+                               Calldata(calldata.begin(), calldata.end())}}};
   }
 
-  SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
+  static SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
   {
     return make_tx(0, values);
   }
 
-  SignedTransaction make_consume_tx(uint8_t count)
+  static SignedTransaction make_consume_tx(uint8_t count)
   {
     return make_tx(1, {count});
   }
 
   // --- Interleaving infrastructure ---
 
-  template <bool Proposal>
+  template<bool Proposal>
   void add_tx(model::RunnableActionSet &actions, TxSlot &slot)
   {
     actions.add_action(
@@ -126,8 +126,7 @@ protected:
           co_await set.bg();
           auto handler = [&]() {
             if constexpr (Proposal)
-              return self->make_new_system_call_handler(
-                  s.tx, *self->context_);
+              return self->make_new_system_call_handler(s.tx, *self->context_);
             else
               return self->make_new_system_call_handler_validation(
                   s.tx.tx, *self->context_, s.proposal);
@@ -179,6 +178,7 @@ protected:
 
       // Snapshot proposal outcomes before discarding the block.
       std::vector<bool> proposed;
+      proposed.reserve(slots.size());
       for (auto const &s : slots)
         proposed.push_back(s.committed);
 
