@@ -108,6 +108,10 @@ public:
             delta.retrocausal_queue().consume->current_block_consumed.end(),
             std::mt19937{std::random_device{}()});
       }
+      // shuffle the order of this-block inserts too
+      std::shuffle(delta.retrocausal_queue().insert.added_entries.begin(),
+                   delta.retrocausal_queue().insert.added_entries.end(),
+                   std::mt19937{std::random_device{}()});
     }
     return delta;
   }
