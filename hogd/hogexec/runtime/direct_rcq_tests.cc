@@ -2578,11 +2578,8 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertMismatchedCurrentBlock)
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   auto r = tx.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx.abort_transaction().has_value());
-    return;
-  }
+  // this should fail in validation mode
+  ASSERT_TRUE(r.has_value() && !r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
   advance_block();
 }
