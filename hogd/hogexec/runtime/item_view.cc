@@ -307,6 +307,28 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   return std::nullopt;
 }
 
+StorageDelta
+RetrocausalQueueItem::get_delta() const
+{
+  StorageDelta delta =
+      StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+  delta.retrocausal_queue() = queue_delta_;
+  // In debug builds, we shuffle the order of entries in the concurrent
+  // consumes, as these are not supposed to affect the result of the db
+  // operation.
+  if constexpr (is_debug_build()) {
+    if (delta.retrocausal_queue().consume) {
+      std::shuffle(
+          delta.retrocausal_queue().consume->current_block_consumed.begin(),
+          delta.retrocausal_queue().consume->current_block_consumed.end(),
+          std::mt19937{std::random_device{}()});
+    }
+    // We don't shuffle the order of this-block inserts -- some of the tests
+    // have logic conditioned on the order of concurrent inserts.
+  }
+  return delta;
+}
+
 void
 RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 {
