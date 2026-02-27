@@ -289,4 +289,32 @@ TEST_F(ItemViewTest, RCQRead)
       std::get<ValidationModeData>(validation_mode_data).check_all_consumed());
 }
 
+TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
+{
+  ItemView proxy;
+
+  // Write an NNInt item
+  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(42)), to_xdr(int128_t(10)))));
+  ASSERT_TRUE(proxy.template get<NNIntItem>());
+  EXPECT_EQ(proxy.template get<NNIntItem>()->base_value_, to_xdr(int128_t(42)));
+
+  // Overwrite with a BytestringItem on the same ItemView
+  Bytestring bytes{0xDE, 0xAD, 0xBE, 0xEF};
+  EXPECT_TRUE(proxy.set(BytestringItem(bytes)));
+
+  // After overwrite, NNIntItem should be gone
+  ASSERT_EQ(proxy.template get<NNIntItem>(), nullptr);
+
+  // BytestringItem should be present with the new value
+  const auto *bs = proxy.template get<BytestringItem>();
+  ASSERT_TRUE(bs);
+  EXPECT_EQ(bs->bytestring_, bytes);
+
+  // get_delta should produce a bytestring delta (not NNInt)
+  auto [delta, flags] = proxy.get_delta();
+  ASSERT_TRUE(delta.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeBytestringSet);
+}
+
 } // namespace hogd
