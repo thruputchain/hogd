@@ -1292,6 +1292,302 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
   }
 }
 
+// ===================================================================
+// Impossible Commit Set Tests
+//
+// These test scenarios where a malicious proposer fabricates
+// internally consistent-looking proposal data that nonetheless
+// describes an impossible execution.  Individual TX commits succeed
+// (they only track deltas), but block-level finalization detects the
+// inconsistency in write_committed_change.
+//
+// These tests require kHogDB because the check is in the hogdb layer
+// (retrocausal_queue_lock.cc write_committed_change).
+// ===================================================================
+
+// Proposer claims TX_B consumed entry {99} but TX_A only inserted {10}.
+// Per-TX commits succeed, but block finalization detects the mismatch:
+// consumed_set has {99}, added_entries has {10} → no match → error.
+TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "write_committed_change check requires kHogDB";
+  }
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 1
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             auto res = ctx.handler().retrocausal_queue_consume(key, false);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal: TX_A inserts {10}, TX_B consumes concurrent {10}
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+  {
+    auto handler_a =
+        make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    insert_proposal_data = handler_a.get_proposal_data();
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    consume_proposal_data = handler_b.get_proposal_data();
+    ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Tamper: change observation from {10} to {99}
+  auto tampered = consume_proposal_data;
+  tampered.observed_queue_entry_sequence[0].clear();
+  tampered.observed_queue_entry_sequence[0].push_back(99);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation: both TXs execute and commit successfully (per-TX level)
+  {
+    auto handler_a = make_new_system_call_handler_validation(
+        tx_insert, *native_context, insert_proposal_data);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(tampered));
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Block finalization should fail: consumed_set={99} vs added_entries={10}
+  EXPECT_THROW(advance_block(), std::runtime_error)
+      << "Block with fabricated observation value should fail finalization";
+}
+
+// Proposer claims TX_B consumed a concurrent entry from TX_A, but TX_A
+// is not included in the validation set (as if it was aborted).
+// TX_B's per-TX commit succeeds, but block finalization detects that the
+// consumed entry {10} has no matching insert.
+TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "write_committed_change check requires kHogDB";
+  }
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 1
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             auto res = ctx.handler().retrocausal_queue_consume(key, false);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal: TX_A inserts {10}, TX_B consumes concurrent {10}
+  NondeterministicProposalData consume_proposal_data;
+  {
+    auto handler_a =
+        make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    consume_proposal_data = handler_b.get_proposal_data();
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation: only TX_B runs (TX_A is "aborted" — not included)
+  // TX_B replays with bit=true, observation={10}, but nobody inserts {10}
+  {
+    auto handler_b = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(consume_proposal_data));
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Block finalization: consumed_set={10} but added_entries={} → mismatch
+  EXPECT_THROW(advance_block(), std::runtime_error)
+      << "Block with consumed entry from missing inserter should fail";
+}
+
+// Proposer claims consumer consumed 2 concurrent entries, but only 1
+// inserter committed (providing 1 entry).  The second consumed entry
+// has no matching insert.
+TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "write_committed_change check requires kHogDB";
+  }
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert: calldata[0] is the value
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto const &calldata = ctx.handler().get_calldata();
+             auto key = make_storage_key("rcq0");
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key,
+                 std::as_bytes(std::span(calldata.data(), calldata.size())));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 2
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             for (int i = 0; i < 2; i++) {
+               auto res = ctx.handler().retrocausal_queue_consume(key, false);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert_a{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = Calldata({10})},
+  };
+  Transaction tx_insert_b{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = Calldata({20})},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal: TX_A inserts {10}, TX_B inserts {20}, TX_C consumes 2
+  NondeterministicProposalData insert_a_proposal;
+  NondeterministicProposalData consume_proposal;
+  {
+    auto handler_a =
+        make_new_system_call_handler(tx_insert_a, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    insert_a_proposal = handler_a.get_proposal_data();
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b =
+        make_new_system_call_handler(tx_insert_b, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_c =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_c.root_invoke().is_root_success());
+    consume_proposal = handler_c.get_proposal_data();
+    // Should have consumed 2 concurrent entries: {10} and {20}
+    ASSERT_EQ(consume_proposal.observed_queue_entry_sequence.size(), 2U);
+    ASSERT_EQ(handler_c.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation: only TX_A and TX_C run (TX_B "aborted" — not included)
+  // TX_C replays with 2 observations ({10}, {20}) but only {10} is inserted
+  {
+    auto handler_a = make_new_system_call_handler_validation(
+        tx_insert_a, *native_context, insert_a_proposal);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_c = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(consume_proposal));
+    ASSERT_TRUE(handler_c.root_invoke().is_root_success());
+    ASSERT_EQ(handler_c.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Block finalization: consumed_set={10,20}, added_entries={10}
+  // {10} matches, {20} remains in consumed_set → error
+  EXPECT_THROW(advance_block(), std::runtime_error)
+      << "Block with more consumed than inserted should fail finalization";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,

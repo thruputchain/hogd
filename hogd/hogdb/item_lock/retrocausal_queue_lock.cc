@@ -358,8 +358,13 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
         remaining_entries.push_back(entry);
       }
     }
-    // Sanity check: all consumed entries should have been found
-    CHECK(consumed_set.empty());
+    // All consumed entries must have been found among added entries.
+    // In validation mode, a malicious proposer could fabricate observations
+    // that don't match any inserted entries.  Return an error instead of
+    // crashing so the block can be rejected gracefully.
+    if (!consumed_set.empty()) {
+      return std::unexpected(HogDBError(HogDBCode::kInternal));
+    }
   }
   else {
     // No current block consumption; all added entries remain
