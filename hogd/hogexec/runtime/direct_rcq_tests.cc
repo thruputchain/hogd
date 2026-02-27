@@ -914,6 +914,8 @@ TEST_F(DirectRCQTests, StressSameTxNonCumulativeRCQInserts)
 // (e.g., block 5). The try_atomic_change_lock code at line 200 reads
 // intermediate blocks with CHECK(block.has_value()), which would crash
 // if the block doesn't exist in the DAO.
+//
+// This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressConsumeFromNonExistentBlock)
 {
   GTEST_SKIP() << "HogDB bug: consuming from non-existent block causes CHECK "
@@ -962,6 +964,8 @@ TEST_F(DirectRCQTests, StressConsumeFromNonExistentBlock)
 // (new_partial - old_partial). If partial_consumed > block.entries.size(),
 // the arithmetic in write_committed_change or commit_change could produce
 // negative live_entries, triggering assert(live_entries >= 0) at line 262.
+//
+// This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressConsumeMoreEntriesThanExist)
 {
   GTEST_SKIP()
@@ -1069,52 +1073,98 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
 // triggering CHECK(consumed_set.empty()) at retrocausal_queue_lock.cc:356.
 TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
 {
-  GTEST_SKIP()
-      << "HogDB bug: consuming a current-block entry that was never inserted "
-         "causes CHECK(consumed_set.empty()) failure at "
-         "retrocausal_queue_lock.cc:356";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
-  auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_ghost");
 
-  // TX1 inserts entry {10}
+  GTEST_SKIP()
+  << "HogDB bug: consuming a current-block entry that was never inserted "
+     "causes CHECK(consumed_set.empty()) failure at "
+     "retrocausal_queue_lock.cc:356";
+  for (auto mode : {BlockExecutionMode::kBlockExecutionModeValidation, BlockExecutionMode::kBlockExecutionModeProposal}) {
+    advance_block(mode);
+ 
+    auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_ghost");
+
+    // TX1 inserts entry {10}
+    auto tx1 = make_new_per_tx_db_proxy();
+    tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx1.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value());
+
+    // TX2 consumes {99} from current block -- an entry that was never inserted
+    auto tx2 = make_new_per_tx_db_proxy();
+    tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    r = tx2.try_push_current_subtransaction();
+    if (!r.has_value()) {
+      // RPC error -- potential kUnrecoverable
+      return;
+    }
+    if (!r.value()) {
+      // conflict -- not a break
+      ASSERT_TRUE(tx2.abort_transaction().has_value());
+      ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+    } else {
+
+      // Both pushed successfully -- commit and advance to trigger finalization
+      ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+      ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+    }
+
+    // advance_block triggers write_committed_change which has
+    // CHECK(consumed_set.empty())
+    advance_block();
+  }
+}
+
+// StressConsumeMoreCurrentThanInserted
+//
+// TX1 inserts one entry, TX2 consume_inserts specifying two current-block
+// consumed entries (one real, one ghost). At finalization the consumed_set
+// check should fail.
+TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
+{
+  GTEST_SKIP()
+      << "HogDB bug: consuming more current-block entries than were inserted "
+         "causes assert(live_entries >= 0) failure at "
+         "retrocausal_queue_lock.cc:262";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_extra");
+
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  // TX2 consumes {99} from current block -- an entry that was never inserted
+  // TX2 consumes two entries from current block but only one was inserted
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({99})}),
+  tx2.add_delta(key,
+                make_rcq_consume_delta(0, 0,
+                                       {make_rcq_entry({10}),
+                                        make_rcq_entry({20})}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx2.try_push_current_subtransaction();
-  if (!r.has_value()) {
-    // RPC error -- potential kUnrecoverable
-    return;
-  }
+  ASSERT_TRUE(r.has_value());
+  EXPECT_FALSE(r.value());
   if (!r.value()) {
-    // conflict -- not a break
     ASSERT_TRUE(tx2.abort_transaction().has_value());
-    ASSERT_TRUE(tx1.commit_transaction({}).has_value());
     return;
   }
 
-  // Both pushed successfully -- commit and advance to trigger finalization
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-
-  // advance_block triggers write_committed_change which has
-  // CHECK(consumed_set.empty())
   advance_block();
 }
 
-// StressValidationConsumeMoreCurrentThanInserted
+// StressConsumeMoreCurrentThanInserted
 //
 // TX1 inserts one entry, TX2 consume_inserts specifying two current-block
 // consumed entries (one real, one ghost). At finalization the consumed_set
 // check should fail.
 TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
 {
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
   GTEST_SKIP()
       << "HogDB bug: consuming more current-block entries than were inserted "
          "causes assert(live_entries >= 0) failure at "
@@ -1148,14 +1198,53 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
   advance_block();
 }
 
-// StressValidationSameTxConsumeInsertMismatch
+// StressSameTxConsumeInsertMismatch
 //
 // Single TX does a consume_insert where consumed current-block entries don't
 // match the inserted entries. This is the same-TX variant:
 // insert {10, 20}, then push a consume_insert that consumes {10, 30} (30
 // was never inserted). At finalization CHECK(consumed_set.empty()) fires.
+TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
+{
+  GTEST_SKIP()
+      << "HogDB bug: same-TX consume_insert with mismatched current-block "
+         "consumed entries causes CHECK(consumed_set.empty()) failure at "
+         "retrocausal_queue_lock.cc:356";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_mismatch");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Sub1: insert two entries
+  tx.add_delta(key,
+               make_rcq_insert_delta(
+                   {make_rcq_entry({10}), make_rcq_entry({20})}),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Sub2: consume_insert consuming {10, 30} (30 never inserted) and inserting
+  // {40}
+  tx.add_delta(key,
+               make_rcq_consume_insert_delta(
+                   0, 0, {make_rcq_entry({10}), make_rcq_entry({30})},
+                   {make_rcq_entry({10}), make_rcq_entry({20}),
+                    make_rcq_entry({40})}),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx.try_push_current_subtransaction();
+  if (!r.has_value() || !r.value()) {
+    if (r.has_value())
+      ASSERT_TRUE(tx.abort_transaction().has_value());
+    return;
+  }
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+}
+
 TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
 {
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
   GTEST_SKIP()
       << "HogDB bug: same-TX consume_insert with mismatched current-block "
          "consumed entries causes CHECK(consumed_set.empty()) failure at "
