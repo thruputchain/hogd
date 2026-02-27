@@ -313,6 +313,7 @@ add_wasm_builds(
   syscall_misc_tests
   syscall_parse_hardening_test
   nnint_output_fault_test
+  output_alias_test
 )
 
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
@@ -339,6 +340,7 @@ add_spec_and_types_generation(
     syscall_misc_tests
     syscall_parse_hardening_test
     nnint_output_fault_test
+    output_alias_test
   TYPES_TARGETS
     itc_erc20
     manual_revert_test
@@ -372,6 +374,7 @@ add_contract_header(no_syscall_test)
 add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
+add_contract_header(output_alias_test)
 
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)

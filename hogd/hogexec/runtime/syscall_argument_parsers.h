@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <optional>
@@ -14,6 +15,9 @@
 // the runtime's active memory.
 
 namespace hogd {
+
+// These parsers will need to be rewritten to support big-endian machines.
+static_assert(std::endian::native == std::endian::little);
 
 template<typename T> class WritableOutput {
 public:
@@ -40,6 +44,9 @@ public:
   }
 
   bool has_value() const noexcept { return value_.has_value(); }
+
+  const void *target_ptr() const noexcept { return original_pointer_; }
+  static constexpr size_t kWriteSize = sizeof(T);
 
   void disarm() noexcept
   {

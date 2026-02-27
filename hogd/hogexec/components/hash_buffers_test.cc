@@ -5,7 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/hash_buffers.h"
+#include "hogd/hogexec/components/hash_buffers.h"
 #include "hogexec_constants.hh"
 #include "syscall_error.hh"
 

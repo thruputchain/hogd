@@ -21,7 +21,6 @@ add_library(runtime_objects OBJECT
   database_proxy.cc
   event_server_proxy.cc
   execution_mode.cc
-  hash_buffers.cc
   invocation_frame.cc
   item_view.cc
   native_runtime.cc
@@ -92,7 +91,6 @@ add_library(runtime_test_objects OBJECT
   ffi_helpers_tests.cc
   fibonacci_test.cc
   gas_api_test.cc
-  hash_buffers_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
   instantiate_test.cc
@@ -105,6 +103,7 @@ add_library(runtime_test_objects OBJECT
   memory_access_test.cc
   return_fault_test_wasm_test.cc
   nnint_output_fault_test_wasm_test.cc
+  output_alias_test_wasm_test.cc
   native_contract_test.cc
   nnint_add_test.cc
   propose_validate_roundtrip_test.cc
@@ -146,6 +145,7 @@ add_executable(
 
 target_link_libraries(
   runtime
+  components
   unified_lib
   protocol
   metrics

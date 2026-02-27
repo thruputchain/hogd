@@ -1231,6 +1231,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "output_alias_test"
+version = "0.1.0"
+dependencies = [
+ "output_alias_test",
+ "sdk",
+]
+
+[[package]]
 name = "payment_channel"
 version = "0.1.0"
 dependencies = [
