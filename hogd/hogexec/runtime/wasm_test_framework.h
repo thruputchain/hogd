@@ -63,6 +63,7 @@ public:
       break;
     case WasmEngine::kWasmtime:
       global_context_.emplace<WasmtimeGlobalContext>(wasmtime_engine_count);
+      break;
     }
   }
 

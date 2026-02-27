@@ -828,6 +828,205 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
   }
 }
 
+//
+// Test manual revert with successful try_invoke children.
+//
+// Scenario: Three methods on one contract:
+// - Method 0 (parent): writes "parent_key", calls try_invoke on method 1,
+//   continues normally
+// - Method 1 (child): writes "child_key", calls try_invoke on method 2
+//   (succeeds), then returns with revert_frame=true
+// - Method 2 (grandchild): writes "grandchild_key", returns normally
+//
+// Verify after commit:
+// - Parent's state persists (parent_key exists in DB)
+// - Child's state is reverted (child_key absent — manual revert discards
+//   modified_items)
+// - Grandchild's state is reverted (grandchild_key absent — nested under
+//   reverted frame)
+// - Return data from child is available to parent
+//
+TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
+{
+  ContractAddress contract_addr = make_contract_address(1);
+  auto parent_data = make_bytestring("parent_state");
+  auto child_data = make_bytestring("child_state");
+  auto grandchild_data = make_bytestring("grandchild_state");
+  auto child_return_data = make_bytestring("child_reverted");
+  auto parent_key = make_storage_key("parent_key");
+  auto child_key = make_storage_key("child_key");
+  auto grandchild_key = make_storage_key("grandchild_key");
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          // Method 0 (parent): writes state, try_invokes child, continues
+          {0,
+           [parent_data,
+            parent_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Parent writes its own state
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), parent_key,
+                 std::as_bytes(std::span(parent_data)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring in parent (method 0)";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // try_invoke child method 1
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 1,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r1.has_value()) {
+               ADD_FAILURE() << "try_invoke on child failed unexpectedly";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Child manually reverted, so we expect kFrameReverted
+             if (r1.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+               ADD_FAILURE()
+                   << "Expected kSyscallErrorCodeFrameReverted from child";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Verify child's return data is available to parent
+             auto status = ctx.handler().get_return_buffer();
+             if (!status || !(*status)) {
+               ADD_FAILURE() << "Child return data not available to parent";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto expected = make_bytestring("child_reverted");
+             if ((**status)->size() != expected.size() ||
+                 std::memcmp((**status)->data(), expected.data(),
+                             expected.size()) != 0) {
+               ADD_FAILURE() << "Child return data mismatch";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Parent continues normally (no revert)
+             return {};
+           }},
+          // Method 1 (child): writes state, try_invokes grandchild, then
+          // manually reverts
+          {1,
+           [child_data, child_return_data,
+            child_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Child writes its own state
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring in child (method 1)";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // try_invoke grandchild method 2 (should succeed normally)
+             auto r2 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   ctx.handler().get_current_address(), 2,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r2.has_value()) {
+               ADD_FAILURE() << "try_invoke on grandchild failed unexpectedly";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "Expected kSyscallErrorCodeNone from grandchild";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Child manually reverts with return data
+             ReturnBuffer buffer;
+             buffer.resize_uninitialized(child_return_data.size());
+             std::memcpy(buffer.data(), child_return_data.data(),
+                         child_return_data.size());
+             ctx.handler().set_return_buffer(std::move(buffer), true);
+             return {};
+           }},
+          // Method 2 (grandchild): writes state, returns normally
+          {2,
+           [grandchild_data,
+            grandchild_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), grandchild_key,
+                 std::as_bytes(std::span(grandchild_data)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "Failed to set bytestring in grandchild (method 2)";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Return normally (no revert)
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  // Deploy contract
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Invoke parent method
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  advance_block();
+
+  // Parent's state should persist (parent_key exists in DB)
+  auto parent_addrkey = make_contract_data_addrkey(contract_addr, "parent_key");
+  auto parent_item_opt = lookup_storage_item_from_db(parent_addrkey);
+  ASSERT_TRUE(parent_item_opt.has_value())
+      << "Parent state should persist after commit";
+
+  // Child's state should be reverted (child_key absent)
+  auto child_addrkey = make_contract_data_addrkey(contract_addr, "child_key");
+  auto child_item_opt = lookup_storage_item_from_db(child_addrkey);
+  ASSERT_FALSE(child_item_opt.has_value())
+      << "Child state should be reverted (manual revert discards "
+         "modified_items)";
+
+  // Grandchild's state should be reverted (grandchild_key absent — nested
+  // under reverted frame)
+  auto grandchild_addrkey =
+      make_contract_data_addrkey(contract_addr, "grandchild_key");
+  auto grandchild_item_opt = lookup_storage_item_from_db(grandchild_addrkey);
+  ASSERT_FALSE(grandchild_item_opt.has_value())
+      << "Grandchild state should be reverted (nested under reverted child "
+         "frame)";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertTest,
