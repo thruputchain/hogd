@@ -1,4 +1,4 @@
-#include "hogd/hogexec/runtime/hash_buffers.h"
+#include "hogd/hogexec/components/hash_buffers.h"
 
 #include <cstddef>
 #include <span>
