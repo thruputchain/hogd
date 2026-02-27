@@ -1,5 +1,3 @@
-// -*-C++-*-
-
 // Model-checker-based interleaving tests for RCQ validation mode.
 //
 // Pattern (from interleaving_tests.cc):

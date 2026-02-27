@@ -260,11 +260,18 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   auto calculate_cost = [&]() {
     int64_t live_entries = meta.live_entries + committed_element_count_delta_;
     // In validation mode, a consumer may commit before its corresponding
-    // inserter, temporarily making the count negative.  The real invariant
-    // is CHECK(consumed_set.empty()) in write_committed_change, which
-    // verifies all consumed entries are accounted for at end-of-block.
-    // Clamp to 0 for cost calculation; the aggregate cost across all TXs
-    // in the block sums to the same value regardless of commit order.
+    // inserter, temporarily making the count negative.  Clamp to 0 for
+    // the cost calculation.  This is safe w.r.t. the CHECK_LE(cost_change,
+    // locked_storage_cost) invariant in InvokeTX::commit because clamping
+    // from negative to 0 can only make cost_before LARGER, which makes
+    // (cost_after - cost_before) SMALLER — tightening the gap below the
+    // reservation, not exceeding it.  The pessimistic reserve in
+    // try_atomic_change_lock already accounts for the worst case where a
+    // concurrent consume empties the queue before the inserter commits.
+    //
+    // The real data-integrity invariant is the consumed_set check in
+    // write_committed_change, which verifies at end-of-block that all
+    // consumed entries were matched by inserts.
     live_entries = std::max(live_entries, int64_t{0});
 
     return cost_model->get_retrocausal_queue_cost(
