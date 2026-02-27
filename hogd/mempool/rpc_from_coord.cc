@@ -871,6 +871,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                     .nomination.block_height,
       .block_hash = nominated_block_cache_.nomination_result.nominated_block()
                         .nomination.block_hash,
+      .db_hash = {},
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
@@ -956,6 +957,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   cache.block_id = generate_block_id();
   cache.db_tip = {.height = nomination.block_height,
                   .block_hash = nomination.block_hash,
+                  .db_hash = {},
                   .id = cache.block_id};
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
@@ -1053,6 +1055,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   cache.db_tip = DbTip{.height = nomination.block_height,
                        .block_hash = nomination.block_hash,
+                       .db_hash = {},
                        .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);

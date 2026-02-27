@@ -165,7 +165,8 @@ HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
   if (!lsn)
     return lsn.error();
 
-  info("committed block {}: db_hash='{}', height='{}', lsn='{}", id,
+  info("committed block {}: block_hash='{}' db_hash='{}', height='{}', lsn='{}",
+       id, encode_base64(std::as_bytes(std::span(ctx_.get_tip().block_hash))),
        encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
        ctx_.get_tip().height, *lsn);
   assert(ctx_.get_tip().height != 0);

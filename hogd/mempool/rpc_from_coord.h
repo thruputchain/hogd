@@ -168,6 +168,7 @@ public:
             genesis_configuration);
     last_committed_block_ = {.height = 0,
                              .block_hash = sha256(genesis_configuration),
+                             .db_hash = {},
                              .id = generate_block_id()};
     received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;

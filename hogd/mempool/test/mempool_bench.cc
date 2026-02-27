@@ -115,7 +115,7 @@ nominate(benchmark::State &state)
     // Submit unvetted transactions so there's something to nominate
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(txs)())();
-    DbTip db_tip{.height = 0, .block_hash = {}, .id = 0};
+    DbTip db_tip{.height = 0, .block_hash = {}, .db_hash = {}, .id = 0};
     state.ResumeTiming();
 
     auto res_nominate =
@@ -138,7 +138,7 @@ validate(benchmark::State &state)
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(txs)())();
 
-    DbTip db_tip{.height = 0, .block_hash = {}, .id = 0};
+    DbTip db_tip{.height = 0, .block_hash = {}, .db_hash = {}, .id = 0};
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     CHECK_EQ(res_nominate.outcome(),
@@ -149,6 +149,7 @@ validate(benchmark::State &state)
     Nomination nomination = res_nominate.nominated_block().nomination;
     db_tip.height++;
     db_tip.block_hash = nomination.block_hash;
+    db_tip.db_hash = {};
     db_tip.id++;
 
     nomination.block_height++;
@@ -266,6 +267,7 @@ loadgen_validate(benchmark::State &state)
     Nomination nomination = res_nominate.nominated_block().nomination;
     db_tip.height++;
     db_tip.block_hash = nomination.block_hash;
+    db_tip.db_hash = {};
     db_tip.id++;
 
     nomination.block_height++;
@@ -324,6 +326,7 @@ loadgen_nominate_throughput(benchmark::State &state)
           res_nominate.nominated_block();
       db_tip = {.height = nomination.nomination.block_height,
                 .block_hash = nomination.nomination.block_hash,
+                .db_hash = {},
                 .id = nomination.block_id};
       {
         SignedTransactionHashBatch tx_hashes;
@@ -371,6 +374,7 @@ loadgen_validate_throughput(benchmark::State &state)
       // validation.
       db_tip.height++;
       db_tip.block_hash = nomination.block_hash;
+      db_tip.db_hash = {};
       db_tip.id++;
 
       nomination.block_height++;
