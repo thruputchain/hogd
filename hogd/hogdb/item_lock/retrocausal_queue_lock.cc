@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -259,7 +260,20 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 
   auto calculate_cost = [&]() {
     int64_t live_entries = meta.live_entries + committed_element_count_delta_;
-    assert(live_entries >= 0);
+    // In validation mode, a consumer may commit before its corresponding
+    // inserter, temporarily making the count negative.  Clamp to 0 for
+    // the cost calculation.  This is safe w.r.t. the CHECK_LE(cost_change,
+    // locked_storage_cost) invariant in InvokeTX::commit because clamping
+    // from negative to 0 can only make cost_before LARGER, which makes
+    // (cost_after - cost_before) SMALLER — tightening the gap below the
+    // reservation, not exceeding it.  The pessimistic reserve in
+    // try_atomic_change_lock already accounts for the worst case where a
+    // concurrent consume empties the queue before the inserter commits.
+    //
+    // The real data-integrity invariant is the consumed_set check in
+    // write_committed_change, which verifies at end-of-block that all
+    // consumed entries were matched by inserts.
+    live_entries = std::max(live_entries, int64_t{0});
 
     return cost_model->get_retrocausal_queue_cost(
         static_cast<uint64_t>(live_entries));
@@ -352,8 +366,13 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
         remaining_entries.push_back(entry);
       }
     }
-    // Sanity check: all consumed entries should have been found
-    CHECK(consumed_set.empty());
+    // All consumed entries must have been found among added entries.
+    // In validation mode, a malicious proposer could fabricate observations
+    // that don't match any inserted entries.  Return an error instead of
+    // crashing so the block can be rejected gracefully.
+    if (!consumed_set.empty()) {
+      return HogDBError{HogDBCode::kInternal};
+    }
   }
   else {
     // No current block consumption; all added entries remain
