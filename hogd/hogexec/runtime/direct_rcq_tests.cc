@@ -2840,51 +2840,6 @@ TEST_F(DirectRCQTests, StressExclusiveRCQThenNormalModifySameBlockDowngrade)
 }
 
 // StressExclusiveConsumeInsertMismatchedCurrentBlock
-//
-// Target: retrocausal_queue_lock.cc:356 CHECK(consumed_set.empty())
-//         The current_block_consumed entries don't match any added entries.
-//
-// This IS known site #5, but we want to verify the exclusive path
-// can still trigger it in a new way. The exclusive lock bypasses the
-// normal validation, so we can inject consumed entries that don't exist.
-//
-// Block 1: Insert 2 entries.
-// Block 2: Exclusive consume_insert with:
-//   - Insert [A, B]
-//   - current_block_consumed [C] (C doesn't match A or B)
-//   - No past consume (max_fully_consumed=0, partial=0)
-//
-// At push: ExclusiveLock ignores consume. cost(2) returned.
-// At commit: fresh RCQ lock. try_atomic_change_lock:
-//   meta from snapshot: live=2. Same-block: consumed_entries=0.
-//   consumed_past_entries_=0. element_delta=2-0-1=1. committed_delta=1.
-//   calculate_cost: live=2+1=3. cost(3)=12024.
-//   cost_before: snapshot(2)=12016. cost_change=8.
-//   locked_storage_cost: cost(2)-snapshot(2)=0 (perm_excl). Wait that's 0.
-//   CHECK_LE(8, 0) -> FAIL. Crashes at site #6 before reaching 356.
-//
-// Hmm, that hits site #6 again. To bypass, we need cost_change <= locked.
-// Need locked >= 8. ExclusiveLock returns cost(2)=12016.
-// snapshot_cost_transform(12016, 12016, true) = 0. locked = 0.
-// 8 > 0 -> still fails.
-//
-// What if the key is FRESH (no snapshot cost)?
-// snapshot_cost_ = 0. ExclusiveLock returns cost(2) = 12016.
-// snapshot_cost_transform(12016, 0, true) = 12016. locked = 12016.
-// At commit: RCQ lock. meta is fresh (live=0). consume_delta is present.
-// same-block: consumed_entries = 0 (both partials are 0).
-// consumed_past_entries_=0. element_delta = 2 - 0 - 1 = 1. committed = 1.
-// calculate_cost: live = 0 + 1 = 1. cost(1) = 12008.
-// cost_before = 0 (no prior changes, snapshot=0). cost_change = 12008.
-// CHECK_LE(12008, 12016) -> 12008 <= 12016 -> PASSES!
-//
-// write_committed_change: consumed_set = {C}.
-// added_entries_ = [A, B]. A != C, B != C.
-// consumed_set = {C} -> NOT EMPTY. CHECK fires at line 356!
-//
-// Wait but does this path actually work? The key is fresh, no prior existence.
-// get_meta returns fresh metadata. The consume has current_block_consumed=[C].
-// The insert has [A, B].
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertMismatchedCurrentBlock)
 {
   GTEST_SKIP(); // Crashes at retrocausal_queue_lock.cc:356 (site #5)
@@ -2911,49 +2866,6 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertMismatchedCurrentBlock)
   advance_block();
 }
 
-// StressExclusiveConsumeOnlyZeroBlockFreshKey
-//
-// Target: retrocausal_queue_lock.cc:148
-//         CHECK(meta.max_live_block_num >= consume_state.max_fully_consumed)
-//
-// Fresh key. Exclusive consume with max_fully_consumed=0, partial=1.
-// At push: ExclusiveLock. entries=0 (no inserts). Returns 0.
-// snapshot_cost_transform(0, 0, true) = 0. locked = 0.
-// At commit: fresh RCQ lock. get_meta: fresh (live=0, max_live=0,
-// consume={0,0}). CHECK(0 >= 0) -> passes. Same-block: consumed_entries = 1 - 0
-// = 1. consumed_past_entries_=1. element_delta = 0 - 1 = -1. committed = -1.
-// calculate_cost: live = 0 + (-1) = -1. assert(live>=0) fires at 262 (site #4).
-//
-// Hmm, that's site #4. What if I add inserts to compensate?
-// Insert 1, consume partial=1. element_delta = 1 - 1 = 0. live = 0 + 0 = 0.
-// cost = 0. cost_before = 0. cost_change = 0.
-// CHECK_LE(0, 0) -> passes. But this is just a clean operation.
-//
-// What if insert 1, consume partial=2?
-// element_delta = 1 - 2 = -1. live = 0 + (-1) = -1. assert fires at 262.
-// Still site #4.
-//
-// OK let me try a different angle: max_fully_consumed=1 on a fresh key.
-// At commit: get_meta: fresh. max_live_block_num=0.
-// CHECK(0 >= 0) -> passes (fresh consume_state has max_fully_consumed=0).
-// new_consume.max_fully_consumed=1 > old(0). Cross-block path.
-// first_block_num = 0+1 = 1.
-// read block 1 -> kNotFound. CHECK(first_block.has_value()) FAILS! Line 193.
-// But this is site #2. Already known.
-//
-// What if I can manipulate things so max_live_block_num=0 but
-// consume_state.max_fully_consumed=1? That would fail CHECK at 148.
-// But this requires persisted metadata where max_fully_consumed >
-// max_live_block. Exclusive path could do this if we consume from a block that
-// doesn't exist and the live_entries stays >= 0.
-//
-// Fresh key: exclusive consume_insert. max_fully_consumed=1, insert 5 entries.
-// At commit: fresh meta. max_live=0. consume_state={0,0}.
-// new_consume.max_fully_consumed=1 > old(0). Cross-block.
-// first_block=1. Read block 1 -> kNotFound. CHECK at 193. Site #2 again.
-//
-// Cannot persist max_fully_consumed > max_live because the CHECK at 193
-// fires first during the exclusive downgrade commit.
 TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
 {
   GTEST_SKIP(); // Crashes at retrocausal_queue_lock.cc:262 (site #4)
@@ -2961,40 +2873,6 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_excl_zero_block");
 
-  // Fresh key, exclusive: insert 1 + consume partial=1 from block 0.
-  // This should be a no-op (consume what we insert).
-  // element_delta = 1 - 1 = 0. live = 0 + 0 = 0. cost = 0.
-  // write_committed_change: consumed_set = empty (current_block_consumed
-  // is empty since partial is a past-block consume, not current block).
-  // remaining_entries = [A]. new_block written with block_num=1.
-  // metadata: max_live=1, live=0. But wait, remaining is non-empty
-  // so live_entries = 0 + 0 = 0. But we wrote a block! The metadata
-  // says live=0 but there IS a block. This is corrupted state.
-  // Next block: normal consume max_fully_consumed=1.
-  // get_meta: {max_live=1, live=0, consume={0,1}}.
-  // CHECK(1 >= 0) -> OK.
-  // new_consume = {1, 0}. old = {0, 1}.
-  // Cross-block: first_block = 0+1 = 1.
-  // consumed_entries = (block1.entries.size(1) - old.partial(1)) = 0.
-  // consumed_past_entries_ = 0.
-  // element_delta = 0 - 0 = 0. live = 0 + 0 = 0. OK but cost = 0.
-  // write_committed_change: prune block 1 from trie. remaining empty.
-  // live=0. base live=0 -> skip first cleanup.
-  // base_was_different_type_=false -> skip second.
-  // Write metadata with live=0. Hmm, this writes metadata with live=0
-  // but we're in the else branch (live != 0 check failed)...
-  // Actually live_entries=0 -> enters the if branch.
-  // base_metadata.live_entries=0 -> skip first sub-branch.
-  // base_was_different_type_=false -> skip second.
-  // Nothing cleaned up. But the metadata key exists from block 2.
-  // CHECK(MerkleTrieHelpers::update_kv_pair_in_trie)... wait.
-  // live==0 branch doesn't write metadata. It expects to clean up.
-  // But base_metadata.live_entries=0 and !base_was_different_type_.
-  // So neither sub-branch runs. No cleanup. But the metadata
-  // WAS written in the previous block. The trie has an entry for it.
-  // Now block 3 starts. The metadata trie entry is stale.
-  //
-  // Actually let me just run this and see what happens.
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 1, {}, {make_rcq_entry({10})}),
@@ -3052,10 +2930,6 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
 //   fires. OR: cost computation overflows, and CHECK_LE at invoke_tx.cc:195
 //   fires first.
 //
-// The key question is whether the cost CHECK at 195 or the assert at 262 fires.
-// If cost CHECK fires first, it's site #6 (known). If assert fires first,
-// it's site #4 (known). But we want to see if the size_t underflow at 194-195
-// creates a genuinely new crash mode.
 TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
 {
   GTEST_SKIP() << "Crashes at invoke_tx.cc:195 (site #6)";
