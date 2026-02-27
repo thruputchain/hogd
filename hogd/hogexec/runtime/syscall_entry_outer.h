@@ -22,6 +22,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -442,6 +443,29 @@ disarm_outputs(std::tuple<Args...> &args)
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 }
 
+template<typename T>
+bool
+register_if_writable(AliasGuard &guard, T const &output) noexcept
+{
+  if constexpr (requires {
+                  output.target_ptr();
+                  output.has_value();
+                  T::kWriteSize;
+                }) {
+    // WritableOutput<U>
+    CHECK(output.has_value());
+    return guard.check_and_register(output.target_ptr(), T::kWriteSize);
+  }
+  else if constexpr (std::same_as<std::remove_cvref_t<T>,
+                                  std::optional<std::span<std::byte>>>) {
+    // Mutable output span
+    CHECK(output.has_value());
+    return guard.check_and_register(output->data(), output->size());
+  }
+
+  return true;
+}
+
 // This logic -- validating all of the syscall inputs, calling the inner
 // syscall, logging, read-only checks, and returning the result -- is common to
 // both the regular and mock syscall handlers.  This is split out from
@@ -486,6 +510,15 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
       }
       disarm_outputs(args);
       return kFaultResult;
+    }
+
+    // Check for output-output aliasing (overlapping writable regions).
+    {
+      AliasGuard alias_guard;
+      if (!((register_if_writable(alias_guard, std::get<Is>(args)) && ...))) {
+        disarm_outputs(args);
+        return kFaultResult;
+      }
     }
 
     if (runtime_log_level(LogLevel::kTrace)) {
