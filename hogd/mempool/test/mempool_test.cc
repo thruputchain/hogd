@@ -260,7 +260,8 @@ TEST(Mempool, Validate)
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -308,7 +309,8 @@ TEST(Mempool, ValidateBatch)
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -336,7 +338,7 @@ TEST(Mempool, ValidateEmpty)
 
   MempoolTestInfra server;
 
-  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  DbTip db_tip{.height = 0, .block_hash = {}, .db_hash = {}, .id = 0};
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip,
                                                          Nomination{})();
@@ -372,7 +374,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -431,7 +434,8 @@ TEST(Mempool, ValidateBatchMissingTx)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -487,7 +491,8 @@ TEST(Mempool, ValidateCommit)
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -541,7 +546,8 @@ TEST(Mempool, ValidateTwo)
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -565,7 +571,8 @@ TEST(Mempool, ValidateTwo)
 
   // Now validate another block.
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -620,7 +627,8 @@ TEST(Mempool, GetTip)
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
-  db_tip.hash = nomination.block_hash;
+  db_tip.block_hash = nomination.block_hash;
+  db_tip.db_hash = nomination.block_hash;
   db_tip.id++;
 
   nomination.block_height++;
@@ -748,7 +756,8 @@ TEST(Mempool, AuthChanged)
   }
   CHECK_EQ(server.mempool_coord_rpc().auth_data_height(), 1);
   db_tip = {.height = nomination.block_height,
-            .hash = nomination.block_hash,
+            .block_hash = nomination.block_hash,
+            .db_hash = nomination.block_hash,
             .id = res_nominate.nominated_block().block_id};
   res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),

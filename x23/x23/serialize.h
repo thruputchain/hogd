@@ -276,7 +276,7 @@ struct Serializer {
   void putbytes(const void *buf, size_t len)
   {
     if (size_t rem = len % 4) {
-      *reinterpret_cast<uint32_t *>(p + len - rem) = 0;
+      putbe(p + len - rem, uint32_t{0});
       memcpy(p, buf, len);
       p += len + (4 - rem);
     }
@@ -651,9 +651,11 @@ struct Deserializer
     constexpr auto swaple = [](uint32_t v) consteval -> uint32_t {
       return std::endian::native == std::endian::little ? std::byteswap(v) : v;
     };
-    constexpr std::array masks{swaple(0), swaple(0xffffff), swaple(0xffff),
-                               swaple(0xff)};
-    if (reinterpret_cast<const uint32_t *>(p)[-1] & masks[rem]) [[unlikely]]
+    constexpr std::array<uint32_t, 4> masks{swaple(0), swaple(0xffffff),
+                                            swaple(0xffff), swaple(0xff)};
+    uint32_t w;
+    std::memcpy(&w, p - 4, 4);
+    if (w & masks[rem]) [[unlikely]]
       raise("padding bytes are not zero deserializing XDR");
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kOpaqueArray> X> void go(X &x)

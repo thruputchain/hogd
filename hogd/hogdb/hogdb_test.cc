@@ -101,7 +101,8 @@ TEST_F(HogDBTest, DataAccessObject)
 
   // test db tip
   DbTip tip{.height = 10,
-            .hash = sha256(std::as_bytes(std::span("foo"))),
+            .block_hash = sha256(std::as_bytes(std::span("foo"))),
+            .db_hash = sha256(std::as_bytes(std::span("foo"))),
             .id = 30};
   EXPECT_TRUE(db_.write_dbtip(tip));
   HogDBStatus<DbTip> rtip = db_.read_dbtip();

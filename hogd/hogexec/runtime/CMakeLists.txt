@@ -109,6 +109,7 @@ add_library(runtime_test_objects OBJECT
   propose_validate_roundtrip_test.cc
   nnint_get_test.cc
   rcq_delete_test.cc
+  rcq_interleaving_tests.cc
   rcq_read_test.cc
   rcq_test.cc
   read_only_test.cc

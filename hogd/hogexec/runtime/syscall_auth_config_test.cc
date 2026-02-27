@@ -681,6 +681,216 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsInvalidBitmap)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
+// Test ChangePublicKeyRegistration rejects mixed-null args:
+// scheme=null but weight!=null
+TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // scheme=null, weight!=null — should be rejected
+             uint32_t key_weight = 5;
+             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                 0, static_cast<const int32_t *>(nullptr),
+                 std::span<const std::byte>{}, &key_weight);
+             if (!status.has_value() ||
+                 status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE() << "scheme=null, weight!=null should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+// Test ChangePublicKeyRegistration rejects mixed-null args:
+// scheme=null but bytes not empty
+TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto [public_key, _] = ed25519_keygen();
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [public_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // scheme=null, bytes not empty — should be rejected
+             std::span<const std::byte> key_bytes(
+                 reinterpret_cast<const std::byte *>(public_key.data()),
+                 public_key.size());
+             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                 0, static_cast<const int32_t *>(nullptr), key_bytes,
+                 static_cast<const uint32_t *>(nullptr));
+             if (!status.has_value() ||
+                 status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               ADD_FAILURE()
+                   << "scheme=null, bytes not empty should be rejected";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+// Test ChangePublicKeyRegistration key deletion:
+// Register a key, then delete it via all-null args, verify key removed from DB
+TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto [public_key, _] = ed25519_keygen();
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          // Method 0: Register a key
+          {0,
+           [public_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             int32_t key_scheme =
+                 std::to_underlying(CryptographicScheme::Ed25519);
+             uint32_t key_weight = 5;
+             std::span<const std::byte> key_bytes(
+                 reinterpret_cast<const std::byte *>(public_key.data()),
+                 public_key.size());
+             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                 0, &key_scheme, key_bytes, &key_weight);
+             if (!status.has_value() ||
+                 status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to register key";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+          // Method 1: Delete the key via all-null args
+          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto status = ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                 0, static_cast<const int32_t *>(nullptr),
+                 std::span<const std::byte>{},
+                 static_cast<const uint32_t *>(nullptr));
+             if (!status.has_value() ||
+                 status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to delete key";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  // Step 1: Register the key
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address = contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata = {}}}},
+        *context);
+
+    auto root_res = handler.root_invoke();
+    ASSERT_TRUE(root_res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    advance_block();
+  }
+
+  // Verify key was registered
+  {
+    auto item = lookup_storage_item_from_db(
+        make_address_auth_data_addrkey(contract_addr));
+    ASSERT_TRUE(item.has_value());
+    auto auth_data = item->auth_data();
+    ASSERT_TRUE(auth_data.public_keys[0]);
+    ASSERT_EQ(auth_data.public_keys[0]->key.ed25519(), public_key);
+  }
+
+  // Step 2: Delete the key
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address = contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(1),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata = {}}}},
+        *context);
+
+    auto root_res = handler.root_invoke();
+    ASSERT_TRUE(root_res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    advance_block();
+  }
+
+  // Verify key was deleted
+  {
+    auto item = lookup_storage_item_from_db(
+        make_address_auth_data_addrkey(contract_addr));
+    ASSERT_TRUE(item.has_value());
+    auto auth_data = item->auth_data();
+    ASSERT_FALSE(auth_data.public_keys[0]);
+  }
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

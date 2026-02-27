@@ -1,0 +1,266 @@
+// Model-checker-based interleaving tests for RCQ validation mode.
+//
+// For every proposal interleaving, enumerate ALL validation interleavings
+// and assert: same commit/abort set.  State agreement (hash match) is
+// covered by the ProposeValidateRoundtripTest tier.
+
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "exec_result.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
+#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "model_checker/async.h"
+#include "model_checker/work_queue.h"
+#include "rpc_types.hh"
+#include "transaction.hh"
+#include "types.hh"
+
+namespace hogd {
+
+class RCQInterleavingTest : public ::testing::Test,
+                            public NativeContractTestFramework {
+public:
+  RCQInterleavingTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
+
+protected:
+  static constexpr ContractAddress kAddr = make_contract_address(0);
+
+  // Per-TX state tracked across proposal and validation.
+  struct TxSlot {
+    SignedTransaction tx;
+    bool committed = true;
+    NondeterministicProposalData proposal;
+  };
+
+  void SetUp() override
+  {
+    auto contract_xdr = make_native_contract(0);
+    write_contract(contract_xdr);
+    write_deployment(kAddr, contract_xdr);
+    setup_grant_storage_token(kAddr, 1'000'000'000);
+
+    // Calldata-driven RCQ contract:
+    //   method 0: each calldata byte → one queue entry
+    //   method 1: consume calldata[0] entries (default 1)
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &cd = ctx.handler().get_calldata();
+               auto key = make_storage_key("rcq0");
+               for (uint8_t val : cd) {
+                 auto res = ctx.handler().retrocausal_queue_insert(
+                     key, std::as_bytes(std::span(&val, 1)));
+                 if (!res.has_value())
+                   return res.error().to_invoke_error();
+               }
+               return {};
+             }},
+            {1,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &cd = ctx.handler().get_calldata();
+               uint8_t count = cd.empty() ? 1 : cd[0];
+               auto key = make_storage_key("rcq0");
+               for (uint8_t i = 0; i < count; i++) {
+                 auto res = ctx.handler().retrocausal_queue_consume(key, false);
+                 if (!res.has_value())
+                   return res.error().to_invoke_error();
+               }
+               return {};
+             }},
+        });
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    context_ = std::make_unique<NativeContext>(std::move(contract_map));
+  }
+
+  static SignedTransaction make_tx(uint32_t method,
+                                   std::vector<uint8_t> const &calldata)
+  {
+    return SignedTransaction{
+        .tx = Transaction{
+            .invocation =
+                Invocation{.invoked_address = kAddr,
+                           .entrypoint = entrypoint_from_method_id(method),
+                           .gas_limit = UINT64_MAX,
+                           .calldata =
+                               Calldata(calldata.begin(), calldata.end())}}};
+  }
+
+  static SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
+  {
+    return make_tx(0, values);
+  }
+
+  static SignedTransaction make_consume_tx(uint8_t count)
+  {
+    return make_tx(1, {count});
+  }
+
+  // --- Interleaving infrastructure ---
+
+  template<bool Proposal>
+  void add_tx(model::RunnableActionSet &actions, TxSlot &slot)
+  {
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto *self,
+           TxSlot &s) -> model::Async {
+          co_await set.bg();
+          auto handler = [&]() {
+            if constexpr (Proposal)
+              return self->make_new_system_call_handler(s.tx, *self->context_);
+            else
+              return self->make_new_system_call_handler_validation(
+                  s.tx.tx, *self->context_, s.proposal);
+          }();
+          auto res = handler.root_invoke();
+          if (!res.is_root_success()) {
+            s.committed = false;
+            co_return;
+          }
+          if constexpr (Proposal)
+            s.proposal = handler.get_proposal_data();
+          auto commit_res = handler.try_commit_transaction();
+          if (commit_res != ExecResult::ExecResultOK &&
+              commit_res != ExecResult::ExecResultTxNonDeterministicError) {
+            throw std::runtime_error("unexpected commit error");
+          }
+          if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {
+            s.committed = false;
+          }
+          co_return;
+        },
+        this, slot);
+  }
+
+  void add_proposal_tx(model::RunnableActionSet &actions, TxSlot &slot)
+  {
+    add_tx<true>(actions, slot);
+  }
+
+  void add_validation_tx(model::RunnableActionSet &actions, TxSlot &slot)
+  {
+    add_tx<false>(actions, slot);
+  }
+
+  // Exhaustively enumerate proposal and validation interleavings,
+  // asserting commit/abort agreement for every combination.
+  void check_interleavings(std::vector<TxSlot> slots)
+  {
+    model::WorkQueue wq;
+    while (!wq.done()) {
+      advance_block();
+
+      for (auto &s : slots)
+        s.committed = true;
+      model::RunnableActionSet actions(wq);
+      for (auto &s : slots)
+        add_proposal_tx(actions, s);
+      ASSERT_EQ(actions.run(), model::ActionResult::kOk);
+
+      // Snapshot proposal outcomes before discarding the block.
+      std::vector<bool> proposed;
+      proposed.reserve(slots.size());
+      for (auto const &s : slots)
+        proposed.push_back(s.committed);
+
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+      model::WorkQueue val_wq;
+      while (!val_wq.done()) {
+        // Build validation slots only for committed TXs.
+        std::vector<TxSlot> val_slots;
+        val_slots.reserve(slots.size());
+        for (size_t i = 0; i < slots.size(); i++) {
+          if (proposed[i])
+            val_slots.push_back({slots[i].tx, true, slots[i].proposal});
+        }
+
+        model::RunnableActionSet val_actions(val_wq);
+        for (auto &s : val_slots)
+          add_validation_tx(val_actions, s);
+        ASSERT_EQ(val_actions.run(), model::ActionResult::kOk);
+
+        for (size_t i = 0, vi = 0; i < slots.size(); i++) {
+          if (proposed[i]) {
+            EXPECT_EQ(val_slots[vi].committed, proposed[i])
+                << "Commit/abort disagreement for TX " << i;
+            vi++;
+          }
+        }
+
+        discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+        val_wq.advance_cursor();
+      }
+
+      wq.advance_cursor();
+    }
+  }
+
+  std::unique_ptr<RuntimeContext> context_;
+};
+
+// Two concurrent inserters.  Insert-insert never conflicts (no
+// nondeterministic bits), so both always commit.  Baseline sanity
+// check for the interleaving framework on RCQ.
+TEST_F(RCQInterleavingTest, TwoInserters)
+{
+  check_interleavings({
+      {make_insert_tx({10})},
+      {make_insert_tx({20})},
+  });
+}
+
+// Inserter + concurrent consumer.  Exercises consumed_but_not_inserted
+// reconciliation when validation commits the consumer before its
+// corresponding inserter.
+TEST_F(RCQInterleavingTest, InserterAndConcurrentConsumer)
+{
+  check_interleavings({
+      {make_insert_tx({10})},
+      {make_consume_tx(1)},
+  });
+}
+
+// Two inserters + one consumer.  Multi-source concurrent entry
+// reconciliation across all 3-TX commit orderings.
+TEST_F(RCQInterleavingTest, TwoInsertersOneConsumer)
+{
+  check_interleavings({
+      {make_insert_tx({10})},
+      {make_insert_tx({20})},
+      {make_consume_tx(2)},
+  });
+}
+
+// Same topology as TwoInsertersOneConsumer but with identical entry
+// values.  Targets L13 audit finding: consumed_but_not_inserted must
+// use multiset (not set) semantics to handle duplicate values.
+TEST_F(RCQInterleavingTest, DuplicateEntryValues)
+{
+  check_interleavings({
+      {make_insert_tx({10})},
+      {make_insert_tx({10})},
+      {make_consume_tx(2)},
+  });
+}
+
+} // namespace hogd

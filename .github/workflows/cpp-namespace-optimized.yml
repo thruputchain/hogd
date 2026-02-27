@@ -91,7 +91,6 @@ jobs:
 
   # GCC Debug build + tests
   gcc-debug:
-    needs: format
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: read
@@ -221,7 +220,6 @@ jobs:
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
-    needs: format
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: read
@@ -332,7 +330,6 @@ jobs:
 
   # GCC Release build (parallel with debug builds)
   gcc-release:
-    needs: format
     runs-on: namespace-profile-hogd-linux
     permissions:
       contents: read
