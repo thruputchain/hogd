@@ -472,6 +472,826 @@ TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
   ASSERT_TRUE(handler.abort_transaction().has_value());
 }
 
+// ===================================================================
+// RCQ Validation Mode Tests
+// ===================================================================
+//
+// These tests exercise the proposer/validator pipeline for
+// RetrocausalQueue operations.  The most critical code path is the
+// concurrent-entry observation replay in item_view.cc:326-373 and the
+// consumed_but_not_inserted reconciliation in
+// refcounted_delta_variant.cc:316-360.
+
+// Single TX inserts three entries.  No nondeterministic bits (insert
+// is deterministic).  Validates the basic RCQ-through-validation
+// pipeline.
+TEST_P(ProposeValidateRoundtripTest, RCQInsertRoundtrip)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             for (uint8_t val : {1, 2, 3}) {
+               auto res = ctx.handler().retrocausal_queue_insert(
+                   key, std::as_bytes(std::span(&val, 1)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // === Proposal ===
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx, *native_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    proposal_data = handler.get_proposal_data();
+    // Insert is fully deterministic — no nondeterministic bits expected
+    EXPECT_EQ(proposal_data.nondeterministic_bit_count, 0U);
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // === Validation ===
+  {
+    auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                           proposal_data);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success())
+        << "Validation of RCQ insert should succeed";
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
+// Setup: insert entries in block 1.  Block 2: consume past entries.
+// Past-block consume is deterministic (entries are in the snapshot),
+// so no nondeterministic bits from RCQ.
+TEST_P(ProposeValidateRoundtripTest, RCQConsumePastEntriesRoundtrip)
+{
+  std::vector<uint8_t> consumed_values;
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             for (uint8_t val : {1, 2, 3}) {
+               auto res = ctx.handler().retrocausal_queue_insert(
+                   key, std::as_bytes(std::span(&val, 1)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+             }
+             return {};
+           }},
+          {1, // Consume 2
+           [&consumed_values](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             consumed_values.clear();
+             for (int i = 0; i < 2; i++) {
+               auto res =
+                   ctx.handler().retrocausal_queue_consume(key, false);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 break;
+               }
+               auto const &entry = res.value().value();
+               if (entry.size() == 1) {
+                 consumed_values.push_back(entry[0]);
+               }
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  // Block 1: insert entries {1, 2, 3}
+  {
+    Transaction tx_insert{
+        .invocation = Invocation{.invoked_address = kAddrA,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+    };
+    auto handler = make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  // Block 2: consume 2 entries
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // === Proposal ===
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_consume, *native_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    proposal_data = handler.get_proposal_data();
+    // Past-block consume doesn't produce nondeterministic bits
+    EXPECT_EQ(proposal_data.nondeterministic_bit_count, 0U);
+    EXPECT_EQ(consumed_values, (std::vector<uint8_t>{1, 2}));
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // === Validation ===
+  {
+    auto handler = make_new_system_call_handler_validation(
+        tx_consume, *native_context, proposal_data);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success())
+        << "Validation of past-block consume should succeed";
+    EXPECT_EQ(consumed_values, (std::vector<uint8_t>{1, 2}));
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
+// CRITICAL TEST: Two TXs in same block.  TX_A inserts, TX_B consumes
+// a concurrent entry inserted by TX_A.  This produces nondeterministic
+// bits (entry existence) and queue entry observations.
+TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
+{
+  std::vector<uint8_t> consumed_values;
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert single entry {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 1 entry
+           [&consumed_values](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             consumed_values.clear();
+             auto res = ctx.handler().retrocausal_queue_consume(key, false);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (res.value().has_value()) {
+               auto const &entry = res.value().value();
+               if (entry.size() == 1) {
+                 consumed_values.push_back(entry[0]);
+               }
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // === Proposal: TX_A inserts, commits, then TX_B consumes concurrent ===
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+  {
+    // TX_A: insert {10} and commit
+    auto handler_a =
+        make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    insert_proposal_data = handler_a.get_proposal_data();
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    // TX_B: consume — should see {10} as a concurrent entry
+    auto handler_b =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    consume_proposal_data = handler_b.get_proposal_data();
+
+    // TX_B should have consumed concurrent entry {10}:
+    //   1 nondeterministic bit (entry exists = true)
+    //   1 queue entry observation ({10})
+    EXPECT_EQ(consume_proposal_data.nondeterministic_bit_count, 1U);
+    EXPECT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(), 1U);
+    EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10}));
+
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Capture proposal state for comparison
+  DbTip proposal_tip;
+  if (GetParam() == TestDB::kHogDB) {
+    advance_block();
+    proposal_tip = get_db_tip();
+    // Rewind: discard the committed block so we can re-validate
+    discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  }
+  else {
+    discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  }
+
+  // === Validation: replay both TXs with captured proposal data ===
+  {
+    // TX_A: insert {10} — same as proposal
+    auto handler_a = make_new_system_call_handler_validation(
+        tx_insert, *native_context, insert_proposal_data);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    // TX_B: consume — validation replays: bit=true, observation={10}
+    auto handler_b = make_new_system_call_handler_validation(
+        tx_consume, *native_context, consume_proposal_data);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success())
+        << "Validation of concurrent entry consumption should succeed";
+    EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10}));
+    ASSERT_EQ(handler_b.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Verify state agreement
+  if (GetParam() == TestDB::kHogDB) {
+    advance_block();
+    auto validation_tip = get_db_tip();
+    EXPECT_EQ(proposal_tip.hash, validation_tip.hash)
+        << "Proposal and validation trie root hashes must match";
+  }
+}
+
+// TX tries to consume from a queue where past entries are exhausted
+// and no concurrent entries exist.  The nondeterministic bit is false
+// (no concurrent entry found).
+TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert single entry
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 1;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 2 entries (second will be empty)
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             for (int i = 0; i < 2; i++) {
+               auto res = ctx.handler().retrocausal_queue_consume(key, false);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               // First consume returns entry, second returns empty
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  // Block 1: insert 1 entry
+  {
+    Transaction tx_insert{
+        .invocation = Invocation{.invoked_address = kAddrA,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+    };
+    auto handler = make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  // Block 2: consume 2 entries (only 1 exists)
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // === Proposal ===
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_consume, *native_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    proposal_data = handler.get_proposal_data();
+    // First consume: past block entry (deterministic, no bit)
+    // Second consume: no past entries left, no self entries, tries concurrent
+    //   -> bit=false (no concurrent entry), no observation
+    EXPECT_EQ(proposal_data.nondeterministic_bit_count, 1U);
+    EXPECT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // === Validation ===
+  {
+    auto handler = make_new_system_call_handler_validation(
+        tx_consume, *native_context, proposal_data);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success())
+        << "Validation with bit=false (empty concurrent) should succeed";
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
+// Single TX inserts then consumes its own entries (self-entries via
+// get_next_self_entry, deterministic) plus checks concurrent entries.
+TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
+{
+  std::vector<uint8_t> consumed_values;
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert 2 entries, then consume 3 (2 self + 1 concurrent miss)
+           [&consumed_values](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             consumed_values.clear();
+
+             // Insert {10, 20}
+             for (uint8_t val : {10, 20}) {
+               auto r = ctx.handler().retrocausal_queue_insert(
+                   key, std::as_bytes(std::span(&val, 1)));
+               if (!r.has_value()) {
+                 return r.error().to_invoke_error();
+               }
+             }
+
+             // Consume 3 (2 self-entries + 1 miss on concurrent)
+             for (int i = 0; i < 3; i++) {
+               auto r = ctx.handler().retrocausal_queue_consume(key, false);
+               if (!r.has_value()) {
+                 return r.error().to_invoke_error();
+               }
+               if (r.value().has_value()) {
+                 auto const &entry = r.value().value();
+                 if (entry.size() == 1) {
+                   consumed_values.push_back(entry[0]);
+                 }
+               }
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // === Proposal ===
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx, *native_context);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    proposal_data = handler.get_proposal_data();
+    // First 2 consumes hit self-entries (deterministic)
+    // Third consume: no past, no self, tries concurrent -> bit=false
+    EXPECT_EQ(proposal_data.nondeterministic_bit_count, 1U);
+    EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10, 20}));
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // === Validation ===
+  {
+    auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                           proposal_data);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success())
+        << "Validation of self-consume + concurrent miss should succeed";
+    EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10, 20}));
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  }
+}
+
+// ===================================================================
+// Adversarial / Negative RCQ Validation Tests
+// ===================================================================
+
+// Tamper: add an extra, unconsumed queue entry observation.
+// check_all_consumed() should detect the extra observation.
+TEST_P(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 1
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             auto res = ctx.handler().retrocausal_queue_consume(key, false);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal: insert + commit, then consume + capture
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+  {
+    auto handler_a =
+        make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    insert_proposal_data = handler_a.get_proposal_data();
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    consume_proposal_data = handler_b.get_proposal_data();
+    ASSERT_TRUE(handler_b.abort_transaction().has_value());
+  }
+
+  // Tamper: add an extra observation
+  auto tampered = consume_proposal_data;
+  QueueEntry extra_entry;
+  extra_entry.push_back(99);
+  tampered.observed_queue_entry_sequence.push_back(extra_entry);
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Insert TX first
+  {
+    auto handler_a = make_new_system_call_handler_validation(
+        tx_insert, *native_context, insert_proposal_data);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Consume TX with tampered data — should fail validation
+  {
+    auto handler_b = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(tampered));
+    auto res = handler_b.root_invoke();
+    // check_all_consumed() should detect extra unconsumed observation
+    EXPECT_FALSE(res.is_root_success())
+        << "Extra queue entry observations should cause validation failure";
+    ASSERT_TRUE(handler_b.abort_transaction().has_value());
+  }
+}
+
+// Tamper: remove the queue entry observation.
+// consume_queue_entry_observation returns nullopt → kSystemValidationFailure.
+TEST_P(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 1
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             auto res = ctx.handler().retrocausal_queue_consume(key, false);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+  {
+    auto handler_a =
+        make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    insert_proposal_data = handler_a.get_proposal_data();
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    consume_proposal_data = handler_b.get_proposal_data();
+    ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_TRUE(handler_b.abort_transaction().has_value());
+  }
+
+  // Tamper: remove the observation (but keep the bit saying entry exists)
+  auto tampered = consume_proposal_data;
+  tampered.observed_queue_entry_sequence.clear();
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler_a = make_new_system_call_handler_validation(
+        tx_insert, *native_context, insert_proposal_data);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  // Validation should fail — bit says entry exists but no observation to consume
+  {
+    auto handler_b = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(tampered));
+    auto res = handler_b.root_invoke();
+    EXPECT_FALSE(res.is_root_success())
+        << "Missing queue entry observation should cause validation failure";
+    ASSERT_TRUE(handler_b.abort_transaction().has_value());
+  }
+}
+
+// Tamper: flip existence bit from true to false.
+// Validator skips observation consumption → unconsumed observation →
+// check_all_consumed() fails.
+TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 1
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             auto res = ctx.handler().retrocausal_queue_consume(key, false);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  Transaction tx_insert{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal
+  NondeterministicProposalData insert_proposal_data;
+  NondeterministicProposalData consume_proposal_data;
+  {
+    auto handler_a =
+        make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    insert_proposal_data = handler_a.get_proposal_data();
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+
+    auto handler_b =
+        make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler_b.root_invoke().is_root_success());
+    consume_proposal_data = handler_b.get_proposal_data();
+    ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count, 1U);
+    ASSERT_TRUE(handler_b.abort_transaction().has_value());
+  }
+
+  // Tamper: flip bit 0 from true to false
+  auto tampered = consume_proposal_data;
+  tampered.nondeterministic_bits[0] ^= 1; // flip bit 0
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler_a = make_new_system_call_handler_validation(
+        tx_insert, *native_context, insert_proposal_data);
+    ASSERT_TRUE(handler_a.root_invoke().is_root_success());
+    ASSERT_EQ(handler_a.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  {
+    auto handler_b = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(tampered));
+    auto res = handler_b.root_invoke();
+    // bit=false → validator returns nullopt, skips observation
+    // → unconsumed observation → check_all_consumed() fails
+    EXPECT_FALSE(res.is_root_success())
+        << "Flipped existence bit (true→false) should cause validation failure";
+    ASSERT_TRUE(handler_b.abort_transaction().has_value());
+  }
+}
+
+// Tamper: flip existence bit from false to true.
+// Validator tries to consume an observation that doesn't exist.
+TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, // Insert {10}
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             uint8_t val = 10;
+             auto res = ctx.handler().retrocausal_queue_insert(
+                 key, std::as_bytes(std::span(&val, 1)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             return {};
+           }},
+          {1, // Consume 2 entries (1 past + 1 concurrent miss)
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("rcq0");
+             for (int i = 0; i < 2; i++) {
+               auto res = ctx.handler().retrocausal_queue_consume(key, false);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  // Block 1: insert 1 entry
+  {
+    Transaction tx_insert{
+        .invocation = Invocation{.invoked_address = kAddrA,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+    };
+    auto handler = make_new_system_call_handler(tx_insert, *native_context);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  // Block 2: consume 2 entries (1 past, then concurrent=empty)
+  Transaction tx_consume{
+      .invocation = Invocation{.invoked_address = kAddrA,
+                               .entrypoint = entrypoint_from_method_id(1),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+  };
+
+  // Proposal
+  NondeterministicProposalData proposal_data;
+  {
+    auto handler = make_new_system_call_handler(tx_consume, *native_context);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    proposal_data = handler.get_proposal_data();
+    // 1 bit (false — no concurrent entry), 0 observations
+    ASSERT_EQ(proposal_data.nondeterministic_bit_count, 1U);
+    ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
+    ASSERT_TRUE(handler.abort_transaction().has_value());
+  }
+
+  // Tamper: flip bit 0 from false to true
+  auto tampered = proposal_data;
+  tampered.nondeterministic_bits[0] ^= 1; // now true
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation: bit=true → tries to consume observation, but none exists
+  {
+    auto handler = make_new_system_call_handler_validation(
+        tx_consume, *native_context, std::move(tampered));
+    auto res = handler.root_invoke();
+    EXPECT_FALSE(res.is_root_success())
+        << "Flipped existence bit (false→true) with no observation should "
+           "cause validation failure";
+    ASSERT_TRUE(handler.abort_transaction().has_value());
+  }
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
