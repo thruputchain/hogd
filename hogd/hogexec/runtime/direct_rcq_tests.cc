@@ -2509,13 +2509,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyOnFreshKeyNoMetadata)
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   auto r = tx.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
+  ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
 // StressExclusiveRCQThenNormalModifySameBlockDowngrade
@@ -2596,26 +2590,9 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
                make_rcq_consume_insert_delta(0, 1, {}, {make_rcq_entry({10})}),
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  // This constitutes invalid input from the executor
   auto r = tx.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
-
-  // Block 2: Normal consume to see if corrupted state causes issues.
-  auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_rcq_consume_delta(1, 0, {}),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-  r = tx2.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx2.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_FALSE(r.has_value()); // invalid input guard
   advance_block();
 }
 
