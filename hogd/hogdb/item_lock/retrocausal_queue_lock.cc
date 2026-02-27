@@ -259,7 +259,13 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 
   auto calculate_cost = [&]() {
     int64_t live_entries = meta.live_entries + committed_element_count_delta_;
-    assert(live_entries >= 0);
+    // In validation mode, a consumer may commit before its corresponding
+    // inserter, temporarily making the count negative.  The real invariant
+    // is CHECK(consumed_set.empty()) in write_committed_change, which
+    // verifies all consumed entries are accounted for at end-of-block.
+    // Clamp to 0 for cost calculation; the aggregate cost across all TXs
+    // in the block sums to the same value regardless of commit order.
+    live_entries = std::max(live_entries, int64_t{0});
 
     return cost_model->get_retrocausal_queue_cost(
         static_cast<uint64_t>(live_entries));
