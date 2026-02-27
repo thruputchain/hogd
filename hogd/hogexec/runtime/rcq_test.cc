@@ -295,9 +295,9 @@ TEST_P(RCQTest, InsertThenConsume)
   advance_block();
 
   // The RCQ metadata item and one RCQ block with one RCQ entry remain.
-  ASSERT_TRUE(check_balance(
-      initial_balance -
-      get_default_cost_model()->get_retrocausal_queue_cost(1, 1)));
+  ASSERT_TRUE(
+      check_balance(initial_balance -
+                    get_default_cost_model()->get_retrocausal_queue_cost(1)));
 
   ASSERT_TRUE(consume({3}));
 
@@ -328,9 +328,9 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
   advance_block();
 
   // The RCQ metadata item and one RCQ block with one RCQ entry remain.
-  ASSERT_TRUE(check_balance(
-      initial_balance -
-      get_default_cost_model()->get_retrocausal_queue_cost(1, 1)));
+  ASSERT_TRUE(
+      check_balance(initial_balance -
+                    get_default_cost_model()->get_retrocausal_queue_cost(1)));
 
   ASSERT_TRUE(consume({3}));
 

@@ -38,7 +38,7 @@ namespace hogd {
 
 namespace {
 
-const StorageCostModel cost_model(12000, 2, 5, 100, 7, 0);
+const StorageCostModel cost_model(12000, 2, 5, 7, 0);
 
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
@@ -765,7 +765,7 @@ TEST_P(DeltaManagerTest, RCQInsertThenConsume)
                          .added_entries = {make_test_rcq_entry(1)}});
   auto lk = item.try_reserve(insert_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk);
-  EXPECT_EQ(lk->locked_tokens_, cost_model.get_retrocausal_queue_cost(1, 1));
+  EXPECT_EQ(lk->locked_tokens_, cost_model.get_retrocausal_queue_cost(1));
   item.commit(insert_delta, *lk);
 
   // try consume one entry
@@ -783,8 +783,7 @@ TEST_P(DeltaManagerTest, RCQInsertThenConsume)
   EXPECT_EQ(lk2->locked_tokens_, 0);
   item.commit(consume_delta, *lk2);
 
-  expect_final(item, RetrocausalQueueStats{.active_block_count = 0,
-                                           .active_size = 0});
+  expect_final(item, RetrocausalQueueStats{.active_size = 0});
 }
 
 TEST_P(DeltaManagerTest, RCQConsumeThenInsert)
@@ -828,8 +827,7 @@ TEST_P(DeltaManagerTest, RCQConsumeThenInsert)
 
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
-  expect_final(item, RetrocausalQueueStats{.active_block_count = 0,
-                                           .active_size = 0});
+  expect_final(item, RetrocausalQueueStats{.active_size = 0});
 }
 
 TEST_P(DeltaManagerTest, NNIntInterleavings)
@@ -1130,8 +1128,7 @@ TEST_P(DeltaManagerTest, RCQAccountingEdgeCase)
                      BlockExecutionMode::kBlockExecutionModeProposal;
             }
 
-            if (net_storage_cost !=
-                cost_model.get_retrocausal_queue_cost(1, 1)) {
+            if (net_storage_cost != cost_model.get_retrocausal_queue_cost(1)) {
               return false;
             }
 
@@ -1143,8 +1140,7 @@ TEST_P(DeltaManagerTest, RCQAccountingEdgeCase)
 
             auto const &queue = snapshot->queue();
             return queue.get_active_stats() ==
-                   RetrocausalQueueStats{.active_block_count = 1,
-                                         .active_size = 1};
+                   RetrocausalQueueStats{.active_size = 1};
           });
 
   EXPECT_TRUE(pool.run_test(experiment));
@@ -1165,7 +1161,7 @@ TEST_P(DeltaManagerTest, BytestringCostUpgrade)
   InvalidStateFlag invalid_state_flag;
 
   // higher cost per byte and lower cost per item
-  StorageCostModel cost_model_2(10000, 3, 1, 1, 5, 0);
+  StorageCostModel cost_model_2(10000, 3, 1, 5, 0);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =
@@ -1302,7 +1298,7 @@ TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
 
   // higher cost per item
 
-  StorageCostModel cost_model_2(14000, 2, 1, 1, 5, 0);
+  StorageCostModel cost_model_2(14000, 2, 1, 5, 0);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =

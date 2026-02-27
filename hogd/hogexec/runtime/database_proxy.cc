@@ -137,20 +137,6 @@ to_system_error_code(auto err, auto &&f)
   }();
 }
 
-template<auto NullValue>
-constexpr auto
-remove_syserr_from_call(auto syserr, auto &&f)
-{
-  using overall_ret_t =
-      decltype(to_system_error_code(syserr.value(), std::forward(f)));
-  if (!syserr.has_value()) [[unlikely]] {
-    return overall_ret_t{syserr.error()};
-  }
-
-  auto err = syserr.value();
-  return to_system_error_code<NullValue>(syserr, std::forward(f));
-}
-
 } // namespace
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)

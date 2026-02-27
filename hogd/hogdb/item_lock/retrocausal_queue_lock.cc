@@ -92,8 +92,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       return r.error();
     }
     auto &meta = **r;
-    return ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries,
-                                                      live_block_count(meta));
+    return ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries);
   }
 
   // This is either a new change or a modification to an existing change.
@@ -211,24 +210,14 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     after->consumed_past_entries_ = consumed_entries;
   }
 
-  // Compute number of blocks added by this transaction. 0 if no inserts,
-  // otherwise all new insertions go into the same block.
-  // Consume may not free up any blocks, so conservatively we can just ignore
-  // consumes for the initial storage cost adjustments. Later we could be more
-  // generous. By looking at HogDB we could find the blocks that would be freed
-  // by the consume and adjust the storage cost accordingly. Instead,
-  // transactions that consume won't get access to that returned storage cost
-  // until they commit. Hence: we don't need to account for consume in the
-  // return cost bound.
-  const uint64_t added_blocks = delta.insert.added_entries.empty() ? 0 : 1;
-
+  // Compute the absolute cost for the new entry count. Consumes are not
+  // accounted for here; transactions that consume won't see the returned
+  // storage cost until they commit.
   const size_t new_live_entries =
       meta.live_entries + delta.insert.added_entries.size();
-  const uint64_t new_live_blocks = live_block_count(meta) + added_blocks;
 
   int128_t absolute_cost =
-      ctx.cost_model->get_retrocausal_queue_cost(new_live_entries,
-                                                 new_live_blocks);
+      ctx.cost_model->get_retrocausal_queue_cost(new_live_entries);
 
   // Pessimistic reserve: when inserting into a non-empty RCQ, we must reserve
   // enough to cover the case where a concurrent consume empties the queue
@@ -243,12 +232,11 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   if (!delta.insert.added_entries.empty() && meta.live_entries > 0) {
     // Compute snapshot cost (cost at block start)
     int128_t snapshot_cost =
-        ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries,
-                                                   live_block_count(meta));
+        ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries);
 
     // Cost if the RCQ were empty and we're adding only our entries
     int128_t cost_if_empty = ctx.cost_model->get_retrocausal_queue_cost(
-        delta.insert.added_entries.size(), added_blocks);
+        delta.insert.added_entries.size());
 
     // Ensure absolute_cost is at least snapshot + cost_if_empty
     absolute_cost = std::max(absolute_cost, snapshot_cost + cost_if_empty);
@@ -270,28 +258,11 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   auto &meta = **r;
 
   auto calculate_cost = [&]() {
-    uint64_t head_block =
-        consume_delta_
-            ? consume_delta_->past_block_consume.max_fully_consumed_block_number
-            : meta.consume_state.max_fully_consumed_block_number;
-    uint64_t blocks = (meta.max_live_block_num > head_block)
-                          ? (meta.max_live_block_num - head_block)
-                          : 0;
-
-    // Only add a block if entries will remain after filtering consumed ones.
-    // This matches the logic in write_committed_change which only writes a
-    // new block if remaining_entries is non-empty.
-    size_t consumed_from_current_block =
-        consume_delta_ ? consume_delta_->current_block_consumed.size() : 0;
-    if (added_entries_.size() > consumed_from_current_block)
-      blocks += 1;
-
     int64_t live_entries = meta.live_entries + committed_element_count_delta_;
     assert(live_entries >= 0);
 
-    return cost_model->get_retrocausal_queue_cost(static_cast<uint64_t>(
-                                                      live_entries),
-                                                  blocks);
+    return cost_model->get_retrocausal_queue_cost(
+        static_cast<uint64_t>(live_entries));
   };
 
   // If no delta has been applied to this lock, use the snapshot cost.

@@ -139,8 +139,7 @@ StorageItemWrapper::RetrocausalQueueWrapper::storage_cost(
     StorageCostModel const *cost_model) const
 {
   auto rcq_stats = queue_.get_active_stats();
-  return cost_model->get_retrocausal_queue_cost(rcq_stats.active_size,
-                                                rcq_stats.active_block_count);
+  return cost_model->get_retrocausal_queue_cost(rcq_stats.active_size);
 }
 
 int128_t

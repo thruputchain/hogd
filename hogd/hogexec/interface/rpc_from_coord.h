@@ -35,6 +35,11 @@ public:
 
   void init(IntroExecResult &&exec_result, size_t n_exec_threads)
   {
+    if (exec_result.exec_id >= std::numeric_limits<uint16_t>::max())
+        [[unlikely]] {
+      panic("ExecutorMempoolRpc: exec_id is too large");
+      return;
+    }
     self_executor_id_ = exec_result.exec_id;
 
     DatabaseIdentifier identifier{ShardedDB(exec_result)};
@@ -97,7 +102,7 @@ private:
   // Allocates a contiguous block of transaction IDs.
   // Returns the first transaction ID in the block
   // (so i.e. the allocated ids are [first_id, first_id + count - 1] inclusive)
-  TransactionID allocate_tx_ids(size_t count);
+  TransactionID allocate_tx_ids(uint32_t count);
 
   ATTRIBUTE_ALWAYS_INLINE bool initialize_check()
   {
@@ -114,7 +119,7 @@ private:
     uint64_t limit_ = 0;
     std::atomic<uint64_t> *base_pool_ = nullptr;
 
-    uint64_t allocate(size_t count)
+    uint64_t allocate(uint32_t count)
     {
       assert(base_pool_ != nullptr);
       if (value_ + count > limit_) {

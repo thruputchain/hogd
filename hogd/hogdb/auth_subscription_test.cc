@@ -47,7 +47,7 @@ make_test_pk_config(uint8_t value, Weight weight = 100)
 }
 
 constexpr StorageCostModel kTestCostModel =
-    StorageCostModel(12000, 1, 1, 1, 1, 1234);
+    StorageCostModel(12000, 1, 1, 1, 1234);
 } // namespace
 
 class AuthSubscriptionTest : public testing::Test {

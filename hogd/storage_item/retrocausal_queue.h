@@ -13,7 +13,6 @@ namespace hogd {
 // Stats about the retrocausal queue
 // used when computing storage costs
 struct RetrocausalQueueStats {
-  uint64_t active_block_count;
   int64_t active_size;
 
   bool operator==(const RetrocausalQueueStats &) const = default;

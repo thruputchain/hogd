@@ -538,7 +538,6 @@ TEST(TestBindingsTest, CostModelRoundtrip)
       .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{3}),
       .auth_per_key_cost = ::hogd::to_xdr(int128_t{55}),
       .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{11}),
-      .rcq_cost_per_block = ::hogd::to_xdr(int128_t{13}),
       .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{17}),
       .balance_cost = ::hogd::to_xdr(int128_t{9999}),
   };

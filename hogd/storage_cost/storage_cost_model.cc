@@ -14,14 +14,12 @@ StorageCostModel::get_bytestring_cost(size_t bytestring_len) const
 }
 
 int128_t
-StorageCostModel::get_retrocausal_queue_cost(int64_t active_queue_size,
-                                             uint64_t active_block_count) const
+StorageCostModel::get_retrocausal_queue_cost(int64_t active_queue_size) const
 {
-  if (active_queue_size == 0 && active_block_count == 0) {
+  if (active_queue_size == 0) {
     return 0;
   }
-  return kBaseItemCost + (active_queue_size * kRCQCostPerEntry) +
-         (active_block_count * kRCQCostPerBlock);
+  return kBaseItemCost + (active_queue_size * kRCQCostPerEntry);
 }
 
 int128_t
@@ -43,7 +41,6 @@ StorageCostModel::to_xdr() const
           ::hogd::to_xdr(kContractDeploymentCostPerByte),
       .auth_per_key_cost = ::hogd::to_xdr(kAuthPerKeyCost),
       .rcq_cost_per_entry = ::hogd::to_xdr(kRCQCostPerEntry),
-      .rcq_cost_per_block = ::hogd::to_xdr(kRCQCostPerBlock),
       .replay_cache_cost_per_entry = ::hogd::to_xdr(kReplayCacheCostPerEntry),
       .balance_cost = ::hogd::to_xdr(kBalanceCost),
   };

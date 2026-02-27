@@ -424,6 +424,24 @@ set_syscall_trace_inputs(Target &target, std::tuple<Args...> const &parsed_args)
   }(std::make_index_sequence<std::tuple_size_v<Target>>{});
 }
 
+template<typename T>
+void
+disarm_output(T &output)
+{
+  if constexpr (requires { output.disarm(); }) {
+    output.disarm();
+  }
+}
+
+template<typename... Args>
+void
+disarm_outputs(std::tuple<Args...> &args)
+{
+  [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+    (disarm_output(std::get<Is>(args)), ...);
+  }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
+}
+
 // This logic -- validating all of the syscall inputs, calling the inner
 // syscall, logging, read-only checks, and returning the result -- is common to
 // both the regular and mock syscall handlers.  This is split out from
@@ -452,6 +470,7 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
       if (handler.is_read_only()) {
         trace("Syscall {} is not read-only, but called in read-only mode",
               kSyscall);
+        disarm_outputs(args);
         return {HostFnStatus<SyscallErrorCode>{
                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
                 WrappedGasAmount{0}};
@@ -465,6 +484,7 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
       if (auto *stats = handler.get_transaction_stats()) {
         stats->syscall_fault_count++;
       }
+      disarm_outputs(args);
       return kFaultResult;
     }
 

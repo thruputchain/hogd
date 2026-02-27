@@ -1,6 +1,7 @@
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 
 #include <cassert>
+#include <limits>
 #include <memory>
 
 #include "exec_result.hh"
@@ -81,6 +82,7 @@ ExecutorMempoolRpc::executorsched_propose_batch(
                                          ExecResult::ExecResultSystemError));
   }
 
+  CHECK(signed_txs.size() <= std::numeric_limits<uint32_t>::max());
   auto r = co_await ctx->get().propose_transaction_batch(
       signed_txs, allocate_tx_ids(signed_txs.size()));
   co_await release_context(block_id, ctx);
@@ -97,6 +99,7 @@ ExecutorMempoolRpc::executorsched_validate_batch(
                                       ExecResult::ExecResultSystemError);
   }
 
+  CHECK(proposed_txs.size() <= std::numeric_limits<uint32_t>::max());
   auto r = ctx->get().validate_transaction_batch(proposed_txs,
                                                  allocate_tx_ids(
                                                      proposed_txs.size()));
@@ -132,14 +135,14 @@ ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
 }
 
 TransactionID
-ExecutorMempoolRpc::allocate_tx_ids(size_t count)
+ExecutorMempoolRpc::allocate_tx_ids(uint32_t count)
 {
   auto &allocator = *tx_id_allocator_;
   if (allocator.base_pool_ == nullptr) [[unlikely]] {
     allocator.base_pool_ = &base_alloc_pool_;
   }
   uint64_t base = allocator.allocate(count);
-  assert(base + count - 1 < uint64_t{1} << 48); // another executor's id block
+  CHECK(base + count <= uint64_t{1} << 48); // another executor's id block
   return TransactionID{base + (uint64_t{self_executor_id_} << 48)};
 }
 

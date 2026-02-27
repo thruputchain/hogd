@@ -79,7 +79,7 @@ TEST(RetrocausalQueue, ClearSeveralBlocks)
 TEST(RetrocausalQueue, CostCountingBasic)
 {
   RetrocausalQueue queue(0);
-  ASSERT_EQ(queue.get_active_stats(), (RetrocausalQueueStats{0, 0}));
+  ASSERT_EQ(queue.get_active_stats(), (RetrocausalQueueStats{0}));
 
   RetrocausalQueue queue2(
       queue,
@@ -92,7 +92,7 @@ TEST(RetrocausalQueue, CostCountingBasic)
                                         make_test_queue_entry(6)},
                             .block_number = 1});
 
-  ASSERT_EQ(queue2.get_active_stats(), (RetrocausalQueueStats{1, 4}));
+  ASSERT_EQ(queue2.get_active_stats(), (RetrocausalQueueStats{4}));
 
   RetrocausalQueue queue3(
       queue2,
@@ -104,22 +104,22 @@ TEST(RetrocausalQueue, CostCountingBasic)
                                         make_test_queue_entry(9)},
                             .block_number = 2});
 
-  ASSERT_EQ(queue3.get_active_stats(), (RetrocausalQueueStats{2, 7}));
+  ASSERT_EQ(queue3.get_active_stats(), (RetrocausalQueueStats{7}));
 
   ASSERT_EQ(
       queue3.get_stats_after_consume(RetrocausalQueuePastBlockConsumeDelta{
           .max_fully_consumed_block_number = 1, .partial_consumed_number = 1}),
-      (RetrocausalQueueStats{.active_block_count = 1, .active_size = 2}));
+      (RetrocausalQueueStats{.active_size = 2}));
 
   ASSERT_EQ(
       queue3.get_stats_after_consume(RetrocausalQueuePastBlockConsumeDelta{
           .max_fully_consumed_block_number = 2, .partial_consumed_number = 0}),
-      (RetrocausalQueueStats{.active_block_count = 0, .active_size = 0}));
+      (RetrocausalQueueStats{.active_size = 0}));
 
   ASSERT_EQ(
       queue3.get_stats_after_consume(RetrocausalQueuePastBlockConsumeDelta{
           .max_fully_consumed_block_number = 0, .partial_consumed_number = 2}),
-      (RetrocausalQueueStats{.active_block_count = 2, .active_size = 5}));
+      (RetrocausalQueueStats{.active_size = 5}));
 }
 
 } // namespace hogd
