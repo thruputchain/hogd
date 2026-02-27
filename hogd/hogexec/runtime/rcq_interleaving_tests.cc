@@ -93,48 +93,56 @@ protected:
     context_ = std::make_unique<NativeContext>(std::move(contract_map));
   }
 
-  SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
+  SignedTransaction make_tx(uint32_t method,
+                           std::vector<uint8_t> const &calldata)
   {
     return SignedTransaction{
         .tx = Transaction{
             .invocation = Invocation{
                 .invoked_address = kAddr,
-                .entrypoint = entrypoint_from_method_id(0),
+                .entrypoint = entrypoint_from_method_id(method),
                 .gas_limit = UINT64_MAX,
-                .calldata = Calldata(values.begin(), values.end())}}};
+                .calldata = Calldata(calldata.begin(), calldata.end())}}};
+  }
+
+  SignedTransaction make_insert_tx(std::vector<uint8_t> const &values)
+  {
+    return make_tx(0, values);
   }
 
   SignedTransaction make_consume_tx(uint8_t count)
   {
-    return SignedTransaction{
-        .tx = Transaction{
-            .invocation = Invocation{
-                .invoked_address = kAddr,
-                .entrypoint = entrypoint_from_method_id(1),
-                .gas_limit = UINT64_MAX,
-                .calldata = Calldata({count})}}};
+    return make_tx(1, {count});
   }
 
   // --- Interleaving infrastructure ---
 
-  void add_proposal_tx(model::RunnableActionSet &actions, TxSlot &slot)
+  template <bool Proposal>
+  void add_tx(model::RunnableActionSet &actions, TxSlot &slot)
   {
     actions.add_action(
         [](model::RunnableActionSet &set, auto *self,
            TxSlot &s) -> model::Async {
           co_await set.bg();
-          auto handler =
-              self->make_new_system_call_handler(s.tx, *self->context_);
+          auto handler = [&]() {
+            if constexpr (Proposal)
+              return self->make_new_system_call_handler(
+                  s.tx, *self->context_);
+            else
+              return self->make_new_system_call_handler_validation(
+                  s.tx.tx, *self->context_, s.proposal);
+          }();
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
             s.committed = false;
             co_return;
           }
-          s.proposal = handler.get_proposal_data();
+          if constexpr (Proposal)
+            s.proposal = handler.get_proposal_data();
           auto commit_res = handler.try_commit_transaction();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("unexpected proposal commit error");
+            throw std::runtime_error("unexpected commit error");
           }
           if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {
             s.committed = false;
@@ -144,30 +152,14 @@ protected:
         this, slot);
   }
 
+  void add_proposal_tx(model::RunnableActionSet &actions, TxSlot &slot)
+  {
+    add_tx<true>(actions, slot);
+  }
+
   void add_validation_tx(model::RunnableActionSet &actions, TxSlot &slot)
   {
-    actions.add_action(
-        [](model::RunnableActionSet &set, auto *self,
-           TxSlot &s) -> model::Async {
-          co_await set.bg();
-          auto handler = self->make_new_system_call_handler_validation(
-              s.tx.tx, *self->context_, s.proposal);
-          auto res = handler.root_invoke();
-          if (!res.is_root_success()) {
-            s.committed = false;
-            co_return;
-          }
-          auto commit_res = handler.try_commit_transaction();
-          if (commit_res != ExecResult::ExecResultOK &&
-              commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("unexpected validation commit error");
-          }
-          if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {
-            s.committed = false;
-          }
-          co_return;
-        },
-        this, slot);
+    add_tx<false>(actions, slot);
   }
 
   // Exhaustively enumerate proposal and validation interleavings,
