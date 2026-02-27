@@ -135,6 +135,10 @@ public:
     if (received_genesis_block_.load(std::memory_order_acquire)) {
       ret = SchedulerGetTipResult(SchedulerGetTipOutcome::SchedulerGetTipOK);
       ret.db_tip() = last_committed_block_;
+      info("schedcoord_get_tip going to return id {} height {} block_hash {} "
+           "db_hash {}",
+           last_committed_block_.id, last_committed_block_.height,
+           last_committed_block_.block_hash, last_committed_block_.db_hash);
     }
     {
       DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
@@ -168,7 +172,7 @@ public:
             genesis_configuration);
     last_committed_block_ = {.height = 0,
                              .block_hash = sha256(genesis_configuration),
-                             .db_hash = {},
+                             .db_hash = sha256(genesis_configuration),
                              .id = generate_block_id()};
     received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;
