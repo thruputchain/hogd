@@ -2317,13 +2317,7 @@ TEST_F(DirectRCQTests, StressConsumeAfterFullConsumeAndReinsertSameBlock)
   tx3.add_delta(key, make_rcq_consume_delta(2, 5, {}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx3.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx3.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
-  advance_block();
+  ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
 // StressExclusiveRCQWithVeryLargePartialConsume
@@ -2349,13 +2343,7 @@ TEST_F(DirectRCQTests, StressExclusiveRCQWithVeryLargePartialConsume)
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
+  ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
 // StressExclusiveConsumeBlockBeyondMaxLiveOnExistingRCQ
@@ -2381,13 +2369,9 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeBlockBeyondMaxLiveOnExistingRCQ)
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
+
+  // invalid input guard
+  ASSERT_FALSE(r.has_value());
 }
 
 // Crashes at invoke_tx.cc:195 (site #6): cost mismatch from exclusive
@@ -2425,34 +2409,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyPartialGreaterThanBlockSize)
                                      make_rcq_entry({50})}),
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx2.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx2.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  advance_block();
-
-  // Block 3: Consume with max_fully_consumed=1 (fully consume block 1).
-  // old_consume = {max_fully_consumed=0, partial=3}.
-  // new_consume = {max_fully_consumed=1, partial=0}.
-  // Cross-block: first_block_num = 1.
-  // consumed_entries = (block1.entries.size() - old.partial) = (2 - 3)
-  // UNDERFLOW! 2 - 3 wraps to huge value (size_t = uint64_t).
-  // consumed_past_entries_ = huge value.
-  // commit_change: element_delta = 0 - huge = massively negative.
-  // live_entries = 4 + massively_negative -> could wrap or go negative.
-  // assert(live_entries >= 0) fires if int64_t, or wraps if uint64_t.
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-  r = tx3.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx3.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_FALSE(r.has_value()); // invalid input guard
   advance_block();
 }
 
@@ -2478,16 +2435,6 @@ TEST_F(DirectRCQTests, StressExclusivePartialOverconsumeFollowedByFullConsume)
   advance_block();
 
   // Block 2: Exclusive consume_insert with partial=5 (overconsume by 3).
-  // ExclusiveLock ignores consume. At commit, downgrade:
-  // consumed_entries = 5 - 0 = 5. element_delta = 3 - 5 = -2.
-  // live_entries = 2 + (-2) = 0. ASSERT fires at 262.
-  //
-  // Wait, that crashes at site #4. We need live_entries to stay >= 0.
-  // Need inserts >= consumed. Let's insert 8, consume partial=5.
-  // element_delta = 8 - 5 = 3. live_entries = 2 + 3 = 5. OK.
-  // Metadata: consume_state={max_fully_consumed=0, partial=5},
-  // max_live_block_num=2, live_entries=5.
-  // Block 1 still has only 2 entries!
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(
       key,
@@ -2499,32 +2446,7 @@ TEST_F(DirectRCQTests, StressExclusivePartialOverconsumeFollowedByFullConsume)
                                      make_rcq_entry({80})}),
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx2.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx2.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  advance_block();
-
-  // Block 3: Normal consume fully consuming block 1.
-  // old_consume = {max_fully_consumed=0, partial=5}.
-  // new_consume = {max_fully_consumed=1, partial=0}.
-  // Cross-block: first_block_num = 1.
-  // consumed_entries = (block1.entries.size(2) - old.partial(5))
-  // = 2 - 5 -> size_t UNDERFLOW -> huge value!
-  // This is a NEW crash path: the underflow at line 194-195.
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-  r = tx3.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx3.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
-  advance_block();
+  ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
 // Crashes at invoke_tx.cc:195 (site #6): same-block consume after exclusive
@@ -2561,34 +2483,8 @@ TEST_F(DirectRCQTests,
                                      make_rcq_entry({80})}),
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx2.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx2.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  advance_block();
-
-  // Block 3: Normal consume with partial=4 (going BACKWARD from 5 to 4).
-  // Same-block: new.partial(4) - old.partial(5) -> uint32_t underflow.
-  // This is similar to bug #12 but triggered by corrupted metadata
-  // from the exclusive overconsume, not by a direct backward partial.
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_rcq_consume_delta(0, 4, {}),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-  r = tx3.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx3.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
-  advance_block();
+  ASSERT_FALSE(r.has_value()); // invalid input guard
 }
-
-// ============================================================================
-// Round 12: New attack vectors
-// ============================================================================
 
 // StressExclusiveConsumeOnlyOnFreshKeyNoMetadata
 //
