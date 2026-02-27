@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <mutex>
 #include <optional>
 #include <set>
