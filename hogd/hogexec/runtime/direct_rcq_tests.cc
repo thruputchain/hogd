@@ -2623,34 +2623,6 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
 }
 
 // StressExclusiveOverconsumePartialThenInsertOnlyNextBlock
-//
-// Target: Corrupt metadata via exclusive overconsume, then trigger unexpected
-//         behavior in next block's insert-only operation.
-//
-// Block 1: Insert 2 entries.
-// Block 2: Exclusive consume_insert: partial=5 (overconsume by 3) + insert 8.
-//   ExclusiveLock bypasses partial check. At commit:
-//   consumed_entries = 5. element_delta = 8 - 5 = 3. live = 2+3 = 5.
-//   Persisted metadata: consume_state={max_fully_consumed=0, partial=5},
-//   max_live_block_num=2, live_entries=5.
-//   Block 1 has only 2 entries. This is corrupted state.
-//
-// Block 3: Insert-only (no consume). Normal path.
-//   get_meta returns corrupted metadata. No consume delta -> skip consume
-//   paths. Just insert. Should work, but the live_entries count is wrong.
-//   live_entries=5+1=6. But real entries = 2+8+1=11 (block1=2, block2=8,
-//   block3=1). live says 6. This is a silent corruption, not a crash.
-//
-// Block 4: Normal consume max_fully_consumed=1.
-//   old_consume = {0, 5}. new_consume = {1, 0}.
-//   Cross-block: first_block_num = 0+1 = 1.
-//   consumed_entries = (block1.entries.size(2) - old.partial(5))
-//   = 2 - 5 -> SIZE_T UNDERFLOW -> huge value!
-//   consumed_past_entries_ = huge. element_delta = 0 - huge = massively
-//   negative. live = 6 + massively_negative -> negative. assert(live>=0) at 262
-//   fires. OR: cost computation overflows, and CHECK_LE at invoke_tx.cc:195
-//   fires first.
-//
 TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
 {
   GTEST_SKIP() << "Crashes at invoke_tx.cc:195 (site #6)";
@@ -2682,12 +2654,8 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
                                      make_rcq_entry({80})}),
       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx2.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx2.abort_transaction().has_value());
-    return;
-  }
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_FALSE(r.has_value()); // invalid input guard
+
   advance_block();
 
   // Block 3: Insert-only to advance state further.
@@ -2695,11 +2663,7 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
   tx3.add_delta(key, make_rcq_insert_delta({make_rcq_entry({100})}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx3.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx3.abort_transaction().has_value());
-    return;
-  }
+  ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
   advance_block();
 
@@ -2709,11 +2673,7 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
   tx4.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx4.try_push_current_subtransaction();
-  if (!r.has_value() || !r.value()) {
-    if (r.has_value())
-      ASSERT_TRUE(tx4.abort_transaction().has_value());
-    return;
-  }
+  ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx4.commit_transaction({}).has_value());
   advance_block();
 }
