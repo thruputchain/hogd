@@ -362,6 +362,75 @@ TEST(Deserialize, MutuallyRecursiveLimit)
   }
 }
 
+// Opaque vec deserialization: roundtrip and trailing-zero checks for each
+// padding length (rem = 0, 1, 2, 3).
+TEST(Deserialize, OpaqueVecRoundtrip4Bytes)
+{
+  // 4 data bytes → rem=0, no padding, no check_trailing_zeros
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 4, 0xaa, 0xbb, 0xcc, 0xdd};
+  EXPECT_NO_THROW(deserialize(&vec, BufView(input)));
+  ASSERT_EQ(vec.size(), 4UZ);
+  EXPECT_EQ(vec[0], 0xaa);
+  EXPECT_EQ(vec[3], 0xdd);
+}
+
+TEST(Deserialize, OpaqueVecRoundtrip3Bytes)
+{
+  // 3 data bytes → rem=3, 1 padding byte must be zero
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 3, 0xaa, 0xbb, 0xcc, 0x00};
+  EXPECT_NO_THROW(deserialize(&vec, BufView(input)));
+  ASSERT_EQ(vec.size(), 3UZ);
+  EXPECT_EQ(vec[0], 0xaa);
+  EXPECT_EQ(vec[2], 0xcc);
+}
+
+TEST(Deserialize, OpaqueVecBadPad3Bytes)
+{
+  // 3 data bytes with non-zero padding → must reject
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 3, 0xaa, 0xbb, 0xcc, 0x01};
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+}
+
+TEST(Deserialize, OpaqueVecRoundtrip2Bytes)
+{
+  // 2 data bytes → rem=2, 2 padding bytes must be zero
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 2, 0xaa, 0xbb, 0x00, 0x00};
+  EXPECT_NO_THROW(deserialize(&vec, BufView(input)));
+  ASSERT_EQ(vec.size(), 2UZ);
+  EXPECT_EQ(vec[0], 0xaa);
+  EXPECT_EQ(vec[1], 0xbb);
+}
+
+TEST(Deserialize, OpaqueVecBadPad2Bytes)
+{
+  // 2 data bytes with non-zero padding → must reject
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 2, 0xaa, 0xbb, 0x00, 0x01};
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+}
+
+TEST(Deserialize, OpaqueVecRoundtrip1Byte)
+{
+  // 1 data byte → rem=1, 3 padding bytes must be zero
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 1, 0xaa, 0x00, 0x00, 0x00};
+  EXPECT_NO_THROW(deserialize(&vec, BufView(input)));
+  ASSERT_EQ(vec.size(), 1UZ);
+  EXPECT_EQ(vec[0], 0xaa);
+}
+
+TEST(Deserialize, OpaqueVecBadPad1Byte)
+{
+  // 1 data byte with non-zero padding → must reject
+  x23::Vec<uint8_t, 16> vec;
+  std::vector<uint8_t> input = {0, 0, 0, 1, 0xaa, 0x01, 0x00, 0x00};
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
+}
+
 // NOLINTEND(modernize-type-traits)
 
 } // namespace x23
