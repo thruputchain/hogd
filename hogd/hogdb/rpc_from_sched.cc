@@ -194,7 +194,7 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-HogDBSchedRpc::dbsched_commit_snapshot(BlockID id)
+HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);

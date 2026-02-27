@@ -50,7 +50,8 @@ public:
   {
     co_return DbSchedResult::DbSchedResultError; // TODO(geoff): unimplemented
   }
-  x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id);
+  x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id,
+                                                    BlockHash block_hash);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
   static x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
 

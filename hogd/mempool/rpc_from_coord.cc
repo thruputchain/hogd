@@ -210,9 +210,10 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 }
 
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id);
+  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id,
+                                                               block_hash);
 }
 
 x23::Async<void>
@@ -696,7 +697,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   record_stage(stage_await_close_snapshot);
   // We need to commit the snapshot *after* the snapshot has been closed.
   x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id);
+      commit_snapshot(cache.block_id, cache.db_tip.block_hash);
   {
     EventBlockResult result = co_await close_block_handle;
     CHECK_EQ(result.error(), RPCError::kRPCNone);

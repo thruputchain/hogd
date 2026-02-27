@@ -128,7 +128,8 @@ protected:
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
     ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
 
-    auto db_commit_res = db_client_.dbsched_commit_snapshot(block_id);
+    auto db_commit_res =
+        db_client_.dbsched_commit_snapshot(block_id, /*block_hash=*/{});
     ASSERT_EQ(db_commit_res.result(), DbSchedResult::DbSchedResultOK);
   }
 };
