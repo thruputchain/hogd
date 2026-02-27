@@ -245,8 +245,15 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
 
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
   // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
-  // hash is invalid. Discuss with Geoff and David about how to resolve this.
-  ctx_.get_trie().generate_top_level_hashes();
+  // hash is invalid. We could add the [ItemChanges] to the Merkle Trie and
+  // compute the root hash, but if the block ends up being abandoned rather than
+  // committed, it is expensive to remove these items from the Merkle Trie.
+  //
+  // We are going to replace the Merkle Trie with a much cheaper commutative
+  // hash function, so once we do that, we *can* compute the hash here with the
+  // pending [ItemChanges]. If we the block is abandoned, it is cheap to revert
+  // the hash.
+  // ctx_.get_trie().generate_top_level_hashes();
   ret.db_hash() = ctx_.get_trie().get_root_hash();
   co_return ret;
 }
