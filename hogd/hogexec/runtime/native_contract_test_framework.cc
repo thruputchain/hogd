@@ -32,9 +32,10 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
     }
   }
   {
-    auto r =
-        coord_wrapper_->client().dbsched_commit_snapshot(block_number_,
-                                                         /*block_hash=*/{});
+    auto r = coord_wrapper_->client().dbsched_commit_snapshot(
+        block_number_,
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*block_hash=*/{});
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_commit_snapshot failed");
     }

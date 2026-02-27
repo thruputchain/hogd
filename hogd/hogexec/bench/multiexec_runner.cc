@@ -257,6 +257,7 @@ close_block(db_sched_client_t &db_sched_client,
   }
   auto close_time = x23::fastclock::get_ns();
   auto commit_res =
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       db_sched_client.dbsched_commit_snapshot(block_number, /*block_hash=*/{});
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
