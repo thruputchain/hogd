@@ -2,8 +2,8 @@
 //
 // LtHash16 maintains a 2048-byte state (1024 uint16_t components). Elements
 // can be incrementally added or removed:
-//   H(A ∪ B) = H(A) + H(B)
-//   H(A \ B) = H(A) - H(B)
+//   H(A union B) = H(A) + H(B)
+//   H(A setminus B) = H(A) - H(B)
 //
 // Each element is hashed with BLAKE3 in XOF mode to produce 2048 bytes,
 // interpreted as 1024 little-endian uint16_t values, then added to or
@@ -73,7 +73,7 @@ public:
 private:
   void apply(x23::BufView element, bool negate)
   {
-    alignas(16) uint8_t buf[kStateBytes];
+    alignas(64) uint8_t buf[kStateBytes];
 
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
