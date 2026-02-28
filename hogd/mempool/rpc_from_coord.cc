@@ -210,9 +210,10 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 }
 
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id);
+  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id,
+                                                               block_hash);
 }
 
 x23::Async<void>
@@ -680,7 +681,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     stage_out = now - last_stage_ts;
     last_stage_ts = now;
   };
-  double stage_spawn_async_calls = 0.0;
   double stage_await_close_snapshot = 0.0;
   double stage_await_close_block = 0.0;
   double stage_await_commit_snapshot = 0.0;
@@ -689,15 +689,15 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
       close_snapshot(cache.block_id);
   x23::Async<EventBlockResult> close_block_handle =
       eventsched_close_block(cache.block_id, scheduler_->current_block());
-  x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id);
-  record_stage(stage_spawn_async_calls);
 
   {
     DbBlockResult result = co_await close_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
   record_stage(stage_await_close_snapshot);
+  // We need to commit the snapshot *after* the snapshot has been closed.
+  x23::Async<DbBlockResult> commit_snapshot_handle =
+      commit_snapshot(cache.block_id, cache.db_tip.block_hash);
   {
     EventBlockResult result = co_await close_block_handle;
     CHECK_EQ(result.error(), RPCError::kRPCNone);
@@ -709,12 +709,11 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   record_stage(stage_await_commit_snapshot);
 
-  info("commit_block() stages: spawn_async_calls={:.6f}, "
-       "await_close_snapshot={:.6f}, await_close_block={:.6f}, "
-       "await_commit_snapshot={:.6f}, total={:.6f}, block_id={}",
-       stage_spawn_async_calls, stage_await_close_snapshot,
-       stage_await_close_block, stage_await_commit_snapshot, timer.elapsed(),
-       cache.block_id);
+  info("commit_block() stages: await_close_snapshot={:.6f}, "
+       "await_close_block={:.6f}, await_commit_snapshot={:.6f}, total={:.6f}, "
+       "block_id={}",
+       stage_await_close_snapshot, stage_await_close_block,
+       stage_await_commit_snapshot, timer.elapsed(), cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>

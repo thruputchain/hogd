@@ -18,7 +18,7 @@ DbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-DbSchedRpc::dbsched_commit_snapshot(BlockID id)
+DbSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
 {
   if (block_manager_->commit_block(id)) {
     //(geoff) TODO: Replace with actual BlockHash if available
