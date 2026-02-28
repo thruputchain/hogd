@@ -1,8 +1,10 @@
 
 #include <cassert>
+#include <cstdint>
 #include <print>
 
 #include <x23/serialize.h>
+#include <x23/vec.h>
 
 #include "tests/xdrtest.hh"
 
@@ -133,9 +135,62 @@ round_trip()
   assert(f12 == f12b);
 }
 
+void
+projected_span()
+{
+  // Project fix_12::i (fixed-size member) from a vec of fix_12.
+  // The projected span should serialize identically to a Vec<int32_t>.
+  XdrVec<fix_12> v12s{{.i = 10, .d = 1.0},
+                      {.i = 20, .d = 2.0},
+                      {.i = 30, .d = 3.0}};
+  ProjectedSpan<fix_12, &fix_12::i> proj(v12s);
+  auto buf = serialize(proj);
+
+  XdrVec<int32_t> ints{10, 20, 30};
+  auto buf2 = serialize(ints);
+  assert(buf == buf2);
+
+  // Verify serialize_equiv so it can be used where Vec<int32_t> is expected.
+  static_assert(
+      serializes_like<ProjectedSpan<fix_12, &fix_12::i>, Vec<int32_t>>);
+
+  // Project middle_struct::inner (fixed-size member from variable-size struct).
+  XdrVec<middle_struct> mids{
+      {.inner = {.x = 1, .y = 2.0}, .tag = "hello"},
+      {.inner = {.x = 3, .y = 4.0}, .tag = "world"},
+  };
+  ProjectedSpan<middle_struct, &middle_struct::inner> proj2(mids);
+  buf = serialize(proj2);
+
+  XdrVec<inner_struct> expected{{.x = 1, .y = 2.0}, {.x = 3, .y = 4.0}};
+  buf2 = serialize(expected);
+  assert(buf == buf2);
+
+  // Empty span.
+  XdrVec<fix_12> empty;
+  ProjectedSpan<fix_12, &fix_12::i> proj_empty(empty);
+  buf = serialize(proj_empty);
+  XdrVec<int32_t> empty_ints;
+  buf2 = serialize(empty_ints);
+  assert(buf == buf2);
+
+  // Fixed-extent: no size prefix, serializes like std::array.
+  std::array<fix_12, 2> arr{fix_12{.i = 7, .d = 7.0}, fix_12{.i = 8, .d = 8.0}};
+  ProjectedSpan<fix_12, &fix_12::i, 2> proj_fixed(arr);
+  buf = serialize(proj_fixed);
+
+  std::array<int32_t, 2> ints_arr{7, 8};
+  buf2 = serialize(ints_arr);
+  assert(buf == buf2);
+
+  static_assert(serializes_like<ProjectedSpan<fix_12, &fix_12::i, 2>,
+                                std::array<int32_t, 2>>);
+}
+
 int
 main()
 {
   check_sizes();
   round_trip();
+  projected_span();
 }
