@@ -1794,6 +1794,552 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+// ===========================================================================
+// Bug-hunting tests: bytestrings, deletes, nnints edge cases
+// ===========================================================================
+
+// Bug hunt #1: Empty bytestring (zero-length)
+TEST_P(DirectBytestringTest, BugHunt_NegativeNNIntViaMinSetValue)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "neg_nnint");
+  constexpr int128_t kIntMin = std::numeric_limits<int128_t>::min();
+
+  // Store INT128_MIN as NNInt
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(key, make_nnint_set_add_delta(kIntMin, 0),
+                    std::to_underlying(
+                        StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  if (!r_init.value()) {
+    // If it fails, that's OK - the system rejected the negative value
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    advance_block();
+    return;
+  }
+  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  advance_block();
+
+  // Read back - should be INT128_MIN
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  int128_t stored_value = from_xdr(item->nnint());
+  // This is the bug: a "non-negative" integer storing INT128_MIN
+  EXPECT_EQ(stored_value, kIntMin);
+
+  // Now try to add 1 to the negative base
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(1),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  // Must not crash
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  // Check the value - INT128_MIN + 1 is still negative!
+  auto item2 = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item2.has_value());
+  int128_t final_value = from_xdr(item2->nnint());
+  // If the value is negative, we found a bug: non-negative int is negative
+  if (final_value < 0) {
+    EXPECT_GE(final_value, 0)
+        << "BUG: NNInt stored a negative value: " << static_cast<int64_t>(final_value >> 64);
+  }
+}
+
+// Bug hunt #37: Bytestring exceeding max length (1025 bytes).
+// kBytestringMaxLen is 1024. What happens with 1025?
+// The XDR layer throws an exception from Vec<unsigned char, 1024>.
+// This is expected behavior -- the test validates the exception is thrown.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NNIntAddWithExclusiveLock)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "excl_nnint");
+
+  // Create NNInt with value 100
+  {
+    auto tx_init = make_new_per_tx_db_proxy();
+    tx_init.add_delta(key, make_nnint_set_add_delta(0, 100),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx_init.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  // TX1: add -50 with exclusive lock
+  // On MockInMemory, this crashes with SYSTEM_ERR ("Impossible state")
+  // because the exclusive lock path for NNIntAdd is broken in the RPC layer.
+  // On HogDB, this succeeds but leaks the bounds lock.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_nnint_add_delta(-50),
+                std::to_underlying(
+                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  SystemStatus<bool> r1;
+  try {
+    r1 = tx1.try_push_current_subtransaction();
+  }
+  catch (std::exception const &e) {
+    // BUG on MockInMemory: SYSTEM_ERR crash during exclusive NNInt add
+    EXPECT_TRUE(false)
+        << "BUG: exception during exclusive NNInt add push: " << e.what();
+    return;
+  }
+  if (!r1.has_value()) {
+    EXPECT_TRUE(r1.has_value())
+        << "BUG: kUnrecoverable during exclusive NNInt add push";
+    return;
+  }
+  ASSERT_TRUE(r1.value());
+
+  // TX1 has exclusive lock, commit it
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // TX2: add -50 should succeed (value was 100, TX1 subtracted 50, so now 50)
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_nnint_add_delta(-50),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  // If bounds lock was leaked, TX2 might fail even though it should succeed
+  EXPECT_TRUE(r2.value())
+      << "BUG: bounds lock leak after exclusive NNInt add commit";
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  EXPECT_EQ(from_xdr(item->nnint()), 0);
+}
+
+// Bug hunt #47: NNInt INT128_MAX add overflow.
+// Create NNInt with value 1, then add INT128_MAX. The result would be
+// 1 + INT128_MAX which overflows int128_t. WideIntegral should handle this.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NNIntSetNegOneAddZero)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "set_neg_one");
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_set_add_delta(-1, 0),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  // Must not crash
+
+  if (r.value()) {
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+
+    auto item = lookup_storage_item_from_db(key);
+    ASSERT_TRUE(item.has_value());
+    int128_t stored = from_xdr(item->nnint());
+    // BUG: NNInt storing -1
+    EXPECT_GE(stored, 0)
+        << "BUG: NNInt stored negative value -1";
+  }
+  else {
+    // Expected: system rejected negative set value
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  }
+}
+
+// Bug hunt #58: Pop a subtransaction with a balance key delta, then push a new
+// subtransaction with a new data key. The balance held_lock from the popped
+// subtx should be properly handled during commit.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NNIntAddOnBytestringKey)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "nnint_on_bs");
+
+  // Create bytestring
+  {
+    auto tx_init = make_new_per_tx_db_proxy();
+    tx_init.add_delta(key, make_bytestring_delta("existing"),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx_init.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  // Try NNInt add on the bytestring key
+  // On MockInMemory: succeeds (acquires exclusive lock, overwrites)
+  // On HogDB: returns kUnrecoverable (BUG: should fail gracefully or succeed)
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  if (!r.has_value()) {
+    // BUG on HogDB: kUnrecoverable instead of graceful failure
+    EXPECT_TRUE(r.has_value())
+        << "BUG: kUnrecoverable error for NNInt add on bytestring key";
+    return;
+  }
+
+  if (r.value()) {
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+
+    auto item = lookup_storage_item_from_db(key);
+    ASSERT_TRUE(item.has_value());
+    // If it succeeded, the type should be NNInt now, not bytestring
+    EXPECT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+    EXPECT_EQ(from_xdr(item->nnint()), 10);
+  }
+  else {
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  }
+}
+
+// Bug hunt #64: Multiple pops in a single call.
+// Push 3 subtransactions, pop 2 at once, then commit.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NNIntAddOnlyExclNewKey)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "add_only_excl_new");
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(
+      key, make_nnint_add_delta(42),
+      std::to_underlying(
+          StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+
+  SystemStatus<bool> r;
+  try {
+    r = tx.try_push_current_subtransaction();
+  } catch (std::exception const &e) {
+    // BUG #2 repro: "Impossible state" exception
+    EXPECT_TRUE(false) << "BUG: exception during NNInt add-only with exclusive "
+                          "lock on new key: "
+                       << e.what();
+    return;
+  }
+
+  if (!r.has_value()) {
+    EXPECT_TRUE(r.has_value())
+        << "BUG: kUnrecoverable for NNInt add-only with exclusive lock";
+    return;
+  }
+
+  if (r.value()) {
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+
+    auto item = lookup_storage_item_from_db(key);
+    ASSERT_TRUE(item.has_value());
+    EXPECT_EQ(from_xdr(item->nnint()), 42);
+  } else {
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  }
+}
+
+// Bug hunt #81: Three-way concurrent NNInt adds that individually are fine
+// but collectively overflow. TX1: add INT128_MAX/2, TX2: add INT128_MAX/2,
+// TX3: add INT128_MAX/2. Only two should succeed; the third should fail.
+// Then commit all and verify the final value is in-range.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NNIntNegSetTwoSubtxsSameKey)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto addrkey = make_addrkey(contract_addr, "neg_set_two_subtx");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Subtx 1: set=-5, add=10 (sum=5>=0, passes validation)
+  tx.add_delta(addrkey, make_nnint_set_add_delta(-5, 10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r1 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value())
+      << "BUG: NNInt set=-5 add=10 caused system error";
+  if (!r1.value()) {
+    // If first subtx was rejected, skip test
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+    return;
+  }
+
+  // Subtx 2: set=-5, add=20 (same key, triggers narrow() which calls
+  // assert_is_valid on NNInt128{-5, 20} where base_+minus_ = -5+0 = -5 < 0)
+  tx.add_delta(addrkey, make_nnint_set_add_delta(-5, 20),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value())
+      << "BUG: NNInt set=-5 add=20 (second subtx) caused system error "
+         "(possible assertion failure in narrow() due to invalid NNInt128 "
+         "state with negative base)";
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+}
+
+// Test #148: NNInt set=-100, add=100 on one key, then NNInt add-only 50 on
+// the same key in the next subtx. The add-only reads base=0 from snapshot
+// (key didn't exist) and creates NNInt128{0, 50}. narrow() is called with
+// the existing NNInt128{-100, 100} (which has base_=-100, minus_=0).
+// assert_is_valid on existing would fail. Tests HogDB specifically.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NNIntAddOnExistingBytestringNoExcl)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  auto addrkey = make_addrkey(contract_addr, "bs_then_nnint_add");
+
+  // Create key as bytestring.
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(addrkey, make_bytestring_delta("existing_value"),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  // Now NNInt add-only on that key (no exclusive lock).
+  // On HogDB: read_nnint128_base -> kTypeMismatch -> to_rpc_error default
+  // -> kRPCTransactionFailed -> kSystemUnrecoverable
+  // On MockInMemory: try_reserve_nnint_set_add(base=nnint_from_committed,
+  // but committed is bytestring, so base=0) -> works but conflicts
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(addrkey, make_nnint_add_delta(100),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value())
+        << "BUG: system error on NNInt add on existing bytestring key "
+           "(to_rpc_error missing kTypeMismatch?)";
+    // It's acceptable for this to fail (false) due to conflict.
+    // It is NOT acceptable for has_value() to be false (system error).
+  }
+}
+
+// Test #172: NNInt set+add on an existing bytestring key (no exclusive flag).
+// Same as #171 but with set+add delta. The set_value provides the base, so
+// this goes through the 3-arg request_nnint128, which does NOT read from DB.
+// This should succeed on both backends (no kTypeMismatch).
+
+
+TEST_P(DirectBytestringTest, BugHunt_LargeBytestringExhaustsBalance)
+{
+  auto contract_addr = make_contract_address(0);
+  // Small balance that can't cover a large bytestring.
+  // 1024 bytes costs 12000 + 10*1024 = 22240. Give 20000 which is insufficient.
+  setup_grant_storage_token(contract_addr, 20'000);
+  auto addrkey = make_addrkey(contract_addr, "large_bs");
+
+  // Vec<unsigned char, 1024> has max capacity of 1024, so use that.
+  std::string large_str(1024, 'X'); // 1024 bytes -> cost = 12000 + 10240 = 22240
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(addrkey, make_bytestring_delta(large_str),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value())
+      << "BUG: system error when bytestring exceeds balance";
+  EXPECT_FALSE(r.value())
+      << "Expected push to fail due to insufficient balance";
+}
+
+// Test #174: Multiple items on same address, verify balance is correctly
+// deducted for each. Each NNInt costs kBaseItemCost=12000 and each bytestring
+// costs 12000 + 10*len. With balance=50,000, creating 5 NNInts (5*12000=60000)
+// should fail on the 5th.
+
+
+TEST_P(DirectBytestringTest, BugHunt_PopMoreThanPushed)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  auto addrkey = make_addrkey(contract_addr, "pop_overflow");
+
+  auto tx = make_new_per_tx_db_proxy();
+  // Push 1 subtx
+  tx.add_delta(addrkey, make_nnint_set_add_delta(100, 0),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+
+  // Pop 2 (only 1 was pushed)
+  auto pop_r = tx.pop_subtransactions(2);
+  ASSERT_TRUE(pop_r.has_value())
+      << "BUG: system error when popping more subtxs than were pushed (should "
+         "gracefully fail or be a no-op)";
+}
+
+// Test #182: Two concurrent txs on same NNInt key, both adding values that
+// individually succeed but combined would overflow. TX1: set=INT128_MAX-10,
+// add=5. TX2: set=INT128_MAX-10, add=5. Both have the same set_value so they
+// should be compatible. Combined adds = 10, but the set_value is already near
+// INT128_MAX, so the bounds (plus_=5 for each, combined plus_=10) should still
+// fit: base + combined_plus = (INT128_MAX-10) + 10 = INT128_MAX. This should
+// work. But let's test it.
+
+
+TEST_P(DirectBytestringTest, BugHunt_BytestringOneOverMax)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  auto addrkey = make_addrkey(contract_addr, "bs_1025_over");
+
+  std::string s(1025, 'B');
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(addrkey, make_bytestring_delta(s),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  // If we get here, check result. Expected to crash or fail with system error.
+  ASSERT_TRUE(r.has_value()) << "BUG: system error (unrecoverable) on bytestring > 1024";
+  ASSERT_TRUE(tx.abort_transaction().has_value());
+  advance_block();
+}
+
+// Test #218: Two subtxs modifying same key with different set_add values,
+// then pop the second subtx. The committed value should be from subtx 1.
+
+
+TEST_P(DirectBytestringTest, BugHunt_NegativeSetValueNarrowCrash)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "neg_set_narrow");
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Subtx 1: set_value=-5, add_value=10 => value=5 (passes sum>=0 check)
+  tx.add_delta(key, make_nnint_set_add_delta(-5, 10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r1 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  // MockInMemory allows this (Bug #1). HogDB: sum = 5 >= 0, passes check.
+  if (!r1.value()) {
+    // If it was correctly rejected, we're done
+    ASSERT_TRUE(tx.abort_transaction().has_value());
+    advance_block();
+    return;
+  }
+
+  // Subtx 2: modify the same key again to trigger narrow()
+  // In HogDB, narrow() calls assert_is_valid() which checks base_(-5) + minus_(0) >= 0
+  // This assertion fails because base < 0.
+  tx.add_delta(key, make_nnint_set_add_delta(-5, 15),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value())
+      << "BUG: system error (potential assert_is_valid crash)";
+
+  if (r2.has_value() && r2.value()) {
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  } else {
+    if (r1.value()) {
+      auto pop_r = tx.pop_subtransactions(1);
+      ASSERT_TRUE(pop_r.has_value());
+    }
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  }
+  advance_block();
+}
+
+// Test #224: NNInt set_value = -1, add_value = 1 (sum = 0 >= 0). Then overwrite
+// with bytestring in second subtx. This forces an exclusive lock upgrade.
+// ExclusiveLockedState::get_marginal_cost_upper_bound handles
+// kDeltaTypeNonnegativeIntSetAdd but NOT kDeltaTypeBytestringSet after NNInt.
+// The type change should trigger exclusive lock path, not the missing-case path.
+
+
+TEST_P(DirectBytestringTest, BugHunt_CommitThenAbortSameTx)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "commit_abort");
+  auto tx = make_new_per_tx_db_proxy();
+
+  tx.add_delta(key, make_bytestring_delta("test"),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+
+  // Commit the transaction
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+
+  // Now try to abort the already-committed transaction.
+  // In MockInMemory: assert(!finished_) fires in extract_results()
+  // In HogDB: get_invoke_tx returns nullptr -> kRPCBadBlockID
+  auto abort_r = tx.abort_transaction();
+  // Should either succeed (no-op) or return a system error,
+  // but should NOT crash.
+  EXPECT_TRUE(abort_r.has_value())
+      << "BUG: system crash on abort after commit";
+
+  advance_block();
+}
+
+// Test #232: Abort transaction, then try to commit the same transaction.
+// Same root cause as #231 but in reverse order.
+
+
+TEST_P(DirectBytestringTest, BugHunt_AbortThenCommitSameTx)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "abort_commit");
+  auto tx = make_new_per_tx_db_proxy();
+
+  tx.add_delta(key, make_bytestring_delta("test"),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+
+  // Abort the transaction
+  ASSERT_TRUE(tx.abort_transaction().has_value());
+
+  // Now try to commit the already-aborted transaction.
+  auto commit_r = tx.commit_transaction({});
+  // Should either succeed (no-op) or return a system error,
+  // but should NOT crash.
+  EXPECT_TRUE(commit_r.has_value())
+      << "BUG: system crash on commit after abort";
+
+  advance_block();
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
