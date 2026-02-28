@@ -31,19 +31,21 @@ TEST(AliasGuardTest, TwoIdenticalRangesFail)
 TEST(AliasGuardTest, PartialOverlapFails)
 {
   AliasGuard guard;
-  uint8_t buf[32] = {};
-  EXPECT_TRUE(guard.check_and_register(buf, 16));
-  EXPECT_FALSE(guard.check_and_register(buf + 8, 16));
-  EXPECT_FALSE(guard.check_and_register(buf - 8, 16));
+  uint8_t buf[48] = {};
+  uint8_t *p = buf + 16;
+  EXPECT_TRUE(guard.check_and_register(p, 16));
+  EXPECT_FALSE(guard.check_and_register(p + 8, 16));
+  EXPECT_FALSE(guard.check_and_register(p - 8, 16));
 }
 
 TEST(AliasGuardTest, ContainedRangeFails)
 {
   AliasGuard guard;
-  uint8_t buf[32] = {};
-  EXPECT_TRUE(guard.check_and_register(buf, 32));
-  EXPECT_FALSE(guard.check_and_register(buf + 8, 8));
-  EXPECT_FALSE(guard.check_and_register(buf - 8, 64));
+  uint8_t buf[96] = {};
+  uint8_t *p = buf + 16;
+  EXPECT_TRUE(guard.check_and_register(p, 32));
+  EXPECT_FALSE(guard.check_and_register(p + 8, 8));
+  EXPECT_FALSE(guard.check_and_register(p - 8, 64));
 }
 
 TEST(AliasGuardTest, AdjacentRangesSucceed)
