@@ -3,8 +3,8 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/hogexec/runtime/wasm_test_framework.h"
+#include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 
 namespace hogd {
 

@@ -39,7 +39,7 @@ load_raw_file(std::string_view filename)
 static ContractBlob
 load_wasm_from_file(std::string_view filename)
 {
-  return load_raw_file("/hogd/hogexec/runtime/" + std::string(filename));
+  return load_raw_file("/hogd/hogexec/runtime/wasm/" + std::string(filename));
 }
 
 } // namespace hogd::test
