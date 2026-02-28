@@ -84,8 +84,11 @@ BENCHMARK(bm_ed25519_sign_and_verify)
 void
 bm_lthash16_add(benchmark::State &state)
 {
-  bench_func(state,
-             [](std::span<std::byte> buf) { LtHash16 h; h.add(buf); return h; });
+  bench_func(state, [](std::span<std::byte> buf) {
+    LtHash16 h;
+    h.add(buf);
+    return h;
+  });
 }
 BENCHMARK(bm_lthash16_add)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 

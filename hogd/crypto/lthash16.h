@@ -40,32 +40,28 @@ public:
 
   const State &state() const { return state_; }
 
-  LtHash16 &
-  operator+=(const LtHash16 &other)
+  LtHash16 &operator+=(const LtHash16 &other)
   {
     for (size_t i = 0; i < kNumComponents; ++i)
       state_[i] += other.state_[i];
     return *this;
   }
 
-  LtHash16 &
-  operator-=(const LtHash16 &other)
+  LtHash16 &operator-=(const LtHash16 &other)
   {
     for (size_t i = 0; i < kNumComponents; ++i)
       state_[i] -= other.state_[i];
     return *this;
   }
 
-  friend LtHash16
-  operator+(const LtHash16 &a, const LtHash16 &b)
+  friend LtHash16 operator+(const LtHash16 &a, const LtHash16 &b)
   {
     LtHash16 r(a);
     r += b;
     return r;
   }
 
-  friend LtHash16
-  operator-(const LtHash16 &a, const LtHash16 &b)
+  friend LtHash16 operator-(const LtHash16 &a, const LtHash16 &b)
   {
     LtHash16 r(a);
     r -= b;
@@ -75,8 +71,7 @@ public:
   friend bool operator==(const LtHash16 &, const LtHash16 &) = default;
 
 private:
-  void
-  apply(x23::BufView element, bool negate)
+  void apply(x23::BufView element, bool negate)
   {
     alignas(16) uint8_t buf[kStateBytes];
 
@@ -86,10 +81,13 @@ private:
     blake3_hasher_finalize(&hasher, buf, sizeof(buf));
 
     const auto *components = reinterpret_cast<const uint16_t *>(buf);
+    // clang and gcc both seem to vectorize this well
+    // https://godbolt.org/z/q7Yr1essM
     if (negate) {
       for (size_t i = 0; i < kNumComponents; ++i)
         state_[i] -= components[i];
-    } else {
+    }
+    else {
       for (size_t i = 0; i < kNumComponents; ++i)
         state_[i] += components[i];
     }
