@@ -287,8 +287,10 @@ public:
   };
 
   // Commits the current block and creates a new one.
-  void advance_block(BlockExecutionMode mode =
-                         BlockExecutionMode::kBlockExecutionModeProposal);
+  void advance_block(
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
+      DbSchedResult expected_dbsched_commit_snapshot_result =
+          DbSchedResult::DbSchedResultOK);
 
   // Discards the current block and creates a new one.
   void discard_block(BlockExecutionMode mode =

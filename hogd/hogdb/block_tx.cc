@@ -280,8 +280,11 @@ BlockTX::commit(WorkerPool &pool)
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
       },
       1024, pool);
-  background_commit_worker_.submit_job(block_height_, std::move(key_changes),
-                                       std::move(balance_deltas));
+
+  if (ret) {
+    background_commit_worker_.submit_job(block_height_, std::move(key_changes),
+                                         std::move(balance_deltas));
+  }
 
   return ret;
 }

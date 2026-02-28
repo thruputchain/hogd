@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -100,6 +101,21 @@ public:
 
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
 };
+
+TEST_F(DirectRCQTests, ValidationFailsThenPropose)
+{
+  auto handler = make_new_per_tx_db_proxy();
+  handler.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
+                    make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
+                    std::to_underlying(
+                        StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = handler.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  advance_block(BlockExecutionMode::kBlockExecutionModeProposal,
+                DbSchedResult::DbSchedResultError);
+  advance_block();
+}
 
 TEST_F(DirectRCQTests, ConcurrentInsert)
 {
@@ -1702,16 +1718,12 @@ TEST_F(DirectRCQTests, StressSameBlockPartialOverconsume)
 // path.
 TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
 {
-  GTEST_SKIP() << "Crashes at retrocausal_queue_lock.cc:262 (existing site #3: "
-                  "NNInt->delete->RCQ->consume-all type transition causes "
-                  "assert(live_entries >= 0) failure)";
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_nnint_trans");
 
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
                     BlockExecutionMode::kBlockExecutionModeValidation}) {
-    advance_block(mode);
+    advance_block();
     // First establish the key as NNInt in the snapshot
     auto tx_setup = make_new_per_tx_db_proxy();
     tx_setup.add_delta(key, make_nnint_set_add_delta(0, 100),
@@ -1720,7 +1732,7 @@ TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
     auto r = tx_setup.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value() && r.value());
     ASSERT_TRUE(tx_setup.commit_transaction({}).has_value());
-    advance_block();
+    advance_block(mode);
 
     // Now in a single TX: NNInt -> delete -> RCQ insert -> RCQ consume all
     auto tx = make_new_per_tx_db_proxy();
@@ -1746,15 +1758,9 @@ TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
                      0, 0, {make_rcq_entry({10}), make_rcq_entry({20})}, {}),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     r = tx.try_push_current_subtransaction();
-    if (mode == BlockExecutionMode::kBlockExecutionModeProposal) {
-      ASSERT_TRUE(r.has_value() && !r.value());
-    }
-    else {
-      ASSERT_TRUE(r.has_value() && r.value());
-    }
-    // TODO(geoff): guard validation mode advance block failure
+    ASSERT_TRUE(r.has_value() && r.value());
     ASSERT_TRUE(tx.commit_transaction({}).has_value());
-    advance_block();
+    advance_block(mode, DbSchedResult::DbSchedResultError);
   }
 }
 

@@ -273,6 +273,8 @@ public:
         std::make_unique<HogConservationInvariant>(cost_model));
   }
 
+  void clear_invariants() { invariants_.clear(); }
+
   bool check_invariants()
   {
     bool ret = true;
