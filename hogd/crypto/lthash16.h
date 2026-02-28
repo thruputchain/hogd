@@ -16,9 +16,13 @@ extern "C" {
 }
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+
+static_assert(std::endian::native == std::endian::little,
+              "LtHash16 assumes little-endian byte order");
 
 #include "x23/vec.h"
 
@@ -73,14 +77,13 @@ public:
 private:
   void apply(x23::BufView element, bool negate)
   {
-    alignas(64) uint8_t buf[kStateBytes];
+    alignas(64) uint16_t components[kNumComponents];
 
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
     blake3_hasher_update(&hasher, element.data(), element.size());
-    blake3_hasher_finalize(&hasher, buf, sizeof(buf));
-
-    const auto *components = reinterpret_cast<const uint16_t *>(buf);
+    blake3_hasher_finalize(&hasher, reinterpret_cast<uint8_t *>(components),
+                           kStateBytes);
     // clang and gcc both seem to vectorize this well
     // https://godbolt.org/z/q7Yr1essM
     if (negate) {
