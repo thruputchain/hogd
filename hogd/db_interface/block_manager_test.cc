@@ -6,6 +6,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/init.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
