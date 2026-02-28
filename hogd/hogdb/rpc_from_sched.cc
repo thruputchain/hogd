@@ -37,6 +37,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -200,6 +201,7 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
     block_id_state_manager_.log_block_commit(id);
     ctx_.get_db().enable_debug_invariants(ctx_.get_cost_model());
   }
+  x23::Defer _d([&] { ctx_.get_db().clear_invariants(); });
 
   auto *btx = ctx_.get_block_tx(id, false);
   if (btx == nullptr) [[unlikely]]

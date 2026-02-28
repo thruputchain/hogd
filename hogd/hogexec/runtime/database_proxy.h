@@ -4,6 +4,7 @@
 #include <cassert>
 #include <optional>
 #include <random>
+#include <set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -112,11 +113,18 @@ public:
 
   SystemStatus<bool> try_push_current_subtransaction()
   {
-    // In debug builds, we shuffle the batch of deltas before sending to the
-    // database because the order of deltas in a batch is supposed to not affect
-    // the result of the call.  Shuffling in tests helps catch bugs in the
-    // database delta handling logic.
     if constexpr (is_debug_build()) {
+      // Invariant: hogexec sends at most one delta per key per subtransaction.
+      std::set<AddressAndKey> seen_keys;
+      for (auto const &d : current_subtransaction_batch_) {
+        auto [_, inserted] = seen_keys.insert(d.addrkey);
+        assert(inserted && "duplicate key in subtransaction batch");
+      }
+
+      // Shuffle the batch of deltas before sending to the database because
+      // the order of deltas in a batch is supposed to not affect the result
+      // of the call.  Shuffling in tests helps catch bugs in the database
+      // delta handling logic.
       std::shuffle(current_subtransaction_batch_.begin(),
                    current_subtransaction_batch_.end(),
                    std::mt19937{std::random_device{}()});

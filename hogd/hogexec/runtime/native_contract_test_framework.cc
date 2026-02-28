@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 
 #include <cassert>
+#include <format>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -23,7 +24,9 @@
 namespace hogd {
 
 void
-NativeContractTestFramework::advance_block(BlockExecutionMode mode)
+NativeContractTestFramework::advance_block(
+    BlockExecutionMode mode,
+    DbSchedResult expected_dbsched_commit_snapshot_result)
 {
   {
     auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
@@ -36,8 +39,10 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
         block_number_,
         // NOLINTNEXTLINE(bugprone-argument-comment)
         /*block_hash=*/{});
-    if (r.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("advance_block: dbsched_commit_snapshot failed");
+    if (r.result() != expected_dbsched_commit_snapshot_result) {
+      throw std::runtime_error(std::format(
+          "advance_block: mismatching dbsched_commit_snapshot result: {} != {}",
+          r.result(), expected_dbsched_commit_snapshot_result));
     }
   }
   close_event_block(block_number_);

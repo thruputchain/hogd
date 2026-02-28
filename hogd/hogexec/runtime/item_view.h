@@ -93,24 +93,7 @@ public:
   make_fully_consumed_item(const SnapshotStorageItem &base_item,
                            uint32_t retrocausally_consumed_count);
 
-  StorageDelta get_delta() const
-  {
-    StorageDelta delta =
-        StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue() = queue_delta_;
-    // In debug builds, we shuffle the order of entries in the concurrent
-    // consumes, as these are not supposed to affect the result of the db
-    // operation.
-    if constexpr (is_debug_build()) {
-      if (delta.retrocausal_queue().consume) {
-        std::shuffle(
-            delta.retrocausal_queue().consume->current_block_consumed.begin(),
-            delta.retrocausal_queue().consume->current_block_consumed.end(),
-            std::mt19937{std::random_device{}()});
-      }
-    }
-    return delta;
-  }
+  StorageDelta get_delta() const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kRetrocausalQueue;
 

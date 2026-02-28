@@ -8,6 +8,8 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include <cassert>
+#include <set>
 #include <utility>
 
 namespace hogd {
@@ -61,6 +63,15 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   }
 
   block_data->push_subtransaction(tx);
+
+  if constexpr (is_debug_build()) {
+    // Invariant: hogexec sends at most one delta per key per subtransaction.
+    std::set<AddressAndKey> seen_keys;
+    for (auto const &delta : batch) {
+      auto [_, inserted] = seen_keys.insert(delta.addrkey);
+      assert(inserted && "duplicate key in subtransaction batch");
+    }
+  }
 
   for (auto const &delta : batch) {
     if (!try_reserve_delta(block_data.get(), tx, delta.addrkey, delta.delta,

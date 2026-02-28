@@ -38,6 +38,11 @@ public:
   {}
 
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
+  }
 };
 
 // Test that runs the root_invoke portion of a transaction,
