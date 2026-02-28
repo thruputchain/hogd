@@ -160,7 +160,7 @@ private:
     // check that the object is not in a conflict state.
     [[maybe_unused]] auto [ign, of] = overflowing_add(base_, plus_);
     assert(!of);
-    assert(base_ + minus_ <= 0 || (base_ < 0 && minus_ == 0));
+    assert(base_ + minus_ >= 0 || (base_ < 0 && minus_ == 0));
   }
 };
 
