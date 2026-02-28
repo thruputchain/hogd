@@ -188,14 +188,16 @@ TEST_F(DirectRCQTests, ConcurrentConsumeSelfDisallowed)
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
-                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({0})}, {make_rcq_entry({0})}),
+                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({0})},
+                                              {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
 
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);  
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
+                DbSchedResult::DbSchedResultError);
 }
 
 TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed)
@@ -1050,7 +1052,8 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
   ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block(BlockExecutionMode::kBlockExecutionModeProposal, DbSchedResult::DbSchedResultError);
+  advance_block(BlockExecutionMode::kBlockExecutionModeProposal,
+                DbSchedResult::DbSchedResultError);
 
   auto item = lookup_storage_item_from_db(key);
   // block commif failed, so no item written
@@ -1128,7 +1131,8 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   // there should be an error in advance block
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
+                DbSchedResult::DbSchedResultError);
 }
 
 // StressConsumeMoreCurrentThanInserted
@@ -1162,7 +1166,8 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   // there should be an error in advance block
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
+                DbSchedResult::DbSchedResultError);
 }
 
 // StressSameTxConsumeInsertMismatch
@@ -1197,7 +1202,8 @@ TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
   r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
+                DbSchedResult::DbSchedResultError);
 }
 
 TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
@@ -1230,7 +1236,8 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
   // there should be an error in advance block
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
+                DbSchedResult::DbSchedResultError);
 }
 
 // StressValidationConsumeCurrentBlockZeroInserted
@@ -1626,7 +1633,8 @@ TEST_F(DirectRCQTests,
   ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
+                DbSchedResult::DbSchedResultError);
 }
 
 // StressConsumeFromSameBlockPartialExceedsBlockSize
