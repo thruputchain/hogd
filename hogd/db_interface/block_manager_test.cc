@@ -6,6 +6,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/init.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -15,6 +16,7 @@ TEST(BlockManagerTest, CommitCleanup)
 {
   InMemoryDatabase db;
   BlockManager m(0, &db);
+  m.set_cost_model(StorageCostModel::default_cost_model());
   // block 0 doesn't have state that can be manipulated;
   // it's the root of the block tree, and is already committed.
   EXPECT_FALSE(m.get_block_data(0));
@@ -61,6 +63,7 @@ TEST(BlockManagerTest, ChildOfCommittedBlock)
 {
   InMemoryDatabase db;
   BlockManager m(0, &db);
+  m.set_cost_model(StorageCostModel::default_cost_model());
   EXPECT_TRUE(
       m.add_child(0, 1, BlockExecutionMode::kBlockExecutionModeProposal));
   ASSERT_TRUE(m.get_block_data(1));
@@ -90,6 +93,7 @@ TEST(BlockManagerTest, AddSequenceOfChildren)
 {
   InMemoryDatabase db;
   BlockManager m(0, &db);
+  m.set_cost_model(StorageCostModel::default_cost_model());
   EXPECT_TRUE(
       m.add_child(0, 1, BlockExecutionMode::kBlockExecutionModeProposal));
   auto b1 = m.get_block_data(1);
@@ -126,6 +130,7 @@ TEST(BlockManagerTest, AccessingSnapshotData)
   db.write_deployment(ContractAddress{},
                       std::make_shared<const Contract>(ContractType::kNative));
   BlockManager m(0, &db);
+  m.set_cost_model(StorageCostModel::default_cost_model());
 
   EXPECT_TRUE(
       m.add_child(0, 1, BlockExecutionMode::kBlockExecutionModeProposal));

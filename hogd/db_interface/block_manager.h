@@ -1,7 +1,9 @@
 
 #pragma once
 
+#include <cassert>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -41,9 +43,18 @@ public:
   // Otherwise the parent id is no longer a valid block to link to.
   bool add_child(BlockID parent_id, BlockID new_id, BlockExecutionMode mode);
 
-  const StorageCostModel cost_model_;
-
   bool initialize_genesis_configuration(GenesisConfiguration const &config);
+
+  const StorageCostModel *get_cost_model() const
+  {
+    assert(cost_model_.has_value());
+    return &(*cost_model_);
+  }
+
+  void set_cost_model(StorageCostModel model)
+  {
+    cost_model_.emplace(std::move(model));
+  }
 
 private:
   // One block.
@@ -86,6 +97,8 @@ private:
     // and concurrently the block is deleted (if e.g. a sibling commits).
     std::shared_ptr<BlockState> block_data_;
   };
+
+  std::optional<const StorageCostModel> cost_model_;
 
   // remove the block, and all of its children
   // returns the block_data_ for each block that was removed;

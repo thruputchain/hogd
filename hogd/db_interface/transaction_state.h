@@ -46,7 +46,7 @@ public:
 
   // Close the most recent `count` subtransactions.  This is e.g. called when
   // a call frame (that contained some number of try_invoke frames) reverts.
-  void pop_subtransactions(uint32_t count);
+  [[nodiscard]] RPCError pop_subtransactions(uint32_t count);
 
   // Add a storage delta and associated lock for a given address+key pair.
   // The lock must have been acquired by the caller (via querying the

@@ -32,6 +32,7 @@
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/db_interface/db_sched_server.h"
 #include "hogd/hogdb/block_id_manager.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -132,7 +133,7 @@ public:
 
   const StorageCostModel *get_default_cost_model() const
   {
-    return &block_manager_.cost_model_;
+    return block_manager_.get_cost_model();
   }
 
 private:
@@ -489,11 +490,8 @@ public:
   void write_deployment(ContractAddress const &addr,
                         std::shared_ptr<const Contract> const &contract);
 
-  const StorageCostModel *get_default_cost_model()
+  static const StorageCostModel *get_default_cost_model()
   {
-    if (std::holds_alternative<MockDBWrapper>(db_wrapper_)) {
-      return std::get<MockDBWrapper>(db_wrapper_).get_default_cost_model();
-    }
     static StorageCostModel default_cost_model =
         StorageCostModel::default_cost_model();
     return &default_cost_model;

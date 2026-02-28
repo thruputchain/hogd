@@ -28,8 +28,7 @@ namespace hogd {
 // principle, at the cost of much more code complexity. This edge case
 // should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id, InMemoryDatabase *base_database)
-  : cost_model_(12000, 1, 5, 5, 0), last_committed_id_(root_id),
-    base_database_(base_database)
+  : last_committed_id_(root_id), base_database_(base_database)
 {
   block_cache_.emplace(last_committed_id_, Block());
 }
@@ -188,14 +187,14 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
 
   if (!parent.block_data_ || parent.block_data_->is_committed_to_database()) {
     // parent is committed to database, so we need to create a new block state
-    block_cache_.emplace(new_id, Block(base_database_, mode, &cost_model_));
+    block_cache_.emplace(new_id, Block(base_database_, mode, get_cost_model()));
   }
   else {
     assert(parent_id != last_committed_id_);
     // parent is not committed to database, so we can use the parent's block
     // state
-    block_cache_.emplace(new_id,
-                         Block(parent.block_data_.get(), mode, &cost_model_));
+    block_cache_.emplace(new_id, Block(parent.block_data_.get(), mode,
+                                       get_cost_model()));
   }
   return true;
 }
@@ -210,11 +209,14 @@ BlockManager::initialize_genesis_configuration(
   }
   initialized_genesis_ = true;
 
+  cost_model_.emplace(config.storage_cost_model);
+
   GenesisConfigurationLoader loader(config);
 
   loader.load_genesis_configuration(
       [&](StorageKey const &key, int128_t value) -> int128_t {
-        auto item = std::make_shared<StorageItemWrapper>(value, &cost_model_);
+        auto item =
+            std::make_shared<StorageItemWrapper>(value, &cost_model_.value());
         base_database_->write_item(
             AddressAndKey{
                 .address = GenesisConfigurationLoader::kDeployContractAddress,
@@ -229,7 +231,8 @@ BlockManager::initialize_genesis_configuration(
       },
       [&](const ContractAddress &addr, const DeployedContractHash &hash) {
         auto item =
-            std::make_shared<const StorageItemWrapper>(hash, &cost_model_);
+            std::make_shared<const StorageItemWrapper>(hash,
+                                                       &cost_model_.value());
         base_database_->write_item(
             AddressAndKey{.address = addr,
                           .key = StorageKey(
@@ -239,7 +242,8 @@ BlockManager::initialize_genesis_configuration(
       [&](ContractAddress const &addr,
           AddressAuthData const &auth_data) -> int128_t {
         auto item =
-            std::make_shared<const StorageItemWrapper>(auth_data, &cost_model_);
+            std::make_shared<const StorageItemWrapper>(auth_data,
+                                                       &cost_model_.value());
         base_database_->write_item(
             AddressAndKey{.address = addr,
                           .key = StorageKey(

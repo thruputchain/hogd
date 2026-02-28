@@ -41,6 +41,8 @@ bool
 StorageItemDeltaManager::try_reserve_nnint_set_add(int128_t set_value,
                                                    int128_t add_value)
 {
+  trace("try_reserve_nnint_set_add: set_value: {}, add_value: {}", set_value,
+        add_value);
   if (auto *args = variant_.try_set_variant<NNIntSetAddArgs>(set_value)) {
     if (set_value < 0 && add_value < 0) {
       // can only add to a set_value_ < 0
@@ -378,9 +380,17 @@ StorageItemDeltaManager::revert_exclusive_lock_to_set_typeclass(
   // normally released during commit() -- not in commit_delta() after this is
   // called).
   if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
-    if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+    if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd ||
+        delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd) {
       auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
-      int128_t add_value = from_xdr(delta.nnint().add_value);
+
+      int128_t add_value = [&] {
+        if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+          return from_xdr(delta.nnint().add_value);
+        }
+        assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+        return from_xdr(delta.nnint_add());
+      }();
       NNIntBoundsLock bounds_lock{
           .add_amount = to_xdr(add_value > 0 ? add_value : 0),
           .subtract_amount = to_xdr(add_value < 0 ? add_value : 0),
@@ -603,6 +613,8 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
   case StorageLockType::kNone:
   {
     if (variant_.has_permanent_exclusive_lock()) {
+      trace("try_reserve: failed because there exists a permanent exclusive "
+            "lock");
       return std::nullopt;
     }
     if (try_reserve_delta(delta)) {
@@ -615,6 +627,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
                                 .locked_tokens_ =
                                     std::max<int128_t>(required_storage, 0)};
     }
+    trace("try_reserve: failed because try_reserve_delta failed");
     return std::nullopt;
   }
   case StorageLockType::kSetItemTypeClass:

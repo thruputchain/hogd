@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
@@ -19,6 +18,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 
@@ -50,7 +50,7 @@ public:
   void release_savepoint(int depth);
 
   // get_savepoint_head returns the depth of the most recent savepoint.
-  int get_savepoint_head() const { return tx_depth_; }
+  unsigned int get_savepoint_head() const { return tx_depth_; }
 
   //
   // All of the read_* methods below read the current value of an item in just
@@ -122,7 +122,7 @@ public:
 private:
   struct ItemVersion {
     ItemChange change;
-    int tx_depth;
+    unsigned int tx_depth;
     int128_t locked_storage_cost{0};
   };
 
@@ -133,10 +133,10 @@ private:
     // total locked amount at this depth,
     // for all ops on this address.
     int128_t total_locked_storage_amount;
-    int tx_depth;
+    unsigned int tx_depth;
   };
 
-  int tx_depth_{0};
+  unsigned int tx_depth_{0};
   PerThreadARC<BlockTX> &block_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),

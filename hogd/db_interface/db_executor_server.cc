@@ -76,7 +76,10 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   for (auto const &delta : batch) {
     if (!try_reserve_delta(block_data.get(), tx, delta.addrkey, delta.delta,
                            delta.flags)) {
-      block_data->pop_subtransactions(tx, 1);
+      if (auto err = block_data->pop_subtransactions(tx, 1);
+          err != RPCError::kRPCNone) {
+        return err;
+      }
       return RPCError::kRPCStorageWriteFailed;
     }
   }
@@ -93,8 +96,7 @@ DbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
     return RPCError::kRPCBadBlockID;
   }
 
-  block_data->pop_subtransactions(tx, popcount);
-  return RPCError::kRPCNone;
+  return block_data->pop_subtransactions(tx, popcount);
 }
 
 ExpectedStorageItem

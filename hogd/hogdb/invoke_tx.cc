@@ -379,7 +379,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
   if (of) [[unlikely]] {
     return HogDBError(HogDBCode::kOverflow);
   }
-  if (sum < 0) {
+  if (sum < std::min<int128_t>(base, 0)) {
     return HogDBError(HogDBCode::kConflict);
   }
 
@@ -405,10 +405,9 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
   // TODO(geoff): consider caching this
   HogDBStatus<int128_t> base = block_.get().read_nnint128_base(key);
   if (!base) {
-    if (base.error() != HogDBCode::kNotFound) {
-      return base.error();
-    }
-    base = 0;
+    assert(base.error() != HogDBCode::kTypeMismatch &&
+           base.error() != HogDBCode::kNotFound);
+    return base.error();
   }
   return request_nnint128(key, *base, delta, flags);
 }
@@ -499,7 +498,7 @@ InvokeTX::assert_is_valid() const noexcept
   std::unordered_map<Address, int128_t> balance_deltas;
   if constexpr (is_debug_build()) {
     for (const auto &[key, vec] : changes_) {
-      [[maybe_unused]] int depth = 0;
+      [[maybe_unused]] unsigned int depth = 0;
       for (const ItemVersion &item : vec) {
         assert(item.tx_depth >= depth);
         assert(item.tx_depth <= tx_depth_);

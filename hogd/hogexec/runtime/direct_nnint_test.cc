@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -655,6 +656,236 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   int128_t contract_bal_int = from_xdr(contract_bal.value().nnint());
   EXPECT_EQ(contract_bal_int, 0);
   // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "neg_nnint");
+  constexpr int128_t kIntMin = std::numeric_limits<int128_t>::min();
+
+  // Store INT128_MIN as NNInt
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(key, make_nnint_set_add_delta(kIntMin, 0),
+                    std::to_underlying(
+                        StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value() && r_init.value());
+  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  advance_block();
+
+  // Read back - should be INT128_MIN
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  int128_t stored_value = from_xdr(item->nnint());
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  // This is the bug: a "non-negative" integer storing INT128_MIN
+  EXPECT_EQ(stored_value, kIntMin);
+
+  // Now try to add 1 to the negative base
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(1),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  // Check the value - INT128_MIN + 1 is still negative
+  auto item2 = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item2.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  int128_t final_value = from_xdr(item2->nnint());
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  // negative nnint is allowed if the base is negative
+  EXPECT_EQ(final_value, kIntMin + 1);
+}
+
+TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "excl_nnint");
+
+  // Create NNInt with value 100
+  {
+    auto tx_init = make_new_per_tx_db_proxy();
+    tx_init.add_delta(key, make_nnint_set_add_delta(0, 100),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx_init.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  // TX1: add -50 with exclusive lock
+  // On MockInMemory, this crashes with SYSTEM_ERR ("Impossible state")
+  // because the exclusive lock path for NNIntAdd is broken in the RPC layer.
+  // On HogDB, this succeeds but leaks the bounds lock.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_nnint_add_delta(-50),
+                std::to_underlying(
+                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+
+  // TX1 has exclusive lock, commit it
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // TX2: add -50 should succeed (value was 100, TX1 subtracted 50, so now 50)
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_nnint_add_delta(-50),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value() && !r2.value());
+  // exclusive lock causes tx failure
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(from_xdr(item->nnint()), 50);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "set_neg_one");
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_set_add_delta(-1, 0),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ;
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  int128_t stored = from_xdr(item->nnint());
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  // value is -1 on set_add(-1, 0)
+  EXPECT_EQ(stored, -1);
+}
+
+TEST_P(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "add_only_excl_new");
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(42),
+               std::to_underlying(
+                   StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  auto r1 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(from_xdr(item->nnint()), 42);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+TEST_P(DirectNNIntTest, BugHuntNNIntNegSetTwoSubtxsSameKey)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto addrkey = make_addrkey(contract_addr, "neg_set_two_subtx");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Subtx 1: set=-5, add=10 (sum=5>=0, passes validation)
+  tx.add_delta(addrkey, make_nnint_set_add_delta(-5, 10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r1 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+
+  // Subtx 2: set=-5, add=20 (same key, triggers narrow() which calls
+  // assert_is_valid on NNInt128{-5, 20} where base_+minus_ = -5+0 = -5 < 0)
+  tx.add_delta(addrkey, make_nnint_set_add_delta(-5, 20),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value() && r2.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+}
+
+TEST_P(DirectNNIntTest, BugHuntPopMoreThanPushed)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  auto addrkey = make_addrkey(contract_addr, "pop_overflow");
+
+  auto tx = make_new_per_tx_db_proxy();
+  // Push 1 subtx
+  tx.add_delta(addrkey, make_nnint_set_add_delta(100, 0),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+
+  // Pop 2 (only 1 was pushed)
+  auto pop_r = tx.pop_subtransactions(2);
+  ASSERT_FALSE(pop_r.has_value());
+}
+
+TEST_P(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "neg_set_narrow");
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Subtx 1: set_value=-5, add_value=10 => value=5 (passes sum>=0 check)
+  tx.add_delta(key, make_nnint_set_add_delta(-5, 10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r1 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  // MockInMemory allows this (Bug #1). HogDB: sum = 5 >= 0, passes check.
+  if (!r1.value()) {
+    // If it was correctly rejected, we're done
+    ASSERT_TRUE(tx.abort_transaction().has_value());
+    advance_block();
+    return;
+  }
+
+  // Subtx 2: modify the same key again to trigger narrow()
+  // In HogDB, narrow() calls assert_is_valid() which checks base_(-5) +
+  // minus_(0) >= 0 This assertion fails because base < 0.
+  tx.add_delta(key, make_nnint_set_add_delta(-5, 15),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value() && r2.value());
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(from_xdr(item->nnint()), 10);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  advance_block();
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,

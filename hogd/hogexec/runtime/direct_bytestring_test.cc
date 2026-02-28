@@ -1792,6 +1792,142 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
   ASSERT_TRUE(bal.has_value());
   EXPECT_EQ(from_xdr(bal.value().nnint()), 0);
 }
+
+// Ensure that behavior before and after a concurrent delta is consistent
+TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "nnint_on_bs");
+
+  // Create bytestring
+  {
+    auto tx_init = make_new_per_tx_db_proxy();
+    tx_init.add_delta(key, make_bytestring_delta("existing"),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx_init.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_nnint_set_add_delta(0, 10),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // Try NNInt add on the bytestring key
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  EXPECT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item->nnint()), 20);
+}
+
+TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "nnint_on_bs");
+
+  // Create bytestring
+  {
+    auto tx_init = make_new_per_tx_db_proxy();
+    tx_init.add_delta(key, make_bytestring_delta("existing"),
+                      std::to_underlying(
+                          StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx_init.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  // Try NNInt add on the bytestring key
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(10),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  EXPECT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item->nnint()), 10);
+}
+
+TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  auto addrkey = make_addrkey(contract_addr, "bs_then_nnint_add");
+
+  // Create key as bytestring.
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(addrkey, make_bytestring_delta("existing_value"),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  }
+
+  // Now NNInt add-only on that key (no exclusive lock).
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(addrkey, make_nnint_add_delta(100),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value() && r.value());
+
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  }
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(item.has_value());
+  EXPECT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item->nnint()), 100);
+}
+
+TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
+{
+  auto contract_addr = make_contract_address(0);
+  // Small balance that can't cover a large bytestring.
+  // 1024 bytes costs 12000 + 10*1024 = 22240. Give 20000 which is insufficient.
+  setup_grant_storage_token(contract_addr, 20'000);
+  auto addrkey = make_addrkey(contract_addr, "large_bs");
+
+  // Vec<unsigned char, 1024> has max capacity of 1024, so use that.
+  std::string large_str(1024,
+                        'X'); // 1024 bytes -> cost = 12000 + 10240 = 22240
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(addrkey, make_bytestring_delta(large_str),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && !r.value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
