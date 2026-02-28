@@ -49,16 +49,8 @@ add_executable(
 
 target_link_libraries(
   wasm_runtime_test
-  precompiles
   runtime
-  runtime_test_lib
   runtime_test_util
-  db_interface
-  hogdb
-  storage_cost
-  model_checker
-  contract_loader
-  genesis
   GTest::gtest
 )
 gtest_discover_tests(wasm_runtime_test)
