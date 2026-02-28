@@ -397,6 +397,10 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
                            StorageDeltaFlagSet flags)
 {
   if (key.is_address_balance()) {
+    if (flags &
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      return HogDBError(HogDBCode::kConflict);
+    }
     request_balance_change(key.get_address(), delta);
     return {};
   }

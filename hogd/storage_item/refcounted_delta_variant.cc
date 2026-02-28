@@ -645,6 +645,10 @@ ExclusiveLockedState::get_marginal_cost_upper_bound(
     return AuthDataArgs::get_marginal_cost_upper_bound_static(false, delta,
                                                               cost_model,
                                                               base_item);
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    return DeployedContractArgs::get_marginal_cost_upper_bound(delta,
+                                                               cost_model,
+                                                               base_item);
   default:
     throw std::runtime_error("Impossible state : delta is " + x23::show(delta));
   }
