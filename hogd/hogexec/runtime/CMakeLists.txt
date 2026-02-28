@@ -6,15 +6,8 @@ set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/syscall_meta.h
     PROPERTIES GENERATED TRUE)
 
-set_source_files_properties(
-    ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
-    PROPERTIES GENERATED TRUE)
-
-set_source_files_properties(
-    ${CMAKE_BINARY_DIR}/hogd/rust/wasmtime/bindings.h
-    PROPERTIES GENERATED TRUE)
-
 add_subdirectory(test_util)
+add_subdirectory(wasm)
 
 add_library(runtime_objects OBJECT
   contract_trait.cc
@@ -44,8 +37,6 @@ add_library(runtime_objects OBJECT
   syscall_rcq.cc
   syscall_stats.cc
   transaction_stats.cc
-  wasmi_runtime.cc
-  wasmtime_runtime.cc
 )
 
 target_link_libraries(
@@ -53,7 +44,10 @@ target_link_libraries(
   hogd_interface
 )
 
-add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
+add_library(runtime STATIC
+  $<TARGET_OBJECTS:runtime_objects>
+  $<TARGET_OBJECTS:wasm_runtime_objects>
+)
 
 add_library(runtime_test_lib
   native_contract_test_framework.cc
@@ -85,22 +79,17 @@ add_library(runtime_test_objects OBJECT
   direct_nonce_tests.cc
   direct_storage_ordering_tests.cc
   empty_test.cc
-  error_handling_test.cc
   event_test.cc
   execution_mode_test.cc
   ffi_helpers_tests.cc
   fibonacci_test.cc
-  gas_api_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
-  instantiate_test.cc
-  invoke_arity_test.cc
   invoke_error_handling_test.cc
   item_view_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_wasm_test.cc
   manual_revert_caller_wasm_test.cc
-  memory_access_test.cc
   return_fault_test_wasm_test.cc
   nnint_output_fault_test_wasm_test.cc
   output_alias_test_wasm_test.cc
@@ -130,7 +119,6 @@ add_library(runtime_test_objects OBJECT
   syscall_parse_tests.cc
   tracing_tests.cc
   try_invoke_test.cc
-  userctx_test.cc
 )
 
 target_link_libraries(
@@ -158,8 +146,6 @@ add_dependencies(
   runtime_objects
   generate_syscall_inner_h
   generate_syscall_meta_h
-  generate_wasmi_ffi_h
-  generate_wasmtime_ffi_h
   generate_contract_types_ffi_h
   protocol
 )
@@ -192,48 +178,6 @@ target_link_libraries(
 )
 gtest_discover_tests(runtime_test)
 
-wat2wasm_target(
-  test_invoke_wasm
-  wat/test_invoke.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_invoke.wasm
-)
-
-wat2wasm_target(
-  test_error_handling_wasm
-  wat/test_error_handling.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_error_handling.wasm
-)
-
-wat2wasm_target(
-  test_invoke_arity_wasm
-  wat/test_invoke_arity.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_invoke_arity.wasm
-)
-
-wat2wasm_target(
-  test_set_memory_wasm
-  wat/test_set_memory.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_set_memory.wasm
-)
-
-wat2wasm_target(
-  test_instantiate_fail_wasm
-  wat/test_instantiate_fail.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_fail.wasm
-)
-
-wat2wasm_target(
-  test_instantiate_unexported_memory_wasm
-  wat/test_instantiate_unexported_memory.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_unexported_memory.wasm
-)
-
-wat2wasm_target(
-  test_no_start_wasm
-  wat/test_no_start.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_no_start.wasm
-)
-
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
@@ -241,12 +185,5 @@ add_dependencies(
 
 add_dependencies(
   runtime_test
-  test_invoke_wasm
-  test_error_handling_wasm
-  test_invoke_arity_wasm
-  test_set_memory_wasm
-  test_instantiate_fail_wasm
-  test_instantiate_unexported_memory_wasm
-  test_no_start_wasm
   all_wasm_contracts
 )

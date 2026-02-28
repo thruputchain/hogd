@@ -20,8 +20,8 @@
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/runtime/wasmtime_runtime.h"
+#include "hogd/hogexec/runtime/wasm/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/wasm/wasmtime_runtime.h"
 #include "transaction.hh"
 #include "x23/sockio.h"
 
