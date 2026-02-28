@@ -903,7 +903,7 @@ TEST_P(DirectNNIntTest, BugHuntPartialBatchFailureLocksNotReverted)
 
   auto contract_addr = make_contract_address(0);
   // Give just enough balance for ONE nnint item, not two.
-  auto cost_model = get_default_cost_model();
+  const auto *cost_model = get_default_cost_model();
   int128_t one_item_cost = cost_model->get_nnint_cost();
   setup_grant_storage_token(contract_addr, one_item_cost);
 
