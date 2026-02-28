@@ -206,8 +206,12 @@ HogDBExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
+  unsigned int head = itx->get_savepoint_head();
+  if (head < popcount) [[unlikely]] {
+    return RPCError::kRPCUnrecoverable;
+  }
 
-  itx->rollback_to_savepoint(itx->get_savepoint_head() - popcount);
+  itx->rollback_to_savepoint(head - popcount);
 
   return RPCError::kRPCNone;
 }

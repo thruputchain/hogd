@@ -33,16 +33,13 @@ public:
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }
 
   // For testing only
-  int128_t get_add_capacity() const { return add_.load(); }
+  uint128_t get_add_capacity() const { return add_.load(); }
   int128_t get_sub_capacity() const { return sub_.load(); }
 
 private:
-  static int128_t add_capacity(int128_t base_value)
+  static uint128_t add_capacity(int128_t base_value)
   {
-    if (base_value >= 0) {
-      return std::numeric_limits<int128_t>::max() - base_value;
-    }
-    return std::numeric_limits<int128_t>::max();
+    return std::numeric_limits<int128_t>::max() - base_value;
   }
 
   static int128_t sub_capacity(int128_t base_value)
@@ -59,14 +56,15 @@ private:
     if (amount == 0) {
       return true;
     }
+    uint128_t amount_uint = amount;
 
-    int128_t current_add = add_.load();
+    uint128_t current_add = add_.load();
 
     for (;;) {
-      if (current_add < amount) {
+      if (current_add < amount_uint) {
         return false;
       }
-      if (add_.compare_exchange_strong(current_add, current_add - amount,
+      if (add_.compare_exchange_strong(current_add, current_add - amount_uint,
                                        std::memory_order_relaxed)) {
         return true;
       }
@@ -121,7 +119,7 @@ private:
   // the amount that can be added to or subtracted from the base, without
   // overflowing. We subtract the (positive) add amount from add_, and add the
   // (negative) sub amount to sub_.
-  Atomic16B<int128_t> add_;
+  Atomic16B<uint128_t> add_;
   Atomic16B<int128_t> sub_;
 };
 
@@ -176,7 +174,10 @@ public:
   }
 
   // For testing only
-  int128_t get_add_capacity() const { return delta_bounds_.get_add_capacity(); }
+  uint128_t get_add_capacity() const
+  {
+    return delta_bounds_.get_add_capacity();
+  }
   int128_t get_sub_capacity() const { return delta_bounds_.get_sub_capacity(); }
 
 private:

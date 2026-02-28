@@ -85,7 +85,8 @@ public:
   bool is_closed() const { return storage_view_.is_closed(); }
 
   void push_subtransaction(TransactionID txid);
-  void pop_subtransactions(TransactionID txid, uint32_t count);
+  [[nodiscard]] RPCError pop_subtransactions(TransactionID txid,
+                                             uint32_t count);
 
 private:
   StorageView storage_view_;

@@ -222,4 +222,40 @@ TEST(NNInt128LockTest, MultipleAddsOnValue)
   EXPECT_EQ(lock.get_base_and_delta(),
             (std::pair<int128_t, int128_t>(100, 50)));
 }
+
+TEST(NNInt128LockTest, NegativeBase)
+{
+  NNInt128Lock lock(-100);
+  EXPECT_EQ(lock.get_add_capacity(),
+            uint128_t{std::numeric_limits<int128_t>::max()} + 100);
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+
+  NNInt128 add(-100, 100);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+                  .has_value());
+  EXPECT_EQ(lock.get_add_capacity(),
+            uint128_t{std::numeric_limits<int128_t>::max()});
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+
+  NNInt128 sub(-100, -100);
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+                   .has_value());
+
+  NNInt128 big_add(-100, std::numeric_limits<int128_t>::max());
+
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &big_add, make_dummy_context())
+          .has_value());
+
+  EXPECT_EQ(lock.commit_change(true, 0, big_add, &kTestCostModel),
+            kTestCostModel.kBaseItemCost);
+  EXPECT_EQ(lock.commit_change(false, 0, add, &kTestCostModel), 0);
+
+  EXPECT_EQ(lock.get_base_and_delta(),
+            (std::pair<int128_t, int128_t>(
+                -100, uint128_t{std::numeric_limits<int128_t>::max()} + 100)));
+  EXPECT_EQ(lock.get_add_capacity(), 0);
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+}
+
 } // namespace hogd

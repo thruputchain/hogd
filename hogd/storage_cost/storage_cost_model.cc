@@ -10,6 +10,8 @@ namespace hogd {
 int128_t
 StorageCostModel::get_bytestring_cost(size_t bytestring_len) const
 {
+  info("get_bytestring_cost: {} + {} * {}", kBaseItemCost, bytestring_len,
+       kBytestringCostPerByte);
   return kBaseItemCost + (int128_t{bytestring_len} * kBytestringCostPerByte);
 }
 

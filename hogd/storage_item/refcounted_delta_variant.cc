@@ -626,6 +626,7 @@ ExclusiveLockedState::get_marginal_cost_upper_bound(
                                                                 cost_model,
                                                                 base_item);
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
     return NNIntSetAddArgs::get_marginal_cost_upper_bound_static(false,
                                                                  cost_model,
                                                                  base_item);

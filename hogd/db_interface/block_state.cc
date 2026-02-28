@@ -186,11 +186,11 @@ BlockState::push_subtransaction(TransactionID txid)
   tx.push_subtransaction();
 }
 
-void
+RPCError
 BlockState::pop_subtransactions(TransactionID txid, uint32_t count)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);
-  tx.pop_subtransactions(count);
+  return tx.pop_subtransactions(count);
 }
 
 Nondeterministic<std::optional<QueueEntry>>

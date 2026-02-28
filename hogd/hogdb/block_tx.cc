@@ -191,7 +191,15 @@ BlockTX::read_nnint128_base(const ItemKey &key)
 {
   auto *lock = item_locks_.get(key);
   if (!lock) {
-    return db_.read_nnint128(key);
+    auto r = db_.read_nnint128(key);
+    if (!r) {
+      if (r.error() == HogDBCode::kNotFound ||
+          r.error() == HogDBCode::kTypeMismatch) {
+        return 0;
+      }
+      return r.error();
+    }
+    return *r;
   }
 
   auto base = lock->get_cached_nnint128_base();

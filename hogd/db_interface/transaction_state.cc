@@ -24,12 +24,15 @@ TransactionState::push_subtransaction()
   subtransaction_stack_.emplace_back();
 }
 
-void
+RPCError
 TransactionState::pop_subtransactions(uint32_t count)
 {
   assert(!finished_);
-  assert(subtransaction_stack_.size() >= count);
+  if (subtransaction_stack_.size() < count) [[unlikely]] {
+    return RPCError::kRPCUnrecoverable;
+  }
   subtransaction_stack_.resize(subtransaction_stack_.size() - count);
+  return RPCError::kRPCNone;
 }
 
 void
