@@ -201,8 +201,16 @@ struct SyscallArgParams<T> {
   }
   constexpr static T deref(std::optional<const T> const &value)
   {
+    // GCC cannot track that validate() was called before deref() across
+    // the template indirection in syscall_entry_outer.h, so it falsely
+    // warns that the optional storage may be uninitialized for __int128.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
+#pragma GCC diagnostic pop
   }
 };
 
