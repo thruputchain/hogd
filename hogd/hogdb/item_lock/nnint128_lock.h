@@ -39,7 +39,9 @@ public:
 private:
   static uint128_t add_capacity(int128_t base_value)
   {
-    return std::numeric_limits<int128_t>::max() - base_value;
+    constexpr static uint128_t kInt128Max =
+        std::numeric_limits<int128_t>::max();
+    return kInt128Max - base_value;
   }
 
   static int128_t sub_capacity(int128_t base_value)
