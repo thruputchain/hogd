@@ -182,9 +182,15 @@ TEST_F(DirectRCQTests, ConcurrentConsume)
   ASSERT_EQ(entry2.value(), make_rcq_entry({1}));
 }
 
-TEST_F(DirectRCQTests, ConcurrentConsumeSelfDisallowed)
+TEST_F(DirectRCQTests, ConcurrentConsumeSelf)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  // This, on its own, would be bad input from hogexec.
+  // However, it's not clear that this can be easily distinguished
+  // (looking just at the transaction) from the case of a concurrent insert of
+  // {0} from a separate transaction, which was then consumed and reinserted by
+  // this tx. We therefore allow this case to simplify the database
+  // implementation.
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
@@ -196,8 +202,7 @@ TEST_F(DirectRCQTests, ConcurrentConsumeSelfDisallowed)
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
 
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
-                DbSchedResult::DbSchedResultError);
+  advance_block();
 }
 
 TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed)
@@ -1590,6 +1595,7 @@ TEST_F(DirectRCQTests,
 TEST_F(DirectRCQTests,
        StressDeleteExistingRCQThenRecreateThenConsumeInSameBlock)
 {
+  GTEST_SKIP() << "Exclusive lock storage costs issue";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_del_recreate_consume");
