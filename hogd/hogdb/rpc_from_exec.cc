@@ -208,7 +208,8 @@ HogDBExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
     return RPCError::kRPCBadBlockID;
   unsigned int head = itx->get_savepoint_head();
   if (head < popcount) [[unlikely]] {
-    error("Failed to pop subtransactions: head < popcount: {} < {}", head, popcount);
+    error("Failed to pop subtransactions: head < popcount: {} < {}", head,
+          popcount);
     return RPCError::kRPCUnrecoverable;
   }
 
