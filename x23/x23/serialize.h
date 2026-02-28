@@ -442,29 +442,29 @@ struct serialize_equiv<Ptr<X>, BorrowedPtr<T>> : std::true_type {};
 // fixed extent omits the prefix and serializes like std::array.
 //
 // Example:
-//   ProjectedSpan<SignedTransaction, &SignedTransaction::tx>
+//   ProjectedView<SignedTransaction, &SignedTransaction::tx>
 // wraps a span<const SignedTransaction> but serializes identically to
 // Vec<Transaction>, without copying the Transaction objects.
 template<typename Container, auto MemberPtr, size_t E = std::dynamic_extent>
-struct ProjectedSpan {
+struct ProjectedView {
   using projected_type =
       std::remove_cvref_t<decltype(std::declval<const Container &>().*
                                    MemberPtr)>;
 
   span<const Container, E> data_;
 
-  ProjectedSpan() = default;
-  explicit ProjectedSpan(span<const Container, E> s) : data_(s) {}
+  ProjectedView() = default;
+  explicit ProjectedView(span<const Container, E> s) : data_(s) {}
 
   size_t size() const { return data_.size(); }
 };
 
 template<typename C, auto M, size_t E>
-requires is_xdr_serializable<typename ProjectedSpan<C, M, E>::projected_type>
+requires is_xdr_serializable<typename ProjectedView<C, M, E>::projected_type>
 size_t
-xdr_size(const ProjectedSpan<C, M, E> &ps)
+xdr_size(const ProjectedView<C, M, E> &ps)
 {
-  using P = typename ProjectedSpan<C, M, E>::projected_type;
+  using P = typename ProjectedView<C, M, E>::projected_type;
   constexpr size_t kSizeSize = E == std::dynamic_extent ? 4 : 0;
   if constexpr (requires {
                   {
@@ -479,9 +479,9 @@ xdr_size(const ProjectedSpan<C, M, E> &ps)
 }
 
 template<typename C, auto M, size_t E>
-requires is_xdr_serializable<typename ProjectedSpan<C, M, E>::projected_type>
+requires is_xdr_serializable<typename ProjectedView<C, M, E>::projected_type>
 void
-xdr_serialize(auto &serializer, const ProjectedSpan<C, M, E> &ps)
+xdr_serialize(auto &serializer, const ProjectedView<C, M, E> &ps)
 {
   if constexpr (E == std::dynamic_extent)
     serializer.put32(ps.size());
@@ -490,12 +490,12 @@ xdr_serialize(auto &serializer, const ProjectedSpan<C, M, E> &ps)
 }
 
 template<typename X, size_t N, typename C, auto M>
-requires serializes_like<typename ProjectedSpan<C, M>::projected_type, X>
-struct serialize_equiv<Vec<X, N>, ProjectedSpan<C, M>> : std::true_type {};
+requires serializes_like<typename ProjectedView<C, M>::projected_type, X>
+struct serialize_equiv<Vec<X, N>, ProjectedView<C, M>> : std::true_type {};
 
 template<typename X, size_t N, typename C, auto M>
-requires serializes_like<typename ProjectedSpan<C, M, N>::projected_type, X>
-struct serialize_equiv<std::array<X, N>, ProjectedSpan<C, M, N>>
+requires serializes_like<typename ProjectedView<C, M, N>::projected_type, X>
+struct serialize_equiv<std::array<X, N>, ProjectedView<C, M, N>>
   : std::true_type {};
 
 void
