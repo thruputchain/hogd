@@ -8,6 +8,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/lthash16.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -79,6 +80,17 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
 BENCHMARK(bm_ed25519_sign_and_verify)
     ->RangeMultiplier(2)
     ->Range(kMin, kMax); // NOLINT
+
+void
+bm_lthash16_add(benchmark::State &state)
+{
+  bench_func(state, [](std::span<std::byte> buf) {
+    LtHash16 h;
+    h.add(buf);
+    return h;
+  });
+}
+BENCHMARK(bm_lthash16_add)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 } // namespace
 

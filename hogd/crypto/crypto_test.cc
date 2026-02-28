@@ -7,6 +7,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/lthash16.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -117,6 +118,128 @@ TEST(Ed25519, RandomKeygen)
   auto [pk2, sk2] = ed25519_keygen();
   EXPECT_NE(pk, pk2);
   EXPECT_NE(sk, sk2);
+}
+
+TEST(LtHash16, EmptyState)
+{
+  LtHash16 h;
+  LtHash16::State expected{};
+  EXPECT_EQ(h.state(), expected);
+}
+
+TEST(LtHash16, AddElement)
+{
+  std::vector<uint8_t> elem = {1, 2, 3, 4};
+  LtHash16 h;
+  h.add(elem);
+  LtHash16::State zero{};
+  EXPECT_NE(h.state(), zero);
+}
+
+TEST(LtHash16, Deterministic)
+{
+  std::vector<uint8_t> elem = {1, 2, 3, 4};
+  LtHash16 h1, h2;
+  h1.add(elem);
+  h2.add(elem);
+  EXPECT_EQ(h1, h2);
+}
+
+TEST(LtHash16, Commutativity)
+{
+  std::vector<uint8_t> a = {1, 2, 3};
+  std::vector<uint8_t> b = {4, 5, 6};
+
+  LtHash16 h1;
+  h1.add(a);
+  h1.add(b);
+
+  LtHash16 h2;
+  h2.add(b);
+  h2.add(a);
+
+  EXPECT_EQ(h1, h2);
+}
+
+TEST(LtHash16, AddRemoveIdentity)
+{
+  std::vector<uint8_t> elem = {10, 20, 30};
+  LtHash16 h;
+  LtHash16 original = h;
+
+  h.add(elem);
+  EXPECT_NE(h, original);
+  h.remove(elem);
+  EXPECT_EQ(h, original);
+}
+
+TEST(LtHash16, HomomorphicProperty)
+{
+  std::vector<uint8_t> a = {1, 2, 3};
+  std::vector<uint8_t> b = {4, 5, 6};
+
+  LtHash16 hab;
+  hab.add(a);
+  hab.add(b);
+
+  LtHash16 ha;
+  ha.add(a);
+  LtHash16 hb;
+  hb.add(b);
+
+  EXPECT_EQ(ha + hb, hab);
+}
+
+TEST(LtHash16, OperatorMinusInverse)
+{
+  std::vector<uint8_t> a = {1, 2, 3};
+  std::vector<uint8_t> b = {4, 5, 6};
+
+  LtHash16 ha;
+  ha.add(a);
+  LtHash16 hb;
+  hb.add(b);
+
+  LtHash16 combined = ha + hb;
+  EXPECT_EQ(combined - hb, ha);
+  EXPECT_EQ(combined - ha, hb);
+}
+
+TEST(LtHash16, Reset)
+{
+  std::vector<uint8_t> elem = {1, 2, 3};
+  LtHash16 h;
+  h.add(elem);
+  h.reset();
+  EXPECT_EQ(h, LtHash16{});
+}
+
+TEST(LtHash16, DifferentInputsDifferentStates)
+{
+  std::vector<uint8_t> a = {1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1};
+
+  LtHash16 ha, hb;
+  ha.add(a);
+  hb.add(b);
+  EXPECT_NE(ha, hb);
+}
+
+TEST(LtHash16, MultisetProperty)
+{
+  std::vector<uint8_t> elem = {42};
+
+  LtHash16 once;
+  once.add(elem);
+
+  LtHash16 twice;
+  twice.add(elem);
+  twice.add(elem);
+
+  EXPECT_NE(once, twice);
+
+  twice.remove(elem);
+  EXPECT_EQ(once, twice);
 }
 
 } // namespace hogd
