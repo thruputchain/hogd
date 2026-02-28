@@ -45,9 +45,9 @@ TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
   write_contract(contract);
   auto deployment_hash = make_deployed_contract_hash(contract);
 
-  AddressAndKey addrkey{
-      .address = contract_addr,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
+  AddressAndKey addrkey{.address = contract_addr,
+                        .key = StorageKey(
+                            StorageKeyType::kStorageKeyTypeAddressMetadata)};
 
   // TX1: deploy with exclusive lock
   auto tx1 = make_new_per_tx_db_proxy();
