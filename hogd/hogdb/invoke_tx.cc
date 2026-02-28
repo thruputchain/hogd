@@ -498,7 +498,7 @@ InvokeTX::assert_is_valid() const noexcept
   std::unordered_map<Address, int128_t> balance_deltas;
   if constexpr (is_debug_build()) {
     for (const auto &[key, vec] : changes_) {
-      [[maybe_unused]] int depth = 0;
+      [[maybe_unused]] unsigned int depth = 0;
       for (const ItemVersion &item : vec) {
         assert(item.tx_depth >= depth);
         assert(item.tx_depth <= tx_depth_);
