@@ -51,6 +51,11 @@ public:
     return &(*cost_model_);
   }
 
+  void set_cost_model(StorageCostModel model)
+  {
+    cost_model_.emplace(std::move(model));
+  }
+
 private:
   // One block.
   // Does not own a reference to children.

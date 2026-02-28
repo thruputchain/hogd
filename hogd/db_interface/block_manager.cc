@@ -188,14 +188,14 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
   if (!parent.block_data_ || parent.block_data_->is_committed_to_database()) {
     // parent is committed to database, so we need to create a new block state
     block_cache_.emplace(new_id,
-                         Block(base_database_, mode, &cost_model_.value()));
+                         Block(base_database_, mode, get_cost_model()));
   }
   else {
     assert(parent_id != last_committed_id_);
     // parent is not committed to database, so we can use the parent's block
     // state
     block_cache_.emplace(new_id, Block(parent.block_data_.get(), mode,
-                                       &cost_model_.value()));
+                                       get_cost_model()));
   }
   return true;
 }

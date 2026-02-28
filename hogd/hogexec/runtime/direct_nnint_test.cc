@@ -679,7 +679,9 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   // Read back - should be INT128_MIN
   auto item = lookup_storage_item_from_db(key);
   ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   int128_t stored_value = from_xdr(item->nnint());
+  // NOLINTEND(bugprone-unchecked-optional-access)
   // This is the bug: a "non-negative" integer storing INT128_MIN
   EXPECT_EQ(stored_value, kIntMin);
 
@@ -695,7 +697,9 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   // Check the value - INT128_MIN + 1 is still negative
   auto item2 = lookup_storage_item_from_db(key);
   ASSERT_TRUE(item2.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   int128_t final_value = from_xdr(item2->nnint());
+  // NOLINTEND(bugprone-unchecked-optional-access)
   // negative nnint is allowed if the base is negative
   EXPECT_EQ(final_value, kIntMin + 1);
 }
@@ -770,7 +774,9 @@ TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
 
   auto item = lookup_storage_item_from_db(key);
   ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   int128_t stored = from_xdr(item->nnint());
+  // NOLINTEND(bugprone-unchecked-optional-access)
   // value is -1 on set_add(-1, 0)
   EXPECT_EQ(stored, -1);
 }
