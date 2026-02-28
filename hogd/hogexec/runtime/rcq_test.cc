@@ -403,13 +403,6 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
 // 4) commit consume first, then insert
 TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "HogDB bug: RCQ concurrent consume+insert can trigger storage-cost "
-        << "assert(cost_change <= vec.back().locked_storage_cost) in "
-           "invoke_tx.cc.";
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   ASSERT_TRUE(insert({1}));

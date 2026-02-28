@@ -182,6 +182,22 @@ TEST_F(DirectRCQTests, ConcurrentConsume)
   ASSERT_EQ(entry2.value(), make_rcq_entry({1}));
 }
 
+TEST_F(DirectRCQTests, ConcurrentConsumeSelfDisallowed)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
+                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({0})}, {make_rcq_entry({0})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);  
+}
+
 TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -578,11 +594,6 @@ TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsert)
 // assert(cost_change <= vec.back().locked_storage_cost) in invoke_tx.cc.
 TEST_F(DirectRCQTests, ReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
 {
-  GTEST_SKIP()
-      << "HogDB bug: RCQ concurrent consume+insert can trigger storage-cost "
-      << "assert(cost_change <= vec.back().locked_storage_cost) in "
-         "invoke_tx.cc.";
-
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_assert_repro");
 
@@ -1003,8 +1014,6 @@ TEST_F(DirectRCQTests, StressConsumeFromNonExistentBlock)
 
 TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
 {
-  GTEST_SKIP() << "Either hogexec or hogdb should guard against this probably "
-                  "invalid input";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_type_trans");
 
@@ -1030,24 +1039,22 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
   r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  // Step 4: Consume all current-block entries, bringing the RCQ to zero.
+  // Step 4: Consume concurrent entries that are not in current block
   tx.add_delta(key,
                make_rcq_consume_insert_delta(
                    0, 0, {make_rcq_entry({10}), make_rcq_entry({20})}, {}),
                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx.try_push_current_subtransaction();
-
-  // this check fails in proposal mode
-  // Arguably this is invalid input from the executor
-  ASSERT_TRUE(r.has_value() && !r.value());
+  // This is invalid input from the executor, but we accept in validation mode,
+  // and allow it to commit in proposal mode (then fail the advance block)
+  ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
+  advance_block(BlockExecutionMode::kBlockExecutionModeProposal, DbSchedResult::DbSchedResultError);
 
   auto item = lookup_storage_item_from_db(key);
-  ASSERT_TRUE(item.has_value());
-  ASSERT_EQ(item->type(), StorageItemType::kItemTypeRetrocausalQueue);
-  ASSERT_EQ(item->metadata().live_entries, 2);
+  // block commif failed, so no item written
+  ASSERT_FALSE(item.has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,16 +1066,11 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
 // In the same block: TX1 inserts {A}, TX2 consumes {B} from current block
 // (where B was never inserted). At block finalization, write_committed_change
 // builds a consumed_set from current_block_consumed and tries to match against
-// added_entries_. Since {B} was never inserted, consumed_set won't be emptied,
-// triggering CHECK(consumed_set.empty()) at retrocausal_queue_lock.cc:356.
+// added_entries_. Since {B} was never inserted, consumed_set won't be emptied.
 TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
-  GTEST_SKIP()
-      << "HogDB bug: consuming a current-block entry that was never inserted "
-         "causes CHECK(consumed_set.empty()) failure at "
-         "retrocausal_queue_lock.cc:356";
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeValidation,
                     BlockExecutionMode::kBlockExecutionModeProposal}) {
     advance_block(mode);
@@ -1088,20 +1090,12 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
                   std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     r = tx2.try_push_current_subtransaction();
 
-    if (mode == BlockExecutionMode::kBlockExecutionModeProposal) {
-      ASSERT_TRUE(r.has_value() &&
-                  !r.value()); // consume should be rejected in proposal mode
-    }
-    else {
-      ASSERT_TRUE(r.has_value() && r.value()); // accepted in validation mode
-    }
+    ASSERT_TRUE(r.has_value() && r.value());
 
     ASSERT_TRUE(tx1.commit_transaction({}).has_value());
     ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
-    // advance_block triggers write_committed_change which has
-    // CHECK(consumed_set.empty())
-    advance_block();
+    advance_block(mode, DbSchedResult::DbSchedResultError);
   }
 }
 
@@ -1112,10 +1106,6 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
 // check should fail.
 TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
 {
-  GTEST_SKIP()
-      << "HogDB bug: consuming more current-block entries than were inserted "
-         "causes assert(live_entries >= 0) failure at "
-         "retrocausal_queue_lock.cc:262";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_extra");
 
@@ -1133,13 +1123,12 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
                                         make_rcq_entry({20})}),
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx2.try_push_current_subtransaction();
-  ASSERT_TRUE(r.has_value() &&
-              !r.value()); // consume should be rejected in proposal mode
+  ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   // there should be an error in advance block
-  advance_block();
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
 }
 
 // StressConsumeMoreCurrentThanInserted
@@ -1150,10 +1139,7 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
 TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
 {
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
-  GTEST_SKIP()
-      << "HogDB bug: consuming more current-block entries than were inserted "
-         "causes assert(live_entries >= 0) failure at "
-         "retrocausal_queue_lock.cc:262";
+
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_extra");
 
@@ -1176,7 +1162,7 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   // there should be an error in advance block
-  advance_block();
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
 }
 
 // StressSameTxConsumeInsertMismatch
@@ -1187,10 +1173,6 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
 // was never inserted). At finalization CHECK(consumed_set.empty()) fires.
 TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
 {
-  GTEST_SKIP()
-      << "HogDB bug: same-TX consume_insert with mismatched current-block "
-         "consumed entries causes CHECK(consumed_set.empty()) failure at "
-         "retrocausal_queue_lock.cc:356";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_mismatch");
 
@@ -1213,19 +1195,15 @@ TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
                     make_rcq_entry({40})}),
                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx.try_push_current_subtransaction();
-  ASSERT_TRUE(r.has_value() &&
-              !r.value()); // consume should be rejected in proposal mode
+  ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
 }
 
 TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
 {
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
-  GTEST_SKIP()
-      << "HogDB bug: same-TX consume_insert with mismatched current-block "
-         "consumed entries causes CHECK(consumed_set.empty()) failure at "
-         "retrocausal_queue_lock.cc:356";
+
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_mismatch");
 
@@ -1252,7 +1230,7 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
   // there should be an error in advance block
-  advance_block();
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
 }
 
 // StressValidationConsumeCurrentBlockZeroInserted
@@ -1263,10 +1241,6 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
 // added_entries_ to match against.
 TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
 {
-  GTEST_SKIP()
-      << "HogDB bug: consuming current-block entries when nothing was inserted "
-         "in the current block causes CHECK(consumed_set.empty()) failure at "
-         "retrocausal_queue_lock.cc:356";
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
                     BlockExecutionMode::kBlockExecutionModeValidation}) {
     advance_block(mode);
@@ -1289,14 +1263,9 @@ TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
     tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({1})}),
                   std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     r = tx2.try_push_current_subtransaction();
-    if (mode == BlockExecutionMode::kBlockExecutionModeProposal) {
-      ASSERT_TRUE(r.has_value() && !r.value());
-    }
-    else {
-      ASSERT_TRUE(r.has_value() && r.value());
-    }
+    ASSERT_TRUE(r.has_value() && r.value());
     ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-    advance_block();
+    advance_block(mode, DbSchedResult::DbSchedResultError);
   }
 }
 
@@ -1308,10 +1277,6 @@ TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
 // But if TX1 and TX2 commit in a specific order, the accounting might break.
 TEST_F(DirectRCQTests, StressValidationConcurrentInsertAndConsumeCurrentBlock)
 {
-  GTEST_SKIP()
-      << "HogDB bug: committing a current-block consumer before the producer "
-         "causes assert(live_entries >= 0) failure at "
-         "retrocausal_queue_lock.cc:262 (commit ordering issue)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_conc");
 
@@ -1334,7 +1299,7 @@ TEST_F(DirectRCQTests, StressValidationConcurrentInsertAndConsumeCurrentBlock)
   ASSERT_TRUE(r.has_value() && r.value());
   // Commit consume FIRST, then insert -- stresses the ordering
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  ASSERT_TRUE(r.has_value() && !r.value()); // invalid input guard
+  ASSERT_TRUE(r.has_value() && r.value()); // invalid input guard
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   advance_block();
 }
@@ -1567,10 +1532,6 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithConsumeDelta)
 TEST_F(DirectRCQTests,
        StressConsumeInsertDuplicateCurrentConsumedExceedsInserted)
 {
-  GTEST_SKIP()
-      << "Crashes at retrocausal_queue_lock.cc:356 (same site as bug "
-         "#6: CHECK(consumed_set.empty()) when duplicate current_block "
-         "consumed exceeds inserted count)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
@@ -1597,19 +1558,14 @@ TEST_F(DirectRCQTests,
                   std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     r = tx2.try_push_current_subtransaction();
 
-    if (mode == BlockExecutionMode::kBlockExecutionModeProposal) {
-      ASSERT_TRUE(r.has_value() && !r.value());
-    }
-    else {
-      ASSERT_TRUE(r.has_value() && r.value());
-    }
+    ASSERT_TRUE(r.has_value() && r.value());
 
     // Commit both -- TX1 adds {10}, TX2 tries to consume 2x{10} from current
     // block
     ASSERT_TRUE(tx1.commit_transaction({}).has_value());
     ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-    // this commit should fail in validation mode
-    advance_block();
+    // this commit should fail
+    advance_block(mode, DbSchedResult::DbSchedResultError);
   }
 }
 
@@ -1627,9 +1583,6 @@ TEST_F(DirectRCQTests,
 TEST_F(DirectRCQTests,
        StressDeleteExistingRCQThenRecreateThenConsumeInSameBlock)
 {
-  GTEST_SKIP() << "Crashes at invoke_tx.cc:195 (same site as bug #5: "
-                  "CHECK(cost_change <= locked_storage_cost) during "
-                  "delete->recreate->consume in same block)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_del_recreate_consume");
@@ -1661,7 +1614,7 @@ TEST_F(DirectRCQTests,
                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
-  // Sub3: retrocausally consume
+  // Sub3: retrocausally consume (entries that don't exist)
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({10})},
                                              {make_rcq_entry({10}),
@@ -1669,12 +1622,11 @@ TEST_F(DirectRCQTests,
                                               make_rcq_entry({30})}),
                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx.try_push_current_subtransaction();
-  // in proposal mode, the consume fails because no concurrent tx inserted the
-  // entries
-  ASSERT_TRUE(r.has_value() && !r.value());
+
+  ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  advance_block();
+  advance_block(BlockExecutionMode::kBlockExecutionModeValidation, DbSchedResult::DbSchedResultError);
 }
 
 // StressConsumeFromSameBlockPartialExceedsBlockSize
