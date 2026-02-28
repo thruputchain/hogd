@@ -63,8 +63,7 @@ check_delta_type(StorageKeyType key_type, StorageDeltaType delta_type)
   if constexpr (is_debug_build()) {
     switch (key_type) {
     case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-      if (delta_type != StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd &&
-          delta_type != StorageDeltaType::kDeltaTypeNonnegativeIntAdd) {
+      if (delta_type != StorageDeltaType::kDeltaTypeNonnegativeIntAdd) {
         error("delta type is not valid for key type: {} with {}", key_type,
               delta_type);
         assert(false);

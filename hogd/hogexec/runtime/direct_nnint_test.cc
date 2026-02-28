@@ -888,6 +888,91 @@ TEST_P(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
   advance_block();
 }
 
+// After a failed multi-delta subtransaction push (delta A succeeds, delta B
+// fails due to insufficient storage balance), check whether a concurrent TX
+// can reserve the same key as delta A.  In hogdb, the savepoint rollback
+// releases delta A's lock; in mockdb, pop_subtransactions does NOT revert
+// the StorageItemDeltaManager lock for the already-reserved delta.
+// Known MockDB issue: partial batch failure leaves locks unreleased.
+// See hogd/mockdb/KNOWN_ISSUES.md.
+TEST_P(DirectNNIntTest, BugHuntPartialBatchFailureLocksNotReverted)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB known issue: partial batch failure leaks locks";
+  }
+
+  auto contract_addr = make_contract_address(0);
+  // Give just enough balance for ONE nnint item, not two.
+  const auto *cost_model = get_default_cost_model();
+  int128_t one_item_cost = cost_model->get_nnint_cost();
+  setup_grant_storage_token(contract_addr, one_item_cost);
+
+  auto key_a = make_addrkey(contract_addr, "batch_key_a");
+  auto key_b = make_addrkey(contract_addr, "batch_key_b");
+
+  // TX1: push a batch with TWO new nnint keys. The contract only has balance
+  // for one, so the batch should fail (the second key's storage cost will push
+  // the balance below zero).
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key_a, make_nnint_set_add_delta(0, 1),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  tx1.add_delta(key_b, make_nnint_set_add_delta(0, 1),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  // The batch should fail because insufficient balance for 2 items.
+  ASSERT_FALSE(r1.value());
+
+  // TX2: try to reserve key_a (which was part of the failed batch).
+  // If the failed batch properly cleaned up locks, this should succeed.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key_a, make_nnint_set_add_delta(0, 42),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_TRUE(r2.value())
+      << "After a failed batch, locks should be released so concurrent "
+         "transactions can use the same key";
+
+  // Commit tx2 if it succeeded, or abort both
+  if (r2.value()) {
+    ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  }
+  else {
+    ASSERT_TRUE(tx2.abort_transaction().has_value());
+  }
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  advance_block();
+
+  // If tx2 committed, verify the value
+  if (r2.value()) {
+    auto item = lookup_storage_item_from_db(key_a);
+    ASSERT_TRUE(item.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    EXPECT_EQ(from_xdr(item->nnint()), 42);
+    // NOLINTEND(bugprone-unchecked-optional-access)
+  }
+}
+
+// Exclusive lock on balance key should be rejected by both backends.
+TEST_P(DirectNNIntTest, BugHuntBalanceNNIntAddExclusiveLockRejected)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto balance_key = make_free_native_token_balance_addrkey(contract_addr);
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(balance_key, make_nnint_add_delta(-100),
+               std::to_underlying(
+                   StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  EXPECT_FALSE(r.value()) << "Exclusive lock on balance key should be rejected";
+  ASSERT_TRUE(tx.abort_transaction().has_value());
+  advance_block();
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

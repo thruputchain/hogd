@@ -80,6 +80,7 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   direct_auth_data_tests.cc
   direct_bytestring_test.cc
+  direct_deploy_test.cc
   direct_rcq_tests.cc
   direct_nnint_test.cc
   direct_nonce_tests.cc
