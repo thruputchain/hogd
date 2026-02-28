@@ -6,6 +6,7 @@
 #include "hogd/base/types.h"
 #include "hogd/db_interface/transaction_state.h"
 #include "hogd/storage_item/storage_lock_util.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -56,7 +57,7 @@ TEST(TransactionState, EmptyTest)
   tx.push_subtransaction();
   tx.add_delta(make_addrkey(0), make_bstring_delta({1, 2, 3}),
                make_bstring_lock({1, 2, 3}));
-  tx.pop_subtransactions(1);
+  ASSERT_EQ(tx.pop_subtransactions(1), RPCError::kRPCNone);
 
   auto results = tx.extract_results();
   ASSERT_EQ(results.size(), 1);
@@ -80,7 +81,7 @@ TEST(TransactionState, SubtransactionTest)
   // lock
   tx.add_delta(make_addrkey(1), make_bstring_delta({4, 5, 6}),
                make_bstring_lock({4, 5, 6}));
-  tx.pop_subtransactions(1);
+  ASSERT_EQ(tx.pop_subtransactions(1), RPCError::kRPCNone);
 
   auto results = tx.extract_results();
 
