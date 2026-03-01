@@ -117,9 +117,8 @@ public:
       // Invariant: hogexec sends at most one delta per key per subtransaction.
       std::set<AddressAndKey> seen_keys;
       for (auto const &d : current_subtransaction_batch_) {
-        auto [it, inserted] = seen_keys.insert(d.addrkey);
-        (void)it;
-        assert(inserted && "duplicate key in subtransaction batch");
+        auto [_, inserted] = seen_keys.insert(d.addrkey);
+        CHECK(inserted);
       }
 
       // Shuffle the batch of deltas before sending to the database because

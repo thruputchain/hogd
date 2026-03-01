@@ -176,9 +176,8 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     // Invariant: hogexec sends at most one delta per key per subtransaction.
     std::set<AddressAndKey> seen_keys;
     for (auto const &delta : batch) {
-      auto [it, inserted] = seen_keys.insert(delta.addrkey);
-      (void)it;
-      assert(inserted && "duplicate key in subtransaction batch");
+      auto [_, inserted] = seen_keys.insert(delta.addrkey);
+      CHECK(inserted);
     }
   }
 
