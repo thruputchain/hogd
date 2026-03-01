@@ -261,8 +261,7 @@ InvokeTX::release_savepoint(int depth)
       continue;
 
     // retain latest change but erase any history after savepoint.
-    ItemVersion tmp(std::move(vec.back().change),
-                  tx_depth_, 0);
+    ItemVersion tmp(std::move(vec.back().change), tx_depth_, 0);
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());

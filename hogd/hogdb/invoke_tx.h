@@ -125,12 +125,17 @@ private:
     unsigned int tx_depth;
     int128_t locked_storage_cost{0};
 
-    ItemVersion(ItemChange&& change, unsigned int tx_depth, int128_t locked_storage_cost)
-    : change(change), tx_depth(tx_depth), locked_storage_cost(locked_storage_cost)
+    ItemVersion(ItemChange &&change, unsigned int tx_depth,
+                int128_t locked_storage_cost)
+      : change(change), tx_depth(tx_depth),
+        locked_storage_cost(locked_storage_cost)
     {}
-    
-    ItemVersion(ItemVersion&&) noexcept = default;
-    ItemVersion& operator=(ItemVersion&&) noexcept = default;
+
+    // Disable copy and allow move.
+    // This is not strictly necessary, but eliminates the possibility
+    // of accidental copies that caused the *(almost) bug in PR #1196
+    ItemVersion(ItemVersion &&) noexcept = default;
+    ItemVersion &operator=(ItemVersion &&) noexcept = default;
   };
 
   struct StorageBalanceVersion {
