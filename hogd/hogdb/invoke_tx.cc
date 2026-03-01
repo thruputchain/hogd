@@ -112,7 +112,7 @@ InvokeTX::update_balance_lock(Address const &addr)
       return status.error();
     }
 
-    change.emplace_back(std::move(new_item), tx_depth_, 0);
+    change.emplace_back(std::move(new_item), tx_depth_);
     return {};
   }
 
@@ -150,7 +150,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return status.error();
   }
   assert(last.tx_depth < tx_depth_);
-  change.emplace_back(std::move(new_item), tx_depth_, 0);
+  change.emplace_back(std::move(new_item), tx_depth_);
   return {};
 }
 
@@ -261,7 +261,7 @@ InvokeTX::release_savepoint(int depth)
       continue;
 
     // retain latest change but erase any history after savepoint.
-    ItemVersion tmp(std::move(vec.back().change), tx_depth_, 0);
+    ItemVersion tmp(std::move(vec.back().change), tx_depth_);
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());
@@ -317,7 +317,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     assert(*ret >= 0 || change.is_permanent_exclusive());
     int128_t marginal_storage = *ret;
 
-    v.emplace_back(std::move(change), tx_depth_, 0);
+    v.emplace_back(std::move(change), tx_depth_);
     // now lock the storage
     if (marginal_storage != 0) {
       lock_storage(key.get_address(), marginal_storage);
