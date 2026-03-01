@@ -36,7 +36,7 @@ main() // NOLINT(bugprone-exception-escape)
 
     auto token = cp.read_clear(fds[0]);
     char c;
-    int n = read(fds[0], &c, 1);
+    [[maybe_unused]] int n = read(fds[0], &c, 1);
     x23assert(n == -1 && errno == EAGAIN);
 
     // This coroutine suspends at read_wait (fd is not readable).

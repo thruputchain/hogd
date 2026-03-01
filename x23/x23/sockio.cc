@@ -50,6 +50,7 @@ set_nodelay(BorrowedFd fd, bool on)
 // Refactor env2int calls to avoid a tsan false positive
 namespace {
 
+#ifndef NDEBUG
 int
 env2int(const char *var)
 {
@@ -66,6 +67,7 @@ get_send_recv_buf_sizes()
                    rcvsize = env2int("X23_RCVBUF");
   return {sndsize, rcvsize};
 }
+#endif
 
 } // namespace
 
