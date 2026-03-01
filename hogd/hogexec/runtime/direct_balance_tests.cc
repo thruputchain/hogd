@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -30,6 +31,8 @@ public:
     return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
   }
 };
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // request_balance_change must carry forward total_locked_storage_amount from
 // the parent depth entry.  Previously it zeroed the field, which lost storage
@@ -117,6 +120,8 @@ TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
   EXPECT_EQ(from_xdr(bal_test->nnint()), from_xdr(bal_ref->nnint()))
       << "Balance transfer at new depth should not lose locked storage cost";
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBalanceTest,
                          ::testing::Values(TestDB::kMockInMemory,
