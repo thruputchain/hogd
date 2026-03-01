@@ -603,6 +603,32 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
   ASSERT_TRUE(res.is_root_success());
 }
 
+// Checks that aliasing guards (returning kFault) are performed before the read
+// only guard
+TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
+{
+  using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
+
+  auto context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = contract_addr_,
+                          .entrypoint = meta::entrypoint<
+                              "read_only_aliasing_before_read_only_check">(),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {}},
+              }},
+      *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

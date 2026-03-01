@@ -1077,7 +1077,7 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
-                             int128_t add_value,
+                             const int128_t &add_value,
                              StorageDeltaFlagSet input_flags)
 {
   CHECK(!is_read_only());

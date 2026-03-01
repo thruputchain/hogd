@@ -17,6 +17,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -207,15 +208,17 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
   // lambda context
   return [&]<size_t... Is>(
              TupleIndexSequence<Is...> /*unused*/) -> ForeignHostFnResult {
+    AliasGuard guard;
     // Attempt to load syscall arguments from regular machine, not contract)
     // memory.
     auto parsed_args = std::tuple{
         parse_mock<syscall_t::template offset_i<Is>(),
-                   typename syscall_t::template arg_i<Is>>(input_args)...};
+                   typename syscall_t::template arg_i<Is>>(guard,
+                                                           input_args)...};
 
-    auto inner_res =
-        wrap_after_parse<SyscallMeta>(handler->to_handler(), *mock_runtime,
-                                      syscall_no, std::move(parsed_args));
+    auto inner_res = wrap_after_parse<SyscallMeta>(guard, handler->to_handler(),
+                                                   *mock_runtime, syscall_no,
+                                                   std::move(parsed_args));
 
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

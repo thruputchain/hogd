@@ -147,7 +147,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     const generated::GasPermissionConfig *optional_input_permission_4) noexcept
 {
   x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs;
-  bool no_gaps = false;
+  bool found_first_empty = false;
   bool found_gap = false;
   bool invalid_bitmap = false;
 
@@ -155,7 +155,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     auto add_gas_permission =
         [&](const generated::GasPermissionConfig *permission) {
           if (permission) {
-            if (no_gaps) {
+            if (found_first_empty) {
               found_gap = true;
               return;
             }
@@ -168,7 +168,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
                     *permission));
           }
           else {
-            no_gaps = true;
+            found_first_empty = true;
           }
         };
 

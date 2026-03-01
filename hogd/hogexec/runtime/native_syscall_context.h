@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
@@ -37,12 +38,15 @@ public:
         SyscallTypes<std::remove_const_t<decltype(Meta::kInnerFunc)>>;
     static_assert(sizeof...(Args) == syscall_t::kNumArgs);
 
+    AliasGuard guard;
+
     auto parsed = [&]<size_t... Is>(std::index_sequence<Is...>) {
       return std::tuple{to_parsed<typename syscall_t::template arg_i<Is>>(
           std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    return wrap_after_parse<Meta>(handler_, runtime_, Meta::kSyscallNo, parsed);
+    return wrap_after_parse<Meta>(guard, handler_, runtime_, Meta::kSyscallNo,
+                                  parsed);
   }
 
   SystemCallHandler &handler() { return handler_; }

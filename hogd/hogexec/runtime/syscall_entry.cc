@@ -45,6 +45,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
                     Args... args)
 {
   SyscallFunc syscall_fn = nullptr;
+  assert(call_context->syscall_handler);
   bool valid_syscall_no = syscall_no < kSyscallTable.size();
   if (!valid_syscall_no) {
     // invalid syscall
@@ -58,11 +59,10 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
     assert(syscall_expect == static_cast<SyscallNo>(syscall_no));
     syscall_fn = syscall_fn_outer;
   }
+  assert(syscall_fn);
 
   static_assert(kSyscallTable.size() < INT32_MAX,
                 "xdr enum overflow otherwise");
-
-  assert(call_context->syscall_handler);
 
   if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
     if (valid_syscall_no) {

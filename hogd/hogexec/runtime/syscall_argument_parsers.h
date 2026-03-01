@@ -9,6 +9,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/components/alias_guard.h"
 
 // Provides a set of tools to check that arguments provided by the
 // runtime are well-defined, and contained within
@@ -99,8 +100,10 @@ read_unaligned(const void *ptr)
 template<typename T>
 requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
 WritableOutput<T>
-check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset)
+check_user_argument(AliasGuard &guard, std::span<std::byte> contract_memory,
+                    uint64_t user_offset)
 {
+  guard.check_and_register(user_offset, sizeof(T));
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return WritableOutput<T>();
   }
@@ -110,8 +113,9 @@ check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset)
 template<typename T>
 requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
 WritableOutput<T>
-check_user_argument_mock(uint64_t user_offset)
+check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
 {
+  guard.check_and_register(user_offset, sizeof(T));
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   auto *ptr = reinterpret_cast<void *>(user_offset);
   return WritableOutput<T>(ptr);
@@ -120,9 +124,11 @@ check_user_argument_mock(uint64_t user_offset)
 template<typename T>
 requires (std::is_trivially_copyable_v<T> && std::is_const_v<T>)
 std::optional<T>
-check_user_argument(std::span<const std::byte> contract_memory,
+check_user_argument(AliasGuard &guard,
+                    std::span<const std::byte> contract_memory,
                     uint64_t user_offset)
 {
+  guard.check_and_register(user_offset, sizeof(T));
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return std::nullopt;
   }
@@ -133,8 +139,9 @@ check_user_argument(std::span<const std::byte> contract_memory,
 template<typename T>
 requires (std::is_trivially_copyable_v<T> && std::is_const_v<T>)
 std::optional<T>
-check_user_argument_mock(uint64_t user_offset)
+check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
 {
+  guard.check_and_register(user_offset, sizeof(T));
   // NOLINTBEGIN(performance-no-int-to-ptr)
   return read_unaligned<std::remove_cvref_t<T>>(
       reinterpret_cast<void *>(user_offset));
@@ -142,9 +149,11 @@ check_user_argument_mock(uint64_t user_offset)
 }
 
 inline std::optional<std::span<std::byte>>
-check_user_span_argument(std::span<std::byte> contract_memory,
+check_user_span_argument(AliasGuard &guard,
+                         std::span<std::byte> contract_memory,
                          uint64_t user_offset, uint64_t user_len)
 {
+  guard.check_and_register(user_offset, user_len);
   if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
     return std::nullopt;
   }

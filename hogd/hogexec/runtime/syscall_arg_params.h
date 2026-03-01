@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 
 namespace hogd {
@@ -83,7 +84,8 @@ template<typename T> struct SyscallArgParams;
 template<> struct SyscallArgParams<bool> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static std::optional<bool> parse(std::span<std::byte> /*unused*/,
+  constexpr static std::optional<bool> parse(AliasGuard & /*unused*/,
+                                             std::span<std::byte> /*unused*/,
                                              uint64_t input)
   {
     if (input > 1) {
@@ -92,7 +94,8 @@ template<> struct SyscallArgParams<bool> {
     return static_cast<bool>(input);
   }
 
-  constexpr static std::optional<bool> parse_mock(uint64_t input)
+  constexpr static std::optional<bool> parse_mock(AliasGuard & /*unused*/,
+                                                  uint64_t input)
   {
     if (input > 1) {
       return std::nullopt;
@@ -117,13 +120,15 @@ template<std::integral T> requires (sizeof(T) <= 8 && !std::same_as<T, bool>)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
+  constexpr static std::optional<T> parse(AliasGuard & /*unused*/,
+                                          std::span<std::byte> /*unused*/,
                                           uint64_t input)
   {
     return narrow_int_checked<T>(input);
   }
 
-  constexpr static std::optional<T> parse_mock(uint64_t input)
+  constexpr static std::optional<T> parse_mock(AliasGuard & /*unused*/,
+                                               uint64_t input)
   {
     return narrow_int_checked<T>(input);
   }
@@ -155,13 +160,15 @@ struct SyscallArgParams<T> {
     return static_cast<T>(*result);
   }
 
-  constexpr static std::optional<T> parse(std::span<std::byte> /*unused*/,
+  constexpr static std::optional<T> parse(AliasGuard & /*unused*/,
+                                          std::span<std::byte> /*unused*/,
                                           uint64_t input)
   {
     return parse_impl(input);
   }
 
-  constexpr static std::optional<T> parse_mock(uint64_t input)
+  constexpr static std::optional<T> parse_mock(AliasGuard & /*unused*/,
+                                               uint64_t input)
   {
     return parse_impl(input);
   }
@@ -179,54 +186,21 @@ struct SyscallArgParams<T> {
   }
 };
 
-// Input types that can be passed by value but not within a uint64
-template<typename T> requires (sizeof(T) > 8) && std::is_trivially_copyable_v<T>
-struct SyscallArgParams<T> {
-  constexpr static size_t kNumInputs = 1;
-
-  constexpr static std::optional<const T>
-  parse(std::span<std::byte> contract_memory, uint64_t offset)
-  {
-    return check_user_argument<const T>(contract_memory, offset);
-  }
-
-  constexpr static std::optional<const T> parse_mock(uint64_t offset)
-  {
-    return check_user_argument_mock<const T>(offset);
-  }
-
-  constexpr static bool validate(std::optional<const T> argument)
-  {
-    return argument.has_value();
-  }
-  constexpr static T deref(std::optional<const T> const &value)
-  {
-    // GCC cannot track that validate() was called before deref() across
-    // the template indirection in syscall_entry_outer.h, so it falsely
-    // warns that the optional storage may be uninitialized for __int128.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return *value;
-#pragma GCC diagnostic pop
-  }
-};
-
 // [u8] span contract output.
 // The two input arguments are (offset, length) in contract memory.
 template<> struct SyscallArgParams<std::span<std::byte>> {
   constexpr static size_t kNumInputs = 2;
   constexpr static std::optional<std::span<std::byte>>
-  parse(std::span<std::byte> contract_memory, uint64_t offset, uint64_t len)
+  parse(AliasGuard &guard, std::span<std::byte> contract_memory,
+        uint64_t offset, uint64_t len)
   {
-    return check_user_span_argument(contract_memory, offset, len);
+    return check_user_span_argument(guard, contract_memory, offset, len);
   }
 
   constexpr static std::optional<std::span<std::byte>>
-  parse_mock(uint64_t offset, uint64_t len)
+  parse_mock(AliasGuard &guard, uint64_t offset, uint64_t len)
   {
+    guard.check_and_register(offset, len);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto *output_pointer = reinterpret_cast<std::byte *>(offset);
     return std::span<std::byte>{output_pointer, len};
@@ -252,14 +226,16 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   constexpr static size_t kNumInputs = 2;
 
   constexpr static std::optional<std::span<const std::byte>>
-  parse(std::span<std::byte> contract_memory, uint64_t offset, uint64_t len)
+  parse(AliasGuard &guard, std::span<std::byte> contract_memory,
+        uint64_t offset, uint64_t len)
   {
-    return check_user_span_argument(contract_memory, offset, len);
+    return check_user_span_argument(guard, contract_memory, offset, len);
   }
 
   constexpr static std::optional<std::span<const std::byte>>
-  parse_mock(uint64_t offset, uint64_t len)
+  parse_mock(AliasGuard &guard, uint64_t offset, uint64_t len)
   {
+    guard.check_and_register(offset, len);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const auto *output_pointer = reinterpret_cast<const std::byte *>(offset);
     return std::span<const std::byte>{output_pointer, len};
@@ -284,15 +260,17 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
 template<typename T> requires std::is_trivially_copyable_v<T>
 struct SyscallArgParams<const T &> {
   constexpr static size_t kNumInputs = 1;
-  constexpr static std::optional<T> parse(std::span<std::byte> contract_memory,
+  constexpr static std::optional<T> parse(AliasGuard &guard,
+                                          std::span<std::byte> contract_memory,
                                           uint64_t offset)
   {
-    return check_user_argument<const T>(contract_memory, offset);
+    return check_user_argument<const T>(guard, contract_memory, offset);
   }
 
-  constexpr static std::optional<T> parse_mock(uint64_t offset)
+  constexpr static std::optional<T> parse_mock(AliasGuard &guard,
+                                               uint64_t offset)
   {
-    return check_user_argument_mock<const T>(offset);
+    return check_user_argument_mock<const T>(guard, offset);
   }
 
   constexpr static bool validate(std::optional<T> arg)
@@ -313,15 +291,17 @@ template<typename T>
 requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
 struct SyscallArgParams<T &> {
   constexpr static size_t kNumInputs = 1;
-  constexpr static WritableOutput<T> parse(std::span<std::byte> contract_memory,
+  constexpr static WritableOutput<T> parse(AliasGuard &guard,
+                                           std::span<std::byte> contract_memory,
                                            uint64_t offset)
   {
-    return check_user_argument<T>(contract_memory, offset);
+    return check_user_argument<T>(guard, contract_memory, offset);
   }
 
-  constexpr static WritableOutput<T> parse_mock(uint64_t offset)
+  constexpr static WritableOutput<T> parse_mock(AliasGuard &guard,
+                                                uint64_t offset)
   {
-    return check_user_argument_mock<T>(offset);
+    return check_user_argument_mock<T>(guard, offset);
   }
 
   constexpr static bool validate(WritableOutput<T> const &arg)
@@ -345,7 +325,8 @@ struct SyscallArgParams<const T *> {
 
   constexpr static size_t kNumInputs = 1;
   constexpr static OptionalInputParseResult
-  parse(std::span<std::byte> contract_memory, uint64_t offset)
+  parse(AliasGuard &guard, std::span<std::byte> contract_memory,
+        uint64_t offset)
   {
     // 0 can be a valid pointer in wasm. As such, optional inputs use
     // UINT64_MAX as the explicit null sentinel.
@@ -353,7 +334,7 @@ struct SyscallArgParams<const T *> {
       return {.is_valid = true, .value = std::nullopt};
     }
 
-    auto value = check_user_argument<const T>(contract_memory, offset);
+    auto value = check_user_argument<const T>(guard, contract_memory, offset);
     if (!value.has_value()) {
       return {.is_valid = false, .value = std::nullopt};
     }
@@ -361,7 +342,8 @@ struct SyscallArgParams<const T *> {
     return {.is_valid = true, .value = std::move(value)};
   }
 
-  constexpr static OptionalInputParseResult parse_mock(uint64_t offset)
+  constexpr static OptionalInputParseResult parse_mock(AliasGuard &guard,
+                                                       uint64_t offset)
   {
     // 0 can be a valid pointer in wasm.  As such, the optional input types in
     // the sdk use UINT64_MAX as the nullptr (in the case of a None input),
@@ -371,7 +353,7 @@ struct SyscallArgParams<const T *> {
     }
 
     return {.is_valid = true,
-            .value = check_user_argument_mock<const T>(offset)};
+            .value = check_user_argument_mock<const T>(guard, offset)};
   }
 
   constexpr static bool validate(OptionalInputParseResult const &arg)
