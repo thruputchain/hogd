@@ -26,11 +26,20 @@ contract calls `get_db_tip` on MockDB.
 
 - **File**: `hogd/db_interface/db_executor_server.cc:~226`
 
-## Storage cost accounting does not support transfer-and-use in one transaction
+## Balance deltas from different subtransaction depths are not combined
 
-When a contract receives a native token transfer and attempts to use that
-balance for storage costs within the same transaction, MockDB does not account
-for the incoming transfer when checking the balance. HogDB handles this
-correctly.
+MockDB's `TransactionState::extract_results()` iterates subtransactions
+newest-first and uses `emplace` (insert-if-absent). For balance keys, storage
+cost adjustments from an earlier subtransaction and manual balance transfers from
+a later subtransaction are independent deltas that need to be combined, but
+`extract_results` silently drops the earlier one. This means storage costs locked
+at one depth are lost if a balance transfer occurs at a deeper depth.
 
-- **Test**: `TransferAndUseStorageWithinTransaction` (skipped on MockDB)
+HogDB handles this correctly via `InvokeTX::balance_deltas_`, which tracks
+`manual_transfer_amount` and `total_locked_storage_amount` separately and
+combines them at commit time.
+
+- **File**: `hogd/db_interface/transaction_state.cc` (extract_results)
+- **See also**: `hogd/db_interface/transaction_state.h` line 27 ("THE STORAGE
+  COST ACCOUNTING HERE IS BROKEN")
+- **Test**: `BalanceTransferAtNewDepthPreservesLockedStorage` (skipped on MockDB)
