@@ -31,15 +31,15 @@ public:
   }
 };
 
-// request_balance_change must carry forward total_locked_storage_amount from the
-// parent depth entry.  Previously it zeroed the field, which lost storage costs
-// locked at an earlier depth whenever a balance transfer occurred at a deeper
-// depth in the same transaction.
+// request_balance_change must carry forward total_locked_storage_amount from
+// the parent depth entry.  Previously it zeroed the field, which lost storage
+// costs locked at an earlier depth whenever a balance transfer occurred at a
+// deeper depth in the same transaction.
 TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "MockDB does not combine balance deltas across "
-                     "subtransaction depths (see KNOWN_ISSUES.md)";
+                    "subtransaction depths (see KNOWN_ISSUES.md)";
   }
 
   auto contract_addr = make_contract_address(0);
