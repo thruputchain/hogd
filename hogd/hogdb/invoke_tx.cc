@@ -116,7 +116,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return {};
   }
 
-  auto last = change.back();
+  auto const &last = change.back();
   assert(last.tx_depth <= tx_depth_);
   assert(last.change.is_balance());
   new_item.narrow(last.change);
@@ -149,13 +149,8 @@ InvokeTX::update_balance_lock(Address const &addr)
     }
     return status.error();
   }
-  if (last.tx_depth == tx_depth_) {
-    last.change = std::move(new_item);
-  }
-  else {
-    assert(last.tx_depth < tx_depth_);
-    change.emplace_back(std::move(new_item), tx_depth_, 0);
-  }
+  assert(last.tx_depth < tx_depth_);
+  change.emplace_back(std::move(new_item), tx_depth_, 0);
   return {};
 }
 
