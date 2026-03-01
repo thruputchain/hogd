@@ -8,6 +8,7 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 add_subdirectory(wasm)
+add_subdirectory(direct_rpc_tests)
 
 add_library(runtime_objects OBJECT
   contract_trait.cc
@@ -72,14 +73,6 @@ add_library(runtime_test_objects OBJECT
   cross_contract_revert_test.cc
   delete_recreate_tests.cc
   deserialize_test.cc
-  direct_auth_data_tests.cc
-  direct_balance_tests.cc
-  direct_bytestring_test.cc
-  direct_deploy_test.cc
-  direct_rcq_tests.cc
-  direct_nnint_test.cc
-  direct_nonce_tests.cc
-  direct_storage_ordering_tests.cc
   empty_test.cc
   event_test.cc
   execution_mode_test.cc
