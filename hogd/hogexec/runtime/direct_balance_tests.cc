@@ -141,8 +141,7 @@ TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
 
   // Depth 1: write first storage key
   {
-    tx.add_delta(make_addrkey(addr_A, "key1"),
-                 make_bytestring_delta("data1"),
+    tx.add_delta(make_addrkey(addr_A, "key1"), make_bytestring_delta("data1"),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -165,8 +164,7 @@ TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
 
   // Depth 3: write second storage key (same address)
   {
-    tx.add_delta(make_addrkey(addr_A, "key2"),
-                 make_bytestring_delta("data2"),
+    tx.add_delta(make_addrkey(addr_A, "key2"), make_bytestring_delta("data2"),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -238,8 +236,7 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
 
   // Depth 1: storage key1
   {
-    tx.add_delta(make_addrkey(addr_A, "key1"),
-                 make_bytestring_delta("data1"),
+    tx.add_delta(make_addrkey(addr_A, "key1"), make_bytestring_delta("data1"),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -262,8 +259,7 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
 
   // Depth 3: storage key2
   {
-    tx.add_delta(make_addrkey(addr_A, "key2"),
-                 make_bytestring_delta("data2"),
+    tx.add_delta(make_addrkey(addr_A, "key2"), make_bytestring_delta("data2"),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -371,8 +367,7 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
   {
     auto tx1 = make_new_per_tx_db_proxy();
     {
-      tx1.add_delta(make_addrkey(addr_A, "key"),
-                    make_bytestring_delta("data"),
+      tx1.add_delta(make_addrkey(addr_A, "key"), make_bytestring_delta("data"),
                     std::to_underlying(
                         StorageDeltaFlags::kStorageDeltaFlagNone));
       auto r = tx1.try_push_current_subtransaction();
@@ -437,8 +432,8 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
 
   // A and C had same initial balance but different transfers and data sizes.
   // A: stored "data" (4 bytes, cost 12040), transferred 500 = -12540 total.
-  // C: stored "different_data" (14 bytes, cost 12140), transferred 300 = -12440.
-  // So C should have more remaining (lost less total).
+  // C: stored "different_data" (14 bytes, cost 12140), transferred 300 =
+  // -12440. So C should have more remaining (lost less total).
   EXPECT_GE(from_xdr(bal_A->nnint()), 0);
   EXPECT_GE(from_xdr(bal_C->nnint()), 0);
   EXPECT_NE(from_xdr(bal_A->nnint()), from_xdr(bal_C->nnint()))
