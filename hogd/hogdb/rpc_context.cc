@@ -12,6 +12,7 @@
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 
