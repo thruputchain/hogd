@@ -286,10 +286,17 @@ void
 InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 {
   auto &bal = balance_deltas_[addr];
-  if (bal.empty() || bal.back().tx_depth < tx_depth_) {
+  if (bal.empty()) {
     bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta,
                                            .total_locked_storage_amount = 0,
                                            .tx_depth = tx_depth_});
+  }
+  else if (bal.back().tx_depth < tx_depth_) {
+    bal.emplace_back(
+        StorageBalanceVersion{.manual_transfer_amount = delta,
+                              .total_locked_storage_amount =
+                                  bal.back().total_locked_storage_amount,
+                              .tx_depth = tx_depth_});
   }
   else {
     assert(bal.back().tx_depth == tx_depth_);

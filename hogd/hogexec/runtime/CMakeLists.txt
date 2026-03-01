@@ -73,6 +73,7 @@ add_library(runtime_test_objects OBJECT
   delete_recreate_tests.cc
   deserialize_test.cc
   direct_auth_data_tests.cc
+  direct_balance_tests.cc
   direct_bytestring_test.cc
   direct_deploy_test.cc
   direct_rcq_tests.cc
