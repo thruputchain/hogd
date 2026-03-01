@@ -437,6 +437,67 @@ xdr_serialize(auto &serializer, BorrowedPtr<T> p)
 template<typename X, serializes_like<X> T>
 struct serialize_equiv<Ptr<X>, BorrowedPtr<T>> : std::true_type {};
 
+// A non-owning span that serializes a member projection of each element.
+// Dynamic extent (default) includes a size prefix and serializes like Vec;
+// fixed extent omits the prefix and serializes like std::array.
+//
+// Example:
+//   ProjectedView<SignedTransaction, &SignedTransaction::tx>
+// wraps a span<const SignedTransaction> but serializes identically to
+// Vec<Transaction>, without copying the Transaction objects.
+template<typename Container, auto MemberPtr, size_t E = std::dynamic_extent>
+struct ProjectedView {
+  using projected_type =
+      std::remove_cvref_t<decltype(std::declval<const Container &>().*
+                                   MemberPtr)>;
+
+  span<const Container, E> data_;
+
+  ProjectedView() = default;
+  explicit ProjectedView(span<const Container, E> s) : data_(s) {}
+
+  size_t size() const { return data_.size(); }
+};
+
+template<typename C, auto M, size_t E>
+requires is_xdr_serializable<typename ProjectedView<C, M, E>::projected_type>
+size_t
+xdr_size(const ProjectedView<C, M, E> &ps)
+{
+  using P = typename ProjectedView<C, M, E>::projected_type;
+  constexpr size_t kSizeSize = E == std::dynamic_extent ? 4 : 0;
+  if constexpr (requires {
+                  {
+                    x23::detail::size_of_fixed<P>()
+                  } -> std::convertible_to<size_t>;
+                })
+    return kSizeSize + ps.size() * x23::detail::size_of_fixed<P>();
+  size_t ret = kSizeSize;
+  for (const auto &e : ps.data_)
+    ret += xdr_size(e.*M);
+  return ret;
+}
+
+template<typename C, auto M, size_t E>
+requires is_xdr_serializable<typename ProjectedView<C, M, E>::projected_type>
+void
+xdr_serialize(auto &serializer, const ProjectedView<C, M, E> &ps)
+{
+  if constexpr (E == std::dynamic_extent)
+    serializer.put32(ps.size());
+  for (const auto &e : ps.data_)
+    serializer(e.*M);
+}
+
+template<typename X, size_t N, typename C, auto M>
+requires serializes_like<typename ProjectedView<C, M>::projected_type, X>
+struct serialize_equiv<Vec<X, N>, ProjectedView<C, M>> : std::true_type {};
+
+template<typename X, size_t N, typename C, auto M>
+requires serializes_like<typename ProjectedView<C, M, N>::projected_type, X>
+struct serialize_equiv<std::array<X, N>, ProjectedView<C, M, N>>
+  : std::true_type {};
+
 void
 serialize_to(Buf *bufp, const is_xdr_serializable auto &x)
 {
