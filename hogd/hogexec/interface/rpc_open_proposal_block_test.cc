@@ -49,7 +49,7 @@ public:
         x23::HostPort{"localhost", db_wrapper_.coord_port()}, false);
 
     auto db_res =
-        db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{});
+        db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{}, BlockHash{});
     if (db_res != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to load genesis configuration");
     }

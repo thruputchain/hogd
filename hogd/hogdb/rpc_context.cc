@@ -84,7 +84,7 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
 }
 
 HogDBStatus<void>
-RPCContext::update_dbtip(BlockTXID bid)
+RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash)
 {
   trie_->generate_top_level_hashes();
   tip_.db_hash = trie_->get_root_hash();

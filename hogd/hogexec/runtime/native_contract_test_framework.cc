@@ -163,8 +163,9 @@ NativeContractTestFramework::run_genesis_initialization(
   assert(!storage_snapshot_cache_);
   assert(block_number_ == 0);
 
+  constexpr BlockHash kBlockHash{};
   auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
-      genesis_configuration);
+      genesis_configuration, kBlockHash);
   if (r != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
         "run_genesis_initialization: dbsched_load_genesis_block failed");

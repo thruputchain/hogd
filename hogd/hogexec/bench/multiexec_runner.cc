@@ -447,8 +447,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   auto write_genesis_configuration =
       [&](const GenesisConfiguration &genesis_configuration) {
+        constexpr BlockHash kBlockHash{};
         auto res = db_sched_client.dbsched_load_genesis_configuration(
-            genesis_configuration);
+            genesis_configuration, kBlockHash);
         if (res != DbSchedResult::DbSchedResultOK) {
           throw std::runtime_error("Failed to write genesis block");
         }

@@ -272,8 +272,9 @@ CommonBenchState::run_genesis_configuration(
 
   assert(block_number_ == 0);
   {
+    constexpr BlockHash kBlockHash{};
     auto r = coord_client_->dbsched_load_genesis_configuration(
-        genesis_configuration);
+        genesis_configuration, kBlockHash);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to write genesis configuration");
     }

@@ -262,12 +262,13 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 TEST_F(GenesisConfigurationUnfurlTest, DoubleLoadError)
 {
   GenesisConfiguration genesis_configuration{};
+  BlockHash block_hash{};
 
   auto r = get_coord_client().dbsched_load_genesis_configuration(
-      genesis_configuration);
+      genesis_configuration, block_hash);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
   r = get_coord_client().dbsched_load_genesis_configuration(
-      genesis_configuration);
+      genesis_configuration, block_hash);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 

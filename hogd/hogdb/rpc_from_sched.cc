@@ -120,7 +120,8 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 }
 
 HogDBStatus<void>
-HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
+HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
+                            PerThreadARC<BlockTX> *btx)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -156,7 +157,7 @@ HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
   ctx_.remove_shutdown_block_tx(id);
 
   // update the DbTip.
-  ret = ctx_.update_dbtip(id);
+  ret = ctx_.update_dbtip(id, block_hash);
   if (!ret)
     return ret.error();
 
@@ -205,7 +206,7 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
   if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  HogDBStatus<void> ret = commit_block(id, btx);
+  HogDBStatus<void> ret = commit_block(id, block_hash, btx);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
@@ -273,7 +274,7 @@ sys_getsockname(int sockfd, T &val)
 
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration genesis_configuration)
+    GenesisConfiguration genesis_configuration, BlockHash block_hash)
 {
   constexpr static BlockID kGenesisBlockID = 0;
   if (ctx_.get_tip().height != 0) {
@@ -409,7 +410,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
           })
           .has_value());
 
-  co_return to_db_result(commit_block(kGenesisBlockID, r.value()));
+  co_return to_db_result(commit_block(kGenesisBlockID, block_hash, r.value()));
 }
 
 x23::Async<DbShardResult>

@@ -56,7 +56,7 @@ public:
   static x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
 
   x23::Async<DbSchedResult> dbsched_load_genesis_configuration(
-      GenesisConfiguration const &genesis_configuration);
+      GenesisConfiguration const &genesis_configuration, BlockHash block_hash);
 
   static x23::Async<DbTipResult> dbsched_get_tip()
   {
