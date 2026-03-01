@@ -112,7 +112,7 @@ InvokeTX::update_balance_lock(Address const &addr)
       return status.error();
     }
 
-    change.emplace_back(std::move(new_item), tx_depth_, 0);
+    change.emplace_back(std::move(new_item), tx_depth_);
     return {};
   }
 
@@ -150,7 +150,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return status.error();
   }
   assert(last.tx_depth < tx_depth_);
-  change.emplace_back(std::move(new_item), tx_depth_, 0);
+  change.emplace_back(std::move(new_item), tx_depth_);
   return {};
 }
 
@@ -261,8 +261,7 @@ InvokeTX::release_savepoint(int depth)
       continue;
 
     // retain latest change but erase any history after savepoint.
-    ItemVersion tmp{.change = std::move(vec.back().change),
-                    .tx_depth = tx_depth_};
+    ItemVersion tmp(std::move(vec.back().change), tx_depth_);
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());
