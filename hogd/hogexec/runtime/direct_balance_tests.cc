@@ -281,7 +281,7 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
   }
 
   // Rollback depths 3 and 4 (back to depth 2)
-  tx.pop_subtransactions(2);
+  ASSERT_TRUE(tx.pop_subtransactions(2).has_value());
 
   // Depth 3: new transfer of 300
   constexpr int128_t kTransfer3 = 300;
