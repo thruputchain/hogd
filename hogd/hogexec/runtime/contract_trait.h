@@ -189,8 +189,8 @@ public:
           std::tuple<Args...>,
           typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t>)
   {
-    using args_t = typename detail::CalldataArgs<
-        signature<kLookupIndex<Name>>>::args_t;
+    using args_t =
+        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
     return make_encoding(args_t{args...});
   }
 
