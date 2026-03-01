@@ -2,6 +2,7 @@
 
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/debug/key_type_check.h"
