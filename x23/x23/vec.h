@@ -464,10 +464,6 @@ public:
   {
     return std::min(kMaxSize, kMaxArraySize<T>);
   }
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
   constexpr void reserve(size_type cap)
   {
     if (cap > capacity()) {
@@ -475,9 +471,6 @@ public:
       realloc(cap);
     }
   }
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
   constexpr size_type capacity() const noexcept { return b_.bufend - b_.begin; }
   constexpr void shrink_to_fit() { realloc(size()); }
 
@@ -664,10 +657,6 @@ protected:
 
   static constexpr std::string_view tname() { return type_name<T>(); }
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstringop-overflow"
-#endif
   constexpr void terminate()
   {
     if constexpr (kExtraAlloc > 0 &&
@@ -675,9 +664,6 @@ protected:
       if (!empty())
         std::construct_at(b_.end, value_type{});
   }
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 
   constexpr void shrink(size_type new_size) noexcept
   {
@@ -783,10 +769,8 @@ protected:
       size_t new_size = std::min(size(), n);
       newb.end = newb.begin + new_size;
       [&] noexcept {
-        // for simplicity, use noexcept lambda to crash if move throws.
-        // A manual loop avoids GCC 15 false positives in uninitialized_move_n.
-        for (size_t i = 0; i < new_size; ++i)
-          std::construct_at(newb.begin + i, std::move(b_.begin[i]));
+        // for simplicity, use noexcept lambda to crash if move throws
+        std::uninitialized_move_n(b_.begin, new_size, newb.begin);
       }();
       std::destroy(b_.begin, b_.end);
       a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
