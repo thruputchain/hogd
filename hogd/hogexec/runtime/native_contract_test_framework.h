@@ -626,10 +626,12 @@ private:
     }
 
     {
+      GenesisConfiguration genesis_configuration{
+          .storage_cost_model = get_default_cost_model()->to_xdr(),
+      };
+      constexpr BlockHash kBlockHash{};
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
-          GenesisConfiguration{
-              .storage_cost_model = get_default_cost_model()->to_xdr(),
-          });
+          genesis_configuration, kBlockHash);
       if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
             "initialize: dbsched_load_genesis_configuration failed");

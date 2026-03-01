@@ -57,7 +57,7 @@ DbSchedRpc::dbsched_abandon_snapshot(BlockID id)
 
 x23::Async<DbSchedResult>
 DbSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration const &genesis_configuration)
+    GenesisConfiguration const &genesis_configuration, BlockHash block_hash)
 {
   if (block_manager_->initialize_genesis_configuration(genesis_configuration)) {
     co_return DbSchedResult::DbSchedResultOK;

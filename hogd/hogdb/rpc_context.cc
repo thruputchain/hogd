@@ -12,6 +12,7 @@
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 
@@ -84,9 +85,10 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
 }
 
 HogDBStatus<void>
-RPCContext::update_dbtip(BlockTXID bid)
+RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash)
 {
   trie_->generate_top_level_hashes();
+  tip_.block_hash = block_hash;
   tip_.db_hash = trie_->get_root_hash();
   tip_.height = tip_.height + 1;
   tip_.id = bid;

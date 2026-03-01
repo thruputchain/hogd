@@ -167,12 +167,13 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
+    BlockHash block_hash = sha256(genesis_configuration);
     DbSchedResult ret =
         co_await db_sched_client_->dbsched_load_genesis_configuration(
-            genesis_configuration);
+            genesis_configuration, block_hash);
     last_committed_block_ = {.height = 0,
-                             .block_hash = sha256(genesis_configuration),
-                             .db_hash = sha256(genesis_configuration),
+                             .block_hash = block_hash,
+                             .db_hash = block_hash,
                              .id = generate_block_id()};
     received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;

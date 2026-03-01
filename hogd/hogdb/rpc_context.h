@@ -114,7 +114,7 @@ public:
   // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
-  HogDBStatus<void> update_dbtip(BlockTXID bid);
+  HogDBStatus<void> update_dbtip(BlockTXID bid, BlockHash block_hash);
 
   const auto &get_sched_db_client() { return sched_db_client_; }
 
