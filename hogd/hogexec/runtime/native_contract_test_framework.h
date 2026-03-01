@@ -626,9 +626,8 @@ private:
     }
 
     {
-      GenesisConfiguration genesis_configuration
-      {
-        .storage_cost_model = get_default_cost_model()->to_xdr(),
+      GenesisConfiguration genesis_configuration{
+          .storage_cost_model = get_default_cost_model()->to_xdr(),
       };
       constexpr BlockHash kBlockHash{};
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
