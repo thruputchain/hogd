@@ -516,6 +516,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 
     // Check whether any inputs/outputs were aliased
     if (!guard.check()) {
+      trace("Syscall {} faulted due to aliased memory regions", kSyscall);
       disarm_outputs(args);
       return kFaultResult;
     }

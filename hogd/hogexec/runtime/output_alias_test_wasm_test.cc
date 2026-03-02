@@ -119,6 +119,21 @@ TEST_F(OutputAliasTestWasmTest, CalldataNoOverlap)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
+// Two input pointers at the same address should fault
+TEST_F(OutputAliasTestWasmTest, InputInputOverlapFault)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<"test_log_event_input_input_alias">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *wasm_runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
 // Overlapping input with output should fault
 TEST_F(OutputAliasTestWasmTest, InputOutputOverlapFault)
 {
