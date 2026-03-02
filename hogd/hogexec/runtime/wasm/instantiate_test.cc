@@ -107,6 +107,27 @@ TEST_P(InstantiateTest, InstantiateOobDataSegment)
   EXPECT_FALSE(runtime.value());
 }
 
+// Regression test for audit issue #1 variant: active element segment
+// initialization with an out-of-bounds table offset should return a null
+// runtime, not crash.
+TEST_P(InstantiateTest, InstantiateOobElementSegment)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_oob_element_segment.wasm");
+  make_syscall_handler(contract);
+  auto deployed_contract_hash = DeployedContractHash{
+      .hash = sha256(contract),
+      .contract_size =
+          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+      .contract_type = ContractType::kWasmi,
+  };
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 get_syscall_handler(), true);
+  ASSERT_TRUE(runtime.has_value());
+  EXPECT_FALSE(runtime.value());
+}
+
 INSTANTIATE_TEST_SUITE_P(WasmEngines, InstantiateTest,
                          ::testing::Values(WasmEngine::kWasmi,
                                            WasmEngine::kWasmtime),

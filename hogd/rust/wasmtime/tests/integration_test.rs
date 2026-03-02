@@ -598,6 +598,22 @@ unsafe extern "C" fn test_get_oob_data_segment_contract_get_fn(
     ContractGetResult::new(0, wasm_bytes)
 }
 
+unsafe extern "C" fn test_get_oob_element_segment_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let wasm_bytes = load_wasm_file("oob_element_segment.wasm");
+
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    if hash_slice.iter().any(|&b| b != 3) {
+        return ContractGetResult::new(
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            &[],
+        );
+    }
+    ContractGetResult::new(0, wasm_bytes)
+}
+
 unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
     _userctx: *mut c_void,
     hash: *const u8,
@@ -727,6 +743,97 @@ fn test_audit_1_oob_data_segment_instantiation() {
             "Should return null for OOB data segment module, not panic"
         );
 
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
+    }
+}
+
+// Regression test for audit issue #1 variant: active element segment init can
+// trap at instantiation time when the table offset is out-of-bounds.
+//
+// Before the fix: this could panic inside extern "C".
+// After the fix: new_wasmtime_runtime returns a null runtime pointer.
+#[test]
+fn test_audit_1_oob_element_segment_instantiation() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context = new_wasmtime_context(
+            test_get_oob_element_segment_contract_get_fn,
+            global_context,
+        );
+        let contract_hash = [3u8; 32];
+
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
+        let result = new_wasmtime_runtime(
+            contract_hash.as_ptr(),
+            context_ptr,
+            false,
+            context,
+        );
+
+        let runtime_ptr = result.get().unwrap();
+        assert!(
+            runtime_ptr.is_null(),
+            "Should return null for OOB element segment module, not panic"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
+    }
+}
+
+// Regression test: if pooling allocator slots are exhausted, runtime creation
+// must return a system error (err_code != 0), not panic.
+#[test]
+fn test_pool_exhaustion_returns_system_error() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(1);
+        let context = new_wasmtime_context(
+            test_get_simple_add_contract_get_fn,
+            global_context,
+        );
+        let contract_hash = [0u8; 32];
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
+        let mut runtimes: Vec<*mut c_void> = Vec::with_capacity(1024);
+        for _ in 0..1024 {
+            let result = new_wasmtime_runtime(
+                contract_hash.as_ptr(),
+                context_ptr,
+                false,
+                context,
+            );
+            let runtime_ptr = result
+                .get()
+                .expect("Expected success before pool capacity is exhausted");
+            assert!(
+                !runtime_ptr.is_null(),
+                "Expected non-null runtime before pool exhaustion"
+            );
+            runtimes.push(runtime_ptr);
+        }
+
+        let exhausted_result = new_wasmtime_runtime(
+            contract_hash.as_ptr(),
+            context_ptr,
+            false,
+            context,
+        );
+        assert!(
+            exhausted_result.get().is_none(),
+            "Expected err_code != 0 on pool exhaustion, not panic"
+        );
+
+        for runtime_ptr in runtimes {
+            free_wasmtime_runtime(runtime_ptr);
+        }
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
 

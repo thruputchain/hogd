@@ -103,6 +103,12 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_oob_data_segment.wasm
 )
 
+wat2wasm_target(
+  test_oob_element_segment_wasm
+  wat/test_oob_element_segment.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_oob_element_segment.wasm
+)
+
 add_dependencies(
   wasm_runtime_test_objects
   all_wasm_headers
@@ -118,5 +124,6 @@ add_dependencies(
   test_instantiate_unexported_memory_wasm
   test_no_start_wasm
   test_oob_data_segment_wasm
+  test_oob_element_segment_wasm
   all_wasm_contracts
 )
