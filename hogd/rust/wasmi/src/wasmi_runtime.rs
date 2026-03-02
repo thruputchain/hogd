@@ -257,12 +257,15 @@ pub unsafe extern "C" fn new_wasmi_runtime(
 }
 
 /// # Safety
-/// Caller must have exclusive (non-concurrent)access to the runtime, and runtime must not be a nullptr.
-/// Runtime must have been created by new_wasmi_runtime.
+/// If p is null, this function is a no-op.
+/// If p is non-null, caller must have exclusive (non-concurrent) access,
+/// p must have been created by new_wasmi_runtime, and runtime must not be
+/// accessed after this call.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmi_runtime(p: *mut c_void) {
-    let runtime: *mut WasmiRuntime = unsafe { core::mem::transmute(p) };
-    debug_assert!(!runtime.is_null());
-
+    if p.is_null() {
+        return;
+    }
+    let runtime: *mut WasmiRuntime = p.cast::<WasmiRuntime>();
     unsafe { drop(Box::from_raw(runtime)) };
 }

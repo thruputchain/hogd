@@ -40,27 +40,41 @@ use crate::debug_log;
 impl WasmtimeRuntime {
     // Invariant required: the input wasm module must have passed validation.
     // userctx must be a valid pointer to a HostCallContext
+    //
+    // Returns:
+    //   Ok(Some(runtime)) — success
+    //   Ok(None) — deterministic failure (e.g. trap during instantiation, OOB data segment)
+    //   Err(code) — nondeterministic system error (e.g. pool exhaustion, OOM)
     fn new(
         hash: &[u8; 32],
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
-    ) -> Option<WasmtimeRuntime> {
+    ) -> Result<Option<WasmtimeRuntime>, SystemErrorCode> {
         let instance_pre =
-            unsafe { context.get_instance_pre(hash, userctx).unwrap()? };
+            match unsafe { context.get_instance_pre(hash, userctx) } {
+                Ok(Some(pre)) => pre,
+                Ok(None) => return Ok(None),
+                Err(code) => return Err(code),
+            };
         let mut store = Store::new(context.engine(), userctx);
         let instance = match instance_pre.instantiate(&mut store) {
             Ok(instance) => instance,
             Err(e) => {
-                if let Some(trap_code) = e.downcast_ref::<wasmtime::Trap>() {
-                    if *trap_code == wasmtime::Trap::OutOfFuel {
-                        return None;
-                    }
+                if e.downcast_ref::<wasmtime::Trap>().is_some() {
+                    // Deterministic trap during instantiation (e.g. OOB data
+                    // segment, start function trap including OutOfFuel).
+                    debug_log!(eprintln!("Trap during instantiation: {e:?}"));
+                    return Ok(None);
                 }
-                eprintln!("Error instantiating store: {e:?}");
-                panic!("Error instantiating store: {e:?}");
+                // Non-trap error (e.g. pooling allocator exhaustion, OOM).
+                // This is nondeterministic — the module itself may be fine.
+                debug_log!(eprintln!(
+                    "System error during instantiation: {e:?}"
+                ));
+                return Err(SystemErrorCode::kSystemUnrecoverable);
             }
         };
-        Some(Self { store, instance })
+        Ok(Some(Self { store, instance }))
     }
 
     fn invoke(&mut self, method: &str) -> WasmtimeInvokeResult {
@@ -198,7 +212,7 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
     wasmtime_context_ptr: *mut c_void,
 ) -> NewWasmtimeRuntimeResult {
     if hash.is_null() || wasmtime_context_ptr.is_null() {
-        println!("hash or wasmtime_context_ptr is null");
+        eprintln!("hash or wasmtime_context_ptr is null");
         return NewWasmtimeRuntimeResult::err(
             SystemErrorCode::kSystemUnrecoverable,
         );
@@ -231,10 +245,14 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
     }
 
     let b = match WasmtimeRuntime::new(hash_slice, wasmtime_context, userctx) {
-        Some(res) => Box::new(res),
-        None => {
+        Ok(Some(res)) => Box::new(res),
+        Ok(None) => {
             debug_log!(eprintln!("Error creating runtime"));
             return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
+        }
+        Err(code) => {
+            debug_log!(eprintln!("System error creating runtime: {:?}", code));
+            return NewWasmtimeRuntimeResult::err(code);
         }
     };
 
@@ -246,14 +264,16 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 }
 
 /// # Safety
-/// Caller must have exclusive (non-concurrent)access to the runtime, and runtime must not be a nullptr.
-/// Runtime must have been created by new_wasmtime_runtime.
+/// If p is null, this function is a no-op.
+/// If p is non-null, caller must have exclusive (non-concurrent) access,
+/// p must have been created by new_wasmtime_runtime, and runtime must not be
+/// accessed after this call.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmtime_runtime(p: *mut c_void) {
-    let runtime: *mut WasmtimeRuntime =
-        unsafe { core::mem::transmute::<*mut c_void, *mut WasmtimeRuntime>(p) };
-    debug_assert!(!runtime.is_null());
-
+    if p.is_null() {
+        return;
+    }
+    let runtime: *mut WasmtimeRuntime = p.cast::<WasmtimeRuntime>();
     unsafe { drop(Box::from_raw(runtime)) };
 }
 

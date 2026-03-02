@@ -49,4 +49,10 @@ fn main() {
         "test_simple_add.wat",
         "simple_add.wasm",
     );
+    convert_wat_to_wasm(
+        &manifest_dir,
+        &out_dir,
+        "test_oob_data_segment.wat",
+        "oob_data_segment.wasm",
+    );
 }
