@@ -2,6 +2,7 @@
 
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/debug/key_type_check.h"
@@ -82,7 +83,7 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     std::set<AddressAndKey> seen_keys;
     for (auto const &delta : batch) {
       auto [_, inserted] = seen_keys.insert(delta.addrkey);
-      assert(inserted && "duplicate key in subtransaction batch");
+      CHECK(inserted);
     }
   }
 

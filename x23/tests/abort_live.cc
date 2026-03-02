@@ -41,7 +41,7 @@ main() // NOLINT(bugprone-exception-escape)
     // Do setup before the coroutine so captures are simple.
     auto token = cp.read_clear(fds[0]);
     char c;
-    int n = read(fds[0], &c, 1);
+    [[maybe_unused]] int n = read(fds[0], &c, 1);
     x23assert(n == -1 && errno == EAGAIN);
 
     // The Detached coroutine runs synchronously until co_await.

@@ -177,7 +177,7 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     std::set<AddressAndKey> seen_keys;
     for (auto const &delta : batch) {
       auto [_, inserted] = seen_keys.insert(delta.addrkey);
-      assert(inserted && "duplicate key in subtransaction batch");
+      CHECK(inserted);
     }
   }
 
