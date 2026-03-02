@@ -12,5 +12,12 @@ export HOGX_HOME=/tmp/.hogx-loadgen-123
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 
+# remove /tmp/hogx/XXX from prior runs on all hosts
+for host in hog1 hog2 hog3; do
+  ssh $host "rm -rf /tmp/hogx/*"
+done
+
 "$HOGX" -m 3 config together -a loadgen -t 2
 "$HOGX" -m 3 start -a loadgen -c c1
+
+echo 'using: export HOGX_HOME=${HOGX_HOME}'
