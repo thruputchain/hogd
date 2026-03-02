@@ -29,11 +29,13 @@ namespace hogd {
 namespace {
 
 int
-mempool_init(size_t num_db_shards, size_t num_exec_shards, uint16_t db_port,
-             uint16_t event_port, uint16_t executor_port, uint16_t auth_port,
-             uint16_t coordinator_port)
+mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
+             uint16_t db_port, uint16_t event_port, uint16_t executor_port,
+             uint16_t auth_port, uint16_t coordinator_port)
 {
   Registration &registration = Registration::registration();
+
+  info("NETWORK ID={:#x}", network_id);
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
@@ -75,7 +77,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint16_t db_port,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  RpcServer<MempoolCoordinatorRpc> coord(db->impl());
+  RpcServer<MempoolCoordinatorRpc> coord(db->impl(), network_id);
   coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   uint16_t actual_coordinator_port = coord.start_server(coordinator_port);
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
@@ -112,7 +114,7 @@ namespace {
 usage(char *argv[])
 {
   std::println(
-      "usage: {} --num-db-shards <n> --num-exec-shards <n> "
+      "usage: {} --num-db-shards <n> --num-exec-shards <n> --network-id <hex> "
       "[--db-port <port>] [--event-port <port>] [--executor-port <port>] "
       "[--auth-port <port>] [--coordinator-port <port>]",
       argv[0]);
@@ -142,6 +144,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::optional<size_t> num_db_shards;
   std::optional<size_t> num_exec_shards;
+  std::optional<uint64_t> network_id;
   uint16_t db_port = 0;
   uint16_t event_port = 0;
   uint16_t executor_port = 0;
@@ -151,11 +154,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--num-db-shards" && i + 1 < argc) {
-      num_db_shards = std::stoul(argv[++i], nullptr, 0);
+      num_db_shards = std::stoul(argv[++i], nullptr, /*base=*/10);
       continue;
     }
     if (arg == "--num-exec-shards" && i + 1 < argc) {
-      num_exec_shards = std::stoul(argv[++i], nullptr, 0);
+      num_exec_shards = std::stoul(argv[++i], nullptr, /*base=*/10);
+      continue;
+    }
+    if (arg == "--network-id" && i + 1 < argc) {
+      network_id = std::stoul(argv[++i], nullptr, /*base=*/16);
       continue;
     }
     if (arg == "--db-port" && i + 1 < argc) {
@@ -181,21 +188,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  if (!num_db_shards.has_value() || !num_exec_shards.has_value()) {
+  if (!num_db_shards.has_value() || !num_exec_shards.has_value() ||
+      !network_id.has_value()) {
     usage(argv);
   }
 
-  if (*num_db_shards <= 0) {
-    std::println("[num_db_shards] must be greater than 0.");
-    return EXIT_FAILURE;
-  }
-
-  if (*num_exec_shards <= 0) {
-    std::println("[num_exec_shards] must be greater than 0.");
-    return EXIT_FAILURE;
-  }
-
-  return hogd::mempool_init(*num_db_shards, *num_exec_shards, db_port,
-                            event_port, executor_port, auth_port,
+  return hogd::mempool_init(*num_db_shards, *num_exec_shards, *network_id,
+                            db_port, event_port, executor_port, auth_port,
                             coordinator_port);
 }

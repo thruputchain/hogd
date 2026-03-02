@@ -67,6 +67,7 @@ make_account_address(uint8_t i)
 
 class MempoolTestInfra {
 public:
+  static constexpr uint64_t kNetworkId = 0x0;
   static constexpr std::string kAddress = "127.0.0.1";
   static constexpr std::array<ContractAddress, 4> kAccountAddresses =
       std::array{make_account_address(3), make_account_address(4),
@@ -354,7 +355,7 @@ private:
   // can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
+      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(), kNetworkId);
   RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;

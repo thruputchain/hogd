@@ -59,7 +59,9 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id)
+    : db_rpc_(db_rpc), network_id_(network_id)
+  {}
 
   ~MempoolCoordinatorRpc()
   {
@@ -219,9 +221,8 @@ public:
     }
   }
 
-  static SHA256Hash
-  get_block_hash(const x23::XdrVec<SignedTransactionHash> &hashes,
-                 const BlockHash &prev_block_hash);
+  SHA256Hash get_block_hash(const x23::XdrVec<SignedTransactionHash> &hashes,
+                            const BlockHash &prev_block_hash);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
@@ -355,6 +356,7 @@ private:
   }
 
   MempoolDbRpc *db_rpc_;
+  const uint64_t network_id_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

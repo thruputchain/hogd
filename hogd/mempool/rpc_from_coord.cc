@@ -267,7 +267,7 @@ MempoolCoordinatorRpc::get_block_hash(
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
   // TODO(jhumphri): Fill in all of the fields correctly.
-  BlockHeader header{.network_id = 0x0,
+  BlockHeader header{.network_id = network_id_,
                      .txset_hash = root_hash,
                      .db_hash = {},
                      .events_hash = {},
