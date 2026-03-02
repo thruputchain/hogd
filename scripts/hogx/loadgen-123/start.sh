@@ -12,5 +12,5 @@ export HOGX_HOME=/tmp/.hogx-loadgen-123
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 
-"$HOGX" -m 3 config together
-"$HOGX" -m 3 start
+"$HOGX" -m 3 config together -a loadgen -t 2
+"$HOGX" -m 3 start -a loadgen -c c1
