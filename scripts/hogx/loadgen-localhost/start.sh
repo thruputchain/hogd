@@ -9,6 +9,7 @@ if [ -z "${HOGX:-}" ]; then
 fi
 
 export HOGX_HOME=/tmp/.hogx-loadgen-localhost
+rm -rf $HOGX_HOME
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 
