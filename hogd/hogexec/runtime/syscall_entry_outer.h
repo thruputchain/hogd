@@ -514,7 +514,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       return kFaultResult;
     }
 
-    //  heck whether any inputs/outputs were aliased
+    // Check whether any inputs/outputs were aliased
     if (!guard.check()) {
       disarm_outputs(args);
       return kFaultResult;
