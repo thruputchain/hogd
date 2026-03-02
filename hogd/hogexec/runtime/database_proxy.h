@@ -118,7 +118,7 @@ public:
       std::set<AddressAndKey> seen_keys;
       for (auto const &d : current_subtransaction_batch_) {
         auto [_, inserted] = seen_keys.insert(d.addrkey);
-        assert(inserted && "duplicate key in subtransaction batch");
+        CHECK(inserted);
       }
 
       // Shuffle the batch of deltas before sending to the database because
