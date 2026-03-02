@@ -68,7 +68,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
-                                   int128_t input_add_value,
+                                   const int128_t &input_add_value,
                                    StorageDeltaFlagSet input_flags) noexcept
 {
   std::optional<int128_t> set_value = std::nullopt;
