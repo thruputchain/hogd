@@ -4,7 +4,9 @@ use wasmtime::{Instance, Store};
 
 use crate::context::WasmtimeContext;
 use crate::error::TrampolineError;
-use crate::invoke_result::WasmtimeInvokeResult;
+use crate::invoke_result::{
+    wasmtime_trap_to_invoke_error, WasmtimeInvokeResult,
+};
 use common::{InvokeErrorCode, SystemErrorCode};
 
 #[repr(C)]
@@ -60,11 +62,24 @@ impl WasmtimeRuntime {
         let instance = match instance_pre.instantiate(&mut store) {
             Ok(instance) => instance,
             Err(e) => {
-                if e.downcast_ref::<wasmtime::Trap>().is_some() {
-                    // Deterministic trap during instantiation (e.g. OOB data
-                    // segment, start function trap including OutOfFuel).
-                    debug_log!(eprintln!("Trap during instantiation: {e:?}"));
-                    return Ok(None);
+                if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
+                    match wasmtime_trap_to_invoke_error(trap) {
+                        // Deterministic trap during instantiation (e.g. OOB
+                        // data segment, start function trap including
+                        // OutOfFuel).
+                        InvokeErrorCode::kInvokeOutOfGas
+                        | InvokeErrorCode::kInvokeDeterministic => {
+                            debug_log!(eprintln!(
+                                "Trap during instantiation: {e:?}"
+                            ));
+                            return Ok(None);
+                        }
+                        other => {
+                            panic!(
+                                "Unrecoverable: nondeterministic trap during instantiation: {trap:?}, classified as {other:?}"
+                            );
+                        }
+                    }
                 }
                 // Non-trap error (e.g. pooling allocator exhaustion, OOM).
                 // This is nondeterministic — the module itself may be fine.
