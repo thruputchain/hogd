@@ -1,0 +1,21 @@
+#!/bin/sh
+
+set -ex
+
+SCRIPT_DIR=$(dirname $(readlink -f "$0"))
+if [ -z "${HOGX:-}" ]; then
+  echo "HOGX environment variable is not set (expected path to hogx binary)" >&2
+  exit 1
+fi
+
+export HOGX_HOME=/tmp/.hogx-loadgen-localhost
+
+cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
+
+# remove /tmp/hogx from prior runs
+rm -rf /tmp/hogx/*
+
+"$HOGX" config together -a loadgen -t 1
+"$HOGX" start -a loadgen -c c1
+
+echo "using: export HOGX_HOME=${HOGX_HOME}"
