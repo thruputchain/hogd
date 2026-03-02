@@ -266,9 +266,13 @@ MempoolCoordinatorRpc::get_block_hash(
   }
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
-  BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,
-                             .prev_block_hash = prev_block_hash};
-  return sha256(preimage);
+  // TODO(jhumphri): Fill in all of the fields correctly.
+  BlockHeader header{.network_id = 0x0,
+                     .txset_hash = root_hash,
+                     .db_hash = {},
+                     .events_hash = {},
+                     .prev_block_hash = prev_block_hash};
+  return sha256(header);
 }
 
 x23::Async<void>
