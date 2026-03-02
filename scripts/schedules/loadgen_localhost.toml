@@ -1,0 +1,70 @@
+name = "loadgen_localhost_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git checkout -q {{ .git_commit }}
+
+source ./scripts/ci/configure_git_cache.sh
+
+git submodule update --init --recursive --quiet
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+
+./scripts/build-pkg.sh
+
+export HOGX=$(pwd)/build-pkg/pkg/hogx
+
+echo 'running loadgen'
+
+export HOGX_HOME=/tmp/.hogx-loadgen-localhost
+rm -rf $HOGX_HOME
+
+cp -R ./scripts/hogx/loadgen-localhost/.hogx $HOGX_HOME
+
+# remove /tmp/hogx from prior runs
+rm -rf /tmp/hogx/*
+
+"$HOGX" config together -a loadgen -t 1 \
+  --num-accounts 100 \
+  --txs-per-block 100000 \
+  --num-blocks 100
+
+set +e
+"$HOGX" run -a loadgen -c c1
+hogx_exit_code=$?
+set -e
+
+# Ensure leftover agents from this host are cleaned up.
+pkill -f hogx-agent || true
+
+exit "$hogx_exit_code"
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+
+[jobs.host]
+loadgen_localhost_1 = "?"
