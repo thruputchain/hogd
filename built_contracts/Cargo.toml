@@ -28,6 +28,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+edition = "2024"
+
 [workspace.dependencies]
 # groundhog dependencies
 sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }

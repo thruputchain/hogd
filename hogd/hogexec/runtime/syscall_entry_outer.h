@@ -238,7 +238,8 @@ struct SyscallTypes<Ret (*)(Args...) noexcept>
 template<size_t Offset, typename ArgToParse, typename Inputs>
 requires (is_syscall_arg_param<ArgToParse>)
 constexpr auto
-parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
+parse(AliasGuard &guard, std::span<std::byte> contract_memory,
+      Inputs const &tuple_args)
 {
   using arg_params = SyscallArgParams<ArgToParse>;
 
@@ -250,21 +251,32 @@ parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
   // return arg_params::parse(contract_memory, (args...[Offset + Is])...);
 
   return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) {
-    return arg_params::parse(contract_memory,
+    return arg_params::parse(guard, contract_memory,
                              (std::get<Offset + Is>(tuple_args))...);
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
+
+template<typename T, uint64_t... Args>
+concept is_parseable =
+    requires(AliasGuard &guard, std::span<std::byte> contract_memory) {
+      SyscallArgParams<T>::parse(guard, contract_memory, Args...);
+    };
+// We want just one path for parsing int128; this simplifies the template
+// deduction, making it easier to reason about what template is invoked where.
+static_assert(is_parseable<const int128_t &, 0>);
+static_assert(!is_parseable<int128_t, 0>);
 
 // Parse inputs to mock syscall, within native_exec.
 template<size_t Offset, typename ArgToParse, typename Inputs>
 requires (is_syscall_arg_param<ArgToParse>)
 constexpr auto
-parse_mock(Inputs const &tuple_args)
+parse_mock(AliasGuard &guard, Inputs const &tuple_args)
 {
   using arg_params = SyscallArgParams<ArgToParse>;
 
   return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) {
-    return arg_params::parse_mock((std::get<Offset + Is>(tuple_args))...);
+    return arg_params::parse_mock(guard,
+                                  (std::get<Offset + Is>(tuple_args))...);
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
 
@@ -477,8 +489,8 @@ register_if_writable(AliasGuard &guard, T const &output) noexcept
 // numbers.
 template<is_syscall_meta SyscallMeta>
 constexpr HostFnStatus<SyscallErrorCode>
-wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
-                 SyscallNo syscall_no, auto &&args)
+wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
+                 Runtime &runtime, SyscallNo syscall_no, auto &&args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
@@ -491,17 +503,6 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
   auto [syscall_result, gas_consumed] =
       [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
       -> std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount> {
-    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
-      if (handler.is_read_only()) {
-        trace("Syscall {} is not read-only, but called in read-only mode",
-              kSyscall);
-        disarm_outputs(args);
-        return {HostFnStatus<SyscallErrorCode>{
-                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-                WrappedGasAmount{0}};
-      }
-    }
-
     // check whether any loads failed
     if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
                std::get<Is>(args)) &&
@@ -513,12 +514,21 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
       return kFaultResult;
     }
 
-    // Check for output-output aliasing (overlapping writable regions).
-    {
-      AliasGuard alias_guard;
-      if (!((register_if_writable(alias_guard, std::get<Is>(args)) && ...))) {
+    // Check whether any inputs/outputs were aliased
+    if (!guard.check()) {
+      trace("Syscall {} faulted due to aliased memory regions", kSyscall);
+      disarm_outputs(args);
+      return kFaultResult;
+    }
+
+    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+      if (handler.is_read_only()) {
+        trace("Syscall {} is not read-only, but called in read-only mode",
+              kSyscall);
         disarm_outputs(args);
-        return kFaultResult;
+        return {HostFnStatus<SyscallErrorCode>{
+                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                WrappedGasAmount{0}};
       }
     }
 
@@ -594,23 +604,24 @@ wrap_after_parse(SystemCallHandler &handler, Runtime &runtime,
   // (via a parent frame) still need to have gas accounting performed.  Errors
   // that fail the whole transaction cannot be accidentally turned into an out
   // of gas error.
-  bool is_handleable_error = true;
-  if (!syscall_result.has_value()) {
-    switch (syscall_result.error().code()) {
-    case HostFnErrorCode::kHostAbortTransaction:
-    case HostFnErrorCode::kHostValidationFailure:
-    case HostFnErrorCode::kHostUnrecoverable:
-      is_handleable_error = false;
-      break;
-    case HostFnErrorCode::kHostOutOfGas:
-    case HostFnErrorCode::kHostExit:
-    case HostFnErrorCode::kHostReturn:
-      is_handleable_error = true;
-      break;
-    case HostFnErrorCode::kHostNoneOrRecoverable:
-      panic("unreachable");
+  bool is_handleable_error = [&]() {
+    if (!syscall_result.has_value()) {
+      switch (syscall_result.error().code()) {
+      case HostFnErrorCode::kHostAbortTransaction:
+      case HostFnErrorCode::kHostValidationFailure:
+      case HostFnErrorCode::kHostUnrecoverable:
+        return false;
+      case HostFnErrorCode::kHostOutOfGas:
+      case HostFnErrorCode::kHostExit:
+      case HostFnErrorCode::kHostReturn:
+        return true;
+      case HostFnErrorCode::kHostNoneOrRecoverable:
+        panic("unreachable");
+      }
+      panic("Unhandled HostFnErrorCode (invalid enum?)");
     }
-  }
+    return true;
+  }();
 
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
     bool gas_consume_res = runtime.consume_gas(gas_consumed.get());
@@ -663,12 +674,13 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, SyscallNo syscall_no,
   auto res = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
       -> HostFnStatus<SyscallErrorCode> {
     // Attempt to load syscall arguments from contract memory.
+    AliasGuard guard;
     auto parsed_args = std::tuple{
         parse<syscall_t::template offset_i<Is>(),
-              typename syscall_t::template arg_i<Is>>(contract_memory,
+              typename syscall_t::template arg_i<Is>>(guard, contract_memory,
                                                       input_args)...};
 
-    return wrap_after_parse<SyscallMeta>(handler, runtime, syscall_no,
+    return wrap_after_parse<SyscallMeta>(guard, handler, runtime, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
   return res;

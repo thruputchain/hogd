@@ -11,12 +11,12 @@ namespace hogd {
 class AliasGuard {
 public:
   // Returns false if [ptr, ptr+len) overlaps any previously registered range.
-  [[nodiscard]] bool check_and_register(const void *ptr, size_t len) noexcept
+  bool check_and_register(uintptr_t start, size_t len) noexcept
   {
-    auto start = reinterpret_cast<uintptr_t>(ptr);
     auto end = start + len;
     for (size_t i = 0; i < count_; ++i) {
       if (start < ranges_[i].end && ranges_[i].start < end) {
+        no_aliasing_violation_ = false;
         return false;
       }
     }
@@ -26,6 +26,8 @@ public:
     return true;
   }
 
+  bool check() const { return no_aliasing_violation_; }
+
 private:
   struct Range {
     uintptr_t start;
@@ -34,6 +36,7 @@ private:
   static constexpr size_t kMaxRanges = 8;
   std::array<Range, kMaxRanges> ranges_{};
   size_t count_ = 0;
+  bool no_aliasing_violation_ = true;
 };
 
 } // namespace hogd

@@ -255,7 +255,7 @@ public:
 
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key,
-            std::optional<int128_t> set_value, int128_t add_value,
+            std::optional<int128_t> set_value, const int128_t &add_value,
             StorageDeltaFlagSet input_flags);
 
   // === Delete syscall ===
