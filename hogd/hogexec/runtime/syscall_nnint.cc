@@ -19,33 +19,6 @@
 
 namespace hogd {
 
-namespace {
-
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_nnint_set_add_impl(SystemCallHandler &syscall_handler,
-                           const StorageKeyContractData &input_key,
-                           const int128_t *optional_input_set_value,
-                           int128_t input_add_value,
-                           StorageDeltaFlagSet input_flags) noexcept
-{
-  std::optional<int128_t> set_value = std::nullopt;
-  if (optional_input_set_value) {
-    set_value = *optional_input_set_value;
-  }
-  auto status = syscall_handler.set_nnint(input_key, set_value, input_add_value,
-                                          input_flags);
-  if (!status.has_value()) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  if (!(*status).has_value()) {
-    return {(*status).error().code(), WrappedGasAmount{0}};
-  }
-
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
-}
-
-} // namespace
-
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 const StorageKeyContractData &input_key,
@@ -95,37 +68,23 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
-                                   int128_t input_add_value,
+                                   const int128_t &input_add_value,
                                    StorageDeltaFlagSet input_flags) noexcept
 {
-  return syscall_nnint_set_add_impl(syscall_handler, input_key,
-                                    optional_input_set_value, input_add_value,
-                                    input_flags);
-}
+  std::optional<int128_t> set_value = std::nullopt;
+  if (optional_input_set_value) {
+    set_value = *optional_input_set_value;
+  }
+  auto status = syscall_handler.set_nnint(input_key, set_value, input_add_value,
+                                          input_flags);
+  if (!status.has_value()) {
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+  if (!(*status).has_value()) {
+    return {(*status).error().code(), WrappedGasAmount{0}};
+  }
 
-// Compatibility overloads for older generated syscall headers that used
-// different argument types for this syscall.
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
-                                   const StorageKeyContractData &input_key,
-                                   const int128_t *optional_input_set_value,
-                                   int128_t input_add_value) noexcept
-{
-  return syscall_nnint_set_add_impl(
-      syscall_handler, input_key, optional_input_set_value, input_add_value,
-      static_cast<StorageDeltaFlagSet>(0));
-}
-
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
-                                   const StorageKeyContractData &input_key,
-                                   const int128_t *optional_input_set_value,
-                                   const int128_t &input_add_value,
-                                   int input_flags) noexcept
-{
-  return syscall_nnint_set_add_impl(
-      syscall_handler, input_key, optional_input_set_value, input_add_value,
-      static_cast<StorageDeltaFlagSet>(input_flags));
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd
