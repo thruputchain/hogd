@@ -6,7 +6,6 @@ use core::ffi::c_void;
 use core::slice;
 
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
-use crate::wasmi_debug_log;
 use crate::wasmi_error::TrampolineError;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
@@ -313,7 +312,8 @@ impl WasmiContext {
 }
 
 /// # Safety
-/// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
+/// Caller must have exclusive (non-concurrent) access to the context.
+/// context_void must not be a nullptr.
 /// Context must have been created by new_wasmi_context.
 #[no_mangle]
 pub unsafe extern "C" fn wasmi_link_nargs(
@@ -326,15 +326,13 @@ pub unsafe extern "C" fn wasmi_link_nargs(
     nargs: u8,
 ) -> bool // true if success
 {
-    let context: *mut WasmiContext =
-        unsafe { core::mem::transmute(context_void) };
-
-    debug_assert!(!context.is_null());
+    debug_assert!(!context_void.is_null());
     debug_assert!(!module_name.is_null());
     debug_assert!(!method_name.is_null());
 
-    // assert module name & method_name nonzero
-    // WASMI (and apparently the wasm standard) will accept modules with no names,
+    let context: &mut WasmiContext =
+        unsafe { &mut *context_void.cast::<WasmiContext>() };
+
     let module = match string_from_parts(module_name, module_name_len) {
         Ok(x) => x,
         _ => {
@@ -352,22 +350,23 @@ pub unsafe extern "C" fn wasmi_link_nargs(
     debug_assert!(!module.is_empty());
     debug_assert!(!method.is_empty());
 
-    // Forward to global context FFI function
-    let c = unsafe { &*context };
-    // Get the Arc pointer - we need to get the inner pointer from the Arc
-    let global_context_ptr: *mut c_void = &c.global_context
-        as *const std::sync::Arc<WasmiGlobalContext>
-        as *mut c_void;
-
-    wasmi_global_link_nargs(
-        global_context_ptr,
-        module_name,
-        module_name_len,
-        method_name,
-        method_name_len,
-        function_pointer,
-        nargs,
-    )
+    // Directly mutate via Arc::get_mut on the legitimately mutable reference,
+    // avoiding the aliasing UB of laundering &Arc -> *mut -> &mut Arc.
+    if let Some(global_context_mut) =
+        std::sync::Arc::get_mut(&mut context.global_context)
+    {
+        global_context_mut.add_entry(LinkEntry::new(
+            module,
+            method,
+            nargs,
+            function_pointer,
+        ));
+        true
+    } else {
+        panic!(
+            "Unrecoverable: Multiple references exist to global context in wasmi_link_nargs"
+        );
+    }
 }
 
 /// # Safety
@@ -423,11 +422,9 @@ pub unsafe extern "C" fn wasmi_global_link_nargs(
         ));
         true
     } else {
-        // Multiple references exist - this shouldn't happen if linking is done before contexts
-        wasmi_debug_log!(eprintln!(
-            "Multiple references exist to global context"
-        ));
-        false
+        panic!(
+            "Unrecoverable: Multiple references exist to global context in wasmi_global_link_nargs"
+        );
     }
 }
 
@@ -443,15 +440,16 @@ pub unsafe extern "C" fn new_wasmi_global_context() -> *mut c_void {
 }
 
 /// # Safety
-/// Global context must not be a nullptr.
-/// Global context must have been created by new_wasmi_global_context.
+/// If p is null, this function is a no-op.
+/// If p is non-null, it must have been created by new_wasmi_global_context
+/// and not previously freed.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmi_global_context(p: *mut c_void) {
-    debug_assert!(!p.is_null());
-
+    if p.is_null() {
+        return;
+    }
     let global_context: *mut std::sync::Arc<WasmiGlobalContext> =
-        unsafe { core::mem::transmute(p) };
-
+        p.cast::<std::sync::Arc<WasmiGlobalContext>>();
     unsafe { drop(Box::from_raw(global_context)) };
 }
 
@@ -478,15 +476,16 @@ pub unsafe extern "C" fn new_wasmi_context(
 }
 
 /// # Safety
-/// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
-/// Context must have been created by new_wasmi_context.
-/// Context must not be accessed after this call.
+/// If p is null, this function is a no-op.
+/// If p is non-null, caller must have exclusive (non-concurrent) access,
+/// p must have been created by new_wasmi_context, and context must not be
+/// accessed after this call.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmi_context(p: *mut c_void) {
-    debug_assert!(!p.is_null());
-
-    let context: *mut WasmiContext = unsafe { core::mem::transmute(p) };
-
+    if p.is_null() {
+        return;
+    }
+    let context: *mut WasmiContext = p.cast::<WasmiContext>();
     unsafe { drop(Box::from_raw(context)) };
 }
 

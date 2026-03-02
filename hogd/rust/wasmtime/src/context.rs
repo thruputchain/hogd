@@ -174,23 +174,23 @@ pub unsafe extern "C" fn new_wasmtime_context(
 }
 
 /// # Safety
-/// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
-/// Context must have been created by new_wasmtime_context.
-/// Context must not be accessed after this call.
+/// If p is null, this function is a no-op.
+/// If p is non-null, caller must have exclusive (non-concurrent) access,
+/// p must have been created by new_wasmtime_context, and context must not be
+/// accessed after this call.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmtime_context(p: *mut c_void) {
-    debug_assert!(!p.is_null());
-
-    let context: *mut WasmtimeContext = unsafe { core::mem::transmute(p) };
-
+    if p.is_null() {
+        return;
+    }
+    let context: *mut WasmtimeContext = p.cast::<WasmtimeContext>();
     unsafe { drop(Box::from_raw(context)) };
 }
 
 /// # Safety
 /// Context must not be a nullptr.
-/// Context must have been created by new_wasmi_context.
+/// Context must have been created by new_wasmtime_context.
 /// Multiple contracts can be verified concurrently.
-/// The linker can be modified concurrently.
 #[no_mangle]
 pub unsafe extern "C" fn wasmtime_verify_contract(
     p: *const c_void,

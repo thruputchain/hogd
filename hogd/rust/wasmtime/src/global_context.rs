@@ -1,5 +1,4 @@
 use core::ffi::c_void;
-use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -57,28 +56,20 @@ pub struct WasmtimeGlobalContext {
     instance_pre_cache: InstancePreCache,
     engine_count: usize,
     linkers: Vec<Linker<*mut c_void>>,
+    /// Per-instance engine index allocator.
+    /// Each call to alloc_engine_index atomically increments this and wraps
+    /// modulo engine_count. This replaces the old static global allocator
+    /// which was shared across all WasmtimeGlobalContext instances.
+    next_engine_index: AtomicUsize,
 }
 
 impl WasmtimeGlobalContext {
-    /// Allocates an engine index using a static thread-local atomic pattern,
-    /// similar to the C++ implementation. Each thread gets a stable engine index
-    /// that is assigned on first access.
+    /// Allocates an engine index from this instance's atomic counter.
+    /// Round-robins across engines. Threadsafe — multiple threads can call
+    /// this concurrently.
     pub fn alloc_engine_index(&self) -> usize {
-        static ALLOCATOR: AtomicUsize = AtomicUsize::new(0);
-        thread_local! {
-            static THREAD_LOCAL_ALLOC: Cell<Option<usize>> = const { Cell::new(None) };
-        }
-
-        THREAD_LOCAL_ALLOC.with(|cell| {
-            if let Some(idx) = cell.get() {
-                idx
-            } else {
-                let idx = ALLOCATOR.fetch_add(1, Ordering::Relaxed)
-                    % self.engine_count;
-                cell.set(Some(idx));
-                idx
-            }
-        })
+        self.next_engine_index.fetch_add(1, Ordering::Relaxed)
+            % self.engine_count
     }
 
     fn new_engine() -> Engine {
@@ -170,6 +161,7 @@ impl WasmtimeGlobalContext {
             instance_pre_cache,
             engine_count,
             linkers,
+            next_engine_index: AtomicUsize::new(0),
         }
     }
 
@@ -389,14 +381,15 @@ pub unsafe extern "C" fn new_wasmtime_global_context(
 }
 
 /// # Safety
-/// Global context must not be a nullptr.
-/// Global context must have been created by new_wasmtime_global_context.
+/// If p is null, this function is a no-op.
+/// If p is non-null, it must have been created by
+/// new_wasmtime_global_context and not previously freed.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
-    debug_assert!(!p.is_null());
-
+    if p.is_null() {
+        return;
+    }
     let context: *mut Arc<WasmtimeGlobalContext> =
-        unsafe { core::mem::transmute(p) };
-
+        p.cast::<Arc<WasmtimeGlobalContext>>();
     unsafe { drop(Box::from_raw(context)) };
 }
