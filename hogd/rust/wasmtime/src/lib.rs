@@ -93,7 +93,13 @@ pub unsafe extern "C" fn wasmtime_get_available_gas(
     let runtime: *const WasmtimeRuntime =
         unsafe { core::mem::transmute(runtime_void) };
     let r = unsafe { &*runtime };
-    r.store.get_fuel().unwrap()
+    match r.store.get_fuel() {
+        Ok(fuel) => fuel,
+        Err(_) => {
+            eprintln!("FATAL: get_fuel failed");
+            std::process::abort();
+        }
+    }
 }
 
 /// # Safety
@@ -108,5 +114,8 @@ pub unsafe extern "C" fn wasmtime_set_available_gas(
     let runtime: *mut WasmtimeRuntime =
         unsafe { core::mem::transmute(runtime_void) };
     let r = unsafe { &mut *runtime };
-    r.store.set_fuel(gas).unwrap();
+    if r.store.set_fuel(gas).is_err() {
+        eprintln!("FATAL: set_fuel failed");
+        std::process::abort();
+    }
 }
