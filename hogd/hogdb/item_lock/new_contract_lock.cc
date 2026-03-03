@@ -4,6 +4,7 @@
 #include <span>
 
 #include "hogd/base/types.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -35,6 +36,23 @@ NewContractLock::write_committed_change(LockContext const &ctx) const
   assert(ctx.dao);
   return ctx.dao->write_wasm_code(ctx.key.get_contract_code_hash(),
                                   std::as_bytes(std::span(buf)));
+}
+
+HogDBStatus<void>
+NewContractLock::apply_close_hash_delta(const LockContext &ctx,
+                                        LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  SHA256Hash code_hash = ctx.key.get_contract_code_hash();
+  auto key = make_wasm_code_db_key(code_hash);
+  auto wasm = ctx.dao->read_wasm_code(code_hash);
+  if (wasm.has_value()) {
+    lthash_remove_item(hash, std::as_bytes(std::span(key)), 0, *wasm);
+  }
+  auto marker = x23::serialize(code_hash);
+  lthash_add_item(hash, std::as_bytes(std::span(key)), 0,
+                  std::as_bytes(std::span(marker)));
+  return {};
 }
 
 } // namespace hogd

@@ -7,6 +7,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -69,6 +70,25 @@ NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
            snapshot_cost;
   }
   return 0;
+}
+
+HogDBStatus<void>
+NewDeploymentLock::apply_close_hash_delta(const LockContext &ctx,
+                                          LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  auto meta = ctx.dao->read_address_metadata(ctx.key.get_address());
+  auto key =
+      make_address_key_with_prefix(ctx.key.get_address(), Prefix::kAddressMetadata);
+  if (meta.has_value()) {
+    auto old = x23::serialize(*meta);
+    lthash_remove_item(hash, std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(old)));
+  }
+  auto marker = x23::serialize(ctx.key.get_address().get_raw());
+  lthash_add_item(hash, std::as_bytes(std::span(key)), 0,
+                  std::as_bytes(std::span(marker)));
+  return {};
 }
 
 } // namespace hogd

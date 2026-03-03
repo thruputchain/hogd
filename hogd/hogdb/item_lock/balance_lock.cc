@@ -9,6 +9,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -85,6 +86,27 @@ BalanceLock::write_committed_change(LockContext const &ctx) const
 
   assert(ctx.dao);
   return ctx.dao->write_address_balance(ctx.key.get_address(), value);
+}
+
+HogDBStatus<void>
+BalanceLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+{
+  assert(ctx.key.is_address_balance());
+  assert(ctx.dao);
+
+  auto key = make_address_key_with_prefix(ctx.key.get_address(), Prefix::kBalance);
+  auto before = ctx.dao->read_address_balance(ctx.key.get_address());
+  if (before.has_value()) {
+    int128_t prev = cpu_to_le(*before);
+    lthash_remove_item(hash, std::as_bytes(std::span(key)), kNNInt128,
+                       byte_view(prev));
+  }
+
+  int128_t after = before.value_or(0) + get_delta();
+  int128_t encoded_after = cpu_to_le(after);
+  lthash_add_item(hash, std::as_bytes(std::span(key)), kNNInt128,
+                  byte_view(encoded_after));
+  return {};
 }
 
 } // namespace hogd

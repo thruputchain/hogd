@@ -9,6 +9,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -121,6 +122,18 @@ NNInt128Lock::write_committed_change(LockContext const &ctx) const
 
   assert(ctx.dao);
   return ctx.dao->write_nnint128(ctx.key, value);
+}
+
+HogDBStatus<void>
+NNInt128Lock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
+  CHECK(!of);
+  int128_t out = cpu_to_le(value);
+  auto key = make_contract_data_db_key(ctx.key.as_bytes());
+  replace_known_item(hash, *ctx.dao, key, kNNInt128, byte_view(out));
+  return {};
 }
 
 } // namespace hogd

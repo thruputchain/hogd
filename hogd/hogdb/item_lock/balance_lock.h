@@ -70,6 +70,8 @@ public:
   }
 
   HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
+  HogDBStatus<void> apply_close_hash_delta(const LockContext &ctx,
+                                           LtHash16 &hash) const;
 
   static int128_t
   get_storage_cost_of_committed_value(const StorageCostModel *cost_model)

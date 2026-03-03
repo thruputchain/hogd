@@ -5,6 +5,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -56,6 +57,18 @@ DeletionLock::write_committed_change(LockContext const &ctx)
     }
   }
 
+  return {};
+}
+
+HogDBStatus<void>
+DeletionLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  auto key = make_contract_data_db_key(ctx.key.as_bytes());
+  auto before = ctx.dao->get_ramdb().get(key);
+  if (before.has_value()) {
+    lthash_remove_item(hash, key, before->type, before->value);
+  }
   return {};
 }
 

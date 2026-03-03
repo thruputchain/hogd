@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
@@ -10,6 +11,8 @@
 #include "types.hh"
 
 namespace hogd {
+
+class LtHash16;
 
 // Passed to item_lock::try_atomic_change_lock and item_lock::commit_change.
 // Used by some lock types to access the DAO, block height, and/or item key.
@@ -42,6 +45,8 @@ concept item_lock_unsized =
     } &&
     requires(Lock const &lock, const LockContext &ctx) {
       { lock.write_committed_change(ctx) } -> std::same_as<HogDBStatus<void>>;
+      { lock.apply_close_hash_delta(ctx, std::declval<LtHash16 &>()) }
+      -> std::same_as<HogDBStatus<void>>;
     };
 
 template<typename Lock>

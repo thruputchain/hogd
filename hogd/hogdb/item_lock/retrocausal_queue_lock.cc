@@ -491,4 +491,11 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx)
   return {};
 }
 
+HogDBStatus<void>
+RetrocausalQueueLock::apply_close_hash_delta(const LockContext & /*ctx*/,
+                                             LtHash16 & /*hash*/) const
+{
+  return {};
+}
+
 } // namespace hogd
