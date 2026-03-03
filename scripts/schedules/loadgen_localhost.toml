@@ -28,8 +28,8 @@ rm -rf $HOGX_HOME
 
 THIS_IP=$(ifconfig enp129s0f0np0 | awk '/inet / {print $2; exit}')
 
-mkdir -p $HOGX_HOME/default/cluster
-cat > $HOGX_HOME/default/cluster/cluster.json << EOF
+mkdir -p $HOGX_HOME/cluster/default
+cat > $HOGX_HOME/cluster/default/cluster.json << EOF
 {
   "host_defs": [
     {
