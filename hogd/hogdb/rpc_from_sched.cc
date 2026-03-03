@@ -252,7 +252,8 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
-  DbHash closed_hash = btx->get().compute_close_hash(ctx_.get_tip().db_hash);
+  DbHash closed_hash =
+      btx->get().compute_close_hash(/*base_hash=*/ctx_.get_tip().db_hash);
   ctx_.cache_closed_hash(id, closed_hash);
   ret.db_hash() = closed_hash;
   co_return ret;

@@ -225,6 +225,7 @@ public:
   }
 
   SHA256Hash get_block_hash(const x23::XdrVec<SignedTransactionHash> &hashes,
+                            const DbHash &db_hash,
                             const BlockHash &prev_block_hash);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }

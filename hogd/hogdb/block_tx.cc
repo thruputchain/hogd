@@ -92,6 +92,7 @@ lthash_remove_item(LtHash16 &hash, std::span<const std::byte> key, uint8_t type,
   hash.remove(element);
 }
 
+// TODO(jhumphri): Why do we have this?
 void
 replace_known_item(LtHash16 &hash, HogDBDAO &db, std::span<const std::byte> key,
                    uint8_t type, std::span<const std::byte> new_value)
@@ -403,7 +404,6 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
     }
 
     const ItemKey &key = v.first;
-
     if (auto const *inner = v.second.get_inner<NNInt128Lock>()) {
       auto [base, delta] = inner->get_base_and_delta();
       int128_t out = cpu_to_le(base + delta);

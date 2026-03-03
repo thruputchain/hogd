@@ -41,7 +41,8 @@ DeletionLock::write_committed_change(LockContext const &ctx)
   assert(ctx.dao);
 
   if (type == kRetrocausalQueue) {
-    // Delegate to RCQ-specific cleanup.
+    // Delegate to RCQ-specific cleanup: removes metadata + all blocks from DAO.
+    // This is fully self-contained.
     auto cleanup_ret = RetrocausalQueueLock::cleanup_on_deletion(ctx);
     if (!cleanup_ret.has_value()) {
       return cleanup_ret.error();

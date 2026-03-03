@@ -75,8 +75,7 @@ public:
     out.db_tip() = DbTip{
         .height = static_cast<BlockHeight>(block_id_),
         .block_hash = sha256(block_id_),
-        .db_hash =
-            db_hash_from_lthash16_seed(std::as_bytes(std::span(&block_id_, 1))),
+        .db_hash = {},
         .id = block_id_,
     };
     return out;
