@@ -985,6 +985,8 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());
   if (!input_bytestring.empty()) {
+    assert(new_string.data() != nullptr);
+    assert(input_bytestring.data() != nullptr);
     std::memcpy(new_string.data(),
                 reinterpret_cast<const uint8_t *>(input_bytestring.data()),
                 input_bytestring.size());
@@ -1125,7 +1127,9 @@ queue_entry_from_span(std::span<const std::byte> span)
 {
   QueueEntry new_entry;
   new_entry.resize_uninitialized(span.size());
-  if (!new_entry.empty()) {
+  if (!span.empty()) {
+    assert(new_entry.data() != nullptr);
+    assert(span.data() != nullptr);
     std::memcpy(new_entry.data(),
                 reinterpret_cast<const uint8_t *>(span.data()), span.size());
   }

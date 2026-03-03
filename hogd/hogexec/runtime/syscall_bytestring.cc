@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -40,6 +41,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
       std::min<RuntimeMemoryLength>(output_bytestring.size(), bs->size());
 
   if (output_written_len > 0) {
+    assert(output_bytestring.data() != nullptr);
+    assert(bs->data() != nullptr);
     std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
                 bs->data(), output_written_len);
   }

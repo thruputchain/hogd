@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -113,6 +114,8 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   output_written_len =
       std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
   if (output_written_len > 0) {
+    assert(output_buffer.data() != nullptr);
+    assert(calldata.data() != nullptr);
     std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
                 calldata.data(), output_written_len);
   }
@@ -148,6 +151,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
             WrappedGasAmount{0}};
   }
   if (!input_calldata.empty()) {
+    assert(calldata.data() != nullptr);
+    assert(input_calldata.data() != nullptr);
     std::memcpy(calldata.data(),
                 reinterpret_cast<const uint8_t *>(input_calldata.data()),
                 input_calldata.size());
@@ -209,6 +214,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
             WrappedGasAmount{0}};
   }
   if (!input_buffer.empty()) {
+    assert(buffer.data() != nullptr);
+    assert(input_buffer.data() != nullptr);
     std::memcpy(buffer.data(),
                 reinterpret_cast<const uint8_t *>(input_buffer.data()),
                 input_buffer.size());
@@ -236,6 +243,8 @@ syscall_GetReturnedBuffer_inner(
   bool written = false;
   size_t write_len = std::min(output_buffer.size(), (**status)->size());
   if (write_len > 0) {
+    assert(output_buffer.data() != nullptr);
+    assert((**status)->data() != nullptr);
     std::memcpy(output_buffer.data(), (**status)->data(), write_len);
     written = true;
   }
