@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
-use common::{LinkEntry, SendPtr};
+use common::{LinkEntry, SendFnPtr};
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker,
@@ -18,16 +18,16 @@ macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
             linker: &mut Linker<*mut c_void>,
-            fn_pointer: *mut c_void,
+            fn_pointer: common::ErasedFnPtr,
             import_name: &str,
             fn_name: &str,
         ) -> Result<(), wasmtime::Error> {
-            let ptr = SendPtr::new(fn_pointer);
+            let ptr = SendFnPtr::new(fn_pointer);
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
-                            ptr.as_ptr(),
+                            ptr.get(),
                             *caller.data(),
                             $($arg),*
                         )
@@ -317,33 +317,33 @@ pub unsafe extern "C" fn wasmtime_global_link_nargs(
     module_name_len: u32,
     method_name: *const u8,
     method_name_len: u32,
-    function_pointer: *mut c_void,
+    function_pointer: common::ErasedFnPtr,
     nargs: u8,
 ) -> bool // true if success
 {
-    let global_context: &mut Arc<WasmtimeGlobalContext> = unsafe {
-        &mut *core::mem::transmute::<*mut c_void, *mut Arc<WasmtimeGlobalContext>>(
-            global_context_void,
-        )
-    };
-
     debug_assert!(!global_context_void.is_null());
     debug_assert!(!module_name.is_null());
     debug_assert!(!method_name.is_null());
 
-    let module = match string_from_parts(module_name, module_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
+    let global_context: &mut Arc<WasmtimeGlobalContext> = unsafe {
+        &mut *global_context_void.cast::<Arc<WasmtimeGlobalContext>>()
     };
 
-    let method = match string_from_parts(method_name, method_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
-    };
+    let module =
+        match unsafe { string_from_parts(module_name, module_name_len) } {
+            Ok(x) => x,
+            _ => {
+                return false;
+            }
+        };
+
+    let method =
+        match unsafe { string_from_parts(method_name, method_name_len) } {
+            Ok(x) => x,
+            _ => {
+                return false;
+            }
+        };
 
     debug_assert!(!module.is_empty());
     debug_assert!(!method.is_empty());
@@ -377,7 +377,7 @@ pub unsafe extern "C" fn new_wasmtime_global_context(
     let instance_pre_cache = InstancePreCache::new(engine_count);
     let global_context =
         Arc::new(WasmtimeGlobalContext::new(engine_count, instance_pre_cache));
-    unsafe { core::mem::transmute(Box::into_raw(Box::new(global_context))) }
+    Box::into_raw(Box::new(global_context)).cast::<c_void>()
 }
 
 /// # Safety
