@@ -1059,14 +1059,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // Careful--[validate_batch()] is calling co_await in its function body.
   bool validated =
       co_await validate_batch(cache.block_id, txs, /*executor_idx=*/0);
-
-  // Check [validated] and verify the block hash. It is safe to directly use
-  // [cache.tx_hashes] here because we already checked above that all of these
-  // hashes correspond to vetted txs.
-  if (!validated ||
-      get_block_hash(cache.tx_hashes,
-                     /*prev_block_hash=*/nomination.prev_block_hash) !=
-          nomination.block_hash) {
+  if (!validated) {
     co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
@@ -1075,7 +1068,32 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+  DbHash db_hash;
+  {
+    DbBlockResult result = co_await close_snapshot(cache.block_id);
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+    db_hash = result.db_hash();
+  }
 
+  // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
+  // because we already checked above that all of these hashes correspond to
+  // vetted txs.
+  if (get_block_hash(cache.tx_hashes, db_hash,
+                     /*prev_block_hash=*/nomination.prev_block_hash) !=
+      nomination.block_hash) {
+    co_await scheduler_->add_txs(cache.txs);
+
+    co_await finish_all_executors(cache.block_id);
+    co_await abandon_block(cache);
+    co_await decrement_num_validations_in_progress();
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+  {
+    DbBlockResult result =
+        co_await commit_snapshot(cache.block_id, cache.db_tip.block_hash);
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
   co_await finish_all_executors(cache.block_id);
 
   cache.db_tip =
