@@ -12,7 +12,6 @@
 
 #include "hogd/base/io.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -39,9 +38,7 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port)
   }
 
   HogDBDAO db(RAMDB(std::move(*db_result)));
-  std::unique_ptr<MerkleTriePrefix> trie = std::make_unique<MerkleTriePrefix>();
-  db.load_trie(*trie);
-  RPCContext ctx(std::move(db), std::move(trie), nullptr);
+  RPCContext ctx(std::move(db), nullptr);
 
   // Start the scheduler server
   std::println("Starting scheduler server on port {}", coord_port);

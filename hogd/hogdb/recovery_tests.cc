@@ -52,17 +52,16 @@ TEST(RecoveryTests, RecoveryVaryingItems)
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
-    std::unique_ptr<MerkleTriePrefix> trie =
-        std::make_unique<MerkleTriePrefix>();
-    dao.load_trie(*trie);
-    EXPECT_EQ(trie->size(), 0UL);
+    MerkleTriePrefix trie;
+    dao.load_trie(trie);
+    EXPECT_EQ(trie.size(), 0UL);
 
     // add some items to the database
     // some items that are not in the trie
     CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
     // some items that are in the trie
 
-    RPCContext ctx(std::move(dao), std::move(trie), nullptr);
+    RPCContext ctx(std::move(dao), nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
@@ -117,7 +116,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     ASSERT_TRUE(btx->initiate_shutdown());
     ctx.remove_shutdown_block_tx(1);
 
-    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}).has_value());
+    DbHash closed_hash = btx->get().compute_close_hash(ctx.get_tip().db_hash);
+    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}, closed_hash).has_value());
 
     // commit to disk
     auto lsn = ctx.get_db().commit();
@@ -125,7 +125,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     EXPECT_EQ(*lsn, 1UL);
 
     initial_tip = ctx.get_tip();
-    EXPECT_EQ(ctx.get_trie().size(), 3UL);
+    MerkleTriePrefix final_trie;
+    ctx.get_db().load_trie(final_trie);
+    EXPECT_EQ(final_trie.size(), 3UL);
   }
 
   // now reload the database
@@ -136,7 +138,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
   MerkleTriePrefix trie;
   dao.load_trie(trie);
   EXPECT_EQ(trie.size(), 3UL);
-  ASSERT_EQ(trie.get_root_hash(), initial_tip.db_hash);
+  auto recovered_tip = dao.read_dbtip();
+  ASSERT_TRUE(recovered_tip.has_value());
+  ASSERT_EQ(recovered_tip->db_hash, initial_tip.db_hash);
 
   auto bal = dao.read_address_balance(ContractAddress{0});
   ASSERT_TRUE(bal.has_value());

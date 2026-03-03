@@ -200,7 +200,6 @@ private:
 
     auto db = HogDBDAO(RAMDB(std::move(*ramdb)));
     ctx_ = std::make_unique<RPCContext>(std::move(db),
-                                        std::make_unique<MerkleTriePrefix>(),
                                         std::move(sched_db_client));
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),

@@ -77,9 +77,9 @@ compute_full_state_hash(HogDBDAO &db)
               std::span<const std::byte> value) {
         x23::Vec<std::byte> element;
         element.reserve(key.size() + 1 + value.size());
-        element.insert(element.end(), key.begin(), key.end());
+        element.append(key.begin(), key.end());
         element.push_back(static_cast<std::byte>(type));
-        element.insert(element.end(), value.begin(), value.end());
+        element.append(value.begin(), value.end());
         hash.add(element);
       });
   return db_hash_from_lthash16(hash);

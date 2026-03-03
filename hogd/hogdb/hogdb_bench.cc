@@ -319,7 +319,7 @@ Benchmark::run()
 
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_,
+  PerThreadARC<BlockTX> block(db_, cost_model_,
                               background_commit_worker, 1);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
@@ -498,7 +498,7 @@ RCQBenchmark::run_sequential()
   double insert_sec = measure([&] {
     size_t block_start_idx = 0;
     for (size_t block = 0; block < num_blocks; block++) {
-      PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
+      PerThreadARC<BlockTX> block_tx(db_, cost_model_,
                                      background_commit_worker_,
                                      static_cast<BlockHeight>(block + 1));
 
@@ -558,7 +558,7 @@ RCQBenchmark::run_sequential()
     std::atomic<bool> more = true;
     while (more.load(std::memory_order_relaxed)) {
       more.store(false, std::memory_order_relaxed);
-      PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
+      PerThreadARC<BlockTX> block_tx(db_, cost_model_,
                                      background_commit_worker_,
                                      static_cast<BlockHeight>(num_blocks + 1));
 
@@ -782,7 +782,7 @@ RCQBenchmark::run_concurrent()
   size_t wb_before_concurrent = db_.disk_bytes_written();
   double total_sec = measure([&] {
     for (size_t block = 0; block < num_blocks; block++) {
-      PerThreadARC<BlockTX> block_tx(db_, *trie_, cost_model_,
+      PerThreadARC<BlockTX> block_tx(db_, cost_model_,
                                      background_commit_worker_,
                                      static_cast<BlockHeight>(block + 1));
 

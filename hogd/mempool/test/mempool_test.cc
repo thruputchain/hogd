@@ -11,6 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
@@ -28,6 +29,12 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumTxs = 100;
+
+DbHash
+db_hash_from_block_hash(const BlockHash &block_hash)
+{
+  return db_hash_from_lthash16_seed(std::as_bytes(std::span(block_hash)));
+}
 
 } // namespace
 
@@ -261,7 +268,7 @@ TEST(Mempool, Validate)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -310,7 +317,7 @@ TEST(Mempool, ValidateBatch)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -375,7 +382,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -435,7 +442,7 @@ TEST(Mempool, ValidateBatchMissingTx)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -492,7 +499,7 @@ TEST(Mempool, ValidateCommit)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -547,7 +554,7 @@ TEST(Mempool, ValidateTwo)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -572,7 +579,7 @@ TEST(Mempool, ValidateTwo)
   // Now validate another block.
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -628,7 +635,7 @@ TEST(Mempool, GetTip)
   Nomination nomination = res_nominate.nominated_block().nomination;
   db_tip.height++;
   db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = nomination.block_hash;
+  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
   db_tip.id++;
 
   nomination.block_height++;
@@ -757,7 +764,7 @@ TEST(Mempool, AuthChanged)
   CHECK_EQ(server.mempool_coord_rpc().auth_data_height(), 1);
   db_tip = {.height = nomination.block_height,
             .block_hash = nomination.block_hash,
-            .db_hash = nomination.block_hash,
+            .db_hash = db_hash_from_block_hash(nomination.block_hash),
             .id = res_nominate.nominated_block().block_id};
   res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
