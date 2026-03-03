@@ -33,8 +33,7 @@ public:
     return 0;
   }
 
-  static HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                                  MerkleTriePrefix &trie);
+  static HogDBStatus<void> write_committed_change(LockContext const &ctx);
 };
 
 static_assert(item_lock<DeletionLock>);

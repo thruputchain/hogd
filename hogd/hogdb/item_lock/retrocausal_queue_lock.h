@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
@@ -29,8 +28,7 @@ public:
                          const change_type &change,
                          const StorageCostModel *cost_model);
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
@@ -45,8 +43,7 @@ public:
 
   // Cleanup all RCQ-specific storage (blocks and metadata) when an RCQ is
   // deleted. Removes all blocks and the metadata key from both DAO and trie.
-  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx,
-                                               MerkleTriePrefix &trie);
+  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx);
 
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.

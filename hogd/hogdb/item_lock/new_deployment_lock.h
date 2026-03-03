@@ -27,8 +27,7 @@ public:
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const DeployedContractData & /*unused*/,
                          const StorageCostModel *cost_model) const;
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
 
 private:
   const DeployedContractHash deployed_contract_hash_;

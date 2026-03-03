@@ -3,7 +3,6 @@
 #include <memory>
 
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -32,10 +31,9 @@ public:
     return this->get()->commit_change(did_finalize, snapshot_cost, after,
                                       cost_model);
   }
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const
   {
-    return this->get()->write_committed_change(ctx, trie);
+    return this->get()->write_committed_change(ctx);
   }
 };
 

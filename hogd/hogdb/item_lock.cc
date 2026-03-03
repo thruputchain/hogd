@@ -13,7 +13,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/balance_lock.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
@@ -511,8 +510,7 @@ ItemLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDBStatus<void>
-ItemLock::write_committed_change(LockContext const &ctx,
-                                 MerkleTriePrefix &trie) const
+ItemLock::write_committed_change(LockContext const &ctx) const
 {
   assert(is_finalized());
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
@@ -526,7 +524,7 @@ ItemLock::write_committed_change(LockContext const &ctx,
           panic("bad finalized state");
         }
         else {
-          return lock.write_committed_change(ctx, trie);
+          return lock.write_committed_change(ctx);
         }
       },
       lock_contents_);

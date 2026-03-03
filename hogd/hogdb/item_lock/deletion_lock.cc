@@ -5,19 +5,16 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
 
 HogDBStatus<void>
-DeletionLock::write_committed_change(LockContext const &ctx,
-                                     MerkleTriePrefix &trie)
+DeletionLock::write_committed_change(LockContext const &ctx)
 {
   int8_t type = 0;
   if (ctx.key.is_address_auth_data()) {
@@ -44,9 +41,8 @@ DeletionLock::write_committed_change(LockContext const &ctx,
   assert(ctx.dao);
 
   if (type == kRetrocausalQueue) {
-    // Delegate to RCQ-specific cleanup: removes metadata + all blocks from both
-    // DAO and trie. This is fully self-contained.
-    auto cleanup_ret = RetrocausalQueueLock::cleanup_on_deletion(ctx, trie);
+    // Delegate to RCQ-specific cleanup.
+    auto cleanup_ret = RetrocausalQueueLock::cleanup_on_deletion(ctx);
     if (!cleanup_ret.has_value()) {
       return cleanup_ret.error();
     }
@@ -58,12 +54,6 @@ DeletionLock::write_committed_change(LockContext const &ctx,
       return remove_ret;
     }
 
-    // Remove the metadata/item key from the merkle trie.
-    // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
-    // will never attempt to remove a key that does not exist. We already
-    // checked above that the key exists when we removed it from the database.
-    CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key, type)
-              .has_value());
   }
 
   return {};

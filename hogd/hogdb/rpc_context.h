@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -19,7 +20,6 @@
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/background_commit_worker.h"
@@ -57,19 +57,14 @@ public:
   using sched_db_client_t =
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  RPCContext(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie,
-             std::unique_ptr<sched_db_client_t> sched_db_client)
-    : db_(std::move(db)), trie_(std::move(trie)),
-      sched_db_client_(std::move(sched_db_client))
-  {
-    assert(trie_ != nullptr);
-  }
+  RPCContext(HogDBDAO db, std::unique_ptr<sched_db_client_t> sched_db_client)
+    : db_(std::move(db)), sched_db_client_(std::move(sched_db_client))
+  {}
 
   ~RPCContext();
 
   // getters.
   HogDBDAO &get_db() { return db_; }
-  MerkleTriePrefix &get_trie() { return *trie_; }
   // The tip height is the height of the next block to be committed.
   // (Equivalently, the count of the number of blocks that have been committed.)
   DbTip &get_tip() { return tip_; }
@@ -114,7 +109,32 @@ public:
   // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
-  HogDBStatus<void> update_dbtip(BlockTXID bid, BlockHash block_hash);
+  HogDBStatus<void> update_dbtip(BlockTXID bid, BlockHash block_hash,
+                                 const DbHash &db_hash);
+
+  void cache_closed_hash(BlockTXID bid, const DbHash &db_hash)
+  {
+    std::scoped_lock g(lock_);
+    closed_hashes_[bid] = db_hash;
+  }
+
+  std::optional<DbHash> take_closed_hash(BlockTXID bid)
+  {
+    std::scoped_lock g(lock_);
+    auto it = closed_hashes_.find(bid);
+    if (it == closed_hashes_.end()) {
+      return std::nullopt;
+    }
+    DbHash out = it->second;
+    closed_hashes_.erase(it);
+    return out;
+  }
+
+  void clear_closed_hash(BlockTXID bid)
+  {
+    std::scoped_lock g(lock_);
+    closed_hashes_.erase(bid);
+  }
 
   const auto &get_sched_db_client() { return sched_db_client_; }
 
@@ -133,8 +153,6 @@ private:
 
   // the database used to persist state.
   HogDBDAO db_;
-  // the merkle trie that generates hashes for the items in the database.
-  std::unique_ptr<MerkleTriePrefix> trie_;
   // tracks details about the last committed block.
   DbTip tip_ = DbTip{.id = UINT64_MAX};
   std::atomic<BlockHeight> current_committed_height_ = tip_.height;
@@ -153,6 +171,8 @@ private:
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
+  // closed snapshot hashes waiting for commit.
+  std::map<BlockTXID, DbHash> closed_hashes_;
 
   // External serivces that may subscribe to changes in the database.
   std::shared_ptr<sched_db_client_t> sched_db_client_;

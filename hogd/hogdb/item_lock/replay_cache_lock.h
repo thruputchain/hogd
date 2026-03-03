@@ -36,8 +36,7 @@ public:
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<ReplayCacheIt> &after,
                          const StorageCostModel *cost_model);
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
 
 private:
   HogDBStatus<ReplayCacheData>

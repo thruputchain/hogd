@@ -27,8 +27,7 @@ public:
   {
     return 0;
   }
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
 
 private:
   const Contract contract_;

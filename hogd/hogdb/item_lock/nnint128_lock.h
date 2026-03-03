@@ -165,8 +165,7 @@ public:
     return cost_model->kBaseItemCost;
   }
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
 
   // For balance items
   // Only should be called after all txs in a block are done.

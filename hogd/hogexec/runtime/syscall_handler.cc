@@ -1477,7 +1477,7 @@ SystemCallHandler::get_parent_block_hash() const
   return tip.value()->block_hash;
 }
 
-SystemStatus<SHA256Hash>
+SystemStatus<DbHash>
 SystemCallHandler::get_parent_db_hash() const
 {
   auto tip = snapshot_cache_.try_get_db_tip();

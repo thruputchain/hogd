@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -170,12 +171,14 @@ public:
       GenesisConfiguration genesis_configuration)
   {
     BlockHash block_hash = sha256(genesis_configuration);
+    DbHash db_hash{};
+    std::ranges::copy(block_hash, db_hash.begin());
     DbSchedResult ret =
         co_await db_sched_client_->dbsched_load_genesis_configuration(
             genesis_configuration, block_hash);
     last_committed_block_ = {.height = 0,
                              .block_hash = block_hash,
-                             .db_hash = block_hash,
+                             .db_hash = db_hash,
                              .id = generate_block_id()};
     received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;

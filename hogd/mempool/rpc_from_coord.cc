@@ -46,6 +46,22 @@ namespace hogd {
 
 namespace {
 
+inline BlockHash
+truncate_db_hash_inline(const DbHash &hash)
+{
+  BlockHash out{};
+  std::ranges::copy_n(hash.begin(), out.size(), out.begin());
+  return out;
+}
+
+inline DbHash
+widen_block_hash_inline(const BlockHash &hash)
+{
+  DbHash out{};
+  std::ranges::copy(hash, out.begin());
+  return out;
+}
+
 template<typename T>
 void
 remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
@@ -640,7 +656,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                        /*prev_block_hash=*/db_tip.block_hash);
     record_stage(stage_generate_block_hash);
 
-    nomination.prev_block_hash = db_tip.db_hash;
+    nomination.prev_block_hash = truncate_db_hash_inline(db_tip.db_hash);
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
     co_await t_to_parallel_batch(cache.result_tx_hashes,
@@ -872,15 +888,19 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // there.
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
-  nominated_block_cache_.db_tip = {
-      .height = nominated_block_cache_.nomination_result.nominated_block()
-                    .nomination.block_height,
-      .block_hash = nominated_block_cache_.nomination_result.nominated_block()
-                        .nomination.block_hash,
-      .db_hash = nominated_block_cache_.nomination_result.nominated_block()
-                     .nomination.block_hash,
-      .id =
-          nominated_block_cache_.nomination_result.nominated_block().block_id};
+  DbHash nominated_db_hash = widen_block_hash_inline(
+      nominated_block_cache_.nomination_result.nominated_block()
+          .nomination.block_hash);
+  nominated_block_cache_.db_tip =
+      DbTip{.height = nominated_block_cache_.nomination_result.nominated_block()
+                         .nomination.block_height,
+            .block_hash =
+                nominated_block_cache_.nomination_result.nominated_block()
+                    .nomination.block_hash,
+            .db_hash = nominated_db_hash,
+            .id =
+                nominated_block_cache_.nomination_result.nominated_block()
+                    .block_id};
   record_stage(stage_finalize_result);
   info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
        "wait_auth_data={:.6f}, clear_a={:.6f}, clear_b={:.6f}, clear_c={:.6f}, "
@@ -933,7 +953,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  if (db_tip.db_hash != nomination.prev_block_hash) {
+  if (truncate_db_hash_inline(db_tip.db_hash) != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -964,7 +984,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   cache.block_id = generate_block_id();
   cache.db_tip = {.height = nomination.block_height,
                   .block_hash = nomination.block_hash,
-                  .db_hash = nomination.block_hash,
+                  .db_hash = widen_block_hash_inline(nomination.block_hash),
                   .id = cache.block_id};
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
@@ -1062,7 +1082,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   cache.db_tip = DbTip{.height = nomination.block_height,
                        .block_hash = nomination.block_hash,
-                       .db_hash = nomination.block_hash,
+                       .db_hash = widen_block_hash_inline(nomination.block_hash),
                        .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);

@@ -35,6 +35,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
@@ -45,6 +46,14 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+DbHash
+dbhash_from_sha256(const SHA256Hash &hash)
+{
+  return db_hash_from_lthash16_seed(x23::BufView(hash.data(), hash.size()));
+}
+} // namespace
 
 class HogDBTest : public testing::Test {
 protected:
@@ -102,7 +111,8 @@ TEST_F(HogDBTest, DataAccessObject)
   // test db tip
   DbTip tip{.height = 10,
             .block_hash = sha256(std::as_bytes(std::span("foo"))),
-            .db_hash = sha256(std::as_bytes(std::span("foo"))),
+            .db_hash =
+                dbhash_from_sha256(sha256(std::as_bytes(std::span("foo")))),
             .id = 30};
   EXPECT_TRUE(db_.write_dbtip(tip));
   HogDBStatus<DbTip> rtip = db_.read_dbtip();
@@ -316,7 +326,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     auto commit_cost = lock.commit_change(c1, ctx);
     EXPECT_EQ(cost_model_.kBaseItemCost + cost_model_.kReplayCacheCostPerEntry,
               commit_cost);
-    ASSERT_TRUE(lock.write_committed_change(ctx, trie_));
+    ASSERT_TRUE(lock.write_committed_change(ctx));
   }
 
   height++;
@@ -360,7 +370,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
 
     auto commit_cost = lock2.commit_change(c3, ctx);
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
-    ASSERT_TRUE(lock2.write_committed_change(ctx, trie_));
+    ASSERT_TRUE(lock2.write_committed_change(ctx));
   }
 
   // Read final metadata and data

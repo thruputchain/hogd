@@ -6,11 +6,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -27,20 +25,11 @@ BytestringLock::try_atomic_change_lock(const Bytes *before, const Bytes *after,
 }
 
 HogDBStatus<void>
-BytestringLock::write_committed_change(LockContext const &ctx,
-                                       MerkleTriePrefix &trie) const
+BytestringLock::write_committed_change(LockContext const &ctx) const
 {
   assert(ctx.dao);
   std::span<const std::byte> v = std::as_bytes(std::span(bytestring_));
-  HogDBStatus<void> ret = ctx.dao->write_bytes(ctx.key, v);
-  if (ret) {
-    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
-    // [trie.insert_or_update()] only fails if we attempt to insert an empty
-    // key.
-    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, kBytes, v)
-              .has_value());
-  }
-  return ret;
+  return ctx.dao->write_bytes(ctx.key, v);
 }
 
 } // namespace hogd

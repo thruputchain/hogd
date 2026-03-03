@@ -15,11 +15,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
@@ -314,8 +312,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 }
 
 HogDBStatus<void>
-RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
-                                             MerkleTriePrefix &trie) const
+RetrocausalQueueLock::write_committed_change(LockContext const &ctx) const
 {
   assert(ctx.dao);
 
@@ -335,12 +332,6 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
       if (!r.has_value()) {
         return r;
       }
-
-      auto block_key = make_retrocausal_queue_block_key(ctx.key, block_num);
-      std::span<const std::byte> merkle_key =
-          MerkleTrieHelpers::add_type_to_merkle_key(
-              std::as_bytes(std::span(block_key)).subspan(1), 0);
-      CHECK(trie.remove(merkle_key));
     }
     updated_metadata.consume_state = updated_past_block_consume;
   }
@@ -392,15 +383,6 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
       return write_result.error();
     }
 
-    auto block_key =
-        make_retrocausal_queue_block_key(ctx.key, new_block.block_number);
-    x23::Vec<uint8_t> block_serialized = x23::serialize(new_block);
-    std::span<const std::byte> merkle_key =
-        MerkleTrieHelpers::add_type_to_merkle_key(
-            std::as_bytes(std::span(block_key)).subspan(1), 0);
-    CHECK(trie.insert_or_update(merkle_key,
-                                std::as_bytes(std::span(block_serialized))));
-
     updated_metadata.max_live_block_num = new_block.block_number;
   }
 
@@ -430,22 +412,12 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
         if (!block_remove.has_value()) {
           return block_remove.error();
         }
-
-        auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
-        std::span<const std::byte> merkle_key =
-            MerkleTrieHelpers::add_type_to_merkle_key(
-                std::as_bytes(std::span(block_key)).subspan(1), 0);
-        CHECK(trie.remove(merkle_key));
       }
 
       auto meta_remove = ctx.dao->remove_retrocausal_queue_metadata(ctx.key);
       if (!meta_remove.has_value()) {
         return meta_remove.error();
       }
-
-      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
-                                                        kRetrocausalQueue)
-                .has_value());
     }
     else if (base_was_different_type_) {
       // The key held a different type (e.g. bytestring) that was deleted and
@@ -460,10 +432,6 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
       if (!remove_ret.has_value()) {
         return remove_ret.error();
       }
-
-      CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
-                                                        type_ret.value())
-                .has_value());
     }
   }
   else {
@@ -472,11 +440,6 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx,
     if (!write_meta.has_value()) {
       return write_meta.error();
     }
-
-    x23::Vec<uint8_t> buf = x23::serialize(updated_metadata);
-    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(
-              trie, ctx.key, kRetrocausalQueue, std::as_bytes(std::span(buf)))
-              .has_value());
   }
 
   return {};
@@ -494,8 +457,7 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDBStatus<void>
-RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
-                                          MerkleTriePrefix &trie)
+RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx)
 {
   assert(ctx.dao);
 
@@ -511,30 +473,20 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
 
   auto const &meta = meta_ret.value();
 
-  // Remove all unconsumed blocks from both the DAO and the merkle trie
+  // Remove all unconsumed blocks from the DAO.
   uint64_t start_block = meta.consume_state.max_fully_consumed_block_number + 1;
   for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
     auto block_remove = ctx.dao->remove_retrocausal_queue_block(ctx.key, b);
     if (!block_remove.has_value()) {
       return block_remove.error();
     }
-
-    auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
-    std::span<const std::byte> merkle_key =
-        MerkleTrieHelpers::add_type_to_merkle_key(
-            std::as_bytes(std::span(block_key)).subspan(1), 0);
-    CHECK(trie.remove(merkle_key));
   }
 
-  // Remove the metadata from the DAO and trie
+  // Remove the metadata from the DAO.
   auto meta_remove = ctx.dao->remove_retrocausal_queue_metadata(ctx.key);
   if (!meta_remove.has_value()) {
     return meta_remove.error();
   }
-
-  CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, ctx.key,
-                                                    kRetrocausalQueue)
-            .has_value());
 
   return {};
 }

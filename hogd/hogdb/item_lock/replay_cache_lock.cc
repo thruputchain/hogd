@@ -14,12 +14,10 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
@@ -261,8 +259,7 @@ ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-ReplayCacheLock::write_committed_change(LockContext const &ctx,
-                                        MerkleTriePrefix &trie) const
+ReplayCacheLock::write_committed_change(LockContext const &ctx) const
 {
   assert(ctx.key.is_replay_cache());
 
@@ -296,10 +293,6 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
     }
     pruned_count += it->nonce_count;
 
-    auto key = make_replay_cache_data_key(ctx.key.get_address(), it->height);
-    auto trie_key_bytes =
-        MerkleTrieHelpers::add_type_to_merkle_key(std::span(key).subspan(1), 0);
-    CHECK(trie.remove(trie_key_bytes));
   }
 
   auto it = prune_end;
@@ -338,10 +331,6 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
     }
 
     auto buf = x23::serialize(*res);
-    auto key = make_replay_cache_data_key(ctx.key.get_address(), height);
-    auto trie_key_bytes =
-        MerkleTrieHelpers::add_type_to_merkle_key(std::span(key).subspan(1), 0);
-    CHECK(trie.insert_or_update(trie_key_bytes, std::as_bytes(std::span(buf))));
 
     // Slot in replacement height/nonce count.
     // Don't worry about tracking delta to total cache size here.
@@ -364,11 +353,6 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
   if (!ret) {
     return ret.error();
   }
-
-  auto buf = x23::serialize(meta);
-  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
-                                                  std::as_bytes(std::span(buf)))
-            .has_value());
 
   return {};
 }

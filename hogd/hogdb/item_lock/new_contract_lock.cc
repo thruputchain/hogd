@@ -4,7 +4,6 @@
 #include <span>
 
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -30,8 +29,7 @@ NewContractLock::try_atomic_change_lock(const NewContractData *before,
 }
 
 HogDBStatus<void>
-NewContractLock::write_committed_change(LockContext const &ctx,
-                                        MerkleTriePrefix & /*trie*/) const
+NewContractLock::write_committed_change(LockContext const &ctx) const
 {
   auto buf = x23::serialize(contract_);
   assert(ctx.dao);

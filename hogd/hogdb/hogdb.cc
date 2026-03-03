@@ -26,7 +26,7 @@
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -40,6 +40,7 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -67,6 +68,23 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
       make_rpc_client<SchedDb1>(host_port, cp, true)());
 }
 
+DbHash
+compute_full_state_hash(HogDBDAO &db)
+{
+  LtHash16 hash;
+  db.for_each_state_item(
+      [&hash](std::span<const std::byte> key, uint8_t type,
+              std::span<const std::byte> value) {
+        x23::Vec<std::byte> element;
+        element.reserve(key.size() + 1 + value.size());
+        element.insert(element.end(), key.begin(), key.end());
+        element.push_back(static_cast<std::byte>(type));
+        element.insert(element.end(), value.begin(), value.end());
+        hash.add(element);
+      });
+  return db_hash_from_lthash16(hash);
+}
+
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
            const std::string *coordinator_addr, uint16_t exec_port,
@@ -91,8 +109,6 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
-  std::unique_ptr<MerkleTriePrefix> trie = std::make_unique<MerkleTriePrefix>();
-  db_tmp.load_trie(*trie);
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
       sched_db_client;
@@ -105,15 +121,14 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     warn("no coordinator address provided, skipping coordinator connection");
   }
 
-  RPCContext ctx(std::move(db_tmp), std::move(trie),
-                 std::move(sched_db_client));
+  RPCContext ctx(std::move(db_tmp), std::move(sched_db_client));
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
-    if (ctx.get_trie().get_root_hash() != tip->db_hash) {
-      critical("Root hash doesn't match DbTip: expected '{}', got '{}'",
-               ctx.get_trie().get_root_hash(), tip->db_hash);
+    DbHash state_hash = compute_full_state_hash(ctx.get_db());
+    if (state_hash != tip->db_hash) {
+      critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;
@@ -126,7 +141,6 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     }
   }
   else {
-    CHECK_EQ(ctx.get_trie().size(), 0UL);
     ctx.get_tip().height = 0;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }

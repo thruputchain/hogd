@@ -28,12 +28,12 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
@@ -122,7 +122,8 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
-                            PerThreadARC<BlockTX> *btx)
+                            PerThreadARC<BlockTX> *btx,
+                            const DbHash &closed_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -157,8 +158,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   // destroy the block TX.
   ctx_.remove_shutdown_block_tx(id);
 
-  // update the DbTip.
-  ret = ctx_.update_dbtip(id, block_hash);
+  ret = ctx_.update_dbtip(id, block_hash, closed_hash);
   if (!ret)
     return ret.error();
 
@@ -208,7 +208,13 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
   if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  HogDBStatus<void> ret = commit_block(id, block_hash, btx);
+  auto closed_hash = ctx_.take_closed_hash(id);
+  if (!closed_hash.has_value()) {
+    error("dbsched_commit_snapshot called before close for block {}", id);
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
+
+  HogDBStatus<void> ret = commit_block(id, block_hash, btx, *closed_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
@@ -228,6 +234,7 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
     co_return DbSchedResult::DbSchedResultError;
 
   if (ret->initiate_shutdown()) {
+    ctx_.clear_closed_hash(id);
     ctx_.remove_shutdown_block_tx(id);
   }
 
@@ -240,24 +247,14 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_close(id);
   }
-  // TODO(abelay): rename this to finish_snapshot. It will be called before
-  // either commit_snapshot or abort_snapshot because the merkle root is needed
-  // to create a proposal block.
-
-  // TODO(abelay): we could potential free memory here too.
+  auto *btx = ctx_.get_block_tx(id, false);
+  if (btx == nullptr) [[unlikely]]
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
-  // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
-  // hash is invalid. We could add the [ItemChanges] to the Merkle Trie and
-  // compute the root hash, but if the block ends up being abandoned rather than
-  // committed, it is expensive to remove these items from the Merkle Trie.
-  //
-  // We are going to replace the Merkle Trie with a much cheaper commutative
-  // hash function, so once we do that, we *can* compute the hash here with the
-  // pending [ItemChanges]. If we the block is abandoned, it is cheap to revert
-  // the hash.
-  // ctx_.get_trie().generate_top_level_hashes();
-  ret.db_hash() = ctx_.get_trie().get_root_hash();
+  DbHash closed_hash = btx->get().compute_close_hash(ctx_.get_tip().db_hash);
+  ctx_.cache_closed_hash(id, closed_hash);
+  ret.db_hash() = closed_hash;
   co_return ret;
 }
 
@@ -412,7 +409,13 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
           })
           .has_value());
 
-  co_return to_db_result(commit_block(kGenesisBlockID, block_hash, r.value()));
+  DbBlockResult close_result = co_await dbsched_close_snapshot(kGenesisBlockID);
+  if (close_result.result() != DbSchedResult::DbSchedResultOK) {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  co_return to_db_result(commit_block(kGenesisBlockID, block_hash, r.value(),
+                                      close_result.db_hash()));
 }
 
 x23::Async<DbShardResult>

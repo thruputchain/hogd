@@ -13,7 +13,6 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/auth_lock.h"
@@ -82,8 +81,7 @@ public:
   // change must be non-null.
   int128_t commit_change(const ItemChange &change, const LockContext &ctx);
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
