@@ -23,8 +23,7 @@ namespace hogd {
 
 class HogdbWrapper {
 public:
-  HogdbWrapper()
-    : ctx_(HogDBDAO(open_db()), make_sched_db_client())
+  HogdbWrapper() : ctx_(HogDBDAO(open_db()), make_sched_db_client())
   {
     db_sched_server_.start_server(/*port=*/0);
     db_executor_server_.start_server(/*port=*/0);

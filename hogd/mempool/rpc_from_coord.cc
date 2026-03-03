@@ -891,16 +891,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   DbHash nominated_db_hash = widen_block_hash_inline(
       nominated_block_cache_.nomination_result.nominated_block()
           .nomination.block_hash);
-  nominated_block_cache_.db_tip =
-      DbTip{.height = nominated_block_cache_.nomination_result.nominated_block()
-                         .nomination.block_height,
-            .block_hash =
-                nominated_block_cache_.nomination_result.nominated_block()
-                    .nomination.block_hash,
-            .db_hash = nominated_db_hash,
-            .id =
-                nominated_block_cache_.nomination_result.nominated_block()
-                    .block_id};
+  nominated_block_cache_.db_tip = DbTip{
+      .height = nominated_block_cache_.nomination_result.nominated_block()
+                    .nomination.block_height,
+      .block_hash = nominated_block_cache_.nomination_result.nominated_block()
+                        .nomination.block_hash,
+      .db_hash = nominated_db_hash,
+      .id =
+          nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
   info("nominate() stages: precheck={:.6f}, wait_transfers={:.6f}, "
        "wait_auth_data={:.6f}, clear_a={:.6f}, clear_b={:.6f}, clear_c={:.6f}, "
@@ -1080,10 +1078,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   co_await finish_all_executors(cache.block_id);
 
-  cache.db_tip = DbTip{.height = nomination.block_height,
-                       .block_hash = nomination.block_hash,
-                       .db_hash = widen_block_hash_inline(nomination.block_hash),
-                       .id = cache.block_id};
+  cache.db_tip =
+      DbTip{.height = nomination.block_height,
+            .block_hash = nomination.block_hash,
+            .db_hash = widen_block_hash_inline(nomination.block_hash),
+            .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
   result.db_tip() = cache.db_tip;

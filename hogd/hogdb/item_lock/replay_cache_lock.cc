@@ -292,7 +292,6 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx) const
       return ret.error();
     }
     pruned_count += it->nonce_count;
-
   }
 
   auto it = prune_end;

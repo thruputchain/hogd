@@ -53,7 +53,6 @@ DeletionLock::write_committed_change(LockContext const &ctx)
     if (!remove_ret) {
       return remove_ret;
     }
-
   }
 
   return {};

@@ -41,9 +41,7 @@ concept item_lock_unsized =
       } -> std::same_as<int128_t>;
     } &&
     requires(Lock const &lock, const LockContext &ctx) {
-      {
-        lock.write_committed_change(ctx)
-      } -> std::same_as<HogDBStatus<void>>;
+      { lock.write_committed_change(ctx) } -> std::same_as<HogDBStatus<void>>;
     };
 
 template<typename Lock>

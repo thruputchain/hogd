@@ -262,8 +262,8 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   db_.load_trie(trie_);
 
   BlockHeight height = 1;
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                 background_commit_worker_, height);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 height);
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -412,8 +412,8 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   db_.load_trie(trie_);
 
   BlockHeight height = 1;
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                 background_commit_worker_, height);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 height);
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -465,8 +465,8 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
   db_.load_trie(trie_);
 
   BlockHeight height = 1;
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                 background_commit_worker_, height);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 height);
 
   {
     // First InvokeTX: transfer to recipient (new address, cost applies)
@@ -551,8 +551,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   // Each block gets kEntriesPerBlock entries
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
@@ -652,8 +652,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
   // Create blocks
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -679,8 +679,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
   // Consume the first block completely
   {
     BlockHeight height = kNumBlocks + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -731,8 +731,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
   // Create blocks
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -758,8 +758,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
   // Delete the entire RCQ by consuming all entries
   {
     BlockHeight height = kNumBlocks + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -817,8 +817,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
   // Create blocks
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -845,8 +845,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
   // DeletionLock)
   {
     BlockHeight height = kNumBlocks + 1;
-    PerThreadARC<BlockTX> block_tx(db_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 

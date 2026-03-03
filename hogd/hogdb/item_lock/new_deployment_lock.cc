@@ -40,8 +40,9 @@ NewDeploymentLock::write_committed_change(LockContext const &ctx) const
 {
   assert(ctx.key.is_address_metadata());
   assert(ctx.dao);
-  HogDBStatus<void> ret = ctx.dao->write_address_metadata(
-      ctx.key.get_address(), deployed_contract_hash_);
+  HogDBStatus<void> ret =
+      ctx.dao->write_address_metadata(ctx.key.get_address(),
+                                      deployed_contract_hash_);
 
   // Create an empty data record for this address for scheduler state;
   // the scheduler is responsible for populating this with nonzero data.

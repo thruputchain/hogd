@@ -21,10 +21,11 @@ RPCContext::open_block_tx(BlockTXID bid)
 {
   // create the block tx.
   std::scoped_lock g(lock_);
-  auto [it, inserted] = block_txes_.emplace(
-      std::piecewise_construct, std::forward_as_tuple(bid),
-      std::forward_as_tuple(get_db(), get_cost_model(),
-                            background_commit_worker_, get_tip().height));
+  auto [it, inserted] =
+      block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
+                          std::forward_as_tuple(get_db(), get_cost_model(),
+                                                background_commit_worker_,
+                                                get_tip().height));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDBError(HogDBCode::kExists);

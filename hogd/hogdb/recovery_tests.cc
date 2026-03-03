@@ -117,7 +117,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     ctx.remove_shutdown_block_tx(1);
 
     DbHash closed_hash = btx->get().compute_close_hash(ctx.get_tip().db_hash);
-    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}, closed_hash).has_value());
+    ASSERT_TRUE(
+        ctx.update_dbtip(1, /*block_hash=*/{}, closed_hash).has_value());
 
     // commit to disk
     auto lsn = ctx.get_db().commit();

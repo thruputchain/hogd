@@ -112,8 +112,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel,
-                                 background_commit_worker, height);
+  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel, background_commit_worker,
+                                 height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -218,8 +218,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel,
-                                 background_commit_worker, height);
+  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel, background_commit_worker,
+                                 height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -293,8 +293,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel,
-                                 background_commit_worker, height);
+  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel, background_commit_worker,
+                                 height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -369,8 +369,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
 
-  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel,
-                                 background_commit_worker, height);
+  PerThreadARC<BlockTX> block_tx(db_, kTestCostModel, background_commit_worker,
+                                 height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 

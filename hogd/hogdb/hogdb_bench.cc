@@ -319,8 +319,7 @@ Benchmark::run()
 
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block(db_, cost_model_,
-                              background_commit_worker, 1);
+  PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
   if (auto ret = db_.write_dbtip(tip); !ret)

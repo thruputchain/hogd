@@ -199,8 +199,8 @@ private:
     CHECK(ramdb.has_value());
 
     auto db = HogDBDAO(RAMDB(std::move(*ramdb)));
-    ctx_ = std::make_unique<RPCContext>(std::move(db),
-                                        std::move(sched_db_client));
+    ctx_ =
+        std::make_unique<RPCContext>(std::move(db), std::move(sched_db_client));
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),

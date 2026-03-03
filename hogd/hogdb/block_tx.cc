@@ -397,8 +397,7 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
   LtHash16 hash = lthash16_from_db_hash(base_hash);
   std::mutex hash_lock;
 
-  item_locks_.for_each_parallel(
-      [&](std::pair<const ItemKey &, ItemLock &> v) {
+  item_locks_.for_each_parallel([&](std::pair<const ItemKey &, ItemLock &> v) {
     if (!v.second.is_finalized()) {
       return;
     }
@@ -422,7 +421,8 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
       if (raw.has_value()) {
         lthash_remove_item(hash, raw_key, kBytes, *raw);
       }
-      // We don't currently expose the lock's byte payload; hash a stable marker.
+      // We don't currently expose the lock's byte payload; hash a stable
+      // marker.
       x23::Vec<std::byte> marker;
       marker.push_back(std::byte{0x42});
       lthash_add_item(hash, raw_key, kBytes, marker);
@@ -431,8 +431,8 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
 
     if (auto const *inner = v.second.get_inner<PointerLock<AuthLock>>()) {
       auto auth = inner->get()->build_result();
-      auto auth_key =
-          make_address_key_with_prefix(key.get_address(), Prefix::kAddressAuthData);
+      auto auth_key = make_address_key_with_prefix(key.get_address(),
+                                                   Prefix::kAddressAuthData);
       auto serialized = x23::serialize(auth);
       std::scoped_lock g(hash_lock);
       replace_known_item(hash, db_, auth_key, 0,
@@ -440,12 +440,11 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
       return;
     }
 
-    if (auto const *inner =
-            v.second.get_inner<NewDeploymentLock>()) {
+    if (auto const *inner = v.second.get_inner<NewDeploymentLock>()) {
       (void)inner;
       auto meta = db_.read_address_metadata(key.get_address());
-      auto meta_key =
-          make_address_key_with_prefix(key.get_address(), Prefix::kAddressMetadata);
+      auto meta_key = make_address_key_with_prefix(key.get_address(),
+                                                   Prefix::kAddressMetadata);
       std::scoped_lock g(hash_lock);
       if (meta.has_value()) {
         auto old = x23::serialize(*meta);
@@ -496,13 +495,14 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
         if (!inner) {
           return;
         }
-        auto balance_key = make_address_key_with_prefix(v.first, Prefix::kBalance);
+        auto balance_key =
+            make_address_key_with_prefix(v.first, Prefix::kBalance);
         auto before = db_.read_address_balance(v.first);
         std::scoped_lock g(hash_lock);
         if (before.has_value()) {
           int128_t prev = cpu_to_le(*before);
-          lthash_remove_item(hash, std::as_bytes(std::span(balance_key)), kNNInt128,
-                             byte_view(prev));
+          lthash_remove_item(hash, std::as_bytes(std::span(balance_key)),
+                             kNNInt128, byte_view(prev));
         }
         int128_t after = before.value_or(0) + inner->get_delta();
         int128_t encoded_after = cpu_to_le(after);
