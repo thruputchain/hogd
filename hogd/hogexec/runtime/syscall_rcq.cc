@@ -56,8 +56,12 @@ syscall_RetrocausalQueueConsume_inner(
   auto const &queue_entry = *rcq_syscall_status;
   output_written_len = std::min<RuntimeMemoryLength>(output_queue_entry.size(),
                                                      queue_entry.size());
-  std::memcpy(output_queue_entry.data(), queue_entry.data(),
-              output_written_len);
+  if (output_written_len > 0) {
+    assert(output_queue_entry.data() != nullptr);
+    assert(queue_entry.data() != nullptr);
+    std::memcpy(output_queue_entry.data(), queue_entry.data(),
+                output_written_len);
+  }
 
   if (auto *trace_data =
           syscall_handler
