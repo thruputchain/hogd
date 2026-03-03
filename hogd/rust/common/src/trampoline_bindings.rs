@@ -60,12 +60,14 @@ macro_rules! define_trampoline {
         ) -> TrampolineResult;
 
         pub fn $fn_name(
-            function_pointer: *mut ::std::os::raw::c_void,
+            function_pointer: crate::ErasedFnPtr,
             host_call_context: *mut ::std::os::raw::c_void,
             $($arg: u64),*
         ) -> TrampolineResult {
+            // fn-ptr to fn-ptr transmute is well-defined in Rust
+            // (all fn pointers have the same size and representation).
             unsafe {
-                let f = std::mem::transmute::<*mut c_void, $type_name>(function_pointer);
+                let f = std::mem::transmute::<crate::ErasedFnPtr, $type_name>(function_pointer);
                 f(host_call_context, $($arg),*)
             }
         }

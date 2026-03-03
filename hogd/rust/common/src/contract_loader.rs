@@ -29,7 +29,11 @@ pub type ContractGetFn = unsafe extern "C" fn(
     *const u8,
 ) -> ContractGetResult;
 
-// Lifetime is lifetime of the transaction/user_context, not static.
+/// # Safety (lifetime)
+/// The returned slice's lifetime `'a` is unconstrained by the type system.
+/// In practice, the data is owned by the C++ storage snapshot cache, which is
+/// only recycled on block boundaries. Callers must ensure the returned slice
+/// does not outlive the current transaction scope.
 impl ContractGetResult {
     pub fn to_data<'a>(&self) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         if self.err_code != 0 {

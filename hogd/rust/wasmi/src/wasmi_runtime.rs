@@ -160,8 +160,7 @@ pub unsafe extern "C" fn wasmi_invoke(
     method_name: *const u8,
     method_name_len: u32,
 ) -> WasmiInvokeResult {
-    let runtime: *mut WasmiRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmiRuntime = runtime_void.cast::<WasmiRuntime>();
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
@@ -224,11 +223,8 @@ pub unsafe extern "C" fn new_wasmi_runtime(
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
-    let wasmi_context: &mut WasmiContext = unsafe {
-        &mut *core::mem::transmute::<*mut c_void, *mut WasmiContext>(
-            wasmi_context_ptr,
-        )
-    };
+    let wasmi_context: &mut WasmiContext =
+        unsafe { &mut *wasmi_context_ptr.cast::<WasmiContext>() };
 
     let slice = match wasmi_context.fetch_contract(userctx, hash_slice) {
         Ok(Some(slice)) => slice,
@@ -251,9 +247,7 @@ pub unsafe extern "C" fn new_wasmi_runtime(
         }
     };
 
-    NewWasmiRuntimeResult::new(Ok(unsafe {
-        core::mem::transmute::<*mut WasmiRuntime, *mut c_void>(Box::into_raw(b))
-    }))
+    NewWasmiRuntimeResult::new(Ok(Box::into_raw(b).cast::<c_void>()))
 }
 
 /// # Safety

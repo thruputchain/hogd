@@ -44,8 +44,7 @@ pub unsafe extern "C" fn wasmi_get_memory(
 ) -> WasmiMemorySlice {
     debug_assert!(!runtime_void.is_null());
 
-    let runtime: *mut WasmiRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmiRuntime = runtime_void.cast::<WasmiRuntime>();
 
     let r = unsafe { &mut *runtime };
 
@@ -74,8 +73,7 @@ pub unsafe extern "C" fn wasmi_get_available_gas(
     runtime_void: *const c_void,
 ) -> u64 {
     debug_assert!(!runtime_void.is_null());
-    let runtime: *const WasmiRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *const WasmiRuntime = runtime_void.cast::<WasmiRuntime>();
     let r = unsafe { &*runtime };
     match r.store.get_fuel() {
         Ok(fuel) => fuel,
@@ -95,8 +93,7 @@ pub unsafe extern "C" fn wasmi_set_available_gas(
     gas: u64,
 ) {
     debug_assert!(!runtime_void.is_null());
-    let runtime: *mut WasmiRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmiRuntime = runtime_void.cast::<WasmiRuntime>();
     let r = unsafe { &mut *runtime };
     if r.store.set_fuel(gas).is_err() {
         eprintln!("FATAL: set_fuel failed");
