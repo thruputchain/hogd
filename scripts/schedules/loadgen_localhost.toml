@@ -35,7 +35,7 @@ cat > $HOGX_HOME/cluster/default/cluster.json << EOF
     {
       "host_id": "hogx_this_host",
       "host_tags": [],
-      "ssh_user": "",
+      "ssh_user": "hogci",
       "ssh_address": "$THIS_IP",
       "ssh_port": null,
       "ssh_private_key": "",
