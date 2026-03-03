@@ -50,6 +50,7 @@ cat > $HOGX_HOME/cluster/default/cluster.json << EOF
       },
     },
   ],
+  "assembly_defs": []
 }
 EOF
 
