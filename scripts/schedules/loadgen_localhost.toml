@@ -21,7 +21,7 @@ export HOGX=$(pwd)/build-pkg/pkg/hogx
 
 echo 'running loadgen'
 
-export HOGX_HOME=/tmp/.hogx-loadgen-localhost
+export HOGX_HOME=/tmp/.hogx-loadgen-this-host
 rm -rf $HOGX_HOME
 
 # prepare cluster configuration
@@ -33,9 +33,9 @@ cat > $HOGX_HOME/cluster/default/cluster.json << EOF
 {
   "host_defs": [
     {
-      "host_id": "localhost",
+      "host_id": "hogx_this_host",
       "host_tags": [],
-      "ssh_user": "petar",
+      "ssh_user": "",
       "ssh_address": "$THIS_IP",
       "ssh_port": null,
       "ssh_private_key": "",
