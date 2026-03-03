@@ -57,13 +57,13 @@ EOF
 # remove /tmp/hogx from prior runs
 rm -rf /tmp/hogx/*
 
-"$HOGX" config together -a loadgen -t 1 \
+RUST_LOG=debug "$HOGX" config together -a loadgen -t 1 \
   --num-accounts 100 \
   --txs-per-block 100000 \
   --num-blocks 100
 
 set +e
-"$HOGX" run -a loadgen -c c1
+RUST_LOG=debug "$HOGX" run -a loadgen -c c1
 hogx_exit_code=$?
 set -e
 
