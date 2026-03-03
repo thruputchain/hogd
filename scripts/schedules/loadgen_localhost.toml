@@ -91,4 +91,4 @@ CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 [jobs.host]
-loadgen_localhost_1 = "?"
+loadgen_localhost_1 = "hog6"
