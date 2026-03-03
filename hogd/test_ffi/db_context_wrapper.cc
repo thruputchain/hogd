@@ -69,10 +69,11 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
 
   GenesisConfiguration genesis_configuration{.initial_config = {},
                                              .storage_cost_model = cost_model};
-  constexpr BlockHash kBlockHash{};
-  auto res =
-      db_sched_client_.dbsched_load_genesis_configuration(genesis_configuration,
-                                                          kBlockHash);
+  uint64_t network_id = 0x0;
+  SHA256Hash txset_hash{};
+  SHA256Hash events_hash{};
+  auto res = db_sched_client_.dbsched_load_genesis_configuration(
+      genesis_configuration, network_id, txset_hash, events_hash);
   if (res != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
         "DBContext: dbsched_load_genesis_configuration failed");

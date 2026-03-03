@@ -89,12 +89,14 @@ BalanceLock::write_committed_change(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-BalanceLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+BalanceLock::apply_close_hash_delta(const LockContext &ctx,
+                                    LtHash16 &hash) const
 {
   assert(ctx.key.is_address_balance());
   assert(ctx.dao);
 
-  auto key = make_address_key_with_prefix(ctx.key.get_address(), Prefix::kBalance);
+  auto key =
+      make_address_key_with_prefix(ctx.key.get_address(), Prefix::kBalance);
   auto before = ctx.dao->read_address_balance(ctx.key.get_address());
   if (before.has_value()) {
     int128_t prev = cpu_to_le(*before);

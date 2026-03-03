@@ -61,7 +61,8 @@ DeletionLock::write_committed_change(LockContext const &ctx)
 }
 
 HogDBStatus<void>
-DeletionLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+DeletionLock::apply_close_hash_delta(const LockContext &ctx,
+                                     LtHash16 &hash) const
 {
   assert(ctx.dao);
   auto key = make_contract_data_db_key(ctx.key.as_bytes());

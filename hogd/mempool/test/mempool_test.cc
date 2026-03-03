@@ -276,8 +276,9 @@ TEST(Mempool, Validate)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -325,8 +326,9 @@ TEST(Mempool, ValidateBatch)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
 
@@ -390,8 +392,9 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
 
     // Remove a transaction from the nomination.
@@ -450,8 +453,9 @@ TEST(Mempool, ValidateBatchMissingTx)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
 
@@ -507,8 +511,9 @@ TEST(Mempool, ValidateCommit)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -562,8 +567,9 @@ TEST(Mempool, ValidateTwo)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -587,8 +593,9 @@ TEST(Mempool, ValidateTwo)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -643,8 +650,9 @@ TEST(Mempool, GetTip)
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes,
+        tx_hashes, kDbHash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(

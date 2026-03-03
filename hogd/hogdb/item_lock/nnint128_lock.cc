@@ -125,7 +125,8 @@ NNInt128Lock::write_committed_change(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-NNInt128Lock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+NNInt128Lock::apply_close_hash_delta(const LockContext &ctx,
+                                     LtHash16 &hash) const
 {
   assert(ctx.dao);
   auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());

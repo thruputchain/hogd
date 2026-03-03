@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "auth_rpc.hh"
+#include "block.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
@@ -78,6 +79,12 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
 {
   x23::HostPort host_port{host.c_str(), port};
   return create_client<T>(host_port, retry, max_message_size);
+}
+
+inline SHA256Hash
+generate_block_hash(const BlockHeader &header)
+{
+  return sha256(header);
 }
 
 } // namespace hogd

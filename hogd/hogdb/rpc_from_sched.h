@@ -61,7 +61,8 @@ public:
 
   x23::Async<DbSchedResult>
   dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
-                                     BlockHash block_hash);
+                                     uint64_t network_id, SHA256Hash txset_hash,
+                                     SHA256Hash events_hash);
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 

@@ -157,8 +157,9 @@ validate(benchmark::State &state)
     {
       SignedTransactionHashBatch tx_hashes;
       CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+      constexpr DbHash kDbHash{};
       nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-          tx_hashes,
+          tx_hashes, kDbHash,
           /*prev_block_hash=*/nomination.prev_block_hash);
     }
 
@@ -275,8 +276,9 @@ loadgen_validate(benchmark::State &state)
     {
       SignedTransactionHashBatch tx_hashes;
       CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+      constexpr DbHash kDbHash{};
       nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-          tx_hashes,
+          tx_hashes, kDbHash,
           /*prev_block_hash=*/nomination.prev_block_hash);
     }
 
@@ -382,8 +384,9 @@ loadgen_validate_throughput(benchmark::State &state)
       {
         SignedTransactionHashBatch tx_hashes;
         CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+        constexpr DbHash kDbHash{};
         nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-            tx_hashes,
+            tx_hashes, kDbHash,
             /*prev_block_hash=*/nomination.prev_block_hash);
       }
 

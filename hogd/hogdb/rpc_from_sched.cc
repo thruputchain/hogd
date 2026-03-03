@@ -12,6 +12,7 @@
 // generated x23 headers
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "block.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -36,6 +37,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/mempool/shared.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
@@ -274,7 +276,8 @@ sys_getsockname(int sockfd, T &val)
 
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration genesis_configuration, BlockHash block_hash)
+    GenesisConfiguration genesis_configuration, uint64_t network_id,
+    SHA256Hash txset_hash, SHA256Hash events_hash)
 {
   constexpr static BlockID kGenesisBlockID = 0;
   if (ctx_.get_tip().height != 0) {
@@ -415,7 +418,16 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  co_return to_db_result(commit_block(kGenesisBlockID, block_hash, r.value(),
+  // Since the genesis block is the first block, we set [prev_block_hash] to
+  // null.
+  constexpr BlockHash kNullBlockHash{};
+  const BlockHeader header{.network_id = network_id,
+                           .txset_hash = txset_hash,
+                           .db_hash = close_result.db_hash(),
+                           .events_hash = events_hash,
+                           .prev_block_hash = kNullBlockHash};
+  co_return to_db_result(commit_block(kGenesisBlockID,
+                                      generate_block_hash(header), r.value(),
                                       close_result.db_hash()));
 }
 

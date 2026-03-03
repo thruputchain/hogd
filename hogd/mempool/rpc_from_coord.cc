@@ -288,7 +288,7 @@ MempoolCoordinatorRpc::get_block_hash(
                      .db_hash = db_hash,
                      .events_hash = {},
                      .prev_block_hash = prev_block_hash};
-  return sha256(header);
+  return generate_block_hash(header);
 }
 
 x23::Async<void>

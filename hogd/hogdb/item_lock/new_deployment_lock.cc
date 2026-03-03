@@ -78,8 +78,8 @@ NewDeploymentLock::apply_close_hash_delta(const LockContext &ctx,
 {
   assert(ctx.dao);
   auto meta = ctx.dao->read_address_metadata(ctx.key.get_address());
-  auto key =
-      make_address_key_with_prefix(ctx.key.get_address(), Prefix::kAddressMetadata);
+  auto key = make_address_key_with_prefix(ctx.key.get_address(),
+                                          Prefix::kAddressMetadata);
   if (meta.has_value()) {
     auto old = x23::serialize(*meta);
     lthash_remove_item(hash, std::as_bytes(std::span(key)), 0,

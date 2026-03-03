@@ -48,9 +48,13 @@ public:
     db_client_ = make_srpc_multiclient<DbSched1>(
         x23::HostPort{"localhost", db_wrapper_.coord_port()}, false);
 
+    uint64_t network_id = 0x0;
+    SHA256Hash txset_hash{};
+    SHA256Hash events_hash{};
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
-                                                      BlockHash{});
+                                                      network_id, txset_hash,
+                                                      events_hash);
     if (db_res != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to load genesis configuration");
     }

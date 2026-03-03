@@ -170,16 +170,23 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
-    BlockHash block_hash = sha256(genesis_configuration);
-    std::ranges::copy(block_hash, db_hash.begin());
+    MerkleTrie empty_trie;
+    empty_trie.generate_all_hashes();
+    BlockHash empty_trie_hash = empty_trie.get_root_hash();
     DbSchedResult ret =
         co_await db_sched_client_->dbsched_load_genesis_configuration(
-            genesis_configuration, block_hash);
-    // TODO(jhumphri): Set [last_committed_block_] with [dbsched_get_tip()].
-    last_committed_block_ = {.height = 0,
-                             .block_hash = block_hash,
-                             .db_hash = {},
-                             .id = generate_block_id()};
+            genesis_configuration, network_id_, empty_trie_hash,
+            empty_trie_hash);
+    if (ret != DbSchedResult::DbSchedResultOK) {
+      co_return ret;
+    }
+
+    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+    CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
+    last_committed_block_ = db_res.db_tip();
+    CHECK_EQ(last_committed_block_.height, 0);
+    CHECK_EQ(last_committed_block_.id, 0UL);
+
     received_genesis_block_.store(true, std::memory_order_release);
     co_return ret;
   }
