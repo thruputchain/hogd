@@ -400,7 +400,9 @@ to_xdr_trace(T const &val)
   if constexpr (std::same_as<T, std::span<const std::byte>> ||
                 std::same_as<T, std::span<std::byte>>) {
     x23::Vec<uint8_t> out;
-    out.append(reinterpret_cast<const uint8_t *>(val.data()), val.size());
+    if (!val.empty()) {
+      out.append(reinterpret_cast<const uint8_t *>(val.data()), val.size());
+    }
     return out;
   }
   else if constexpr (is_std_optional<T>) {

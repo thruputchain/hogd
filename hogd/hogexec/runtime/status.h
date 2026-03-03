@@ -105,8 +105,8 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
     case SystemErrorCode::kSystemValidationFailure:
       return HostFnError{HostFnErrorCode::kHostValidationFailure};
     }
-    assert(false);
-    std::unreachable();
+    panic("invalid SystemErrorCode in to_host_fn_error: {}",
+          std::to_underlying(code()));
   }
 
   InvokeError to_invoke_error() const
@@ -119,8 +119,8 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
     case SystemErrorCode::kSystemValidationFailure:
       return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
     }
-    assert(false);
-    std::unreachable();
+    panic("invalid SystemErrorCode in to_invoke_error: {}",
+          std::to_underlying(code()));
   }
 };
 
