@@ -2,6 +2,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <exception>
