@@ -82,9 +82,11 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   co_return ret;
 }
 
+// TODO(jhumphri): Remove this function.
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
 {
+  CHECK(false);
   HogDBDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
     if (!db.write_address_average_hog_age(age)) {
@@ -399,10 +401,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   itx->commit();
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
+  // Initialize the genesis address with scheduler state
   uint128_t initial_hog_token_supply =
       GenesisConfigurationLoader::initial_hog_token_supply();
-
-  // Initialize the genesis address with scheduler state
   CHECK(
       ctx_.get_db()
           .write_address_average_hog_age(HogAge{
