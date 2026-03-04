@@ -27,33 +27,13 @@ pub unsafe fn string_from_parts(
     std::str::from_utf8(slice).map(|s| s.to_owned())
 }
 
-/// A wrapper for a C function pointer that is safe to send across threads.
-///
-/// # Safety
-/// The contained function pointer must remain valid for the lifetime of this value.
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct SendFnPtr(ErasedFnPtr);
-
-unsafe impl Send for SendFnPtr {}
-unsafe impl Sync for SendFnPtr {}
-
-impl SendFnPtr {
-    pub fn new(ptr: ErasedFnPtr) -> Self {
-        Self(ptr)
-    }
-    pub fn get(self) -> ErasedFnPtr {
-        self.0
-    }
-}
-
 /// An entry describing a host function to be linked into a WASM module.
 #[derive(Clone)]
 pub struct LinkEntry {
     module: String,
     function: String,
     nargs: u8,
-    fn_pointer: SendFnPtr,
+    fn_pointer: ErasedFnPtr,
 }
 
 impl LinkEntry {
@@ -67,7 +47,7 @@ impl LinkEntry {
             module,
             function,
             nargs,
-            fn_pointer: SendFnPtr::new(fn_pointer),
+            fn_pointer,
         }
     }
 
@@ -84,6 +64,6 @@ impl LinkEntry {
     }
 
     pub fn fn_pointer(&self) -> ErasedFnPtr {
-        self.fn_pointer.get()
+        self.fn_pointer
     }
 }

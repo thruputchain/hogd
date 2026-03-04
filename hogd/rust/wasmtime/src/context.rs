@@ -65,7 +65,9 @@ impl WasmtimeContext {
         debug_assert!(!user_context.is_null());
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
-        get_res.to_data()
+        // Safety: the returned slice's lifetime is tied to 'a (the hash's lifetime),
+        // which is bounded by the caller's transaction scope.
+        unsafe { get_res.to_data() }
     }
 
     pub fn engine(&self) -> &Engine {
