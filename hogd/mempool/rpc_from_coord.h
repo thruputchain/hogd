@@ -155,7 +155,8 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
-    if (last_committed_block_.height == -1) {
+    CHECK_GE(last_committed_block_.height, -1);
+    if (last_committed_block_.height != -1) {
       // The genesis block has already been loaded.
       co_return DbSchedResult::DbSchedResultError;
     }
