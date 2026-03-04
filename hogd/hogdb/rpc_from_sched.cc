@@ -417,6 +417,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // The database is empty before the genesis block, so we set [base_hash] to
   // 0x0.
   DbHash closed_hash = r.value()->get().compute_close_hash(/*base_hash=*/{});
+  CHECK(false);
   // Since the genesis block is the first block, we set [prev_block_hash] to
   // null.
   constexpr BlockHash kNullBlockHash{};
