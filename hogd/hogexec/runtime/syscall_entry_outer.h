@@ -457,30 +457,6 @@ disarm_outputs(std::tuple<Args...> &args)
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 }
 
-template<typename T>
-bool
-register_if_writable(AliasGuard &guard, T const &output) noexcept
-{
-  if constexpr (requires {
-                  output.target_ptr();
-                  output.has_value();
-                  T::kWriteSize;
-                }) {
-    // WritableOutput<U>
-    assert(output.has_value());
-    return guard.check_and_register(output.target_ptr(), T::kWriteSize);
-  }
-  else if constexpr (std::same_as<std::remove_cvref_t<T>,
-                                  std::optional<std::span<std::byte>>>) {
-    // Mutable output span
-    assert(output.has_value());
-    auto span = output.value();
-    return guard.check_and_register(span.data(), span.size());
-  }
-
-  return true;
-}
-
 // This logic -- validating all of the syscall inputs, calling the inner
 // syscall, logging, read-only checks, and returning the result -- is common to
 // both the regular and mock syscall handlers.  This is split out from
@@ -606,7 +582,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
   // (via a parent frame) still need to have gas accounting performed.  Errors
   // that fail the whole transaction cannot be accidentally turned into an out
   // of gas error.
-  bool is_handleable_error = [&]() {
+  bool is_handleable_error = [&]() noexcept {
     if (!syscall_result.has_value()) {
       switch (syscall_result.error().code()) {
       case HostFnErrorCode::kHostAbortTransaction:
