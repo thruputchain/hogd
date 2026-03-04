@@ -638,25 +638,25 @@ TEST(Mempool, GetTip)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+      server.mempool_coord_rpc().schedulercoord_validate({}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 

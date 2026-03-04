@@ -638,7 +638,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   {
     DbBlockResult result = co_await close_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    db_hash = result.db_hash();
+    nominated_block_cache_.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
   {
@@ -872,16 +872,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // there.
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
-  DbHash nominated_db_hash =
-      {}; // widen_block_hash_inline(
-          // nominated_block_cache_.nomination_result.nominated_block()
-          // .nomination.block_hash);
   nominated_block_cache_.db_tip = DbTip{
       .height = nominated_block_cache_.nomination_result.nominated_block()
                     .nomination.block_height,
       .block_hash = nominated_block_cache_.nomination_result.nominated_block()
                         .nomination.block_hash,
-      .db_hash = nominated_db_hash,
+      .db_hash = nominated_block_cache_.db_tip.db_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
@@ -925,15 +921,15 @@ MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
       .executorsched_open_validation_block(block_id);
 }
 
+// TODO(jhumphri): Remove [db_tip].
 x23::Async<SchedulerValidationResult>
-MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
+MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
                                                Nomination nomination)
 {
   co_await increment_num_validations_in_progress();
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -941,14 +937,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // {
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (nomination.prev_block_hash != last_committed_block_.block_hash ||
       nomination.block_height != last_committed_block_.height + 1) {
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -961,7 +955,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   if (tx_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -971,11 +964,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // executors.
   PendingBlock cache{};
   cache.block_id = generate_block_id();
-  cache.db_tip = {
-      .height = nomination.block_height,
-      .block_hash = nomination.block_hash,
-      .db_hash = {}, // widen_block_hash_inline(nomination.block_hash),
-      .id = cache.block_id};
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
 
@@ -983,11 +971,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await wait_for_auth_data(nomination.block_height - 1);
 
   if (co_await create_snapshot(
-          /*prev_block_id=*/cache.db_tip.id, cache.block_id,
+          /*prev_block_id=*/cache.block_id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -1014,7 +1001,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -1032,7 +1018,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);
         co_await decrement_num_validations_in_progress();
-        info("ret");
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       }
@@ -1060,20 +1045,19 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   {
     DbBlockResult result = co_await close_snapshot(cache.block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    cache.db_tip().db_hash = result.db_hash();
+    cache.db_tip.db_hash = result.db_hash();
   }
 
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
-  if (get_block_hash(cache.tx_hashes, cache.db_tip().db_hash,
+  if (get_block_hash(cache.tx_hashes, cache.db_tip.db_hash,
                      /*prev_block_hash=*/nomination.prev_block_hash) !=
       nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
@@ -1081,22 +1065,15 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  {
-    DbBlockResult result =
-        co_await commit_snapshot(cache.block_id, cache.db_tip.block_hash);
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-  }
   co_await finish_all_executors(cache.block_id);
 
-  cache.db_tip =
-      DbTip{.height = nomination.block_height,
-            .block_hash = nomination.block_hash,
-            .db_hash = {}, // widen_block_hash_inline(nomination.block_hash),
-            .id = cache.block_id};
+  cache.db_tip = DbTip{.height = nomination.block_height,
+                       .block_hash = nomination.block_hash,
+                       .db_hash = cache.db_tip.db_hash,
+                       .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
   result.db_tip() = cache.db_tip;
@@ -1113,7 +1090,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
   }
-  info("ret");
   co_return result;
 }
 

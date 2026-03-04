@@ -228,7 +228,7 @@ private:
 
   // The number of txs on the runqueue.
   std::atomic<size_t> size_ = 0;
-  std::atomic<BlockHeight> current_block_ = 0;
+  std::atomic<BlockHeight> current_block_ = -1;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
