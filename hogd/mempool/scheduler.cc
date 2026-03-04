@@ -655,7 +655,7 @@ Scheduler::schedule(size_t num_txs,
       // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
       // this account.
       move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
-                                           current_block());
+                                           current_block() + 1);
     }
   }
   // Add [removed_accounts] back to [ready_accounts_] for each account that is

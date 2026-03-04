@@ -1090,6 +1090,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   co_return result;
 }
 
+// TODO(jhumphri): We need to update the scheduler hog ages for the txs in the
+// validation block if the validation block is committed.
+// TODO(jhumphri): We need to undo the changes to the scheduler hog ages for the
+// txs in the nomination block if the nomination block is not committed.
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
