@@ -650,7 +650,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                        /*prev_block_hash=*/db_tip.block_hash);
     record_stage(stage_generate_block_hash);
 
-    nomination.prev_block_hash = {}; // truncate_db_hash_inline(db_tip.db_hash);
+    nomination.prev_block_hash = db_tip.block_hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
     co_await t_to_parallel_batch(cache.result_tx_hashes,
@@ -931,7 +931,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 {
   co_await increment_num_validations_in_progress();
 
-  if (db_tip.height + 1 != nomination.block_height) {
+  if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
     info("ret");
     co_return SchedulerValidationResult(
@@ -939,7 +939,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   }
   // if (truncate_db_hash_inline(db_tip.db_hash) != nomination.prev_block_hash)
   // {
-  if (BlockHash{} != nomination.prev_block_hash) {
+  if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
     info("ret");
     co_return SchedulerValidationResult(
@@ -1064,17 +1064,16 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  DbHash db_hash;
   {
     DbBlockResult result = co_await close_snapshot(cache.block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    db_hash = result.db_hash();
+    cache.db_tip().db_hash = result.db_hash();
   }
 
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
-  if (get_block_hash(cache.tx_hashes, db_hash,
+  if (get_block_hash(cache.tx_hashes, cache.db_tip().db_hash,
                      /*prev_block_hash=*/nomination.prev_block_hash) !=
       nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
