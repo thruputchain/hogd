@@ -755,10 +755,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
-  // if (db_tip != last_committed_block_) {
-  if (db_tip.height != last_committed_block_.height ||
-      db_tip.id != last_committed_block_.id ||
-      db_tip.db_hash != last_committed_block_.db_hash) {
+  if (db_tip != last_committed_block_) {
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);

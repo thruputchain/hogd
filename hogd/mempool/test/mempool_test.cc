@@ -30,12 +30,6 @@ namespace {
 
 constexpr size_t kNumTxs = 100;
 
-DbHash
-db_hash_from_block_hash(const BlockHash &block_hash)
-{
-  return db_hash_from_lthash16_seed(std::as_bytes(std::span(block_hash)));
-}
-
 } // namespace
 
 // TODO(jhumphri): Update this test once we implement authentication and
@@ -581,21 +575,19 @@ TEST(Mempool, ValidateTwo)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   // Now validate another block.
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
   {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 2);
-  }
 
-  nomination.block_height++;
-  nomination.prev_block_hash = db_tip.block_hash;
-  {
-    SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -770,10 +762,12 @@ TEST(Mempool, AuthChanged)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   CHECK_EQ(server.mempool_coord_rpc().auth_data_height(), 1);
-  db_tip = {.height = nomination.block_height,
-            .block_hash = nomination.block_hash,
-            .db_hash = db_hash_from_block_hash(nomination.block_hash),
-            .id = res_nominate.nominated_block().block_id};
+  {
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+  }
   res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
