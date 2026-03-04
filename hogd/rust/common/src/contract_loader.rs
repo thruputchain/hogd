@@ -35,7 +35,9 @@ impl ContractGetResult {
     /// The data is owned by the C++ storage snapshot cache, which is only recycled
     /// on block boundaries. Callers must ensure the returned slice does not outlive
     /// the current transaction scope.
-    pub unsafe fn to_data<'a>(&self) -> Result<Option<&'a [u8]>, SystemErrorCode> {
+    pub unsafe fn to_data<'a>(
+        &self,
+    ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         if self.err_code != 0 {
             return match self.err_code.try_into() {
                 Ok(err) => Err(err),
