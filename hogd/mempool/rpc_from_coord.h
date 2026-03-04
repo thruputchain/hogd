@@ -185,7 +185,7 @@ public:
     DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
     CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
     last_committed_block_ = db_res.db_tip();
-    CHECK_EQ(last_committed_block_.height, 1);
+    CHECK_EQ(last_committed_block_.height, 0);
     CHECK_EQ(last_committed_block_.id, 0UL);
 
     received_genesis_block_.store(true, std::memory_order_release);
@@ -296,8 +296,8 @@ private:
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
     // [current_block_id_] with it in the scheduler.
-    scheduler_ =
-        std::make_shared<Scheduler>(/*current_block=*/1, db_sched_client_);
+    scheduler_ = std::make_shared<Scheduler>(
+        /*current_block=*/last_committed_block_.height, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
     auth_client_ = std::make_unique<auth_sched_client_t>(

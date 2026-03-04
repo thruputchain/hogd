@@ -38,7 +38,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
       co_await current_height_futex_.wait(current_height);
       continue;
     }
-    if (current_height >= height) {
+    if (current_height > height) {
       co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
     }
     if (current_height < height - 1) {
@@ -47,7 +47,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
     }
     break;
   }
-  CHECK(current_height == height - 1);
+  CHECK(current_height == height);
   CHECK(current_height != kUninitializedHeight);
   CHECK(current_height != kInitializing);
 

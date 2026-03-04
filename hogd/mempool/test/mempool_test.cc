@@ -62,8 +62,6 @@ TEST(Mempool, SubmitUnvetted)
   KeyChangeBatch key_changes = {
       {.address = MempoolTestInfra::kAccountAddresses[0],
        .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
-  server.register_auth_data_updates(
-      /*height=*/0, key_changes)();
   Transaction &tx = txs[0].tx;
   tx.auth_claims.push_back(make_sign_claim(0));
 

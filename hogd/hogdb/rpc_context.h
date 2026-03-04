@@ -154,7 +154,7 @@ private:
   // the database used to persist state.
   HogDBDAO db_;
   // tracks details about the last committed block.
-  DbTip tip_ = DbTip{.id = UINT64_MAX};
+  DbTip tip_ = DbTip{.height = -1, .id = UINT64_MAX};
   std::atomic<BlockHeight> current_committed_height_ = tip_.height;
   // the storage cost model for computing storage costs at the current block
   // height.

@@ -173,7 +173,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
        id, encode_base64(std::as_bytes(std::span(ctx_.get_tip().block_hash))),
        encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
        ctx_.get_tip().height, *lsn);
-  assert(ctx_.get_tip().height != 0);
+  assert(ctx_.get_tip().height != -1);
   return {};
 }
 
@@ -280,7 +280,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     SHA256Hash txset_hash, SHA256Hash events_hash)
 {
   constexpr static BlockID kGenesisBlockID = 0;
-  if (ctx_.get_tip().height != 0) {
+  if (ctx_.get_tip().height != -1) {
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
