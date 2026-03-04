@@ -185,7 +185,7 @@ public:
     DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
     CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
     last_committed_block_ = db_res.db_tip();
-    CHECK_EQ(last_committed_block_.height, 0);
+    CHECK_EQ(last_committed_block_.height, 1);
     CHECK_EQ(last_committed_block_.id, 0UL);
 
     received_genesis_block_.store(true, std::memory_order_release);

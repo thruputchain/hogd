@@ -269,6 +269,7 @@ remote_launch "$auth_server" "$AUTH_BINARY" \
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
+  --network-id 0 \
   --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
   --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
 
