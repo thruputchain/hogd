@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
-use common::{LinkEntry, SendFnPtr};
+use common::LinkEntry;
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker,
@@ -22,12 +22,12 @@ macro_rules! link_function_nargs {
             import_name: &str,
             fn_name: &str,
         ) -> Result<(), wasmtime::Error> {
-            let ptr = SendFnPtr::new(fn_pointer);
+            let ptr = fn_pointer;
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
-                            ptr.get(),
+                            ptr,
                             *caller.data(),
                             $($arg),*
                         )
@@ -373,7 +373,7 @@ pub unsafe extern "C" fn wasmtime_global_link_nargs(
 pub unsafe extern "C" fn new_wasmtime_global_context(
     engine_count: usize,
 ) -> *mut c_void {
-    debug_assert!(engine_count > 0);
+    assert!(engine_count > 0, "engine_count must be > 0");
     let instance_pre_cache = InstancePreCache::new(engine_count);
     let global_context =
         Arc::new(WasmtimeGlobalContext::new(engine_count, instance_pre_cache));

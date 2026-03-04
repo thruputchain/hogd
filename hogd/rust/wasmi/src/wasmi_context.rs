@@ -11,7 +11,7 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinkEntry, SendFnPtr, SystemErrorCode};
+use common::{LinkEntry, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -87,12 +87,12 @@ macro_rules! link_function_nargs {
             import_name: &str,
             fn_name: &str,
         ) -> Result<(), Error> {
-            let ptr = SendFnPtr::new(fn_pointer);
+            let ptr = fn_pointer;
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
-                            ptr.get(),
+                            ptr,
                             *caller.data(),
                             $($arg),*
                         )
@@ -130,7 +130,9 @@ impl WasmiContext {
     ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
-        get_res.to_data()
+        // Safety: the returned slice's lifetime is tied to 'a (the hash's lifetime),
+        // which is bounded by the caller's transaction scope.
+        unsafe { get_res.to_data() }
     }
 
     pub fn has_module_cache(&self) -> bool {
