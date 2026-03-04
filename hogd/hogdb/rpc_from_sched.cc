@@ -413,22 +413,20 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
           })
           .has_value());
 
-  DbBlockResult close_result = co_await dbsched_close_snapshot(kGenesisBlockID);
-  if (close_result.result() != DbSchedResult::DbSchedResultOK) {
-    co_return DbSchedResult::DbSchedResultError;
-  }
-
+  // The database is empty before the genesis block, so we set [base_hash] to
+  // 0x0.
+  DbHash closed_hash = r.value()->get().compute_close_hash(/*base_hash=*/{});
   // Since the genesis block is the first block, we set [prev_block_hash] to
   // null.
   constexpr BlockHash kNullBlockHash{};
   const BlockHeader header{.network_id = network_id,
                            .txset_hash = txset_hash,
-                           .db_hash = close_result.db_hash(),
+                           .db_hash = closed_hash,
                            .events_hash = events_hash,
                            .prev_block_hash = kNullBlockHash};
   co_return to_db_result(commit_block(kGenesisBlockID,
                                       generate_block_hash(header), r.value(),
-                                      close_result.db_hash()));
+                                      closed_hash));
 }
 
 x23::Async<DbShardResult>
