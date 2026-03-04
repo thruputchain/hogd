@@ -126,6 +126,10 @@ public:
   {
     current_block_.fetch_add(1, std::memory_order_relaxed);
   }
+  void set_current_block(BlockHeight height)
+  {
+    current_block_.store(height, std::memory_order_relaxed);
+  }
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.

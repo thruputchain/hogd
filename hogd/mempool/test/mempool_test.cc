@@ -264,19 +264,19 @@ TEST(Mempool, Validate)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -314,19 +314,19 @@ TEST(Mempool, ValidateBatch)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
 
@@ -380,19 +380,19 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
 
     // Remove a transaction from the nomination.
@@ -441,19 +441,19 @@ TEST(Mempool, ValidateBatchMissingTx)
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
 
@@ -499,19 +499,19 @@ TEST(Mempool, ValidateCommit)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -555,19 +555,19 @@ TEST(Mempool, ValidateTwo)
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
   Nomination nomination = res_nominate.nominated_block().nomination;
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    constexpr DbHash kDbHash{};
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, kDbHash,
+        tx_hashes, db_tip.db_hash,
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -581,13 +581,15 @@ TEST(Mempool, ValidateTwo)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   // Now validate another block.
-  db_tip.height++;
-  db_tip.block_hash = nomination.block_hash;
-  db_tip.db_hash = db_hash_from_block_hash(nomination.block_hash);
-  db_tip.id++;
+  {
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 2);
+  }
 
   nomination.block_height++;
-  nomination.prev_block_hash = nomination.block_hash;
+  nomination.prev_block_hash = db_tip.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());

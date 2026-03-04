@@ -178,6 +178,7 @@ public:
     last_committed_block_ = db_res.db_tip();
     CHECK_EQ(last_committed_block_.height, 0);
     CHECK_EQ(last_committed_block_.id, 0UL);
+    scheduler_->set_current_block(last_committed_block_.height);
 
     co_return ret;
   }
