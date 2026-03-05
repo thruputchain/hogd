@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -125,8 +126,11 @@ void
 HogDBDAO::load_hash(DbHash &db_hash)
 {
   LtHash16 hash;
-  for_each_state_item([&hash](std::span<const std::byte> key, uint8_t type,
-                              std::span<const std::byte> value) {
+  std::mutex lock;
+  for_each_state_item([&hash, &lock](std::span<const std::byte> key,
+                                     uint8_t type,
+                                     std::span<const std::byte> value) {
+    std::scoped_lock guard(lock);
     lthash_add_item(hash, key, type, value);
   });
   db_hash = db_hash_from_lthash16(hash);

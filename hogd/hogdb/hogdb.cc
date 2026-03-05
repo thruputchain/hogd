@@ -8,6 +8,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -72,13 +73,17 @@ DbHash
 compute_full_state_hash(HogDBDAO &db)
 {
   LtHash16 hash;
-  db.for_each_state_item([&hash](std::span<const std::byte> key, uint8_t type,
-                                 std::span<const std::byte> value) {
+  std::mutex lock;
+  db.for_each_state_item([&hash, &lock](std::span<const std::byte> key,
+                                        uint8_t type,
+                                        std::span<const std::byte> value) {
     x23::Vec<std::byte> element;
     element.reserve(key.size() + 1 + value.size());
     element.append(key.begin(), key.end());
     element.push_back(static_cast<std::byte>(type));
     element.append(value.begin(), value.end());
+
+    std::scoped_lock guard(lock);
     hash.add(element);
   });
   return db_hash_from_lthash16(hash);
