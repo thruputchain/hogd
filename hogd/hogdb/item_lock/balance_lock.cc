@@ -104,7 +104,7 @@ BalanceLock::apply_close_hash_delta(const LockContext &ctx,
                        byte_view(prev));
   }
 
-  int128_t after = before.value_or(0) + get_delta();
+  int128_t after = build_result(ctx);
   int128_t encoded_after = cpu_to_le(after);
   lthash_add_item(hash, std::as_bytes(std::span(key)), kNNInt128,
                   byte_view(encoded_after));

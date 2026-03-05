@@ -86,10 +86,10 @@ NewDeploymentLock::apply_close_hash_delta(const LockContext &ctx,
                        std::as_bytes(std::span(old)));
   }
   // The [HogAge] struct is not part of the blockchain state, just the per-node
-  // state. Thus, we do not include it in the hash.
-  auto marker = x23::serialize(ctx.key.get_address().get_raw());
+  // state. Thus, we only hash the deployed contract metadata row.
+  auto serialized = x23::serialize(deployed_contract_hash_);
   lthash_add_item(hash, std::as_bytes(std::span(key)), 0,
-                  std::as_bytes(std::span(marker)));
+                  std::as_bytes(std::span(serialized)));
   return {};
 }
 
