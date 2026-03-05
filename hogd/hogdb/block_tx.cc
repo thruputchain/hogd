@@ -292,8 +292,7 @@ BlockTX::commit(WorkerPool &pool)
       1024, pool);
 
   if (ret) {
-    background_commit_worker_.submit_job(block_height_ + 1,
-                                         std::move(key_changes),
+    background_commit_worker_.submit_job(block_height_, std::move(key_changes),
                                          std::move(balance_deltas));
   }
 

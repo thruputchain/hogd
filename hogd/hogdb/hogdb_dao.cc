@@ -106,6 +106,7 @@ make_contract_data_key(std::span<const std::byte> key)
 
 } // namespace
 
+// TODO(jhumphri): Replace this.
 void
 HogDBDAO::load_trie(MerkleTriePrefix &trie)
 {
