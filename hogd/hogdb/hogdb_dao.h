@@ -296,6 +296,7 @@ public:
   // loads the trie from the database.
   // Recomputes the top-level hashes.
   void load_trie(MerkleTriePrefix &trie);
+  void load_hash(DbHash &db_hash);
 
   //
   // Global Operations

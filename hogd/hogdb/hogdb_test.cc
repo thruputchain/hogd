@@ -673,10 +673,11 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_before_consume = trie_.get_root_hash();
+  DbHash db_hash_before_consume;
+  db_.load_hash(db_hash_before_consume);
 
   // Consume the first block completely
+  DbHash db_hash_after_consume;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
@@ -695,16 +696,21 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    db_hash_after_consume =
+        block_tx.get().compute_close_hash(db_hash_before_consume);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Verify trie hash changed after consuming block 1
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_after_consume = trie_.get_root_hash();
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash;
+  db_.load_hash(full_db_hash);
+  EXPECT_EQ(db_hash_after_consume, full_db_hash);
 
-  EXPECT_NE(trie_hash_before_consume, trie_hash_after_consume)
-      << "Trie hash did not change after consuming block - block may not have "
-         "been removed from trie";
+  // Verify db hash changed after consuming block 1
+  EXPECT_NE(db_hash_before_consume, db_hash_after_consume)
+      << "db hash did not change after consuming block - block may not have "
+         "been removed from hash";
 
   // Verify block 1 is not in ramdb anymore
   auto block_result = db_.read_retrocausal_queue_block(rcq_key, 1);

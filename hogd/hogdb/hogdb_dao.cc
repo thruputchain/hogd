@@ -28,6 +28,8 @@
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/close_hash.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
@@ -117,6 +119,17 @@ HogDBDAO::load_trie(MerkleTriePrefix &trie)
     CHECK(trie.insert(k, value));
   });
   trie.generate_top_level_hashes();
+}
+
+void
+HogDBDAO::load_hash(DbHash &db_hash)
+{
+  LtHash16 hash;
+  for_each_state_item([&hash](std::span<const std::byte> key, uint8_t type,
+                              std::span<const std::byte> value) {
+    lthash_add_item(hash, key, type, value);
+  });
+  db_hash = db_hash_from_lthash16(hash);
 }
 
 void
