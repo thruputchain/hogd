@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include <mutex>
 #include <span>
 #include <sys/socket.h>
 #include <utility>
@@ -65,8 +66,11 @@ DbHash
 compute_full_state_hash(HogDBDAO &db)
 {
   LtHash16 hash;
-  db.for_each_state_item([&hash](std::span<const std::byte> key, uint8_t type,
-                                 std::span<const std::byte> value) {
+  std::mutex lock;
+  db.for_each_state_item([&hash, &lock](std::span<const std::byte> key,
+                                        uint8_t type,
+                                        std::span<const std::byte> value) {
+    std::scoped_lock guard(lock);
     lthash_add_item(hash, key, type, value);
   });
   return db_hash_from_lthash16(hash);
