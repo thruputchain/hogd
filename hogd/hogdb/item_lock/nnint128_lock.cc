@@ -6,8 +6,10 @@
 #include <limits>
 #include <span>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"

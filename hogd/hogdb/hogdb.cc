@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <print>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@
 // XDR headers
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"

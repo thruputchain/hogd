@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <span>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -36,7 +35,7 @@ BytestringLock::write_committed_change(LockContext const &ctx) const
 
 HogDBStatus<void>
 BytestringLock::apply_close_hash_delta(const LockContext &ctx,
-                                       LtHash16 &hash) const
+                                       LtHash16 &hash) 
 {
   assert(ctx.dao);
   auto key = make_contract_data_db_key(ctx.key.as_bytes());

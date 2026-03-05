@@ -358,7 +358,7 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx) const
 
 HogDBStatus<void>
 ReplayCacheLock::apply_close_hash_delta(const LockContext & /*ctx*/,
-                                        LtHash16 & /*hash*/) const
+                                        LtHash16 & /*hash*/) 
 {
   return {};
 }

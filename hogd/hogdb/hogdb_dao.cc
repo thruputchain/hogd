@@ -18,6 +18,7 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/crypto/lthash16.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"

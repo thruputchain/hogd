@@ -1,6 +1,8 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 
 #include <cassert>
+#include <cstddef>
+#include <span>
 #include <utility>
 
 #include "hogd/base/log.h"
@@ -62,7 +64,7 @@ DeletionLock::write_committed_change(LockContext const &ctx)
 
 HogDBStatus<void>
 DeletionLock::apply_close_hash_delta(const LockContext &ctx,
-                                     LtHash16 &hash) const
+                                     LtHash16 &hash) 
 {
   assert(ctx.dao);
 

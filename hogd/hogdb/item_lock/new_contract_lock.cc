@@ -10,6 +10,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
+#include "types.hh"
 #include "x23/serialize.h"
 
 namespace hogd {

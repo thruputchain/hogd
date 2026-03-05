@@ -31,7 +31,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "parallel.hh"
 #include "rpc_types.hh"

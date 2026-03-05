@@ -22,12 +22,12 @@
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/auth_lock.h"
 #include "hogd/hogdb/item_lock/balance_lock.h"
-#include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "x23/x23.h"
 
