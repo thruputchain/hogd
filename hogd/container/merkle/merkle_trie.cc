@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
