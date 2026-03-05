@@ -60,6 +60,14 @@ public:
     std::scoped_lock lock(mutex_);
     BlockHeight new_height = current_height_ + 1;
 
+    compute_key_changes_for_current_height();
+    current_key_changes_.clear();
+
+    current_height_ = new_height;
+  }
+
+  void compute_key_changes_for_current_height()
+  {
     KeyChangeBatch changes;
     for (const auto &[_, auth_data] : current_key_changes_) {
       changes.push_back(auth_data);
@@ -69,7 +77,6 @@ public:
     if (!changes.empty()) {
       changes_by_height_[current_height_] = std::move(changes);
     }
-    current_height_ = new_height;
   }
 
   // Materialize the KeyChangeBatch for a particular block height

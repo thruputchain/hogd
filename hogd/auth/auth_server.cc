@@ -40,7 +40,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
     if (current_height > height) {
       co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
     }
-    if (current_height < height - 1) {
+    if (current_height < height) {
       co_await current_height_futex_.wait(current_height);
       continue;
     }

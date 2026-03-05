@@ -16,7 +16,7 @@ std::optional<AddressAuthData>
 MockDBAuthRpc::find_auth_data_at_height(ContractAddress address,
                                         BlockHeight height) const
 {
-  assert(height == current_height_);
+  CHECK_EQ(height, current_height_);
   check_should_be_cached(address);
   auto it = current_auth_state_.find(address);
   if (it == current_auth_state_.end()) {
