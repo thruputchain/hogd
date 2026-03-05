@@ -80,7 +80,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
-  mock_db().increment_height(); // height 2
+  mock_db().compute_key_changes_for_current_height();
 
   auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
@@ -97,7 +97,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(2, stx_span)();
+  auto result = auth_server().verify_transactions(1, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 }
@@ -134,7 +134,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   mock_db().set(address1, auth_data1);
   mock_db().set(address2, auth_data2);
   mock_db().set(address3, AddressAuthData{});
-  mock_db().increment_height(); // height 1
+  mock_db().compute_key_changes_for_current_height();
 
   auth_server().register_auth_data_updates(0,
                                            mock_db().get_key_changes_at_height(
@@ -170,7 +170,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(1, stx_span)();
+  auto result = auth_server().verify_transactions(0, stx_span)();
 
   ASSERT_EQ(result.size(), 3);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
@@ -178,11 +178,11 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
 
   // batch verify
-  EXPECT_EQ(auth_server().verify_batch(1, {stx1, stx2, stx3})(),
+  EXPECT_EQ(auth_server().verify_batch(0, {stx1, stx2, stx3})(),
             AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(1, {stx2, stx3})(),
+  EXPECT_EQ(auth_server().verify_batch(0, {stx2, stx3})(),
             AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(1, {stx2, stx2, stx2})(),
+  EXPECT_EQ(auth_server().verify_batch(0, {stx2, stx2, stx2})(),
             AuthErrorCode::kAuthSuccess);
 }
 
