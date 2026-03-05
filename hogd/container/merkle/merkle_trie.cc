@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
@@ -942,8 +943,28 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
       return false;
     }
 
-    // We can block on acquiring the writer lock when moving up the trie.
-    branch->parent->rw_lock.lock_writer();
+    // We can block on acquiring the writer lock when moving up the trie. We
+    // observed that the [MerkleTriePrefix.Multithread128] test could livelock
+    // as readers could starve writers. In other words, if we were to call
+    // [branch->parent->rw_lock.lock_writer()] below, it is possible that we
+    // would not be able to acquire the writer lock for a long time if there are
+    // a lot of readers that keep acquiring the reader lock.
+    //
+    // To fix this, we need to give the writer priority over the readers. We do
+    // this by first acquiring the lock in reader mode and then upgrading the
+    // lock to writer mode. [try_upgrade_to_writer_if_only_one()] forces new
+    // threads that try to acquire the lock in reader mode to fail, so the
+    // writer will be able to acquire the lock fairly quickly.
+    while (true) {
+      branch->parent->rw_lock.lock_reader();
+      if (branch->parent->rw_lock.try_upgrade_to_writer_if_only_one()) {
+        break;
+      }
+      // We failed to become the writer. We do not want to hold the reader lock
+      // while another thread is trying to become the writer.
+      branch->parent->rw_lock.unlock();
+      cpu_relax();
+    }
     locked_through = branch->parent;
     locked_through_depth--;
 
@@ -953,7 +974,18 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
       CHECK_EQ(branch->parent->type, Node::Type::kExtension);
       CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
 
-      branch->parent->parent->rw_lock.lock_writer();
+      // See the comment above for why we acquire the lock in reader mode and
+      // then upgrade it to writer mode, rather than just call
+      // [branch->parent->parent->rw_lock.lock_writer()].
+      while (true) {
+        branch->parent->parent->rw_lock.lock_reader();
+        if (branch->parent->parent->rw_lock
+                .try_upgrade_to_writer_if_only_one()) {
+          break;
+        }
+        branch->parent->parent->rw_lock.unlock();
+        cpu_relax();
+      }
       locked_through = branch->parent->parent;
       // We already subtracted 1 from [locked_through_depth] above, so we
       // subtract 1 again to subtract 2 in total.

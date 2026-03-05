@@ -165,8 +165,8 @@ public:
     return lock_.load(std::memory_order_relaxed) == kWriterLocked;
   }
 
-  // Unlocks the lock, regardless of whether the current thread is a reader or a
-  // writer.
+  // Unlocks the lock, regardless of whether the current thread is a reader or
+  // a writer.
   void unlock()
   {
     int64_t cur = lock_.load(std::memory_order_relaxed);
@@ -198,14 +198,14 @@ private:
   void unlock_reader() { lock_.fetch_sub(1, std::memory_order_release); }
   void unlock_writer() { lock_.store(kUnlocked, std::memory_order_release); }
 
-  // The spinlock. Holds a value of [kUnlocked] (0) when unlocked. Holds a value
-  // of [kWriterLocked] (-1) when locked by a writer. Holds a positive value
-  // when locked by one or more readers; the exact positive value is the number
-  // of readers currently holding the lock.
+  // The spinlock. Holds a value of [kUnlocked] (0) when unlocked. Holds a
+  // value of [kWriterLocked] (-1) when locked by a writer. Holds a positive
+  // value when locked by one or more readers; the exact positive value is the
+  // number of readers currently holding the lock.
   std::atomic<int64_t> lock_ = kUnlocked;
-  // This is true when a writer is trying to acquire the lock. While this value
-  // is true, no additional readers will be allowed to acquire the lock. This
-  // prevents a writer from being starved when there is a large number of
+  // This is true when a writer is trying to acquire the lock. While this
+  // value is true, no additional readers will be allowed to acquire the lock.
+  // This prevents a writer from being starved when there is a large number of
   // readers.
   std::atomic<bool> writer_waiting_for_upgrade_ = false;
 };
