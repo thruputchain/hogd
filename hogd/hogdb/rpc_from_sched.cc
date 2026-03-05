@@ -424,7 +424,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   };
   CHECK(ctx_.get_db().write_address_average_hog_age(ages).has_value());
 
-  CHECK_EQ(compute_full_state_hash(ctx_.get_db()), dbhash);
+  CHECK_EQ(compute_full_state_hash(ctx_.get_db()), db_hash);
   // Since the genesis block is the first block, we set [prev_block_hash] to
   // null.
   constexpr BlockHash kNullBlockHash{};
@@ -435,7 +435,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
                            .prev_block_hash = kNullBlockHash};
   co_return to_db_result(commit_block(kGenesisBlockID,
                                       generate_block_hash(header), r.value(),
-                                      closed_hash));
+                                      db_hash));
 }
 
 x23::Async<DbShardResult>
