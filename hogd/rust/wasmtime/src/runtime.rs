@@ -4,7 +4,9 @@ use wasmtime::{Instance, Store};
 
 use crate::context::WasmtimeContext;
 use crate::error::TrampolineError;
-use crate::invoke_result::WasmtimeInvokeResult;
+use crate::invoke_result::{
+    wasmtime_trap_to_invoke_error, WasmtimeInvokeResult,
+};
 use common::{InvokeErrorCode, SystemErrorCode};
 
 #[repr(C)]
@@ -60,11 +62,24 @@ impl WasmtimeRuntime {
         let instance = match instance_pre.instantiate(&mut store) {
             Ok(instance) => instance,
             Err(e) => {
-                if e.downcast_ref::<wasmtime::Trap>().is_some() {
-                    // Deterministic trap during instantiation (e.g. OOB data
-                    // segment, start function trap including OutOfFuel).
-                    debug_log!(eprintln!("Trap during instantiation: {e:?}"));
-                    return Ok(None);
+                if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
+                    match wasmtime_trap_to_invoke_error(trap) {
+                        // Deterministic trap during instantiation (e.g. OOB
+                        // data segment, start function trap including
+                        // OutOfFuel).
+                        InvokeErrorCode::kInvokeOutOfGas
+                        | InvokeErrorCode::kInvokeDeterministic => {
+                            debug_log!(eprintln!(
+                                "Trap during instantiation: {e:?}"
+                            ));
+                            return Ok(None);
+                        }
+                        other => {
+                            panic!(
+                                "Unrecoverable: nondeterministic trap during instantiation: {trap:?}, classified as {other:?}"
+                            );
+                        }
+                    }
                 }
                 // Non-trap error (e.g. pooling allocator exhaustion, OOM).
                 // This is nondeterministic — the module itself may be fine.
@@ -143,8 +158,7 @@ pub unsafe extern "C" fn wasmtime_invoke(
     method_name: *const u8,
     method_name_len: u32,
 ) -> WasmtimeInvokeResult {
-    let runtime: *mut WasmtimeRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmtimeRuntime = runtime_void.cast::<WasmtimeRuntime>();
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
@@ -220,11 +234,8 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
-    let wasmtime_context: &mut WasmtimeContext = unsafe {
-        &mut *core::mem::transmute::<*mut c_void, *mut WasmtimeContext>(
-            wasmtime_context_ptr,
-        )
-    };
+    let wasmtime_context: &mut WasmtimeContext =
+        unsafe { &mut *wasmtime_context_ptr.cast::<WasmtimeContext>() };
 
     if do_verify_contract {
         let slice = match wasmtime_context.fetch_contract(userctx, hash_slice) {
@@ -256,11 +267,7 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
         }
     };
 
-    NewWasmtimeRuntimeResult::ok(unsafe {
-        core::mem::transmute::<*mut WasmtimeRuntime, *mut c_void>(
-            Box::into_raw(b),
-        )
-    })
+    NewWasmtimeRuntimeResult::ok(Box::into_raw(b).cast::<c_void>())
 }
 
 /// # Safety
@@ -291,7 +298,7 @@ pub unsafe extern "C" fn wasmtime_get_module_stats(
     debug_assert!(!stats_out.is_null());
 
     let runtime: *const WasmtimeRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
+        runtime_void.cast::<WasmtimeRuntime>();
     let r = unsafe { &*runtime };
 
     match r.get_stats() {

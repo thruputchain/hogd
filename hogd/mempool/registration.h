@@ -1,23 +1,16 @@
 #pragma once
 
-#include <iostream>
-#include <map>
+#include <atomic>
+#include <cstddef>
 #include <mutex>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
 
+#include "auth_card.hh"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/container/merkle/hex_array.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/mempool/shared.h"
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
-#include "transaction.hh"
-#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -126,15 +119,19 @@ public:
   void clear()
   {
     coordinator_registered_ = false;
+    coord_card_ = CoordCard{};
     {
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.clear();
     }
     event_registered_ = false;
+    event_card_ = EventCard{};
     {
       std::unique_lock lk(shard_cards_mutex_);
       shard_cards_.clear();
     }
+    auth_registered_ = false;
+    auth_card_ = AuthCard{};
   }
 
 private:

@@ -11,7 +11,7 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinkEntry, SendPtr, SystemErrorCode};
+use common::{LinkEntry, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -83,16 +83,16 @@ macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
             linker: &mut Linker<*mut c_void>,
-            fn_pointer: *mut c_void,
+            fn_pointer: common::ErasedFnPtr,
             import_name: &str,
             fn_name: &str,
         ) -> Result<(), Error> {
-            let ptr = SendPtr::new(fn_pointer);
+            let ptr = fn_pointer;
             linker
                 .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
-                            ptr.as_ptr(),
+                            ptr,
                             *caller.data(),
                             $($arg),*
                         )
@@ -130,7 +130,9 @@ impl WasmiContext {
     ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
-        get_res.to_data()
+        // Safety: the returned slice's lifetime is tied to 'a (the hash's lifetime),
+        // which is bounded by the caller's transaction scope.
+        unsafe { get_res.to_data() }
     }
 
     pub fn has_module_cache(&self) -> bool {
@@ -322,7 +324,7 @@ pub unsafe extern "C" fn wasmi_link_nargs(
     module_name_len: u32,
     method_name: *const u8,
     method_name_len: u32,
-    function_pointer: *mut c_void,
+    function_pointer: common::ErasedFnPtr,
     nargs: u8,
 ) -> bool // true if success
 {
@@ -333,19 +335,21 @@ pub unsafe extern "C" fn wasmi_link_nargs(
     let context: &mut WasmiContext =
         unsafe { &mut *context_void.cast::<WasmiContext>() };
 
-    let module = match string_from_parts(module_name, module_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
-    };
+    let module =
+        match unsafe { string_from_parts(module_name, module_name_len) } {
+            Ok(x) => x,
+            _ => {
+                return false;
+            }
+        };
 
-    let method = match string_from_parts(method_name, method_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
-    };
+    let method =
+        match unsafe { string_from_parts(method_name, method_name_len) } {
+            Ok(x) => x,
+            _ => {
+                return false;
+            }
+        };
 
     debug_assert!(!module.is_empty());
     debug_assert!(!method.is_empty());
@@ -379,34 +383,33 @@ pub unsafe extern "C" fn wasmi_global_link_nargs(
     module_name_len: u32,
     method_name: *const u8,
     method_name_len: u32,
-    function_pointer: *mut c_void,
+    function_pointer: common::ErasedFnPtr,
     nargs: u8,
 ) -> bool // true if success
 {
-    let global_context: &mut std::sync::Arc<WasmiGlobalContext> = unsafe {
-        &mut *core::mem::transmute::<
-            *mut c_void,
-            *mut std::sync::Arc<WasmiGlobalContext>,
-        >(global_context_void)
-    };
-
     debug_assert!(!global_context_void.is_null());
     debug_assert!(!module_name.is_null());
     debug_assert!(!method_name.is_null());
 
-    let module = match string_from_parts(module_name, module_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
+    let global_context: &mut std::sync::Arc<WasmiGlobalContext> = unsafe {
+        &mut *global_context_void.cast::<std::sync::Arc<WasmiGlobalContext>>()
     };
 
-    let method = match string_from_parts(method_name, method_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
-    };
+    let module =
+        match unsafe { string_from_parts(module_name, module_name_len) } {
+            Ok(x) => x,
+            _ => {
+                return false;
+            }
+        };
+
+    let method =
+        match unsafe { string_from_parts(method_name, method_name_len) } {
+            Ok(x) => x,
+            _ => {
+                return false;
+            }
+        };
 
     debug_assert!(!module.is_empty());
     debug_assert!(!method.is_empty());
@@ -435,8 +438,7 @@ pub unsafe extern "C" fn wasmi_global_link_nargs(
 pub unsafe extern "C" fn new_wasmi_global_context() -> *mut c_void {
     let global_context = std::sync::Arc::new(WasmiGlobalContext::default());
 
-    let b = Box::into_raw(Box::new(global_context));
-    unsafe { core::mem::transmute(b) }
+    Box::into_raw(Box::new(global_context)).cast::<c_void>()
 }
 
 /// # Safety
@@ -465,14 +467,11 @@ pub unsafe extern "C" fn new_wasmi_context(
     debug_assert!(!global_context.is_null());
 
     let global_context: &std::sync::Arc<WasmiGlobalContext> = unsafe {
-        &*core::mem::transmute::<
-            *mut c_void,
-            *mut std::sync::Arc<WasmiGlobalContext>,
-        >(global_context)
+        &*global_context.cast::<std::sync::Arc<WasmiGlobalContext>>()
     };
 
     let b = Box::new(WasmiContext::new(global_context.clone(), get_fn));
-    unsafe { core::mem::transmute(Box::into_raw(b)) }
+    Box::into_raw(b).cast::<c_void>()
 }
 
 /// # Safety
@@ -507,7 +506,7 @@ pub unsafe extern "C" fn wasmi_verify_contract(
         return false;
     }
 
-    let context: *const WasmiContext = unsafe { core::mem::transmute(p) };
+    let context: *const WasmiContext = p.cast::<WasmiContext>();
 
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };

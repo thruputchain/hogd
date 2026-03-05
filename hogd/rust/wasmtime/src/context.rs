@@ -65,7 +65,9 @@ impl WasmtimeContext {
         debug_assert!(!user_context.is_null());
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
-        get_res.to_data()
+        // Safety: the returned slice's lifetime is tied to 'a (the hash's lifetime),
+        // which is bounded by the caller's transaction scope.
+        unsafe { get_res.to_data() }
     }
 
     pub fn engine(&self) -> &Engine {
@@ -163,14 +165,11 @@ pub unsafe extern "C" fn new_wasmtime_context(
 ) -> *mut c_void {
     debug_assert!(!global_context.is_null());
 
-    let global_context: &Arc<WasmtimeGlobalContext> = unsafe {
-        &*core::mem::transmute::<*mut c_void, *mut Arc<WasmtimeGlobalContext>>(
-            global_context,
-        )
-    };
+    let global_context: &Arc<WasmtimeGlobalContext> =
+        unsafe { &*global_context.cast::<Arc<WasmtimeGlobalContext>>() };
 
     let b = Box::new(WasmtimeContext::new(global_context, get_fn));
-    unsafe { core::mem::transmute(Box::into_raw(b)) }
+    Box::into_raw(b).cast::<c_void>()
 }
 
 /// # Safety
@@ -204,7 +203,7 @@ pub unsafe extern "C" fn wasmtime_verify_contract(
         return false;
     }
 
-    let context: *const WasmtimeContext = unsafe { core::mem::transmute(p) };
+    let context: *const WasmtimeContext = p.cast::<WasmtimeContext>();
 
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
