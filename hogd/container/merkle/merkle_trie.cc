@@ -954,8 +954,14 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
     // lock to writer mode. [try_upgrade_to_writer_if_only_one()] forces new
     // threads that try to acquire the lock in reader mode to fail, so the
     // writer will be able to acquire the lock fairly quickly.
-    branch->parent->rw_lock.lock_reader();
-    while (!branch->parent->rw_lock.try_upgrade_to_writer_if_only_one()) {
+    while (true) {
+      branch->parent->rw_lock.lock_reader();
+      if (branch->parent->rw_lock.try_upgrade_to_writer_if_only_one()) {
+        break;
+      }
+      // We failed to become the writer. We do not want to hold the reader lock
+      // while another thread is trying to become the writer.
+      branch->parent->rw_lock.unlock();
       cpu_relax();
     }
     locked_through = branch->parent;
@@ -970,9 +976,13 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
       // See the comment above for why we acquire the lock in reader mode and
       // then upgrade it to writer mode, rather than just call
       // [branch->parent->parent->rw_lock.lock_writer()].
-      branch->parent->parent->rw_lock.lock_reader();
-      while (!branch->parent->parent->rw_lock
-                  .try_upgrade_to_writer_if_only_one()) {
+      while (true) {
+        branch->parent->parent->rw_lock.lock_reader();
+        if (branch->parent->parent->rw_lock
+                .try_upgrade_to_writer_if_only_one()) {
+          break;
+        }
+        branch->parent->parent->rw_lock.unlock();
         cpu_relax();
       }
       locked_through = branch->parent->parent;
