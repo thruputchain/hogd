@@ -9,7 +9,6 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -119,7 +118,6 @@ public:
   // structure that this lock protects.
   bool try_upgrade_to_writer_if_only_one()
   {
-    ElapsedTimer timer;
     CHECK(is_reader_locked_relaxed());
 
     {
@@ -145,9 +143,6 @@ public:
                                        /*failure=*/std::memory_order_relaxed)) {
         cpu_relax();
         expected = 1;
-        if (timer.elapsed() > 1.0) {
-          info("trying to upgrade for over a second!");
-        }
       }
     }
 
