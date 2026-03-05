@@ -850,11 +850,12 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_before_delete = trie_.get_root_hash();
+  DbHash db_hash_before_delete;
+  db_.load_hash(db_hash_before_delete);
 
   // Explicitly delete the RCQ using request_deletion (goes through
   // DeletionLock)
+  DbHash db_hash_after_delete;
   {
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
@@ -867,16 +868,21 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    db_hash_after_delete =
+        block_tx.get().compute_close_hash(db_hash_before_delete);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Verify trie hash changed after deleting all blocks
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_after_delete = trie_.get_root_hash();
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash;
+  db_.load_hash(full_db_hash);
+  EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
-  EXPECT_NE(trie_hash_before_delete, trie_hash_after_delete)
-      << "Trie hash did not change after explicit deletion - blocks may not "
-         "have been removed from trie";
+  // Verify db hash changed after deleting all blocks
+  EXPECT_NE(db_hash_before_delete, db_hash_after_delete)
+      << "db hash did not change after explicit deletion - blocks may not have "
+         "been removed from db";
 
   // Verify all blocks are removed from ramdb
   for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
