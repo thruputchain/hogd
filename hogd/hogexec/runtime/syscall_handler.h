@@ -291,8 +291,6 @@ public:
   // == Block statistics syscalls ==
   // These are based on reading the db tip.
   SystemStatus<BlockHeight> get_block_height() const;
-  SystemStatus<SHA256Hash> get_parent_block_hash() const;
-  SystemStatus<DbHash> get_parent_db_hash() const;
 
   // == General access methods ==
   //
