@@ -76,7 +76,7 @@ public:
   KeyChangeBatch get_key_changes_at_height(BlockHeight height) const
   {
     std::scoped_lock lock(mutex_);
-    CHECK_LT(height, current_height_);
+    CHECK_LE(height, current_height_);
     auto it = changes_by_height_.find(height);
     if (it == changes_by_height_.end()) {
       return KeyChangeBatch{};

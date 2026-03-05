@@ -50,8 +50,8 @@ TEST_F(AuthServerTest, LookupNonExistent)
 
   mock_db().increment_height(); // height 1
   mock_db().increment_height(); // height 2
-  // initialize the auth server at height 1
-  auth_server().register_auth_data_updates(1,
+  // initialize the auth server at height 2
+  auth_server().register_auth_data_updates(2,
                                            mock_db().get_key_changes_at_height(
                                                1))();
 
@@ -60,7 +60,7 @@ TEST_F(AuthServerTest, LookupNonExistent)
 
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, mock_db().get_current_height() - 1);
+  EXPECT_EQ(result.value()->first, mock_db().get_current_height());
   EXPECT_FALSE(result.value()->second.has_value());
 }
 
@@ -71,13 +71,12 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
   AddressAuthData auth_data_2 = make_test_auth_data(2);
 
   mock_db().increment_height(); // height 1
-
   mock_db().set(address, auth_data);
-  mock_db().increment_height(); // height 2
 
+  mock_db().increment_height(); // height 2
   mock_db().set(address, auth_data_2);
+
   mock_db().increment_height(); // height 3
-  mock_db().increment_height(); // height 4
 
   // make sure the auth server starts initialized at height 1
   auth_server().register_auth_data_updates(1,
@@ -99,12 +98,12 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
 
   auto result =
       auth_server().lookup_auth_data(mock_db().get_current_height(), address)();
-  ASSERT_EQ(mock_db().get_current_height(), 4);
+  ASSERT_EQ(mock_db().get_current_height(), 3);
 
   ASSERT_TRUE(result.has_value());
 
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, mock_db().get_current_height() - 1);
+  EXPECT_EQ(result.value()->first, 2);
   ASSERT_TRUE(result.value()->second.has_value());
   EXPECT_EQ(result.value()->second.value(), auth_data_2);
 }
