@@ -539,7 +539,10 @@ RetrocausalQueueLock::apply_close_hash_delta(const LockContext &ctx,
       }
     }
     if (!consumed_set.empty()) {
-      return HogDBError{HogDBCode::kInternal};
+      // In proposal/validation mode, malformed current_block_consumed can
+      // survive until block close. Keep close-hash computation non-fatal here
+      // and let write_committed_change() reject the block with an error.
+      return {};
     }
   }
   else {
