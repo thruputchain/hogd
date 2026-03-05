@@ -27,7 +27,6 @@ is_state_prefix(std::byte prefix)
     return true;
   case Prefix::kHogAge:
   case Prefix::kGlobalMetadata:
-    return false;
   default:
     return false;
   }
