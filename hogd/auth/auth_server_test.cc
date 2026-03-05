@@ -32,15 +32,14 @@ TEST_F(AuthServerTest, BasicLookup)
   BlockHeight height = mock_db().get_current_height();
   ASSERT_EQ(height, 2);
 
-  auth_server().register_auth_data_updates(1,
+  auth_server().register_auth_data_updates(height,
                                            mock_db().get_key_changes_at_height(
                                                1))();
 
   auto result = auth_server().lookup_auth_data(height, address)();
-
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
-  EXPECT_EQ(result.value()->first, 1);
+  EXPECT_EQ(result.value()->first, height);
   ASSERT_TRUE(result.value()->second.has_value());
 }
 

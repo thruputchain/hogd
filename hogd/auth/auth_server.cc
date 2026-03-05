@@ -1,6 +1,5 @@
 #include "hogd/auth/auth_server.h"
 
-#include <cassert>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -28,8 +27,8 @@ x23::Async<AuthStatus<
     std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
-  assert(height != kUninitializedHeight);
-  assert(height != kInitializing);
+  CHECK_NE(height, kUninitializedHeight);
+  CHECK_NE(height, kInitializing);
   BlockHeight current_height;
   for (;;) {
     current_height = current_height_futex_.load();
@@ -47,9 +46,9 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
     }
     break;
   }
-  CHECK(current_height == height);
-  CHECK(current_height != kUninitializedHeight);
-  CHECK(current_height != kInitializing);
+  CHECK_EQ(current_height, height);
+  CHECK_NE(current_height, kUninitializedHeight);
+  CHECK_NE(current_height, kInitializing);
 
   auto auth_data = auth_data_cache_.get(address);
   if (auth_data != nullptr) {
@@ -159,7 +158,7 @@ AuthServer::populate_auth_data(BlockHeight height,
     co_return entry.error().code();
   }
 
-  CHECK(entry.value().get() != nullptr);
+  CHECK_PTR(entry.value().get());
 
   if (!entry.value()->second.has_value()) {
     co_return AuthErrorCode::kAuthFailed;
@@ -273,7 +272,7 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     if (!source_addr.has_value()) {
       co_return source_addr.error().code();
     }
-    CHECK(source_addr.value().get() != nullptr);
+    CHECK_PTR(source_addr.value().get());
     if (!source_addr.value()->second.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }
