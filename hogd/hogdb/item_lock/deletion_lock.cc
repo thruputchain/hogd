@@ -65,11 +65,54 @@ DeletionLock::apply_close_hash_delta(const LockContext &ctx,
                                      LtHash16 &hash) const
 {
   assert(ctx.dao);
-  auto key = make_contract_data_db_key(ctx.key.as_bytes());
-  auto before = ctx.dao->get_ramdb().get(key);
-  if (before.has_value()) {
-    lthash_remove_item(hash, key, before->type, before->value);
+
+  auto remove_if_present = [&](std::span<const std::byte> key) {
+    auto before = ctx.dao->get_ramdb().get(key);
+    if (before.has_value()) {
+      lthash_remove_item(hash, key, before->type, before->value);
+    }
+  };
+
+  if (ctx.key.is_address_auth_data()) {
+    auto key = make_address_key_with_prefix(ctx.key.get_address(),
+                                            Prefix::kAddressAuthData);
+    remove_if_present(std::as_bytes(std::span(key)));
+    return {};
   }
+
+  if (!ctx.key.is_contract_data()) {
+    error("unhandled item key type in DeletionLock::apply_close_hash_delta: {}",
+          std::to_underlying(ctx.key.key_type()));
+    return HogDBError(HogDBCode::kInternal);
+  }
+
+  auto key = make_contract_data_db_key(ctx.key.as_bytes());
+
+  auto type_ret = ctx.dao->get_item_type(ctx.key);
+  if (!type_ret) {
+    if (type_ret.error() == HogDBCode::kNotFound) {
+      return {};
+    }
+    return type_ret.error();
+  }
+
+  if (type_ret.value() == kRetrocausalQueue) {
+    auto meta_ret = ctx.dao->read_retrocausal_queue_metadata(ctx.key);
+    if (meta_ret.has_value()) {
+      auto const &meta = meta_ret.value();
+      uint64_t start_block =
+          meta.consume_state.max_fully_consumed_block_number + 1;
+      for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
+        auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
+        remove_if_present(std::as_bytes(std::span(block_key)));
+      }
+    }
+    else if (meta_ret.error() != HogDBCode::kNotFound) {
+      return meta_ret.error();
+    }
+  }
+
+  remove_if_present(key);
   return {};
 }
 
