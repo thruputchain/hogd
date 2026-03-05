@@ -49,9 +49,9 @@ NewContractLock::apply_close_hash_delta(const LockContext &ctx,
   if (wasm.has_value()) {
     lthash_remove_item(hash, std::as_bytes(std::span(key)), 0, *wasm);
   }
-  auto marker = x23::serialize(code_hash);
+  auto wasm_contract = x23::serialize(contract_);
   lthash_add_item(hash, std::as_bytes(std::span(key)), 0,
-                  std::as_bytes(std::span(marker)));
+                  std::as_bytes(std::span(wasm_contract)));
   return {};
 }
 

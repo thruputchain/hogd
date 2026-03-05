@@ -32,6 +32,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -58,6 +59,17 @@ to_db_result(HogDBStatus<T> ret)
     return DbSchedResult::DbSchedResultError;
   }
   return DbSchedResult::DbSchedResultOK;
+}
+
+DbHash
+compute_full_state_hash(HogDBDAO &db)
+{
+  LtHash16 hash;
+  db.for_each_state_item([&hash](std::span<const std::byte> key, uint8_t type,
+                                 std::span<const std::byte> value) {
+    lthash_add_item(hash, key, type, value);
+  });
+  return db_hash_from_lthash16(hash);
 }
 
 } // namespace
@@ -330,11 +342,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
         return 0;
       },
       [&](auto const &contract) {
-        auto data = x23::serialize(*contract);
-        const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
-        auto buf = std::span<const std::byte>(cptr, data.size());
-        SHA256Hash hash = sha256(buf);
-        auto r = ctx_.get_db().write_wasm_code(hash, buf);
+        auto r = itx->request_new_contract(*contract);
         if (!r.has_value()) {
           error("failed to write genesis block contract: {}", r.error());
           failure = true;
@@ -398,32 +406,31 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     error("failed to sync balance locks: {}", r.error());
     co_return DbSchedResult::DbSchedResultError;
   }
+  // The database is empty before the genesis block, so we set [base_hash] to
+  // 0x0.
+  DbHash db_hash = r.value()->get().compute_close_hash(/*base_hash=*/{});
+
   itx->commit();
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   // Initialize the genesis address with scheduler state
   uint128_t initial_hog_token_supply =
       GenesisConfigurationLoader::initial_hog_token_supply();
-  CHECK(
-      ctx_.get_db()
-          .write_address_average_hog_age(HogAge{
-              .address = GenesisConfigurationLoader::kDeployContractAddress,
-              .num_hogs = {to_xdr(initial_hog_token_supply),
-                           to_xdr(uint128_t{0}), to_xdr(uint128_t{0})},
-              .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
-          })
-          .has_value());
+  HogAge ages{
+      .address = GenesisConfigurationLoader::kDeployContractAddress,
+      .num_hogs = {to_xdr(initial_hog_token_supply), to_xdr(uint128_t{0}),
+                   to_xdr(uint128_t{0})},
+      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+  };
+  CHECK(ctx_.get_db().write_address_average_hog_age(ages).has_value());
 
-  // The database is empty before the genesis block, so we set [base_hash] to
-  // 0x0.
-  DbHash closed_hash = r.value()->get().compute_close_hash(/*base_hash=*/{});
-  CHECK(false);
+  CHECK_EQ(compute_full_state_hash(ctx_.get_db()), dbhash);
   // Since the genesis block is the first block, we set [prev_block_hash] to
   // null.
   constexpr BlockHash kNullBlockHash{};
   const BlockHeader header{.network_id = network_id,
                            .txset_hash = txset_hash,
-                           .db_hash = closed_hash,
+                           .db_hash = db_hash,
                            .events_hash = events_hash,
                            .prev_block_hash = kNullBlockHash};
   co_return to_db_result(commit_block(kGenesisBlockID,
