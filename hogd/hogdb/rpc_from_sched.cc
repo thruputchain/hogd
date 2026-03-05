@@ -309,6 +309,27 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     }
   }
 
+  uint128_t initial_hog_token_supply =
+      GenesisConfigurationLoader::initial_hog_token_supply();
+  HogAge ages{
+      .address = GenesisConfigurationLoader::kDeployContractAddress,
+      .num_hogs = {to_xdr(initial_hog_token_supply), to_xdr(uint128_t{0}),
+                   to_xdr(uint128_t{0})},
+      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+  };
+  if (auto age_write = ctx_.get_db().write_address_average_hog_age(ages);
+      !age_write.has_value()) {
+    error("failed to write genesis block hog ages: {}", age_write.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  // Genesis runs after direct db writes in tests (for example wasm
+  // code/metadata/balance initialization in the mempool test infra). We need to
+  // account for these writes in the db hash. Thus, we compute the db hash with
+  // those items alone in the db, then we use this hash as the base hash when
+  // calling [compute_close_hash()] below.
+  DbHash base_hash = compute_full_state_hash(ctx_.get_db());
+
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
@@ -406,25 +427,10 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     error("failed to sync balance locks: {}", r.error());
     co_return DbSchedResult::DbSchedResultError;
   }
-  // The database is empty before the genesis block, so we set [base_hash] to
-  // 0x0.
-  DbHash db_hash = r.value()->get().compute_close_hash(/*base_hash=*/{});
-
   itx->commit();
+  DbHash db_hash = r.value()->get().compute_close_hash(base_hash);
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
-  // Initialize the genesis address with scheduler state
-  uint128_t initial_hog_token_supply =
-      GenesisConfigurationLoader::initial_hog_token_supply();
-  HogAge ages{
-      .address = GenesisConfigurationLoader::kDeployContractAddress,
-      .num_hogs = {to_xdr(initial_hog_token_supply), to_xdr(uint128_t{0}),
-                   to_xdr(uint128_t{0})},
-      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
-  };
-  CHECK(ctx_.get_db().write_address_average_hog_age(ages).has_value());
-
-  CHECK_EQ(compute_full_state_hash(ctx_.get_db()), db_hash);
   // Since the genesis block is the first block, we set [prev_block_hash] to
   // null.
   constexpr BlockHash kNullBlockHash{};
@@ -433,9 +439,14 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
                            .db_hash = db_hash,
                            .events_hash = events_hash,
                            .prev_block_hash = kNullBlockHash};
-  co_return to_db_result(commit_block(kGenesisBlockID,
-                                      generate_block_hash(header), r.value(),
-                                      db_hash));
+  auto ret =
+      to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
+                                r.value(), db_hash));
+  // Just to be safe, we recompute the db hash from scratch and ensure that
+  // [db_hash] is equal to it.
+  DbHash full_hash = compute_full_state_hash(ctx_.get_db());
+  CHECK_EQ(full_hash, db_hash);
+  co_return ret;
 }
 
 x23::Async<DbShardResult>
