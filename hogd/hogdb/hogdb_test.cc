@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <utility>
 
 // xdr types
+#include "address_auth.hh"
 #include "contract.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -33,7 +35,6 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"

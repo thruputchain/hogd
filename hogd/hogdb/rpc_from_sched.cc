@@ -5,7 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
-#include <mutex>
+#include <optional>
 #include <span>
 #include <sys/socket.h>
 #include <utility>
@@ -21,7 +21,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
-#include "hogd/crypto/lthash16.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -33,8 +32,6 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
-#include "hogd/hogdb/close_hash.h"
-#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"

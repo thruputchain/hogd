@@ -632,11 +632,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   record_stage(stage_spawn_finish_calls);
 
-  DbHash db_hash;
   {
     DbBlockResult result = co_await close_snapshot(cache.block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    db_hash = result.db_hash();
+    cache.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
   {
@@ -644,9 +643,8 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
         cache.nomination_result.nominated_block().nomination;
     nomination.block_height = db_tip.height + 1;
     nomination.block_hash =
-        get_block_hash(cache.tx_hashes, db_hash,
+        get_block_hash(cache.tx_hashes, cache.db_tip.db_hash,
                        /*prev_block_hash=*/db_tip.block_hash);
-    nomination.db_hash = db_hash;
     record_stage(stage_generate_block_hash);
 
     nomination.prev_block_hash = db_tip.block_hash;

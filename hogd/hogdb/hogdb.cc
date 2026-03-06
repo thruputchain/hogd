@@ -8,10 +8,8 @@
 #include <future>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <print>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,8 +25,6 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/crypto/lthash16.h"
-#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -43,7 +39,6 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
