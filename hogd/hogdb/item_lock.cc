@@ -82,7 +82,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
 
   CHECK_CONST_PTR(before);
   CHECK_CONST_PTR(after);
-  CHECK_GT(pending_refcount_, 0);
+  CHECK_GT(pending_refcount_, 0U);
   // No need to modify pending_refcount_ here -- we already have a reference and
   // don't need to release it, as both before and after are non-null.
   return handle_try_atomic_from_pending(before, after, ctx, lock);
@@ -105,7 +105,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
     // if we're committing an exclusive change.
     if (change.is_exclusive()) {
       std::unique_lock<x23::TestLock> lock(lock_);
-      CHECK_EQ(pending_refcount_, 1);
+      CHECK_EQ(pending_refcount_, 1U);
 
       // The workflow for downgrading from exclusive to nonexclusive is to
       // initialize the lock as the proper type, but with no changes applied.
@@ -382,7 +382,7 @@ ItemLock::handle_release_uncommitted_lock(
     std::unique_lock<x23::TestLock> const &ul)
 {
   CHECK(ul.owns_lock());
-  CHECK_GT(pending_refcount_, 0);
+  CHECK_GT(pending_refcount_, 0U);
   CHECK_CONST_PTR(before);
   pending_refcount_--;
   if (pending_refcount_ == 0) {
@@ -400,7 +400,7 @@ void
 ItemLock::set_exclusive_lock(std::unique_lock<x23::TestLock> const &ul)
 {
   CHECK(ul.owns_lock());
-  CHECK_LE(pending_refcount_, 1);
+  CHECK_LE(pending_refcount_, 1U);
   lock_contents_.emplace<ExclusiveLock>();
 }
 
@@ -484,7 +484,7 @@ void
 ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
 {
   CHECK(ul.owns_lock());
-  CHECK_EQ(pending_refcount_, 0);
+  CHECK_EQ(pending_refcount_, 0U);
 
   lock_contents_ = std::monostate{};
 }
