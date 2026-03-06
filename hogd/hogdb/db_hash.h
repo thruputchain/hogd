@@ -32,10 +32,10 @@ lthash16_from_db_hash(const DbHash &hash)
 }
 
 inline DbHash
-db_hash_from_lthash16_seed(x23::BufView seed)
+db_hash_from_buf(x23::BufView buf)
 {
   LtHash16 hash;
-  hash.add(seed);
+  hash.add(buf);
   return db_hash_from_lthash16(hash);
 }
 
