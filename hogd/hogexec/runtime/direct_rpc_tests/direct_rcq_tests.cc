@@ -3147,7 +3147,8 @@ TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
 // Same as above but with two RCQ blocks before overwrite.  The recreated RCQ's
 // block 1 overwrites ghost block 1, but ghost block 2 persists because the
 // bytestring delete path doesn't know about RCQ blocks.
-TEST_F(DirectRCQTests, OverwriteMultiBlockRCQWithBytestringDeleteLeavesGhostBlocks)
+TEST_F(DirectRCQTests,
+       OverwriteMultiBlockRCQWithBytestringDeleteLeavesGhostBlocks)
 {
   GTEST_SKIP() << "RCQ blocks not cleaned up on type change";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
