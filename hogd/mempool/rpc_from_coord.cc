@@ -630,15 +630,13 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     finish_block_handles.push_back(
         finish_block(cache.block_id, /*executor_idx=*/i));
   }
-  x23::Async<DbBlockResult> close_snapshot_handle =
-      close_snapshot(cache.block_id);
   record_stage(stage_spawn_finish_calls);
 
   DbHash db_hash;
   {
-    DbBlockResult result = co_await close_snapshot_handle;
+    DbBlockResult result = co_await close_snapshot(cache.block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    nominated_block_cache_.db_tip.db_hash = result.db_hash();
+    db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
   {
@@ -648,6 +646,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     nomination.block_hash =
         get_block_hash(cache.tx_hashes, db_hash,
                        /*prev_block_hash=*/db_tip.block_hash);
+    nomination.db_hash = db_hash;
     record_stage(stage_generate_block_hash);
 
     nomination.prev_block_hash = db_tip.block_hash;
@@ -721,7 +720,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 }
 
 x23::Async<SchedulerNominationResult>
-MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
+MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 {
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
