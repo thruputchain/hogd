@@ -84,11 +84,9 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   co_return ret;
 }
 
-// TODO(jhumphri): Remove this function.
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
 {
-  CHECK(false);
   HogDBDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
     if (!db.write_address_average_hog_age(age)) {
@@ -177,7 +175,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
        id, encode_base64(std::as_bytes(std::span(ctx_.get_tip().block_hash))),
        encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
        ctx_.get_tip().height, *lsn);
-  assert(ctx_.get_tip().height != -1);
+  CHECK_NE(ctx_.get_tip().height, -1);
   return {};
 }
 
@@ -214,7 +212,7 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
   if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  auto closed_hash = ctx_.take_closed_hash(id);
+  std::optional<DbHash> closed_hash = ctx_.take_closed_hash(id);
   if (!closed_hash.has_value()) {
     error("dbsched_commit_snapshot called before close for block {}", id);
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
@@ -236,8 +234,9 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
     block_id_state_manager_.log_block_abandon(id);
   }
   auto *ret = ctx_.get_block_tx(id, false);
-  if (!ret)
+  if (!ret) {
     co_return DbSchedResult::DbSchedResultError;
+  }
 
   if (ret->initiate_shutdown()) {
     ctx_.clear_closed_hash(id);
@@ -253,9 +252,15 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_close(id);
   }
-  auto *btx = ctx_.get_block_tx(id, false);
-  if (btx == nullptr) [[unlikely]]
+  // TODO(abelay): rename this to finish_snapshot. It will be called before
+  // either commit_snapshot or abort_snapshot because the merkle root is needed
+  // to create a proposal block.
+
+  // TODO(abelay): we could potential free memory here too.
+  PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(id, false);
+  if (btx == nullptr) [[unlikely]] {
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
 
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
   DbHash closed_hash =

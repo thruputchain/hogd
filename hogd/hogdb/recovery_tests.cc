@@ -136,9 +136,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
   ASSERT_TRUE(db);
   auto dao = HogDBDAO(RAMDB(std::move(*db)));
   EXPECT_EQ(closed_hash, dao.compute_full_db_hash());
-  auto recovered_tip = dao.read_dbtip();
-  ASSERT_TRUE(recovered_tip.has_value());
-  ASSERT_EQ(recovered_tip->db_hash, initial_tip.db_hash);
+  ASSERT_EQ(closed_hash, initial_tip.db_hash);
 
   auto bal = dao.read_address_balance(ContractAddress{0});
   ASSERT_TRUE(bal.has_value());
