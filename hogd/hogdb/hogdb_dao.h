@@ -34,7 +34,6 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
@@ -127,9 +126,9 @@ private:
 // Warning: These key prefixes are persisted on disk so they cannot be changed
 // without migrating existing data.
 //
-// Warning: These prefixes are NOT included in the merkle trie root hash.
+// Warning: These prefixes are NOT included in the db hash.
 //
-// Not every prefix type is included in the merkle trie.
+// Not every prefix type is included in the db hash.
 enum class Prefix : char {
   kHogAge = 'A',
   kBalance = 'B',
@@ -289,8 +288,8 @@ public:
   }
 
   // for_each_state_item calls fn in parallel for every item that needs to be
-  // included in the merkle state root. It is typically used at initialization
-  // time when the database is first loaded.
+  // included in the db hash. It is typically used at initialization time when
+  // the database is first loaded.
   void for_each_state_item(GetEachCallback fn);
 
   // computes the db hash from scratch.

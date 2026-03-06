@@ -7,7 +7,6 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"

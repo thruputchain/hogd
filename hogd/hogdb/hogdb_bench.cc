@@ -26,7 +26,6 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
@@ -94,10 +93,8 @@ public:
   static std::unique_ptr<Benchmark>
   make_new_storage_benchmark(size_t n, int workers, bool use_nonces);
 
-  Benchmark(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie, int workers,
-            std::vector<Payment> &&ops)
-    : db_(std::move(db)), trie_(std::move(trie)), workers_(workers),
-      ops_(std::move(ops))
+  Benchmark(HogDBDAO db, int workers, std::vector<Payment> &&ops)
+    : db_(std::move(db)), workers_(workers), ops_(std::move(ops))
   {}
   ~Benchmark() = default;
 
@@ -107,7 +104,6 @@ public:
 
 private:
   HogDBDAO db_;
-  std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
   AuthChangeSubscriptionManager subscription_manager_;
@@ -149,12 +145,6 @@ open_ramdb(size_t n)
   return HogDBDAO(RAMDB(std::move(*db)));
 }
 
-std::unique_ptr<MerkleTriePrefix>
-create_merkle()
-{
-  return std::make_unique<MerkleTriePrefix>();
-}
-
 void
 populate_account_balances(HogDBDAO &db, size_t n,
                           int128_t val = kDefaultBalance)
@@ -182,8 +172,8 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
   }
 
   // create the benchmark.
-  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
-                                           workers, std::move(ops));
+  auto bench =
+      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
 
   // set up initial DB state.
   auto ret =
@@ -223,8 +213,8 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
   }
 
   // create the benchmark.
-  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
-                                           workers, std::move(ops));
+  auto bench =
+      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
 
   // set up initial DB state.
   auto ret =
@@ -261,8 +251,8 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
   }
 
   // create the benchmark.
-  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
-                                           workers, std::move(ops));
+  auto bench =
+      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
@@ -292,8 +282,8 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
   }
 
   // create the benchmark.
-  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
-                                           workers, std::move(ops));
+  auto bench =
+      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
@@ -363,10 +353,6 @@ Benchmark::run()
 
   // commit changes to the ramdb.
   auto ret = block.get().commit(workers_).and_then([this] {
-    // force merkle root generation so the cost is included.
-    trie_->generate_top_level_hashes();
-    std::ignore = trie_->get_root_hash();
-
     // persist everything to the database.
     return db_.commit().transform([](uint64_t lsn) {});
   });
@@ -411,19 +397,17 @@ public:
   void run();
 
 private:
-  RCQBenchmark(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie,
-               int num_workers, size_t num_entries, size_t num_queues,
-               bool concurrent, int num_producers)
-    : db_(std::move(db)), trie_(std::move(trie)), workers_(num_workers),
-      num_entries_(num_entries), num_queues_(num_queues),
-      concurrent_(concurrent), num_producers_(num_producers)
+  RCQBenchmark(HogDBDAO db, int num_workers, size_t num_entries,
+               size_t num_queues, bool concurrent, int num_producers)
+    : db_(std::move(db)), workers_(num_workers), num_entries_(num_entries),
+      num_queues_(num_queues), concurrent_(concurrent),
+      num_producers_(num_producers)
   {}
 
   void run_sequential();
   void run_concurrent();
 
   HogDBDAO db_;
-  std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   StorageCostModel cost_model_{StorageCostModel::default_cost_model()};
   AuthChangeSubscriptionManager subscription_manager_;
@@ -447,8 +431,8 @@ RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
   size_t blocks_per_queue = bucket_count(num_entries, num_queues * 1000);
   size_t n = num_queues * (blocks_per_queue + 2);
   auto bench = std::unique_ptr<RCQBenchmark>(
-      new RCQBenchmark(open_ramdb(n), create_merkle(), num_workers, num_entries,
-                       num_queues, concurrent, num_producers));
+      new RCQBenchmark(open_ramdb(n), num_workers, num_entries, num_queues,
+                       concurrent, num_producers));
 
   // Generate queue keys: queue i lives at address i, item slot 0.
   bench->queue_keys_.reserve(num_queues);

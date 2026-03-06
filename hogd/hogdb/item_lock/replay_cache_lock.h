@@ -10,7 +10,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/container/concurrent_set.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"

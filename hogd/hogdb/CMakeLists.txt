@@ -40,7 +40,6 @@ target_link_libraries(
   hogdb
   ramdb
   hogd
-  merkle
   genesis
   storage_cost
 )

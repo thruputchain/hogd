@@ -37,7 +37,6 @@
 #include "hogd/base/span.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
@@ -54,8 +53,7 @@ namespace hogd {
 // tracks a change to a DB item. Each class that implements this concept is an
 // item type.
 template<typename T>
-concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
-                           const ItemKey &key, const T &arg,
+concept is_item = requires(T t, HogDBDAO &db, const ItemKey &key, const T &arg,
                            const StorageCostModel *cost_model) {
   // narrow() is called when a transaction wants to modify its pending change to
   // an item.  Makes the change's reservation at least as restrictive as arg.
@@ -275,8 +273,7 @@ namespace hogd {
 // Deletion's to the same item.
 class Deletion {
 public:
-  static HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
-                                  const ItemKey &key);
+  static HogDBStatus<void> commit(HogDBDAO &db, const ItemKey &key);
   static bool narrow(const Deletion & /*del*/) { return true; }
 };
 
@@ -300,8 +297,7 @@ public:
     : deployed_contract_hash_(deployed_contract_hash)
   {}
 
-  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
-                           const ItemKey &key) const;
+  HogDBStatus<void> commit(HogDBDAO &db, const ItemKey &key) const;
   bool narrow(const DeployedContractData &deployed_contract_data)
   {
     assert(deployed_contract_hash_ ==

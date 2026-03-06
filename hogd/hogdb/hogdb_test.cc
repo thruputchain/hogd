@@ -668,17 +668,17 @@ TEST_F(HogDBTest, DbHashDeltaRetrocausalQueueLockMatchesFullStateHash)
   });
 }
 
-// Test that RCQ block contents are integrity-protected by the Merkle trie.
+// Test that RCQ block contents are integrity-protected by the db hash.
 //
 // The test:
 // 1. Creates an RCQ with entries that span multiple blocks
-// 2. Commits and captures the merkle trie root hash
+// 2. Commits and captures the db hash
 // 3. Directly modifies RCQ block data in ramdb (simulating an attacker)
-// 4. Recomputes the merkle trie root hash
+// 4. Recomputes the db hash
 // 5. Asserts that the root hash changed
 //
 // Expected behavior: Root hash SHOULD change (integrity protected)
-TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
+TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
 {
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -738,12 +738,12 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   ASSERT_GT(original_block.entries.size(), 0);
 
   // Now directly modify block 1's data in ramdb (simulating an attacker)
-  // This bypasses the transaction layer and trie updates
+  // This bypasses the transaction layer and db hash updates
   RetrocausalQueueBlock modified_block = original_block;
   modified_block.entries[0] =
       QueueEntry{255}; // Change first entry from 0 to 255
 
-  // Write the modified block directly to ramdb, bypassing trie
+  // Write the modified block directly to ramdb, bypassing the db hash
   ASSERT_TRUE(db_.write_retrocausal_queue_block(rcq_key, modified_block));
   ASSERT_TRUE(db_.commit());
 
@@ -776,8 +776,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
       << "Modifying RCQ block contents did NOT change the db hash!";
 }
 
-// Test that consuming blocks removes them from the trie
-TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
+// Test that consuming blocks removes them from the db hash
+TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
 {
   // Setup: create contract with enough storage tokens
   Address contract_addr = make_address(kAddress);
@@ -859,8 +859,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
       << "Block 1 should be removed from ramdb after consume";
 }
 
-// Test that deleting an RCQ removes all blocks from the trie
-TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
+// Test that deleting an RCQ removes all blocks from the db hash
+TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
 {
   // Setup: create contract with enough storage tokens
   Address contract_addr = make_address(kAddress);
@@ -947,10 +947,10 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
   }
 }
 
-TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
+TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
 {
   // Test that explicit deletion via request_deletion (DeletionLock path)
-  // properly removes all RCQ blocks from both DAO and merkle trie.
+  // properly removes all RCQ blocks from both DAO and db hash.
 
   // Setup: create contract with enough storage tokens
   Address contract_addr = make_address(kAddress);

@@ -55,9 +55,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     EXPECT_EQ(dao.compute_full_db_hash(), DbHash{});
 
     // add some items to the database
-    // some items that are not in the trie
+    // some items that are not in the db hash
     CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
-    // some items that are in the trie
+    // some items that are in the db hash
 
     RPCContext ctx(std::move(dao), nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{

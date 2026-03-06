@@ -30,6 +30,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
@@ -249,7 +250,7 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     block_id_state_manager_.log_block_close(id);
   }
   // TODO(abelay): rename this to finish_snapshot. It will be called before
-  // either commit_snapshot or abort_snapshot because the merkle root is needed
+  // either commit_snapshot or abort_snapshot because the db hash is needed
   // to create a proposal block.
 
   // TODO(abelay): we could potential free memory here too.

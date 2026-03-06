@@ -391,8 +391,8 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx) const
   updated_metadata.live_entries += committed_element_count_delta_;
 
   if (updated_metadata.live_entries == 0) {
-    // Remove the item from the DAO and trie if it actually existed in the
-    // snapshot. This includes two cases:
+    // Remove the item from the DAO and the db hash if it actually existed in
+    // the snapshot. This includes two cases:
     // (1) base_metadata.live_entries > 0: an existing RCQ was fully consumed.
     // (2) base_was_different_type_: the key held a different type (e.g.
     //     bytestring) that was deleted and replaced with an RCQ in the same
@@ -424,7 +424,7 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx) const
     else if (base_was_different_type_) {
       // The key held a different type (e.g. bytestring) that was deleted and
       // replaced with an RCQ in the same block. Look up the actual type to
-      // remove the correct trie entry.
+      // remove the correct db hash entry.
       auto type_ret = ctx.dao->get_item_type(ctx.key);
       if (!type_ret.has_value()) {
         return type_ret.error();
