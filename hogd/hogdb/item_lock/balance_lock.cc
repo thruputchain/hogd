@@ -9,7 +9,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/close_hash.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -89,8 +89,7 @@ BalanceLock::write_committed_change(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-BalanceLock::apply_close_hash_delta(const LockContext &ctx,
-                                    LtHash16 &hash) const
+BalanceLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
 {
   assert(ctx.key.is_address_balance());
   assert(ctx.dao);

@@ -82,7 +82,7 @@ protected:
       BackgroundCommitWorker(subscription_manager_, nullptr);
 
   template<typename F>
-  void commit_block_expect_close_hash_matches_full(BlockHeight height, F &&fn)
+  void commit_block_expect_db_hash_matches_full(BlockHeight height, F &&fn)
   {
     DbHash base_hash = db_.compute_full_db_hash();
 
@@ -97,7 +97,7 @@ protected:
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
 
-    DbHash incremental_hash = block_tx.get().compute_close_hash(base_hash);
+    DbHash incremental_hash = block_tx.get().compute_db_hash(base_hash);
     ASSERT_TRUE(block_tx.get().commit());
 
     DbHash full_hash = db_.compute_full_db_hash();
@@ -539,12 +539,12 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
   EXPECT_EQ(expected_recipient_balance, *recipient_balance);
 }
 
-TEST_F(HogDBTest, CloseHashDeltaAuthLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaAuthLockMatchesFullStateHash)
 {
   Address addr = make_address(kAddress + 15);
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     AuthDataChangeArgs args{};
     args.new_nonce_config =
         NonceConfig{.accepted_keys = 1, .required_weight = 0};
@@ -554,38 +554,38 @@ TEST_F(HogDBTest, CloseHashDeltaAuthLockMatchesFullStateHash)
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaBalanceLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaBalanceLockMatchesFullStateHash)
 {
   Address addr = make_address(kAddress + 10);
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000));
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_nnint128(
         make_address_balance_item_key(addr), 123,
         std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaNNInt128LockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaNNInt128LockMatchesFullStateHash)
 {
   Address contract_addr = make_address(kAddress + 11);
   setup_contract_address(contract_addr);
   ItemKey key = make_item_key(contract_addr, 1);
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_nnint128(
         key, 321,
         std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaBytestringLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaBytestringLockMatchesFullStateHash)
 {
   Address contract_addr = make_address(kAddress + 12);
   setup_contract_address(contract_addr);
   ItemKey key = make_item_key(contract_addr, 2);
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     constexpr std::array<std::byte, 4> kValue = {std::byte{0x01},
                                                  std::byte{0x02},
                                                  std::byte{0x03},
@@ -596,13 +596,13 @@ TEST_F(HogDBTest, CloseHashDeltaBytestringLockMatchesFullStateHash)
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaDeletionLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaDeletionLockMatchesFullStateHash)
 {
   Address contract_addr = make_address(kAddress + 13);
   setup_contract_address(contract_addr);
   ItemKey key = make_item_key(contract_addr, 3);
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     constexpr std::array<std::byte, 2> kValue = {std::byte{0xAA},
                                                  std::byte{0xBB}};
     ASSERT_TRUE(invoke_tx.request_bytes(
@@ -610,29 +610,29 @@ TEST_F(HogDBTest, CloseHashDeltaDeletionLockMatchesFullStateHash)
         std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 
-  commit_block_expect_close_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_deletion(
         key, std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaNewContractLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaNewContractLockMatchesFullStateHash)
 {
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
       static_cast<HogexecPrecompiledNativeContracts>(1);
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_new_contract(contract));
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaNewDeploymentLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
 {
   Address addr = make_address(kAddress + 14);
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_deploy_contract(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
@@ -640,25 +640,25 @@ TEST_F(HogDBTest, CloseHashDeltaNewDeploymentLockMatchesFullStateHash)
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaReplayCacheLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaReplayCacheLockMatchesFullStateHash)
 {
   Address addr = make_address(kAddress + 16);
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
         addr, Uniquifier(5, 42),
         std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 }
 
-TEST_F(HogDBTest, CloseHashDeltaRetrocausalQueueLockMatchesFullStateHash)
+TEST_F(HogDBTest, DbHashDeltaRetrocausalQueueLockMatchesFullStateHash)
 {
   Address contract_addr = make_address(kAddress + 17);
   setup_contract_address(contract_addr);
   ItemKey rcq_key = make_item_key(contract_addr, 4);
 
-  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     RetrocausalQueueDelta delta;
     delta.insert.added_entries.push_back(QueueEntry{0x11});
     delta.insert.added_entries.push_back(QueueEntry{0x22});
@@ -839,7 +839,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     db_hash_after_consume =
-        block_tx.get().compute_close_hash(db_hash_before_consume);
+        block_tx.get().compute_db_hash(db_hash_before_consume);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -924,7 +924,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     db_hash_after_delete =
-        block_tx.get().compute_close_hash(db_hash_before_delete);
+        block_tx.get().compute_db_hash(db_hash_before_delete);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1007,7 +1007,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     db_hash_after_delete =
-        block_tx.get().compute_close_hash(db_hash_before_delete);
+        block_tx.get().compute_db_hash(db_hash_before_delete);
     ASSERT_TRUE(block_tx.get().commit());
   }
 

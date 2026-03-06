@@ -7,7 +7,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/close_hash.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -63,7 +63,7 @@ DeletionLock::write_committed_change(LockContext const &ctx)
 }
 
 HogDBStatus<void>
-DeletionLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash)
+DeletionLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash)
 {
   assert(ctx.dao);
 
@@ -82,7 +82,7 @@ DeletionLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash)
   }
 
   if (!ctx.key.is_contract_data()) {
-    error("unhandled item key type in DeletionLock::apply_close_hash_delta: {}",
+    error("unhandled item key type in DeletionLock::apply_db_hash_delta: {}",
           std::to_underlying(ctx.key.key_type()));
     return HogDBError(HogDBCode::kInternal);
   }

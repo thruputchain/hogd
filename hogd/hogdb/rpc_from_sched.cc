@@ -124,7 +124,7 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
                             PerThreadARC<BlockTX> *btx,
-                            const DbHash &closed_hash)
+                            const DbHash &db_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -159,7 +159,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   // destroy the block TX.
   ctx_.remove_shutdown_block_tx(id);
 
-  ret = ctx_.update_dbtip(id, block_hash, closed_hash);
+  ret = ctx_.update_dbtip(id, block_hash, db_hash);
   if (!ret)
     return ret.error();
 
@@ -209,13 +209,13 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
   if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  std::optional<DbHash> closed_hash = ctx_.take_closed_hash(id);
-  if (!closed_hash.has_value()) {
+  std::optional<DbHash> db_hash = ctx_.take_db_hash(id);
+  if (!db_hash.has_value()) {
     error("dbsched_commit_snapshot called before close for block {}", id);
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
-  HogDBStatus<void> ret = commit_block(id, block_hash, btx, *closed_hash);
+  HogDBStatus<void> ret = commit_block(id, block_hash, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
@@ -236,7 +236,7 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
   }
 
   if (ret->initiate_shutdown()) {
-    ctx_.clear_closed_hash(id);
+    ctx_.clear_db_hash(id);
     ctx_.remove_shutdown_block_tx(id);
   }
 
@@ -260,10 +260,10 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   }
 
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
-  DbHash closed_hash =
-      btx->get().compute_close_hash(/*base_hash=*/ctx_.get_tip().db_hash);
-  ctx_.cache_closed_hash(id, closed_hash);
-  ret.db_hash() = closed_hash;
+  DbHash db_hash =
+      btx->get().compute_db_hash(/*base_hash=*/ctx_.get_tip().db_hash);
+  ctx_.cache_db_hash(id, db_hash);
+  ret.db_hash() = db_hash;
   co_return ret;
 }
 
@@ -319,7 +319,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // code/metadata/balance initialization in the mempool test infra). We need to
   // account for these writes in the db hash. Thus, we compute the db hash with
   // those items alone in the db, then we use this hash as the base hash when
-  // calling [compute_close_hash()] below.
+  // calling [compute_db_hash()] below.
   DbHash base_hash = ctx_.get_db().compute_full_db_hash();
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
@@ -420,7 +420,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
   itx->commit();
-  DbHash db_hash = r.value()->get().compute_close_hash(base_hash);
+  DbHash db_hash = r.value()->get().compute_db_hash(base_hash);
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   // Since the genesis block is the first block, we set [prev_block_hash] to

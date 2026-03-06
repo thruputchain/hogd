@@ -35,10 +35,10 @@ public:
   {
     return this->get()->write_committed_change(ctx);
   }
-  HogDBStatus<void> apply_close_hash_delta(const LockContext &ctx,
+  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
                                            LtHash16 &hash) const
   {
-    return this->get()->apply_close_hash_delta(ctx, hash);
+    return this->get()->apply_db_hash_delta(ctx, hash);
   }
 };
 

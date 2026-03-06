@@ -7,7 +7,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogdb/close_hash.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -73,8 +73,8 @@ NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-NewDeploymentLock::apply_close_hash_delta(const LockContext &ctx,
-                                          LtHash16 &hash) const
+NewDeploymentLock::apply_db_hash_delta(const LockContext &ctx,
+                                       LtHash16 &hash) const
 {
   assert(ctx.dao);
   auto meta = ctx.dao->read_address_metadata(ctx.key.get_address());

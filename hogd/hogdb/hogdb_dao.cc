@@ -29,7 +29,6 @@
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"

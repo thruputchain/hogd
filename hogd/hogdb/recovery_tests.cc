@@ -46,14 +46,13 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
   ASSERT_TRUE(dir.has_value());
   DbTip initial_tip{};
-  DbHash closed_hash;
+  DbHash db_hash;
   {
     DBStatus<std::unique_ptr<Database>> db =
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
-    DbHash db_hash = dao.compute_full_db_hash();
-    EXPECT_EQ(db_hash, DbHash{});
+    EXPECT_EQ(dao.compute_full_db_hash(), DbHash{});
 
     // add some items to the database
     // some items that are not in the trie
@@ -110,12 +109,11 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
     auto *btx = ctx.get_block_tx(1, false);
     assert(btx != nullptr);
-    // Compute close hash before commit(): commit() destructively drains lock
+    // Compute db hash before commit(): commit() destructively drains lock
     // maps.
-    closed_hash = btx->get().compute_close_hash(ctx.get_tip().db_hash);
+    db_hash = btx->get().compute_db_hash(ctx.get_tip().db_hash);
     ASSERT_TRUE((btx->get()).commit().has_value());
-    ASSERT_TRUE(
-        ctx.update_dbtip(1, /*block_hash=*/{}, closed_hash).has_value());
+    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}, db_hash).has_value());
 
     ASSERT_TRUE(btx->initiate_shutdown());
     ctx.remove_shutdown_block_tx(1);
@@ -126,7 +124,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     EXPECT_EQ(*lsn, 1UL);
 
     initial_tip = ctx.get_tip();
-    EXPECT_EQ(closed_hash, ctx.get_db().compute_full_db_hash());
+    EXPECT_EQ(db_hash, ctx.get_db().compute_full_db_hash());
   }
 
   // now reload the database
@@ -134,8 +132,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
       Database::open(dir->get_path(), kDefaultHeapSize, 0);
   ASSERT_TRUE(db);
   auto dao = HogDBDAO(RAMDB(std::move(*db)));
-  EXPECT_EQ(closed_hash, dao.compute_full_db_hash());
-  ASSERT_EQ(closed_hash, initial_tip.db_hash);
+  EXPECT_EQ(db_hash, dao.compute_full_db_hash());
+  ASSERT_EQ(db_hash, initial_tip.db_hash);
 
   auto bal = dao.read_address_balance(ContractAddress{0});
   ASSERT_TRUE(bal.has_value());

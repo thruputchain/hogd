@@ -46,7 +46,7 @@ concept item_lock_unsized =
     requires(Lock const &lock, const LockContext &ctx) {
       { lock.write_committed_change(ctx) } -> std::same_as<HogDBStatus<void>>;
       {
-        lock.apply_close_hash_delta(ctx, std::declval<LtHash16 &>())
+        lock.apply_db_hash_delta(ctx, std::declval<LtHash16 &>())
       } -> std::same_as<HogDBStatus<void>>;
     };
 

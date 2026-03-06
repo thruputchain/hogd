@@ -15,7 +15,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/close_hash.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -494,12 +494,12 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx)
 }
 
 HogDBStatus<void>
-RetrocausalQueueLock::apply_close_hash_delta(const LockContext &ctx,
-                                             LtHash16 &hash) const
+RetrocausalQueueLock::apply_db_hash_delta(const LockContext &ctx,
+                                          LtHash16 &hash) const
 {
   assert(ctx.dao);
 
-  // Mirror write_committed_change() to keep the incremental close hash
+  // Mirror write_committed_change() to keep the incremental db hash
   // consistent with the full hash from iterating DB state.
   RetrocausalQueueMetadata const &base_metadata = *get_meta(&ctx).value();
   RetrocausalQueueMetadata updated_metadata = base_metadata;
@@ -540,7 +540,7 @@ RetrocausalQueueLock::apply_close_hash_delta(const LockContext &ctx,
     }
     if (!consumed_set.empty()) {
       // In proposal/validation mode, malformed current_block_consumed can
-      // survive until block close. Keep close-hash computation non-fatal here
+      // survive until block close. Keep db-hash computation non-fatal here
       // and let write_committed_change() reject the block with an error.
       return {};
     }

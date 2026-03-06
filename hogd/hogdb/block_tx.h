@@ -75,7 +75,7 @@ public:
   HogDBStatus<std::optional<QueueEntry>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
-  DbHash compute_close_hash(const DbHash &base_hash);
+  DbHash compute_db_hash(const DbHash &base_hash);
 
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>

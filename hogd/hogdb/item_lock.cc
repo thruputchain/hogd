@@ -531,7 +531,7 @@ ItemLock::write_committed_change(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-ItemLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+ItemLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
 {
   CHECK(is_finalized());
   CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
@@ -545,7 +545,7 @@ ItemLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash) const
           panic("bad finalized state");
         }
         else {
-          return lock.apply_close_hash_delta(ctx, hash);
+          return lock.apply_db_hash_delta(ctx, hash);
         }
       },
       lock_contents_);

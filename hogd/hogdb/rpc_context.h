@@ -112,28 +112,28 @@ public:
   HogDBStatus<void> update_dbtip(BlockTXID bid, BlockHash block_hash,
                                  const DbHash &db_hash);
 
-  void cache_closed_hash(BlockTXID bid, const DbHash &db_hash)
+  void cache_db_hash(BlockTXID bid, const DbHash &db_hash)
   {
     std::scoped_lock g(lock_);
-    closed_hashes_[bid] = db_hash;
+    db_hashes_[bid] = db_hash;
   }
 
-  std::optional<DbHash> take_closed_hash(BlockTXID bid)
+  std::optional<DbHash> take_db_hash(BlockTXID bid)
   {
     std::scoped_lock g(lock_);
-    auto it = closed_hashes_.find(bid);
-    if (it == closed_hashes_.end()) {
+    auto it = db_hashes_.find(bid);
+    if (it == db_hashes_.end()) {
       return std::nullopt;
     }
     DbHash out = it->second;
-    closed_hashes_.erase(it);
+    db_hashes_.erase(it);
     return out;
   }
 
-  void clear_closed_hash(BlockTXID bid)
+  void clear_db_hash(BlockTXID bid)
   {
     std::scoped_lock g(lock_);
-    closed_hashes_.erase(bid);
+    db_hashes_.erase(bid);
   }
 
   const auto &get_sched_db_client() { return sched_db_client_; }
@@ -172,7 +172,7 @@ private:
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
   // closed snapshot hashes waiting for commit.
-  std::map<BlockTXID, DbHash> closed_hashes_;
+  std::map<BlockTXID, DbHash> db_hashes_;
 
   // External serivces that may subscribe to changes in the database.
   std::shared_ptr<sched_db_client_t> sched_db_client_;

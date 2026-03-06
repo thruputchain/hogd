@@ -300,7 +300,7 @@ BlockTX::commit(WorkerPool &pool)
 }
 
 DbHash
-BlockTX::compute_close_hash(const DbHash &base_hash)
+BlockTX::compute_db_hash(const DbHash &base_hash)
 {
   LtHash16 hash = lthash16_from_db_hash(base_hash);
   std::mutex hash_lock;
@@ -310,7 +310,7 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
       return;
     }
     std::scoped_lock g(hash_lock);
-    auto ret = v.second.apply_close_hash_delta(
+    auto ret = v.second.apply_db_hash_delta(
         LockContext(&db_, block_height_, v.first, &cost_model_), hash);
     CHECK(ret.has_value());
   });
@@ -321,7 +321,7 @@ BlockTX::compute_close_hash(const DbHash &base_hash)
           return;
         }
         std::scoped_lock g(hash_lock);
-        auto ret = v.second.apply_close_hash_delta(
+        auto ret = v.second.apply_db_hash_delta(
             LockContext(&db_, block_height_,
                         make_address_balance_item_key(v.first), &cost_model_),
             hash);

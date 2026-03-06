@@ -29,7 +29,7 @@ public:
                          const StorageCostModel *cost_model);
 
   HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_close_hash_delta(const LockContext &ctx,
+  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
                                            LtHash16 &hash) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
