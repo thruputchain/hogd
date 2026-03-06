@@ -929,15 +929,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  // if (truncate_db_hash_inline(db_tip.db_hash) != nomination.prev_block_hash)
-  // {
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
-    co_await decrement_num_validations_in_progress();
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-  if (nomination.prev_block_hash != last_committed_block_.block_hash ||
-      nomination.block_height != last_committed_block_.height + 1) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
