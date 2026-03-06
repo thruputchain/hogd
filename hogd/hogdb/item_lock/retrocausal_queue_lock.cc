@@ -556,7 +556,8 @@ RetrocausalQueueLock::apply_close_hash_delta(const LockContext &ctx,
     std::ranges::sort(new_block.entries);
     new_block.block_number = base_metadata.max_live_block_num + 1;
 
-    auto block_key = make_retrocausal_queue_block_key(ctx.key, new_block.block_number);
+    auto block_key =
+        make_retrocausal_queue_block_key(ctx.key, new_block.block_number);
     auto block_key_span = std::as_bytes(std::span(block_key));
     auto block_buf = x23::serialize(new_block);
     replace_known_item(hash, *ctx.dao, block_key_span, 0,

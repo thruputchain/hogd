@@ -63,8 +63,7 @@ DeletionLock::write_committed_change(LockContext const &ctx)
 }
 
 HogDBStatus<void>
-DeletionLock::apply_close_hash_delta(const LockContext &ctx,
-                                     LtHash16 &hash) 
+DeletionLock::apply_close_hash_delta(const LockContext &ctx, LtHash16 &hash)
 {
   assert(ctx.dao);
 

@@ -10,8 +10,6 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
-#include "x23/vec.h"
-
 namespace hogd {
 
 HogDBStatus<int128_t>
@@ -35,7 +33,7 @@ BytestringLock::write_committed_change(LockContext const &ctx) const
 
 HogDBStatus<void>
 BytestringLock::apply_close_hash_delta(const LockContext &ctx,
-                                       LtHash16 &hash) 
+                                       LtHash16 &hash) const
 {
   assert(ctx.dao);
   auto key = make_contract_data_db_key(ctx.key.as_bytes());
@@ -43,9 +41,7 @@ BytestringLock::apply_close_hash_delta(const LockContext &ctx,
   if (raw.has_value()) {
     lthash_remove_item(hash, key, kBytes, *raw);
   }
-  x23::Vec<std::byte> marker;
-  marker.push_back(std::byte{0x42});
-  lthash_add_item(hash, key, kBytes, marker);
+  lthash_add_item(hash, key, kBytes, std::as_bytes(std::span(bytestring_)));
   return {};
 }
 
