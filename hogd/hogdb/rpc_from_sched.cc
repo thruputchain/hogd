@@ -123,8 +123,7 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
-                            PerThreadARC<BlockTX> *btx,
-                            const DbHash &db_hash)
+                            PerThreadARC<BlockTX> *btx, const DbHash &db_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {

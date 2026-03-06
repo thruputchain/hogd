@@ -167,7 +167,7 @@ public:
 
   HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
   HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                           LtHash16 &hash) const;
+                                        LtHash16 &hash) const;
 
   // For balance items
   // Only should be called after all txs in a block are done.

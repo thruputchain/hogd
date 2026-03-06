@@ -29,7 +29,7 @@ public:
                          const StorageCostModel *cost_model) const;
   HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
   HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                           LtHash16 &hash) const;
+                                        LtHash16 &hash) const;
 
 private:
   const DeployedContractHash deployed_contract_hash_;

@@ -310,8 +310,9 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
       return;
     }
     std::scoped_lock g(hash_lock);
-    auto ret = v.second.apply_db_hash_delta(
-        LockContext(&db_, block_height_, v.first, &cost_model_), hash);
+    auto ret = v.second.apply_db_hash_delta(LockContext(&db_, block_height_,
+                                                        v.first, &cost_model_),
+                                            hash);
     CHECK(ret.has_value());
   });
 
