@@ -2625,5 +2625,932 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
   advance_block();
 }
 
+// ---------------------------------------------------------------------------
+// Overwrite-and-recreate tests
+// ---------------------------------------------------------------------------
+
+// Build a multi-block RCQ, partially consume, overwrite with a bytestring,
+// recreate the queue in a later block, then consume and verify only the
+// newly inserted entry is visible.
+TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
+{
+  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_recreate");
+
+  // Block 1: Insert 3 entries.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta({make_rcq_entry({1}),
+                                         make_rcq_entry({2}),
+                                         make_rcq_entry({3})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert 2 more entries (now two blocks of data).
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({4}), make_rcq_entry({5})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Partially consume — fully consume block 1, consume 1 entry from
+  // block 2.  Leaves 1 entry ({5}) unconsumed.
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_rcq_consume_delta(1, 1, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Sanity-check partially consumed state.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 1);
+  ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number, 1);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+
+  // Block 4: Overwrite the partially-consumed RCQ with a bytestring.
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_bytestring_delta("overwritten"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 5: Delete bytestring, then recreate the RCQ with a single entry.
+  auto tx_b5 = make_new_per_tx_db_proxy();
+  tx_b5.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b5.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b5.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify: only {99} is visible, no ghost entries from the old queue.
+  // RCQ block numbers are per-key counters (max_live_block_num + 1 for each
+  // new block of entries), so the recreated queue starts at block 1.
+  queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 0);
+  ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number, 0);
+
+  // Block 1 of the recreated queue should contain only {99}.
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  // No ghost blocks should survive from the old queue past
+  // max_live_block_num.
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+
+  // Block 6: Consume {99} — fully consume the recreated queue.
+  auto tx_b6 = make_new_per_tx_db_proxy();
+  tx_b6.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b6.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b6.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
+// Same scenario but the partial consume and bytestring overwrite happen in
+// the same transaction (different subtransactions) within a single block.
+TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
+{
+  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_consume_ow_same");
+
+  // Block 1: Insert 3 entries.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta({make_rcq_entry({1}),
+                                         make_rcq_entry({2}),
+                                         make_rcq_entry({3})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert 2 more entries.
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({4}), make_rcq_entry({5})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Single TX — sub1 partially consumes, sub2 overwrites with
+  // bytestring.  Tests type transition after a consume within the same block.
+  auto tx_b3 = make_new_per_tx_db_proxy();
+
+  tx_b3.add_delta(key, make_rcq_consume_delta(1, 1, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b3.add_delta(key, make_bytestring_delta("overwritten"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 4: Delete bytestring, recreate RCQ with {99}.
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify only {99} is visible.  Recreated queue starts at block 1.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 0);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+
+  // Block 5: Consume the single entry.
+  auto tx_b5 = make_new_per_tx_db_proxy();
+  tx_b5.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b5.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
+// Overwrite a partially-consumed RCQ, then recreate with multiple entries
+// across two blocks.  Verify old data is gone and the recreated queue can
+// itself be partially consumed.
+TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_multi");
+
+  // Block 1: Insert {1}, {2}.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({1}), make_rcq_entry({2})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert {3}.
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({3})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Partially consume (1 entry from block 1).
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_rcq_consume_delta(0, 1, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 4: Overwrite with bytestring.
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_bytestring_delta("dead"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 5: Delete + recreate RCQ with 3 entries.
+  auto tx_b5 = make_new_per_tx_db_proxy();
+  tx_b5.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b5.add_delta(key,
+                  make_rcq_insert_delta({make_rcq_entry({10}),
+                                         make_rcq_entry({20}),
+                                         make_rcq_entry({30})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b5.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 6: Add another entry to the recreated queue in a second block.
+  auto tx_b6 = make_new_per_tx_db_proxy();
+  tx_b6.add_delta(key, make_rcq_insert_delta({make_rcq_entry({40})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b6.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b6.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify: 4 entries across RCQ blocks 1 and 2, nothing from the old queue.
+  // Recreated queue starts numbering from block 1.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 4);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 2);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 0);
+
+  auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 1);
+  ASSERT_TRUE(b1.has_value());
+  ASSERT_TRUE(b1.value().has_value());
+  ASSERT_EQ(b1.value()->block_number, 1);
+  ASSERT_EQ(b1.value()->entries.size(), 3);
+  ASSERT_EQ(b1.value()->entries[0], make_rcq_entry({10}));
+  ASSERT_EQ(b1.value()->entries[1], make_rcq_entry({20}));
+  ASSERT_EQ(b1.value()->entries[2], make_rcq_entry({30}));
+
+  auto b2 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
+                                                            key, 2);
+  ASSERT_TRUE(b2.has_value());
+  ASSERT_TRUE(b2.value().has_value());
+  ASSERT_EQ(b2.value()->block_number, 2);
+  ASSERT_EQ(b2.value()->entries.size(), 1);
+  ASSERT_EQ(b2.value()->entries[0], make_rcq_entry({40}));
+
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      3);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+
+  // Block 7: Partially consume the recreated queue — consume RCQ block 1 only.
+  auto tx_b7 = make_new_per_tx_db_proxy();
+  tx_b7.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b7.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b7.commit_transaction({}).has_value());
+  advance_block();
+
+  // Only RCQ block 2 entry {40} should remain.
+  queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 1);
+
+  // Block 1 was pruned; query from block 2 to find the remaining entry.
+  auto remaining =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(remaining.has_value());
+  ASSERT_TRUE(remaining.value().has_value());
+  ASSERT_EQ(remaining.value()->block_number, 2);
+  ASSERT_EQ(remaining.value()->entries.size(), 1);
+  ASSERT_EQ(remaining.value()->entries[0], make_rcq_entry({40}));
+}
+
+// Same pattern as OverwritePartiallyConsumedRCQThenRecreate but overwriting
+// with NNInt instead of bytestring.  Verifies the cleanup bug is systematic
+// across all non-delete lock types.
+TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
+{
+  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_nnint");
+
+  // Block 1: Insert {1}, {2}, {3}.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta({make_rcq_entry({1}),
+                                         make_rcq_entry({2}),
+                                         make_rcq_entry({3})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert {4}, {5}.
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({4}), make_rcq_entry({5})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Partially consume — fully consume block 1, consume 1 from block 2.
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_rcq_consume_delta(1, 1, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 4: Overwrite with NNInt.
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_nnint_set_add_delta(0, 100),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 5: Delete NNInt, then recreate RCQ with {99}.
+  auto tx_b5 = make_new_per_tx_db_proxy();
+  tx_b5.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b5.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b5.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify: only {99} visible, no ghost blocks from old queue.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+  ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 0);
+  ASSERT_EQ(queue->metadata().consume_state.partial_consumed_number, 0);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+
+  // Block 6: Consume {99}.
+  auto tx_b6 = make_new_per_tx_db_proxy();
+  tx_b6.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b6.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b6.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
+// Overwrite RCQ with bytestring, then delete the bytestring.  The deletion
+// sees a bytestring (not RCQ), so it never calls cleanup_on_deletion() for the
+// orphaned RCQ blocks — they persist permanently.
+TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_bs_del");
+
+  // Block 1: Insert {1}, {2}.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({1}), make_rcq_entry({2})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Overwrite with bytestring "dead".
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key, make_bytestring_delta("dead"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Delete the bytestring (key is now empty).
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Key should be fully gone now.
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+
+  // Block 4: Insert {99} into a fresh RCQ (no delete needed, key is empty).
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify: only {99} visible — ghost blocks from block 1 should be gone.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+}
+
+// Same as above but with two RCQ blocks before overwrite.  The recreated RCQ's
+// block 1 overwrites ghost block 1, but ghost block 2 persists because the
+// bytestring delete path doesn't know about RCQ blocks.
+TEST_F(DirectRCQTests,
+       OverwriteMultiBlockRCQWithBytestringDeleteLeavesGhostBlocks)
+{
+  GTEST_SKIP() << "RCQ blocks not cleaned up on type change";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_bs_del2");
+
+  // Block 1: Insert {1}, {2} (RCQ block 1).
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({1}), make_rcq_entry({2})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert {3} (RCQ block 2).
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({3})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Overwrite with bytestring (orphans RCQ blocks 1 and 2).
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_bytestring_delta("dead"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 4: Delete the bytestring.
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+
+  // Block 5: Insert {99} into fresh RCQ (RCQ block 1 — overwrites ghost 1).
+  auto tx_b5 = make_new_per_tx_db_proxy();
+  tx_b5.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b5.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify: only {99} visible.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  // Ghost block 2 from the old queue should be gone.
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+}
+
+// Regression test: Bytestring → (delete) → RCQ with entries in the same TX.
+// The old bytestring shares the same DB key slot as the RCQ metadata, so
+// write_retrocausal_queue_metadata() implicitly overwrites it.  This works
+// because bytestrings have no side data (unlike RCQ blocks).
+TEST_F(DirectRCQTests, BytestringToRCQWithEntriesDoesNotCleanOldBytestring)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_bs_to_rcq");
+
+  // Block 1: Write bytestring "hello".
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key, make_bytestring_delta("hello"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Same TX — sub1: delete, sub2: RCQ insert {10}, {20}.
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b2.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({10}), make_rcq_entry({20})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify queue metadata is correct.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 2);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->entries.size(), 2);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({10}));
+  ASSERT_EQ(block.value()->entries[1], make_rcq_entry({20}));
+
+  // Consume the queue fully — key should disappear cleanly.
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
+// Same as above but with NNInt instead of bytestring.  NNInt also shares the
+// same DB key slot, so the overwrite is implicit.
+TEST_F(DirectRCQTests, NNIntToRCQWithEntriesOverwritesCleanly)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_nnint_to_rcq");
+
+  // Block 1: Write NNInt value 42.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key, make_nnint_set_add_delta(0, 42),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify NNInt is stored.
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+
+  // Block 2: Same TX — sub1: delete, sub2: RCQ insert {10}, {20}.
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b2.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({10}), make_rcq_entry({20})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify queue metadata — should be RCQ, not NNInt.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 2);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->entries.size(), 2);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({10}));
+  ASSERT_EQ(block.value()->entries[1], make_rcq_entry({20}));
+
+  // Consume fully — key should disappear cleanly.
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
+// Positive/sanity test: verify the explicit DELETE path works correctly for
+// RCQ cleanup.  This should pass and serves as a baseline.
+TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_del_cleanup");
+
+  // Block 1: Insert {1}, {2}, {3}.
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta({make_rcq_entry({1}),
+                                         make_rcq_entry({2}),
+                                         make_rcq_entry({3})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert {4}, {5} (second block).
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({4}), make_rcq_entry({5})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Explicit delete.
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Key should be gone.
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+
+  // Old RCQ blocks 1 and 2 should be cleaned up.
+  auto ghost1 =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(ghost1.has_value());
+  ASSERT_FALSE(ghost1.value().has_value());
+
+  auto ghost2 =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(ghost2.has_value());
+  ASSERT_FALSE(ghost2.value().has_value());
+
+  // Block 4: Recreate with {99}.
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify only {99}.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+}
+
+// Stress test: two full overwrite cycles (RCQ → bytestring → RCQ → bytestring
+// → RCQ) to verify ghost blocks accumulate across cycles.
+TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
+{
+  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_double_ow");
+
+  // Block 1: Insert {1}, {2} into RCQ (RCQ block 1).
+  auto tx_b1 = make_new_per_tx_db_proxy();
+  tx_b1.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({1}), make_rcq_entry({2})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx_b1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Overwrite with bytestring (orphans RCQ block 1).
+  auto tx_b2 = make_new_per_tx_db_proxy();
+  tx_b2.add_delta(key, make_bytestring_delta("cycle1"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Delete + insert {10}, {20} into RCQ (RCQ block 1).
+  auto tx_b3 = make_new_per_tx_db_proxy();
+  tx_b3.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b3.add_delta(key,
+                  make_rcq_insert_delta(
+                      {make_rcq_entry({10}), make_rcq_entry({20})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 4: Insert {30} into RCQ (RCQ block 2).
+  auto tx_b4 = make_new_per_tx_db_proxy();
+  tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({30})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b4.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 5: Overwrite with bytestring again (orphans RCQ blocks 1+2).
+  auto tx_b5 = make_new_per_tx_db_proxy();
+  tx_b5.add_delta(key, make_bytestring_delta("cycle2"),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b5.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b5.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 6: Delete + insert {99} into RCQ (RCQ block 1).
+  auto tx_b6 = make_new_per_tx_db_proxy();
+  tx_b6.add_delta(key, make_delete_delta(),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b6.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  tx_b6.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b6.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b6.commit_transaction({}).has_value());
+  advance_block();
+
+  // Verify: only {99} visible.
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  ASSERT_EQ(queue->metadata().max_live_block_num, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->block_number, 1);
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  ASSERT_EQ(block.value()->entries[0], make_rcq_entry({99}));
+
+  // Ghost block 2 from second cycle should be gone.
+  auto no_more =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      2);
+  ASSERT_TRUE(no_more.has_value());
+  ASSERT_FALSE(no_more.value().has_value());
+
+  // Consume {99} — queue should disappear cleanly.
+  auto tx_b7 = make_new_per_tx_db_proxy();
+  tx_b7.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx_b7.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx_b7.commit_transaction({}).has_value());
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
