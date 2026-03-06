@@ -88,6 +88,40 @@ protected:
   AuthChangeSubscriptionManager subscription_manager_;
   BackgroundCommitWorker background_commit_worker_ =
       BackgroundCommitWorker(subscription_manager_, nullptr);
+
+  template<typename F>
+  void commit_block_expect_close_hash_matches_full(BlockHeight height, F &&fn)
+  {
+    DbHash base_hash;
+    db_.load_hash(base_hash);
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    fn(invoke_tx);
+
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+
+    DbHash incremental_hash = block_tx.get().compute_close_hash(base_hash);
+    ASSERT_TRUE(block_tx.get().commit());
+
+    DbHash full_hash;
+    db_.load_hash(full_hash);
+    EXPECT_EQ(incremental_hash, full_hash);
+  }
+
+  void setup_contract_address(const Address &addr)
+  {
+    ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+    ASSERT_TRUE(db_.write_address_metadata(
+        addr,
+        DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
+                             .contract_size = 10}));
+  }
 };
 
 namespace {
@@ -520,6 +554,135 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
                                         kSecondTransferAmount -
                                         cost_model_.get_balance_cost();
   EXPECT_EQ(expected_recipient_balance, *recipient_balance);
+}
+
+TEST_F(HogDBTest, CloseHashDeltaAuthLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 15);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs args{};
+    args.new_nonce_config =
+        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, args,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaBalanceLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 10);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000));
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        make_address_balance_item_key(addr), 123,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaNNInt128LockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 11);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 1);
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        key, 321,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaBytestringLockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 12);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 2);
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    constexpr std::array<std::byte, 4> kValue = {std::byte{0x01},
+                                                 std::byte{0x02},
+                                                 std::byte{0x03},
+                                                 std::byte{0x04}};
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        key, std::span(kValue),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaDeletionLockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 13);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 3);
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    constexpr std::array<std::byte, 2> kValue = {std::byte{0xAA},
+                                                 std::byte{0xBB}};
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        key, std::span(kValue),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  commit_block_expect_close_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        key, std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaNewContractLockMatchesFullStateHash)
+{
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(1);
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_new_contract(contract));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaNewDeploymentLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 14);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deploy_contract(
+        addr,
+        DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
+                             .contract_size = 15}));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaReplayCacheLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 16);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(5, 42),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, CloseHashDeltaRetrocausalQueueLockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 17);
+  setup_contract_address(contract_addr);
+  ItemKey rcq_key = make_item_key(contract_addr, 4);
+
+  commit_block_expect_close_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x11});
+    delta.insert.added_entries.push_back(QueueEntry{0x22});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
 }
 
 // Test that RCQ block contents are integrity-protected by the Merkle trie.
