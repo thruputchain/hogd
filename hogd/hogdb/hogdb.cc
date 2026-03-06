@@ -18,21 +18,21 @@
 #include <utility>
 
 // XDR headers
-#include "hogd/base/coropoll.h"
-#include "hogd/base/rpc_client.h"
-#include "hogd/crypto/lthash16.h"
-#include "hogd/hogdb/rpc_from_auth.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
@@ -71,26 +71,6 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
       make_rpc_client<SchedDb1>(host_port, cp, true)());
 }
 
-DbHash
-compute_full_state_hash(HogDBDAO &db)
-{
-  LtHash16 hash;
-  std::mutex lock;
-  db.for_each_state_item([&hash, &lock](std::span<const std::byte> key,
-                                        uint8_t type,
-                                        std::span<const std::byte> value) {
-    x23::Vec<std::byte> element;
-    element.reserve(key.size() + 1 + value.size());
-    element.append(key.begin(), key.end());
-    element.push_back(static_cast<std::byte>(type));
-    element.append(value.begin(), value.end());
-
-    std::scoped_lock guard(lock);
-    hash.add(element);
-  });
-  return db_hash_from_lthash16(hash);
-}
-
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
            const std::string *coordinator_addr, uint16_t exec_port,
@@ -115,6 +95,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
+  DbHash db_hash = db_tmp.compute_full_db_hash();
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
       sched_db_client;
@@ -132,8 +113,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
-    DbHash state_hash = compute_full_state_hash(ctx.get_db());
-    if (state_hash != tip->db_hash) {
+    if (db_hash != tip->db_hash) {
       critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
@@ -147,6 +127,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     }
   }
   else {
+    CHECK_EQ(db_hash, DbHash{});
     ctx.get_tip().height = 0;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }

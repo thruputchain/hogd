@@ -123,8 +123,8 @@ HogDBDAO::load_trie(MerkleTriePrefix &trie)
   trie.generate_top_level_hashes();
 }
 
-void
-HogDBDAO::load_hash(DbHash &db_hash)
+DbHash
+HogDBDAO::compute_full_db_hash()
 {
   LtHash16 hash;
   std::mutex lock;
@@ -134,7 +134,7 @@ HogDBDAO::load_hash(DbHash &db_hash)
     std::scoped_lock guard(lock);
     lthash_add_item(hash, key, type, value);
   });
-  db_hash = db_hash_from_lthash16(hash);
+  return db_hash_from_lthash16(hash);
 }
 
 void

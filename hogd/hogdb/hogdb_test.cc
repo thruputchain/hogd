@@ -92,8 +92,7 @@ protected:
   template<typename F>
   void commit_block_expect_close_hash_matches_full(BlockHeight height, F &&fn)
   {
-    DbHash base_hash;
-    db_.load_hash(base_hash);
+    DbHash base_hash = db_.compute_full_db_hash();
 
     PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
                                    height);
@@ -109,8 +108,7 @@ protected:
     DbHash incremental_hash = block_tx.get().compute_close_hash(base_hash);
     ASSERT_TRUE(block_tx.get().commit());
 
-    DbHash full_hash;
-    db_.load_hash(full_hash);
+    DbHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash);
   }
 
@@ -836,8 +834,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_consume;
-  db_.load_hash(db_hash_before_consume);
+  DbHash db_hash_before_consume = db_.compute_full_db_hash();
 
   // Consume the first block completely
   DbHash db_hash_after_consume;
@@ -866,8 +863,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash;
-  db_.load_hash(full_db_hash);
+  DbHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_consume, full_db_hash);
 
   // Verify db hash changed after consuming block 1
@@ -921,8 +917,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_delete;
-  db_.load_hash(db_hash_before_delete);
+  DbHash db_hash_before_delete = db_.compute_full_db_hash();
 
   // Delete the entire RCQ by consuming all entries
   DbHash db_hash_after_delete;
@@ -953,8 +948,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash;
-  db_.load_hash(full_db_hash);
+  DbHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
   // Verify db hash changed after deleting all blocks
@@ -1013,8 +1007,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  DbHash db_hash_before_delete;
-  db_.load_hash(db_hash_before_delete);
+  DbHash db_hash_before_delete = db_.compute_full_db_hash();
 
   // Explicitly delete the RCQ using request_deletion (goes through
   // DeletionLock)
@@ -1038,8 +1031,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
 
   // Verify incremental db hash produced by the block tx matches the db hash
   // generated from scratch
-  DbHash full_db_hash;
-  db_.load_hash(full_db_hash);
+  DbHash full_db_hash = db_.compute_full_db_hash();
   EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
   // Verify db hash changed after deleting all blocks

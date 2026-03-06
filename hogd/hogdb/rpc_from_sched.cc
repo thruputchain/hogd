@@ -62,20 +62,6 @@ to_db_result(HogDBStatus<T> ret)
   return DbSchedResult::DbSchedResultOK;
 }
 
-DbHash
-compute_full_state_hash(HogDBDAO &db)
-{
-  LtHash16 hash;
-  std::mutex lock;
-  db.for_each_state_item([&hash, &lock](std::span<const std::byte> key,
-                                        uint8_t type,
-                                        std::span<const std::byte> value) {
-    std::scoped_lock guard(lock);
-    lthash_add_item(hash, key, type, value);
-  });
-  return db_hash_from_lthash16(hash);
-}
-
 } // namespace
 
 x23::Async<HogAgeResult>
@@ -332,7 +318,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // account for these writes in the db hash. Thus, we compute the db hash with
   // those items alone in the db, then we use this hash as the base hash when
   // calling [compute_close_hash()] below.
-  DbHash base_hash = compute_full_state_hash(ctx_.get_db());
+  DbHash base_hash = ctx_.get_db().compute_full_db_hash();
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
@@ -448,7 +434,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
                                 r.value(), db_hash));
   // Just to be safe, we recompute the db hash from scratch and ensure that
   // [db_hash] is equal to it.
-  DbHash full_hash = compute_full_state_hash(ctx_.get_db());
+  DbHash full_hash = ctx_.get_db().compute_full_db_hash();
   CHECK_EQ(full_hash, db_hash);
   co_return ret;
 }

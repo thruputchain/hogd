@@ -24,24 +24,24 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "db_sched.hh"
-#include "hogd/base/bits.h"
-#include "hogd/base/os.h"
-#include "hogd/base/worker_pool.h"
-#include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/invariant.h"
-#include "hogd/hogdb/invariant_hog_conservation.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/bits.h"
+#include "hogd/base/os.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/invariant.h"
+#include "hogd/hogdb/invariant_hog_conservation.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
 
@@ -296,7 +296,8 @@ public:
   // loads the trie from the database.
   // Recomputes the top-level hashes.
   void load_trie(MerkleTriePrefix &trie);
-  void load_hash(DbHash &db_hash);
+  // computes the db hash from scratch.
+  DbHash compute_full_db_hash();
 
   //
   // Global Operations
