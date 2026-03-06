@@ -37,11 +37,8 @@ BytestringLock::apply_db_hash_delta(const LockContext &ctx,
 {
   assert(ctx.dao);
   auto key = make_contract_data_db_key(ctx.key.as_bytes());
-  auto raw = ctx.dao->read_bytes(ctx.key);
-  if (raw.has_value()) {
-    lthash_remove_item(hash, key, kBytes, *raw);
-  }
-  lthash_add_item(hash, key, kBytes, std::as_bytes(std::span(bytestring_)));
+  replace_known_item(hash, *ctx.dao, key, kBytes,
+                     std::as_bytes(std::span(bytestring_)));
   return {};
 }
 

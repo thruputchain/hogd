@@ -96,17 +96,10 @@ BalanceLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
 
   auto key =
       make_address_key_with_prefix(ctx.key.get_address(), Prefix::kBalance);
-  auto before = ctx.dao->read_address_balance(ctx.key.get_address());
-  if (before.has_value()) {
-    int128_t prev = cpu_to_le(*before);
-    lthash_remove_item(hash, std::as_bytes(std::span(key)), kNNInt128,
-                       byte_view(prev));
-  }
-
   int128_t after = build_result(ctx);
   int128_t encoded_after = cpu_to_le(after);
-  lthash_add_item(hash, std::as_bytes(std::span(key)), kNNInt128,
-                  byte_view(encoded_after));
+  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), kNNInt128,
+                     byte_view(encoded_after));
   return {};
 }
 

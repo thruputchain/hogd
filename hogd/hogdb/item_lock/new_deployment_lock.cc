@@ -77,19 +77,13 @@ NewDeploymentLock::apply_db_hash_delta(const LockContext &ctx,
                                        LtHash16 &hash) const
 {
   assert(ctx.dao);
-  auto meta = ctx.dao->read_address_metadata(ctx.key.get_address());
   auto key = make_address_key_with_prefix(ctx.key.get_address(),
                                           Prefix::kAddressMetadata);
-  if (meta.has_value()) {
-    auto old = x23::serialize(*meta);
-    lthash_remove_item(hash, std::as_bytes(std::span(key)), 0,
-                       std::as_bytes(std::span(old)));
-  }
   // The [HogAge] struct is not part of the blockchain state, just the per-node
   // state. Thus, we only hash the deployed contract metadata row.
   auto serialized = x23::serialize(deployed_contract_hash_);
-  lthash_add_item(hash, std::as_bytes(std::span(key)), 0,
-                  std::as_bytes(std::span(serialized)));
+  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), 0,
+                     std::as_bytes(std::span(serialized)));
   return {};
 }
 

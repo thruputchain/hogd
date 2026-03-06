@@ -46,13 +46,9 @@ NewContractLock::apply_db_hash_delta(const LockContext &ctx,
   assert(ctx.dao);
   SHA256Hash code_hash = ctx.key.get_contract_code_hash();
   auto key = make_wasm_code_db_key(code_hash);
-  auto wasm = ctx.dao->read_wasm_code(code_hash);
-  if (wasm.has_value()) {
-    lthash_remove_item(hash, std::as_bytes(std::span(key)), 0, *wasm);
-  }
   auto wasm_contract = x23::serialize(contract_);
-  lthash_add_item(hash, std::as_bytes(std::span(key)), 0,
-                  std::as_bytes(std::span(wasm_contract)));
+  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), 0,
+                     std::as_bytes(std::span(wasm_contract)));
   return {};
 }
 
