@@ -415,7 +415,8 @@ ReplayCacheLock::apply_close_hash_delta(const LockContext &ctx,
     auto key = make_replay_cache_data_key(ctx.key.get_address(), height);
     auto key_span = std::as_bytes(std::span(key));
     auto buf = x23::serialize(*res);
-    replace_known_item(hash, *ctx.dao, key_span, 0, std::as_bytes(std::span(buf)));
+    replace_known_item(hash, *ctx.dao, key_span, 0,
+                       std::as_bytes(std::span(buf)));
 
     new_heights.emplace_back(height,
                              static_cast<unsigned int>(res->nonces.size()));
