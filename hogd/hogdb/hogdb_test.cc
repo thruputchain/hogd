@@ -675,7 +675,7 @@ TEST_F(HogDBTest, DbHashDeltaRetrocausalQueueLockMatchesFullStateHash)
 // 2. Commits and captures the db hash
 // 3. Directly modifies RCQ block data in ramdb (simulating an attacker)
 // 4. Recomputes the db hash
-// 5. Asserts that the root hash changed
+// 5. Asserts that the db hash changed
 //
 // Expected behavior: Root hash SHOULD change (integrity protected)
 TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
