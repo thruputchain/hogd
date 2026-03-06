@@ -83,7 +83,6 @@ protected:
   }
 
   HogDBDAO db_;
-  MerkleTriePrefix trie_;
   std::optional<MockAuthDBServer> mock_auth_server_;
   AuthCard auth_card_;
   AuthChangeSubscriptionManager subscription_manager_;
@@ -107,7 +106,6 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   grant_storage_token(addr3, kStorageTokens);
 
   BlockHeight height = 1;
-  db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
@@ -213,7 +211,6 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   ASSERT_TRUE(write_ret) << "write_address_auth_data failed";
 
   BlockHeight height = 1;
-  db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
@@ -288,7 +285,6 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   grant_storage_token(addr, kStorageTokens);
 
   BlockHeight height = 1;
-  db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
@@ -363,7 +359,6 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   grant_storage_token(addr, kStorageTokens);
 
   BlockHeight height = 1;
-  db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
   BackgroundCommitWorker background_commit_worker(subscription_manager_,

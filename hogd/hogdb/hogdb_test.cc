@@ -74,7 +74,6 @@ protected:
   }
 
   HogDBDAO db_;
-  MerkleTriePrefix trie_;
 
   StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
@@ -291,8 +290,6 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
                                                       .contract_size = 10}));
   ASSERT_TRUE(db_.write_address_balance(addr, 1000000));
 
-  db_.load_trie(trie_);
-
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
                                  height);
@@ -441,8 +438,6 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   constexpr int128_t kInitialBalance = 100000;
   ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
 
-  db_.load_trie(trie_);
-
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
                                  height);
@@ -493,8 +488,6 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
   constexpr static int128_t kSecondTransferAmount = 30000;
 
   ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
-
-  db_.load_trie(trie_);
 
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
@@ -739,10 +732,9 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Capture the merkle trie root hash after normal operations
-  // The trie_ has been updated by the BlockTX commits above
-  trie_.generate_top_level_hashes();
-  SHA256Hash original_trie_hash = trie_.get_root_hash();
+  // Capture the db hash after normal operations
+  // The db hash has been updated by the BlockTX commits above
+  DbHash original_db_hash = db_.compute_full_db_hash();
 
   // Read block 1's data
   uint64_t target_block_number = 1;
@@ -780,18 +772,16 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
       sha256(std::as_bytes(std::span(modified_block_serialized)));
   ASSERT_NE(original_block_hash, modified_block_hash);
 
-  // Reload the trie from ramdb to detect the inconsistency
-  // If blocks are properly integrity-protected in the trie, reloading from
-  // the tampered ramdb will produce a different trie hash
-  trie_.clear();
-  db_.load_trie(trie_);
-  SHA256Hash new_trie_hash = trie_.get_root_hash();
+  // Recompute the db hash from ramdb to detect the inconsistency
+  // If blocks are properly integrity-protected in the db hash, reloading from
+  // the tampered ramdb will produce a different db hash
+  DbHash new_db_hash = db_.compute_full_db_hash();
 
-  // Blocks are stored directly in the trie, so tampering with block contents
-  // in ramdb causes the reloaded trie hash to differ from the original.
-  EXPECT_NE(original_trie_hash, new_trie_hash)
-      << "Modifying RCQ block contents did NOT change the merkle trie root "
-         "hash!";
+  // Blocks are included directly in the db hash, so tampering with block
+  // contents in ramdb causes the reloaded db hash to differ from the
+  // original.
+  EXPECT_NE(original_db_hash, new_db_hash)
+      << "Modifying RCQ block contents did NOT change the db hash!";
 }
 
 // Test that consuming blocks removes them from the trie

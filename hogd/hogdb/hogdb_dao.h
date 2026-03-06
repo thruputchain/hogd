@@ -293,9 +293,6 @@ public:
   // time when the database is first loaded.
   void for_each_state_item(GetEachCallback fn);
 
-  // loads the trie from the database.
-  // Recomputes the top-level hashes.
-  void load_trie(MerkleTriePrefix &trie);
   // computes the db hash from scratch.
   DbHash compute_full_db_hash();
 

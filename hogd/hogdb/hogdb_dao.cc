@@ -110,19 +110,6 @@ make_contract_data_key(std::span<const std::byte> key)
 
 } // namespace
 
-// TODO(jhumphri): Replace this.
-void
-HogDBDAO::load_trie(MerkleTriePrefix &trie)
-{
-  for_each_state_item([&trie](std::span<const std::byte> key, uint8_t type,
-                              std::span<const std::byte> value) {
-    std::span<const std::byte> k =
-        MerkleTrieHelpers::add_type_to_merkle_key(key.subspan(1), type);
-    CHECK(trie.insert(k, value));
-  });
-  trie.generate_top_level_hashes();
-}
-
 DbHash
 HogDBDAO::compute_full_db_hash()
 {
