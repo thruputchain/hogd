@@ -430,8 +430,7 @@ ReplayCacheLock::apply_db_hash_delta(const LockContext &ctx,
   meta.size = meta.size - pruned_count + all_additions.size();
   meta.heights = std::move(new_heights);
 
-  auto meta_key =
-      make_address_key_with_prefix(ctx.key.get_address(), Prefix::kReplayCache);
+  auto meta_key = make_address_key(ctx.key.get_address(), Prefix::kReplayCache);
   auto meta_buf = x23::serialize(meta);
   replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(meta_key)), 0,
                      std::as_bytes(std::span(meta_buf)));

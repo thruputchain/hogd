@@ -43,68 +43,6 @@ namespace {
 constexpr std::string kGlobalTipKey = ">DBTIP";
 constexpr std::string kGlobalCostModelKey = ">COSTMODEL";
 
-// Warning: you may have to update this if you make changes to Prefix.
-constexpr bool
-is_state_item(std::span<const std::byte> key)
-{
-  if (key.empty()) {
-    return false;
-  }
-
-  // skip global state.
-  if (static_cast<char>(key[0]) == '>')
-    return false;
-
-  auto prefix = static_cast<Prefix>(key[0]);
-
-  switch (prefix) {
-  case Prefix::kHogAge:
-    return false;
-  case Prefix::kBalance:
-  case Prefix::kAddressAuthData:
-  case Prefix::kAddressMetadata:
-  case Prefix::kContractDataKey:
-  case Prefix::kWasmCodeRefcount:
-  case Prefix::kWasmCode:
-  case Prefix::kReplayCache:
-  case Prefix::kRetrocausalQueueBlock:
-    return true;
-  default:
-    error("unknown prefix: {}", std::to_underlying(prefix));
-    return false;
-  }
-}
-
-constexpr auto
-make_address_key(const Address &addr, Prefix p)
-{
-  std::array<std::byte, kAddressSize + 1> ret;
-  std::ranges::copy(addr.as_bytes(),
-                    std::begin(std::as_writable_bytes(std::span(ret))) + 1);
-  ret[0] = static_cast<std::byte>(p);
-  return ret;
-}
-
-constexpr auto
-make_wasm_code_key(const SHA256Hash &hash)
-{
-  std::array<std::byte, hash.size() + 1> ret;
-  std::ranges::copy(std::as_bytes(std::span(hash)),
-                    std::begin(std::span(ret)) + 1);
-  ret[0] = static_cast<std::byte>(Prefix::kWasmCode);
-  return ret;
-}
-
-constexpr auto
-make_contract_data_key(std::span<const std::byte> key)
-{
-  x23::Vec<std::byte> buf;
-  buf.resize_uninitialized(key.size() + 1);
-  buf[0] = static_cast<std::byte>(Prefix::kContractDataKey);
-  std::ranges::copy(key, std::begin(std::span(buf)) + 1);
-  return buf;
-}
-
 } // namespace
 
 DbHash

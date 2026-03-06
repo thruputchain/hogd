@@ -158,8 +158,7 @@ AuthLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
 {
   assert(ctx.dao);
   auto auth = build_result();
-  auto key = make_address_key_with_prefix(ctx.key.get_address(),
-                                          Prefix::kAddressAuthData);
+  auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
   auto serialized = x23::serialize(auth);
   replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), 0,
                      std::as_bytes(std::span(serialized)));

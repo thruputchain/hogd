@@ -567,7 +567,7 @@ RetrocausalQueueLock::apply_db_hash_delta(const LockContext &ctx,
   }
 
   updated_metadata.live_entries += committed_element_count_delta_;
-  auto meta_key = make_contract_data_db_key(ctx.key.as_bytes());
+  auto meta_key = make_contract_data_key(ctx.key.as_bytes());
 
   if (updated_metadata.live_entries == 0) {
     if (base_metadata.live_entries > 0) {

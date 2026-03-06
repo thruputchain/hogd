@@ -94,8 +94,7 @@ BalanceLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
   assert(ctx.key.is_address_balance());
   assert(ctx.dao);
 
-  auto key =
-      make_address_key_with_prefix(ctx.key.get_address(), Prefix::kBalance);
+  auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
   int128_t after = build_result(ctx);
   int128_t encoded_after = cpu_to_le(after);
   replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), kNNInt128,

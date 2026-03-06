@@ -77,8 +77,7 @@ NewDeploymentLock::apply_db_hash_delta(const LockContext &ctx,
                                        LtHash16 &hash) const
 {
   assert(ctx.dao);
-  auto key = make_address_key_with_prefix(ctx.key.get_address(),
-                                          Prefix::kAddressMetadata);
+  auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);
   // The [HogAge] struct is not part of the blockchain state, just the per-node
   // state. Thus, we only hash the deployed contract metadata row.
   auto serialized = x23::serialize(deployed_contract_hash_);

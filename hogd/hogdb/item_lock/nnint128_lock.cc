@@ -133,7 +133,7 @@ NNInt128Lock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
   auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
   CHECK(!of);
   int128_t out = cpu_to_le(value);
-  auto key = make_contract_data_db_key(ctx.key.as_bytes());
+  auto key = make_contract_data_key(ctx.key.as_bytes());
   replace_known_item(hash, *ctx.dao, key, kNNInt128, byte_view(out));
   return {};
 }

@@ -75,8 +75,8 @@ DeletionLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash)
   };
 
   if (ctx.key.is_address_auth_data()) {
-    auto key = make_address_key_with_prefix(ctx.key.get_address(),
-                                            Prefix::kAddressAuthData);
+    auto key =
+        make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
     remove_if_present(std::as_bytes(std::span(key)));
     return {};
   }
@@ -87,7 +87,7 @@ DeletionLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash)
     return HogDBError(HogDBCode::kInternal);
   }
 
-  auto key = make_contract_data_db_key(ctx.key.as_bytes());
+  auto key = make_contract_data_key(ctx.key.as_bytes());
 
   auto type_ret = ctx.dao->get_item_type(ctx.key);
   if (!type_ret) {
