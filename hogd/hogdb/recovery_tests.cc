@@ -111,7 +111,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
     auto *btx = ctx.get_block_tx(1, false);
     assert(btx != nullptr);
-    // Compute close hash before commit(): commit() destructively drains lock maps.
+    // Compute close hash before commit(): commit() destructively drains lock
+    // maps.
     DbHash closed_hash = btx->get().compute_close_hash(ctx.get_tip().db_hash);
     ASSERT_TRUE((btx->get()).commit().has_value());
     ASSERT_TRUE(

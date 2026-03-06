@@ -37,8 +37,8 @@ public:
                          const PointerItem<ReplayCacheIt> &after,
                          const StorageCostModel *cost_model);
   HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  static HogDBStatus<void> apply_close_hash_delta(const LockContext &ctx,
-                                                  LtHash16 &hash);
+  HogDBStatus<void> apply_close_hash_delta(const LockContext &ctx,
+                                           LtHash16 &hash) const;
 
 private:
   HogDBStatus<ReplayCacheData>

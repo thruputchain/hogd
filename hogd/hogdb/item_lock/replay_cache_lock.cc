@@ -14,6 +14,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/close_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -357,9 +358,83 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-ReplayCacheLock::apply_close_hash_delta(const LockContext & /*ctx*/,
-                                        LtHash16 & /*hash*/)
+ReplayCacheLock::apply_close_hash_delta(const LockContext &ctx,
+                                        LtHash16 &hash) const
 {
+  assert(ctx.key.is_replay_cache());
+  assert(ctx.dao);
+
+  assert(meta_.load(std::memory_order_acquire) != nullptr);
+  auto meta = **get_meta(nullptr);
+
+  auto sl = bases_lock_.hold_shared();
+
+  x23::Vec<ReplayCacheHeightCount> new_heights;
+  new_heights.reserve(meta.heights.size() + bases_.size());
+
+  auto prune_end = std::ranges::lower_bound(meta.heights, ctx.block_height, {},
+                                            &ReplayCacheHeightCount::height);
+
+  size_t pruned_count = 0;
+  for (auto it = meta.heights.begin(); it != prune_end; ++it) {
+    auto key = make_replay_cache_data_key(ctx.key.get_address(), it->height);
+    auto key_span = std::as_bytes(std::span(key));
+    auto before = ctx.dao->get_ramdb().get(key_span);
+    if (before.has_value()) {
+      lthash_remove_item(hash, key_span, before->type, before->value);
+    }
+    pruned_count += it->nonce_count;
+  }
+
+  auto it = prune_end;
+  auto end = meta.heights.end();
+
+  std::vector<Uniquifier> all_additions;
+  all_additions.reserve(conflicts_.size());
+  for (const uint128_t &value : conflicts_) {
+    all_additions.push_back(UniquifierHelper::from_uint128(value));
+  }
+  std::ranges::sort(all_additions);
+
+  for (BlockHeight height : std::views::keys(bases_)) {
+    CHECK(height >= ctx.block_height);
+
+    while (it != end && it->height < height) {
+      new_heights.push_back(*it);
+      ++it;
+    }
+    if (it != end && it->height == height) {
+      ++it;
+    }
+
+    auto res = build_result(ctx, height, all_additions);
+    if (!res) {
+      return res.error();
+    }
+
+    auto key = make_replay_cache_data_key(ctx.key.get_address(), height);
+    auto key_span = std::as_bytes(std::span(key));
+    auto buf = x23::serialize(*res);
+    replace_known_item(hash, *ctx.dao, key_span, 0, std::as_bytes(std::span(buf)));
+
+    new_heights.emplace_back(height,
+                             static_cast<unsigned int>(res->nonces.size()));
+  }
+
+  while (it != end) {
+    new_heights.push_back(*it);
+    ++it;
+  }
+
+  meta.size = meta.size - pruned_count + all_additions.size();
+  meta.heights = std::move(new_heights);
+
+  auto meta_key =
+      make_address_key_with_prefix(ctx.key.get_address(), Prefix::kReplayCache);
+  auto meta_buf = x23::serialize(meta);
+  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(meta_key)), 0,
+                     std::as_bytes(std::span(meta_buf)));
+
   return {};
 }
 
