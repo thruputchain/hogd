@@ -329,7 +329,7 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
 
   auto ul = per_thread_hash.lock_threads();
   per_thread_hash.for_each(ul, [&final_hash](const LtHash16 &hash) {
-    final_hash.add(hash);
+    final_hash += hash;
   });
   return db_hash_from_lthash16(final_hash);
 }

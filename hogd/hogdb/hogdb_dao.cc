@@ -26,6 +26,7 @@
 #include "types.hh"
 
 #include "hogd/base/bits.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/db_hash.h"
@@ -47,15 +48,19 @@ constexpr std::string kGlobalCostModelKey = ">COSTMODEL";
 DbHash
 HogDBDAO::compute_full_db_hash()
 {
-  LtHash16 hash;
-  std::mutex lock;
-  for_each_state_item([&hash, &lock](std::span<const std::byte> key,
-                                     uint8_t type,
-                                     std::span<const std::byte> value) {
-    std::scoped_lock guard(lock);
-    lthash_add_item(hash, key, type, value);
+  PerThread<LtHash16> per_thread_hash;
+  for_each_state_item([&per_thread_hash](std::span<const std::byte> key,
+                                         uint8_t type,
+                                         std::span<const std::byte> value) {
+    lthash_add_item(*per_thread_hash, key, type, value);
   });
-  return db_hash_from_lthash16(hash);
+
+  LtHash16 db_hash;
+  auto ul = per_thread_hash.lock_threads();
+  per_thread_hash.for_each(ul, [&db_hash](const LtHash16 &hash) {
+    db_hash += hash;
+  });
+  return db_hash_from_lthash16(db_hash);
 }
 
 void
