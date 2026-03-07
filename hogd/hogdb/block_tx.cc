@@ -302,17 +302,16 @@ BlockTX::commit(WorkerPool &pool)
 DbHash
 BlockTX::compute_db_hash(const DbHash &base_hash)
 {
-  LtHash16 hash = lthash16_from_db_hash(base_hash);
-  std::mutex hash_lock;
+  LtHash16 final_hash = lthash16_from_db_hash(base_hash);
+  PerThread<LtHash16> per_thread_hash;
 
   item_locks_.for_each_parallel([&](std::pair<const ItemKey &, ItemLock &> v) {
     if (!v.second.is_finalized()) {
       return;
     }
-    std::scoped_lock g(hash_lock);
     auto ret = v.second.apply_db_hash_delta(LockContext(&db_, block_height_,
                                                         v.first, &cost_model_),
-                                            hash);
+                                            *per_thread_hash);
     CHECK(ret.has_value());
   });
 
@@ -321,15 +320,18 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
         if (!v.second.is_finalized()) {
           return;
         }
-        std::scoped_lock g(hash_lock);
         auto ret = v.second.apply_db_hash_delta(
             LockContext(&db_, block_height_,
                         make_address_balance_item_key(v.first), &cost_model_),
-            hash);
+            *per_thread_hash);
         CHECK(ret.has_value());
       });
 
-  return db_hash_from_lthash16(hash);
+  auto ul = per_thread_hash.lock_threads();
+  per_thread_hash.for_each(ul, [&final_hash](const LtHash16 &hash) {
+    final_hash += hash;
+  });
+  return db_hash_from_lthash16(final_hash);
 }
 
 } // namespace hogd
