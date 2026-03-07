@@ -193,6 +193,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
+  if (*num_db_shards == 0) {
+    std::println("[num_db_shards] must be greater than 0.");
+    return EXIT_FAILURE;
+  }
+
+  if (*num_exec_shards == 0) {
+    std::println("[num_exec_shards] must be greater than 0.");
+    return EXIT_FAILURE;
+  }
+
   return hogd::mempool_init(*num_db_shards, *num_exec_shards, *network_id,
                             db_port, event_port, executor_port, auth_port,
                             coordinator_port);
