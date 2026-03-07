@@ -145,14 +145,14 @@ enum class Prefix : char {
 };
 
 // Warning: you may have to update this if you make changes to Prefix.
-inline constexpr bool
+constexpr bool
 is_state_item(std::span<const std::byte> key)
 {
   if (key.empty()) {
     return false;
   }
 
-  Prefix prefix = static_cast<Prefix>(key[0]);
+  auto prefix = static_cast<Prefix>(key[0]);
   switch (prefix) {
   case Prefix::kBalance:
   case Prefix::kAddressAuthData:
@@ -172,7 +172,7 @@ is_state_item(std::span<const std::byte> key)
   }
 }
 
-inline constexpr auto
+constexpr auto
 make_address_key(const Address &addr, Prefix p)
 {
   std::array<std::byte, kAddressSize + 1> ret;
@@ -182,7 +182,7 @@ make_address_key(const Address &addr, Prefix p)
   return ret;
 }
 
-inline constexpr auto
+constexpr auto
 make_wasm_code_key(const SHA256Hash &hash)
 {
   std::array<std::byte, hash.size() + 1> ret;
@@ -192,7 +192,7 @@ make_wasm_code_key(const SHA256Hash &hash)
   return ret;
 }
 
-inline constexpr auto
+constexpr auto
 make_contract_data_key(std::span<const std::byte> key)
 {
   x23::Vec<std::byte> buf;
