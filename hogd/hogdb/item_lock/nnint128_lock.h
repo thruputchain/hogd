@@ -8,7 +8,6 @@
 #include "hogd/base/atomic.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
@@ -165,8 +164,9 @@ public:
     return cost_model->kBaseItemCost;
   }
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
+  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
+                                        LtHash16 &hash) const;
 
   // For balance items
   // Only should be called after all txs in a block are done.

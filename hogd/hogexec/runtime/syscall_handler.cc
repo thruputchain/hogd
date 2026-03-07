@@ -38,6 +38,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -1469,26 +1470,6 @@ SystemCallHandler::get_block_height() const
     return tip.error();
   }
   return tip.value()->height;
-}
-
-SystemStatus<SHA256Hash>
-SystemCallHandler::get_parent_block_hash() const
-{
-  auto tip = snapshot_cache_.try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
-  return tip.value()->block_hash;
-}
-
-SystemStatus<SHA256Hash>
-SystemCallHandler::get_parent_db_hash() const
-{
-  auto tip = snapshot_cache_.try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
-  return tip.value()->db_hash;
 }
 
 } // namespace hogd

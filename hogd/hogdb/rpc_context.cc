@@ -21,10 +21,11 @@ RPCContext::open_block_tx(BlockTXID bid)
 {
   // create the block tx.
   std::scoped_lock g(lock_);
-  auto [it, inserted] = block_txes_.emplace(
-      std::piecewise_construct, std::forward_as_tuple(bid),
-      std::forward_as_tuple(get_db(), get_trie(), get_cost_model(),
-                            background_commit_worker_, get_tip().height));
+  auto [it, inserted] =
+      block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
+                          std::forward_as_tuple(get_db(), get_cost_model(),
+                                                background_commit_worker_,
+                                                get_tip().height + 1));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDBError(HogDBCode::kExists);
@@ -85,11 +86,11 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
 }
 
 HogDBStatus<void>
-RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash)
+RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash,
+                         const DbHash &db_hash)
 {
-  trie_->generate_top_level_hashes();
   tip_.block_hash = block_hash;
-  tip_.db_hash = trie_->get_root_hash();
+  tip_.db_hash = db_hash;
   tip_.height = tip_.height + 1;
   tip_.id = bid;
   current_committed_height_.store(tip_.height);

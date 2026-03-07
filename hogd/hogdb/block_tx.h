@@ -7,9 +7,9 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_map.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/background_commit_worker.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -31,11 +31,10 @@ public:
   using sched_db_client_t =
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  BlockTX(HogDBDAO &db, MerkleTriePrefix &trie,
-          const StorageCostModel &cost_model,
+  BlockTX(HogDBDAO &db, const StorageCostModel &cost_model,
           BackgroundCommitWorker &background_commit_worker,
           BlockHeight block_height)
-    : db_(db), trie_(trie), cost_model_(cost_model),
+    : db_(db), cost_model_(cost_model),
       background_commit_worker_(background_commit_worker),
       block_height_(block_height)
   {}
@@ -43,7 +42,6 @@ public:
 
   // getters
   HogDBDAO &get_db() const { return db_; }
-  MerkleTriePrefix &get_trie() const { return trie_; }
   BlockHeight get_height() const { return block_height_; }
 
   // commit applies all changes to the database. If this fails, nothing will be
@@ -77,6 +75,8 @@ public:
   HogDBStatus<std::optional<QueueEntry>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
+  DbHash compute_db_hash(const DbHash &base_hash);
+
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
   get_snapshot_cost_and_cache_data(const ItemKey &key);
@@ -95,7 +95,6 @@ private:
   };
 
   HogDBDAO &db_;
-  MerkleTriePrefix &trie_;
   StorageCostModel cost_model_;
   ConcurrentMap<Address, ItemLock, SipHash24Hasher> addr_balance_locks_;
   ConcurrentMap<ItemKey, ItemLock, SipHash24Hasher> item_locks_;

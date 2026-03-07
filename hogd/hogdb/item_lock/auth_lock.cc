@@ -8,12 +8,11 @@
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/serialize.h"
@@ -145,23 +144,25 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-AuthLock::write_committed_change(LockContext const &ctx,
-                                 MerkleTriePrefix &trie) const
+AuthLock::write_committed_change(LockContext const &ctx) const
 {
   assert(ctx.key.is_address_auth_data());
 
   auto res = build_result();
   assert(ctx.dao);
-  auto ret = ctx.dao->write_address_auth_data(ctx.key.get_address(), res);
-  if (!ret) {
-    return ret.error();
-  }
+  return ctx.dao->write_address_auth_data(ctx.key.get_address(), res);
+}
 
-  auto buf = x23::serialize(res);
-  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
-                                                  std::as_bytes(std::span(buf)))
-            .has_value());
-  return ret;
+HogDBStatus<void>
+AuthLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  auto auth = build_result();
+  auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
+  auto serialized = x23::serialize(auth);
+  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), 0,
+                     std::as_bytes(std::span(serialized)));
+  return {};
 }
 
 } // namespace hogd

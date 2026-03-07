@@ -12,11 +12,11 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/loadgen.h"
 #include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
+#include "parallel.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -157,8 +157,9 @@ validate(benchmark::State &state)
     {
       SignedTransactionHashBatch tx_hashes;
       CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-          tx_hashes,
+      constexpr DbHash kDbHash{};
+      nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
+          tx_hashes, kDbHash,
           /*prev_block_hash=*/nomination.prev_block_hash);
     }
 
@@ -275,8 +276,9 @@ loadgen_validate(benchmark::State &state)
     {
       SignedTransactionHashBatch tx_hashes;
       CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-          tx_hashes,
+      constexpr DbHash kDbHash{};
+      nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
+          tx_hashes, kDbHash,
           /*prev_block_hash=*/nomination.prev_block_hash);
     }
 
@@ -382,8 +384,9 @@ loadgen_validate_throughput(benchmark::State &state)
       {
         SignedTransactionHashBatch tx_hashes;
         CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-        nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-            tx_hashes,
+        constexpr DbHash kDbHash{};
+        nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
+            tx_hashes, kDbHash,
             /*prev_block_hash=*/nomination.prev_block_hash);
       }
 

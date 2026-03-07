@@ -31,7 +31,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "parallel.hh"
 #include "rpc_types.hh"
@@ -237,7 +237,7 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 
 SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(
-    const x23::XdrVec<SignedTransactionHash> &hashes,
+    const x23::XdrVec<SignedTransactionHash> &hashes, const DbHash &db_hash,
     const BlockHash &prev_block_hash)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
@@ -267,12 +267,12 @@ MempoolCoordinatorRpc::get_block_hash(
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
   // TODO(jhumphri): Fill in all of the fields correctly.
-  BlockHeader header{.network_id = 0x0,
+  BlockHeader header{.network_id = network_id_,
                      .txset_hash = root_hash,
-                     .db_hash = {},
+                     .db_hash = db_hash,
                      .events_hash = {},
                      .prev_block_hash = prev_block_hash};
-  return sha256(header);
+  return generate_block_hash(header);
 }
 
 x23::Async<void>
@@ -619,6 +619,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   };
   double stage_spawn_finish_calls = 0.0;
   double stage_generate_block_hash = 0.0;
+  double stage_close_snapshot = 0.0;
   double stage_serialize_nomination = 0.0;
   double stage_await_finish_calls = 0.0;
 
@@ -632,15 +633,21 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   record_stage(stage_spawn_finish_calls);
 
   {
+    DbBlockResult result = co_await close_snapshot(cache.block_id);
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+    cache.db_tip.db_hash = result.db_hash();
+    record_stage(stage_close_snapshot);
+  }
+  {
     Nomination &nomination =
         cache.nomination_result.nominated_block().nomination;
     nomination.block_height = db_tip.height + 1;
     nomination.block_hash =
-        get_block_hash(cache.tx_hashes,
+        get_block_hash(cache.tx_hashes, cache.db_tip.db_hash,
                        /*prev_block_hash=*/db_tip.block_hash);
     record_stage(stage_generate_block_hash);
 
-    nomination.prev_block_hash = db_tip.db_hash;
+    nomination.prev_block_hash = db_tip.block_hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
     co_await t_to_parallel_batch(cache.result_tx_hashes,
@@ -658,11 +665,12 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   record_stage(stage_await_finish_calls);
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
-       "generate_block_hash={:.6f}, serialize_nomination={:.6f}, "
-       "await_finish_calls={:.6f}, total={:.6f}, finish_handles={}",
-       stage_spawn_finish_calls, stage_generate_block_hash,
-       stage_serialize_nomination, stage_await_finish_calls, timer.elapsed(),
-       finish_block_handles.size());
+       "close_snapshot={:.6f}, generate_block_hash={:.6f}, "
+       "serialize_nomination={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
+       "finish_handles={}",
+       stage_spawn_finish_calls, stage_close_snapshot,
+       stage_generate_block_hash, stage_serialize_nomination,
+       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
   co_return;
 }
 
@@ -685,21 +693,11 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     stage_out = now - last_stage_ts;
     last_stage_ts = now;
   };
-  double stage_await_close_snapshot = 0.0;
   double stage_await_close_block = 0.0;
   double stage_await_commit_snapshot = 0.0;
 
-  x23::Async<DbBlockResult> close_snapshot_handle =
-      close_snapshot(cache.block_id);
   x23::Async<EventBlockResult> close_block_handle =
       eventsched_close_block(cache.block_id, scheduler_->current_block());
-
-  {
-    DbBlockResult result = co_await close_snapshot_handle;
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-  }
-  record_stage(stage_await_close_snapshot);
-  // We need to commit the snapshot *after* the snapshot has been closed.
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.block_hash);
   {
@@ -713,15 +711,14 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   record_stage(stage_await_commit_snapshot);
 
-  info("commit_block() stages: await_close_snapshot={:.6f}, "
-       "await_close_block={:.6f}, await_commit_snapshot={:.6f}, total={:.6f}, "
-       "block_id={}",
-       stage_await_close_snapshot, stage_await_close_block,
-       stage_await_commit_snapshot, timer.elapsed(), cache.block_id);
+  info("commit_block() stages: await_close_block={:.6f}, "
+       "await_commit_snapshot={:.6f}, total={:.6f}, block_id={}",
+       stage_await_close_block, stage_await_commit_snapshot, timer.elapsed(),
+       cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
-MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
+MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 {
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
@@ -755,10 +752,22 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
+  // TODO(jhumphri): chuckd does not know the current [db_hash], so we only
+  // check the other fields in [db_tip]. Beyond this, I feel like it is
+  // incorrect to have [schedulercoord_nominate()] have the [DbTip] type as a
+  // parameter--I feel like it should only take the latest *block* hash as a
+  // parameter, and maybe we could also have the latest block height as a
+  // parameter if we wanted to have checks that everything is consistent.
+  //
+  // Similarly, for [schedulercoord_validate()], I think we should only take
+  // [nomination] as a parameter, which includes the latest block hash and
+  // height as fields. We should remove [db_tip].
+  //
+  // I am going to discuss this with Petar and address accordingly.
   // if (db_tip != last_committed_block_) {
   if (db_tip.height != last_committed_block_.height ||
       db_tip.id != last_committed_block_.id ||
-      db_tip.db_hash != last_committed_block_.db_hash) {
+      db_tip.block_hash != last_committed_block_.block_hash) {
     last_ = std::chrono::steady_clock::now();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -872,13 +881,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // there.
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
-  nominated_block_cache_.db_tip = {
+  nominated_block_cache_.db_tip = DbTip{
       .height = nominated_block_cache_.nomination_result.nominated_block()
                     .nomination.block_height,
       .block_hash = nominated_block_cache_.nomination_result.nominated_block()
                         .nomination.block_hash,
-      .db_hash = nominated_block_cache_.nomination_result.nominated_block()
-                     .nomination.block_hash,
+      .db_hash = nominated_block_cache_.db_tip.db_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
   record_stage(stage_finalize_result);
@@ -922,24 +930,19 @@ MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
       .executorsched_open_validation_block(block_id);
 }
 
+// TODO(jhumphri): Remove [db_tip].
 x23::Async<SchedulerValidationResult>
-MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
+MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
                                                Nomination nomination)
 {
   co_await increment_num_validations_in_progress();
 
-  if (db_tip.height + 1 != nomination.block_height) {
+  if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  if (db_tip.db_hash != nomination.prev_block_hash) {
-    co_await decrement_num_validations_in_progress();
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-  if (nomination.prev_block_hash != last_committed_block_.block_hash ||
-      nomination.block_height != last_committed_block_.height + 1) {
+  if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -962,10 +965,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // executors.
   PendingBlock cache{};
   cache.block_id = generate_block_id();
-  cache.db_tip = {.height = nomination.block_height,
-                  .block_hash = nomination.block_hash,
-                  .db_hash = nomination.block_hash,
-                  .id = cache.block_id};
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
 
@@ -973,7 +972,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await wait_for_auth_data(nomination.block_height - 1);
 
   if (co_await create_snapshot(
-          /*prev_block_id=*/cache.db_tip.id, cache.block_id,
+          /*prev_block_id=*/cache.block_id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
@@ -1041,14 +1040,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // Careful--[validate_batch()] is calling co_await in its function body.
   bool validated =
       co_await validate_batch(cache.block_id, txs, /*executor_idx=*/0);
-
-  // Check [validated] and verify the block hash. It is safe to directly use
-  // [cache.tx_hashes] here because we already checked above that all of these
-  // hashes correspond to vetted txs.
-  if (!validated ||
-      get_block_hash(cache.tx_hashes,
-                     /*prev_block_hash=*/nomination.prev_block_hash) !=
-          nomination.block_hash) {
+  if (!validated) {
     co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
@@ -1057,12 +1049,31 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+  {
+    DbBlockResult result = co_await close_snapshot(cache.block_id);
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+    cache.db_tip.db_hash = result.db_hash();
+  }
 
+  // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
+  // because we already checked above that all of these hashes correspond to
+  // vetted txs.
+  if (get_block_hash(cache.tx_hashes, cache.db_tip.db_hash,
+                     /*prev_block_hash=*/nomination.prev_block_hash) !=
+      nomination.block_hash) {
+    co_await scheduler_->add_txs(cache.txs);
+
+    co_await finish_all_executors(cache.block_id);
+    co_await abandon_block(cache);
+    co_await decrement_num_validations_in_progress();
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
   co_await finish_all_executors(cache.block_id);
 
   cache.db_tip = DbTip{.height = nomination.block_height,
                        .block_hash = nomination.block_hash,
-                       .db_hash = nomination.block_hash,
+                       .db_hash = cache.db_tip.db_hash,
                        .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
@@ -1083,6 +1094,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_return result;
 }
 
+// TODO(jhumphri): We need to update the scheduler hog ages for the txs in the
+// validation block if the validation block is committed.
+// TODO(jhumphri): We need to undo the changes to the scheduler hog ages for the
+// txs in the nomination block if the nomination block is not committed.
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {

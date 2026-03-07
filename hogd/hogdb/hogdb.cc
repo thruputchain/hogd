@@ -16,20 +16,19 @@
 #include <utility>
 
 // XDR headers
-#include "hogd/base/coropoll.h"
-#include "hogd/base/rpc_client.h"
-#include "hogd/hogdb/rpc_from_auth.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
@@ -91,8 +90,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
-  std::unique_ptr<MerkleTriePrefix> trie = std::make_unique<MerkleTriePrefix>();
-  db_tmp.load_trie(*trie);
+  DbHash db_hash = db_tmp.compute_full_db_hash();
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
       sched_db_client;
@@ -105,15 +103,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     warn("no coordinator address provided, skipping coordinator connection");
   }
 
-  RPCContext ctx(std::move(db_tmp), std::move(trie),
-                 std::move(sched_db_client));
+  RPCContext ctx(std::move(db_tmp), std::move(sched_db_client));
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
-    if (ctx.get_trie().get_root_hash() != tip->db_hash) {
-      critical("Root hash doesn't match DbTip: expected '{}', got '{}'",
-               ctx.get_trie().get_root_hash(), tip->db_hash);
+    if (db_hash != tip->db_hash) {
+      critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;
@@ -126,8 +122,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     }
   }
   else {
-    CHECK_EQ(ctx.get_trie().size(), 0UL);
-    ctx.get_tip().height = 0;
+    CHECK_EQ(db_hash, DbHash{});
+    ctx.get_tip().height = -1;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
 

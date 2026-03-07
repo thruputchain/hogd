@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -59,7 +61,9 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id)
+    : db_rpc_(db_rpc), network_id_(network_id)
+  {}
 
   ~MempoolCoordinatorRpc()
   {
@@ -130,29 +134,13 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
-    SchedulerGetTipResult ret(
-        SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
-    if (received_genesis_block_.load(std::memory_order_acquire)) {
-      ret = SchedulerGetTipResult(SchedulerGetTipOutcome::SchedulerGetTipOK);
-      ret.db_tip() = last_committed_block_;
-      info("schedcoord_get_tip going to return id {} height {} block_hash {} "
-           "db_hash {}",
-           last_committed_block_.id, last_committed_block_.height,
-           last_committed_block_.block_hash, last_committed_block_.db_hash);
+    if (last_committed_block_.height == -1) {
+      co_return SchedulerGetTipResult(
+          SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
     }
-    {
-      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
-      if (db_res.result() == DbSchedResult::DbSchedResultOK) {
-        info(
-            "dbsched_get_tip gives us height {} block_hash {} db_hash {} id {}",
-            db_res.db_tip().height, db_res.db_tip().block_hash,
-            db_res.db_tip().db_hash, db_res.db_tip().id);
-        // ret.db_tip() = db_res.db_tip();
-      }
-      else {
-        info("dbsched_get_tip failed...");
-      }
-    }
+
+    SchedulerGetTipResult ret(SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ret.db_tip() = last_committed_block_;
     co_return ret;
   }
 
@@ -167,15 +155,31 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
-    BlockHash block_hash = sha256(genesis_configuration);
+    CHECK_GE(last_committed_block_.height, -1);
+    if (last_committed_block_.height != -1) {
+      // The genesis block has already been loaded.
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    CHECK_EQ(last_committed_block_.height, -1);
+
+    MerkleTrie empty_trie;
+    empty_trie.generate_all_hashes();
+    BlockHash empty_trie_hash = empty_trie.get_root_hash();
     DbSchedResult ret =
         co_await db_sched_client_->dbsched_load_genesis_configuration(
-            genesis_configuration, block_hash);
-    last_committed_block_ = {.height = 0,
-                             .block_hash = block_hash,
-                             .db_hash = block_hash,
-                             .id = generate_block_id()};
-    received_genesis_block_.store(true, std::memory_order_release);
+            genesis_configuration, network_id_, empty_trie_hash,
+            empty_trie_hash);
+    if (ret != DbSchedResult::DbSchedResultOK) {
+      co_return ret;
+    }
+
+    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+    CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
+    last_committed_block_ = db_res.db_tip();
+    CHECK_EQ(last_committed_block_.height, 0);
+    CHECK_EQ(last_committed_block_.id, 0UL);
+    scheduler_->set_current_block(last_committed_block_.height);
+
     co_return ret;
   }
 
@@ -219,9 +223,9 @@ public:
     }
   }
 
-  static SHA256Hash
-  get_block_hash(const x23::XdrVec<SignedTransactionHash> &hashes,
-                 const BlockHash &prev_block_hash);
+  SHA256Hash get_block_hash(const x23::XdrVec<SignedTransactionHash> &hashes,
+                            const DbHash &db_hash,
+                            const BlockHash &prev_block_hash);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
@@ -281,10 +285,23 @@ private:
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
 
-    // TODO(jhumphri): Ask the db for the current block ID and fill in
-    // [current_block_id_] with it in the scheduler.
-    scheduler_ =
-        std::make_shared<Scheduler>(/*current_block=*/1, db_sched_client_);
+    {
+      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      if (db_res.result() == DbSchedResult::DbSchedResultOK) {
+        last_committed_block_ = db_res.db_tip();
+        CHECK_GE(last_committed_block_.height, 0);
+      }
+      else {
+        // [dbsched_get_tip()] returned an error because no blocks have been
+        // committed yet (including the genesis block).
+        last_committed_block_ = {.height = -1,
+                                 .block_hash = {},
+                                 .db_hash = {},
+                                 .id = 0};
+      }
+    }
+    scheduler_ = std::make_shared<Scheduler>(
+        /*current_block=*/last_committed_block_.height, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
     auth_client_ = std::make_unique<auth_sched_client_t>(
@@ -355,6 +372,7 @@ private:
   }
 
   MempoolDbRpc *db_rpc_;
+  const uint64_t network_id_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
@@ -379,7 +397,6 @@ private:
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
-  std::atomic<bool> received_genesis_block_ = false;
   DbTip last_committed_block_{};
 
   x23::CoroFutex<int64_t> auth_data_height_{-1};

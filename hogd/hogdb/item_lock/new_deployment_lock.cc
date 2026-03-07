@@ -7,12 +7,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
@@ -38,21 +37,13 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
 }
 
 HogDBStatus<void>
-NewDeploymentLock::write_committed_change(LockContext const &ctx,
-                                          MerkleTriePrefix &trie) const
+NewDeploymentLock::write_committed_change(LockContext const &ctx) const
 {
   assert(ctx.key.is_address_metadata());
   assert(ctx.dao);
   HogDBStatus<void> ret =
       ctx.dao->write_address_metadata(ctx.key.get_address(),
                                       deployed_contract_hash_);
-  if (ret) {
-    auto buf = x23::serialize(deployed_contract_hash_);
-    CHECK(
-        MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
-                                                  std::as_bytes(std::span(buf)))
-            .has_value());
-  }
 
   // Create an empty data record for this address for scheduler state;
   // the scheduler is responsible for populating this with nonzero data.
@@ -79,6 +70,20 @@ NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
            snapshot_cost;
   }
   return 0;
+}
+
+HogDBStatus<void>
+NewDeploymentLock::apply_db_hash_delta(const LockContext &ctx,
+                                       LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);
+  // The [HogAge] struct is not part of the blockchain state, just the per-node
+  // state. Thus, we only hash the deployed contract metadata row.
+  auto serialized = x23::serialize(deployed_contract_hash_);
+  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), 0,
+                     std::as_bytes(std::span(serialized)));
+  return {};
 }
 
 } // namespace hogd

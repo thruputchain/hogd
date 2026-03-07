@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <set>
+#include <span>
 #include <sys/socket.h>
 #include <type_traits>
 #include <unordered_map>
@@ -14,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -73,7 +75,7 @@ public:
     out.db_tip() = DbTip{
         .height = static_cast<BlockHeight>(block_id_),
         .block_hash = sha256(block_id_),
-        .db_hash = sha256(block_id_),
+        .db_hash = {},
         .id = block_id_,
     };
     return out;

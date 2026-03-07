@@ -7,7 +7,6 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
@@ -42,8 +41,9 @@ public:
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<AuthDataItem> &after,
                          const StorageCostModel *cost_model);
-  HogDBStatus<void> write_committed_change(LockContext const &ctx,
-                                           MerkleTriePrefix &trie) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
+  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
+                                        LtHash16 &hash) const;
 
   AddressAuthData build_result() const;
 

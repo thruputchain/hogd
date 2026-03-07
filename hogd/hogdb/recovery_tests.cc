@@ -11,7 +11,6 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -47,22 +46,20 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
   ASSERT_TRUE(dir.has_value());
   DbTip initial_tip{};
+  DbHash db_hash;
   {
     DBStatus<std::unique_ptr<Database>> db =
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
-    std::unique_ptr<MerkleTriePrefix> trie =
-        std::make_unique<MerkleTriePrefix>();
-    dao.load_trie(*trie);
-    EXPECT_EQ(trie->size(), 0UL);
+    EXPECT_EQ(dao.compute_full_db_hash(), DbHash{});
 
     // add some items to the database
-    // some items that are not in the trie
+    // some items that are not in the db hash
     CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
-    // some items that are in the trie
+    // some items that are in the db hash
 
-    RPCContext ctx(std::move(dao), std::move(trie), nullptr);
+    RPCContext ctx(std::move(dao), nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
@@ -112,12 +109,14 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
     auto *btx = ctx.get_block_tx(1, false);
     assert(btx != nullptr);
+    // Compute db hash before commit(): commit() destructively drains lock
+    // maps.
+    db_hash = btx->get().compute_db_hash(ctx.get_tip().db_hash);
     ASSERT_TRUE((btx->get()).commit().has_value());
+    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}, db_hash).has_value());
 
     ASSERT_TRUE(btx->initiate_shutdown());
     ctx.remove_shutdown_block_tx(1);
-
-    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}).has_value());
 
     // commit to disk
     auto lsn = ctx.get_db().commit();
@@ -125,7 +124,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     EXPECT_EQ(*lsn, 1UL);
 
     initial_tip = ctx.get_tip();
-    EXPECT_EQ(ctx.get_trie().size(), 3UL);
+    EXPECT_EQ(db_hash, ctx.get_db().compute_full_db_hash());
   }
 
   // now reload the database
@@ -133,10 +132,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
       Database::open(dir->get_path(), kDefaultHeapSize, 0);
   ASSERT_TRUE(db);
   auto dao = HogDBDAO(RAMDB(std::move(*db)));
-  MerkleTriePrefix trie;
-  dao.load_trie(trie);
-  EXPECT_EQ(trie.size(), 3UL);
-  ASSERT_EQ(trie.get_root_hash(), initial_tip.db_hash);
+  EXPECT_EQ(db_hash, dao.compute_full_db_hash());
+  ASSERT_EQ(db_hash, initial_tip.db_hash);
 
   auto bal = dao.read_address_balance(ContractAddress{0});
   ASSERT_TRUE(bal.has_value());

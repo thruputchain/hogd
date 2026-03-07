@@ -26,6 +26,7 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -111,9 +112,12 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   LoadgenContextID context_id = result.success().context_id;
 
   // Load the genesis configuration from loadgen to the database
-  constexpr BlockHash kBlockHash{};
+  uint64_t network_id = 0x0;
+  SHA256Hash txset_hash{};
+  SHA256Hash events_hash{};
   auto db_res = db_client_.dbsched_load_genesis_configuration(
-      result.success().genesis_configuration, kBlockHash);
+      result.success().genesis_configuration, network_id, txset_hash,
+      events_hash);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
   // Initialize the executor with a shard pointing to our mock database server
@@ -173,9 +177,12 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   LoadgenContextID context_id = result.success().context_id;
 
   // Load the genesis configuration from loadgen to the database
-  constexpr BlockHash kBlockHash{};
+  uint64_t network_id = 0x0;
+  SHA256Hash txset_hash{};
+  SHA256Hash events_hash{};
   auto db_res = db_client_.dbsched_load_genesis_configuration(
-      result.success().genesis_configuration, kBlockHash);
+      result.success().genesis_configuration, network_id, txset_hash,
+      events_hash);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
   // Initialize the executor

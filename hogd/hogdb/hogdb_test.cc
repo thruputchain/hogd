@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <utility>
 
 // xdr types
+#include "address_auth.hh"
 #include "contract.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -33,8 +35,8 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
@@ -65,7 +67,6 @@ protected:
   }
 
   HogDBDAO db_;
-  MerkleTriePrefix trie_;
 
   StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
@@ -79,6 +80,38 @@ protected:
   AuthChangeSubscriptionManager subscription_manager_;
   BackgroundCommitWorker background_commit_worker_ =
       BackgroundCommitWorker(subscription_manager_, nullptr);
+
+  template<typename F>
+  void commit_block_expect_db_hash_matches_full(BlockHeight height, F &&fn)
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    fn(invoke_tx);
+
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+
+    DbHash incremental_hash = block_tx.get().compute_db_hash(base_hash);
+    ASSERT_TRUE(block_tx.get().commit());
+
+    DbHash full_hash = db_.compute_full_db_hash();
+    EXPECT_EQ(incremental_hash, full_hash);
+  }
+
+  void setup_contract_address(const Address &addr)
+  {
+    ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+    ASSERT_TRUE(db_.write_address_metadata(
+        addr,
+        DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
+                             .contract_size = 10}));
+  }
 };
 
 namespace {
@@ -102,7 +135,7 @@ TEST_F(HogDBTest, DataAccessObject)
   // test db tip
   DbTip tip{.height = 10,
             .block_hash = sha256(std::as_bytes(std::span("foo"))),
-            .db_hash = sha256(std::as_bytes(std::span("foo"))),
+            .db_hash = db_hash_from_buf(std::as_bytes(std::span("foo"))),
             .id = 30};
   EXPECT_TRUE(db_.write_dbtip(tip));
   HogDBStatus<DbTip> rtip = db_.read_dbtip();
@@ -249,11 +282,9 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
                                                       .contract_size = 10}));
   ASSERT_TRUE(db_.write_address_balance(addr, 1000000));
 
-  db_.load_trie(trie_);
-
   BlockHeight height = 1;
-  PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                 background_commit_worker_, height);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 height);
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -316,7 +347,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     auto commit_cost = lock.commit_change(c1, ctx);
     EXPECT_EQ(cost_model_.kBaseItemCost + cost_model_.kReplayCacheCostPerEntry,
               commit_cost);
-    ASSERT_TRUE(lock.write_committed_change(ctx, trie_));
+    ASSERT_TRUE(lock.write_committed_change(ctx));
   }
 
   height++;
@@ -360,7 +391,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
 
     auto commit_cost = lock2.commit_change(c3, ctx);
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
-    ASSERT_TRUE(lock2.write_committed_change(ctx, trie_));
+    ASSERT_TRUE(lock2.write_committed_change(ctx));
   }
 
   // Read final metadata and data
@@ -399,11 +430,9 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   constexpr int128_t kInitialBalance = 100000;
   ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
 
-  db_.load_trie(trie_);
-
   BlockHeight height = 1;
-  PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                 background_commit_worker_, height);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 height);
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -452,11 +481,9 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 
   ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
 
-  db_.load_trie(trie_);
-
   BlockHeight height = 1;
-  PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                 background_commit_worker_, height);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 height);
 
   {
     // First InvokeTX: transfer to recipient (new address, cost applies)
@@ -512,17 +539,146 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
   EXPECT_EQ(expected_recipient_balance, *recipient_balance);
 }
 
-// Test that RCQ block contents are integrity-protected by the Merkle trie.
+TEST_F(HogDBTest, DbHashDeltaAuthLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 15);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs args{};
+    args.new_nonce_config =
+        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, args,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaBalanceLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 10);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        make_address_balance_item_key(addr), 123,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaNNInt128LockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 11);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 1);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        key, 321,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaBytestringLockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 12);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 2);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    constexpr std::array<std::byte, 4> kValue = {std::byte{0x01},
+                                                 std::byte{0x02},
+                                                 std::byte{0x03},
+                                                 std::byte{0x04}};
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        key, std::span(kValue),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaDeletionLockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 13);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 3);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    constexpr std::array<std::byte, 2> kValue = {std::byte{0xAA},
+                                                 std::byte{0xBB}};
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        key, std::span(kValue),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        key, std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaNewContractLockMatchesFullStateHash)
+{
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(1);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_new_contract(contract));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 14);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deploy_contract(
+        addr,
+        DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
+                             .contract_size = 15}));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaReplayCacheLockMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 16);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(5, 42),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+TEST_F(HogDBTest, DbHashDeltaRetrocausalQueueLockMatchesFullStateHash)
+{
+  Address contract_addr = make_address(kAddress + 17);
+  setup_contract_address(contract_addr);
+  ItemKey rcq_key = make_item_key(contract_addr, 4);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x11});
+    delta.insert.added_entries.push_back(QueueEntry{0x22});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// Test that RCQ block contents are integrity-protected by the db hash.
 //
 // The test:
 // 1. Creates an RCQ with entries that span multiple blocks
-// 2. Commits and captures the merkle trie root hash
+// 2. Commits and captures the db hash
 // 3. Directly modifies RCQ block data in ramdb (simulating an attacker)
-// 4. Recomputes the merkle trie root hash
-// 5. Asserts that the root hash changed
+// 4. Recomputes the db hash
+// 5. Asserts that the db hash changed
 //
 // Expected behavior: Root hash SHOULD change (integrity protected)
-TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
+TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
 {
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -541,8 +697,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   // Each block gets kEntriesPerBlock entries
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
@@ -568,10 +724,9 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Capture the merkle trie root hash after normal operations
-  // The trie_ has been updated by the BlockTX commits above
-  trie_.generate_top_level_hashes();
-  SHA256Hash original_trie_hash = trie_.get_root_hash();
+  // Capture the db hash after normal operations
+  // The db hash has been updated by the BlockTX commits above
+  DbHash original_db_hash = db_.compute_full_db_hash();
 
   // Read block 1's data
   uint64_t target_block_number = 1;
@@ -583,12 +738,12 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
   ASSERT_GT(original_block.entries.size(), 0);
 
   // Now directly modify block 1's data in ramdb (simulating an attacker)
-  // This bypasses the transaction layer and trie updates
+  // This bypasses the transaction layer and db hash updates
   RetrocausalQueueBlock modified_block = original_block;
   modified_block.entries[0] =
       QueueEntry{255}; // Change first entry from 0 to 255
 
-  // Write the modified block directly to ramdb, bypassing trie
+  // Write the modified block directly to ramdb, bypassing the db hash
   ASSERT_TRUE(db_.write_retrocausal_queue_block(rcq_key, modified_block));
   ASSERT_TRUE(db_.commit());
 
@@ -609,22 +764,20 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesTrieHash)
       sha256(std::as_bytes(std::span(modified_block_serialized)));
   ASSERT_NE(original_block_hash, modified_block_hash);
 
-  // Reload the trie from ramdb to detect the inconsistency
-  // If blocks are properly integrity-protected in the trie, reloading from
-  // the tampered ramdb will produce a different trie hash
-  trie_.clear();
-  db_.load_trie(trie_);
-  SHA256Hash new_trie_hash = trie_.get_root_hash();
+  // Recompute the db hash from ramdb to detect the inconsistency
+  // If blocks are properly integrity-protected in the db hash, reloading from
+  // the tampered ramdb will produce a different db hash
+  DbHash new_db_hash = db_.compute_full_db_hash();
 
-  // Blocks are stored directly in the trie, so tampering with block contents
-  // in ramdb causes the reloaded trie hash to differ from the original.
-  EXPECT_NE(original_trie_hash, new_trie_hash)
-      << "Modifying RCQ block contents did NOT change the merkle trie root "
-         "hash!";
+  // Blocks are included directly in the db hash, so tampering with block
+  // contents in ramdb causes the reloaded db hash to differ from the
+  // original.
+  EXPECT_NE(original_db_hash, new_db_hash)
+      << "Modifying RCQ block contents did NOT change the db hash!";
 }
 
-// Test that consuming blocks removes them from the trie
-TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
+// Test that consuming blocks removes them from the db hash
+TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
 {
   // Setup: create contract with enough storage tokens
   Address contract_addr = make_address(kAddress);
@@ -642,8 +795,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
   // Create blocks
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -663,14 +816,14 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_before_consume = trie_.get_root_hash();
+  DbHash db_hash_before_consume = db_.compute_full_db_hash();
 
   // Consume the first block completely
+  DbHash db_hash_after_consume;
   {
     BlockHeight height = kNumBlocks + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -685,16 +838,20 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    db_hash_after_consume =
+        block_tx.get().compute_db_hash(db_hash_before_consume);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Verify trie hash changed after consuming block 1
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_after_consume = trie_.get_root_hash();
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash = db_.compute_full_db_hash();
+  EXPECT_EQ(db_hash_after_consume, full_db_hash);
 
-  EXPECT_NE(trie_hash_before_consume, trie_hash_after_consume)
-      << "Trie hash did not change after consuming block - block may not have "
-         "been removed from trie";
+  // Verify db hash changed after consuming block 1
+  EXPECT_NE(db_hash_before_consume, db_hash_after_consume)
+      << "db hash did not change after consuming block - block may not have "
+         "been removed from hash";
 
   // Verify block 1 is not in ramdb anymore
   auto block_result = db_.read_retrocausal_queue_block(rcq_key, 1);
@@ -702,8 +859,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromTrie)
       << "Block 1 should be removed from ramdb after consume";
 }
 
-// Test that deleting an RCQ removes all blocks from the trie
-TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
+// Test that deleting an RCQ removes all blocks from the db hash
+TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
 {
   // Setup: create contract with enough storage tokens
   Address contract_addr = make_address(kAddress);
@@ -721,8 +878,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
   // Create blocks
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -742,14 +899,14 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_before_delete = trie_.get_root_hash();
+  DbHash db_hash_before_delete = db_.compute_full_db_hash();
 
   // Delete the entire RCQ by consuming all entries
+  DbHash db_hash_after_delete;
   {
     BlockHeight height = kNumBlocks + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -766,16 +923,20 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    db_hash_after_delete =
+        block_tx.get().compute_db_hash(db_hash_before_delete);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Verify trie hash changed after deleting all blocks
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_after_delete = trie_.get_root_hash();
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash = db_.compute_full_db_hash();
+  EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
-  EXPECT_NE(trie_hash_before_delete, trie_hash_after_delete)
-      << "Trie hash did not change after deleting RCQ - blocks may not have "
-         "been removed from trie";
+  // Verify db hash changed after deleting all blocks
+  EXPECT_NE(db_hash_before_delete, db_hash_after_delete)
+      << "db hash did not change after deleting RCQ - blocks may not have been "
+         "removed from hash";
 
   // Verify all blocks are removed from ramdb
   for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
@@ -786,10 +947,10 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromTrie)
   }
 }
 
-TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
+TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
 {
   // Test that explicit deletion via request_deletion (DeletionLock path)
-  // properly removes all RCQ blocks from both DAO and merkle trie.
+  // properly removes all RCQ blocks from both DAO and db hash.
 
   // Setup: create contract with enough storage tokens
   Address contract_addr = make_address(kAddress);
@@ -807,8 +968,8 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
   // Create blocks
   for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
     BlockHeight height = block_idx + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -828,15 +989,15 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_before_delete = trie_.get_root_hash();
+  DbHash db_hash_before_delete = db_.compute_full_db_hash();
 
   // Explicitly delete the RCQ using request_deletion (goes through
   // DeletionLock)
+  DbHash db_hash_after_delete;
   {
     BlockHeight height = kNumBlocks + 1;
-    PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
-                                   background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -845,16 +1006,20 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromTrie)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    db_hash_after_delete =
+        block_tx.get().compute_db_hash(db_hash_before_delete);
     ASSERT_TRUE(block_tx.get().commit());
   }
 
-  // Verify trie hash changed after deleting all blocks
-  trie_.generate_top_level_hashes();
-  SHA256Hash trie_hash_after_delete = trie_.get_root_hash();
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash = db_.compute_full_db_hash();
+  EXPECT_EQ(db_hash_after_delete, full_db_hash);
 
-  EXPECT_NE(trie_hash_before_delete, trie_hash_after_delete)
-      << "Trie hash did not change after explicit deletion - blocks may not "
-         "have been removed from trie";
+  // Verify db hash changed after deleting all blocks
+  EXPECT_NE(db_hash_before_delete, db_hash_after_delete)
+      << "db hash did not change after explicit deletion - blocks may not have "
+         "been removed from db";
 
   // Verify all blocks are removed from ramdb
   for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {

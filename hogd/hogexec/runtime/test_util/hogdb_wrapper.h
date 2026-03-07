@@ -6,7 +6,6 @@
 #include "contract.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
@@ -24,9 +23,7 @@ namespace hogd {
 
 class HogdbWrapper {
 public:
-  HogdbWrapper()
-    : ctx_(HogDBDAO(open_db()), std::make_unique<MerkleTriePrefix>(),
-           make_sched_db_client())
+  HogdbWrapper() : ctx_(HogDBDAO(open_db()), make_sched_db_client())
   {
     db_sched_server_.start_server(/*port=*/0);
     db_executor_server_.start_server(/*port=*/0);

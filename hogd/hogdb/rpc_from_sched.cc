@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <span>
 #include <sys/socket.h>
 #include <utility>
@@ -12,6 +13,7 @@
 // generated x23 headers
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "block.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -29,13 +31,13 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/mempool/shared.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
@@ -122,7 +124,7 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
-                            PerThreadARC<BlockTX> *btx)
+                            PerThreadARC<BlockTX> *btx, const DbHash &db_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -157,8 +159,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   // destroy the block TX.
   ctx_.remove_shutdown_block_tx(id);
 
-  // update the DbTip.
-  ret = ctx_.update_dbtip(id, block_hash);
+  ret = ctx_.update_dbtip(id, block_hash, db_hash);
   if (!ret)
     return ret.error();
 
@@ -171,7 +172,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
        id, encode_base64(std::as_bytes(std::span(ctx_.get_tip().block_hash))),
        encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
        ctx_.get_tip().height, *lsn);
-  assert(ctx_.get_tip().height != 0);
+  CHECK_NE(ctx_.get_tip().height, -1);
   return {};
 }
 
@@ -208,7 +209,13 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
   if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  HogDBStatus<void> ret = commit_block(id, block_hash, btx);
+  std::optional<DbHash> db_hash = ctx_.take_db_hash(id);
+  if (!db_hash.has_value()) {
+    error("dbsched_commit_snapshot called before close for block {}", id);
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
+
+  HogDBStatus<void> ret = commit_block(id, block_hash, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
@@ -224,10 +231,12 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
     block_id_state_manager_.log_block_abandon(id);
   }
   auto *ret = ctx_.get_block_tx(id, false);
-  if (!ret)
+  if (!ret) {
     co_return DbSchedResult::DbSchedResultError;
+  }
 
   if (ret->initiate_shutdown()) {
+    ctx_.clear_db_hash(id);
     ctx_.remove_shutdown_block_tx(id);
   }
 
@@ -241,23 +250,20 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     block_id_state_manager_.log_block_close(id);
   }
   // TODO(abelay): rename this to finish_snapshot. It will be called before
-  // either commit_snapshot or abort_snapshot because the merkle root is needed
+  // either commit_snapshot or abort_snapshot because the db hash is needed
   // to create a proposal block.
 
   // TODO(abelay): we could potential free memory here too.
+  PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(id, false);
+  if (btx == nullptr) [[unlikely]] {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
 
   DbBlockResult ret(DbSchedResult::DbSchedResultOK);
-  // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
-  // hash is invalid. We could add the [ItemChanges] to the Merkle Trie and
-  // compute the root hash, but if the block ends up being abandoned rather than
-  // committed, it is expensive to remove these items from the Merkle Trie.
-  //
-  // We are going to replace the Merkle Trie with a much cheaper commutative
-  // hash function, so once we do that, we *can* compute the hash here with the
-  // pending [ItemChanges]. If we the block is abandoned, it is cheap to revert
-  // the hash.
-  // ctx_.get_trie().generate_top_level_hashes();
-  ret.db_hash() = ctx_.get_trie().get_root_hash();
+  DbHash db_hash =
+      btx->get().compute_db_hash(/*base_hash=*/ctx_.get_tip().db_hash);
+  ctx_.cache_db_hash(id, db_hash);
+  ret.db_hash() = db_hash;
   co_return ret;
 }
 
@@ -276,10 +282,11 @@ sys_getsockname(int sockfd, T &val)
 
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration genesis_configuration, BlockHash block_hash)
+    GenesisConfiguration genesis_configuration, uint64_t network_id,
+    SHA256Hash txset_hash, SHA256Hash events_hash)
 {
   constexpr static BlockID kGenesisBlockID = 0;
-  if (ctx_.get_tip().height != 0) {
+  if (ctx_.get_tip().height != -1) {
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
@@ -293,6 +300,27 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
       co_return DbSchedResult::DbSchedResultError;
     }
   }
+
+  uint128_t initial_hog_token_supply =
+      GenesisConfigurationLoader::initial_hog_token_supply();
+  HogAge ages{
+      .address = GenesisConfigurationLoader::kDeployContractAddress,
+      .num_hogs = {to_xdr(initial_hog_token_supply), to_xdr(uint128_t{0}),
+                   to_xdr(uint128_t{0})},
+      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+  };
+  if (auto age_write = ctx_.get_db().write_address_average_hog_age(ages);
+      !age_write.has_value()) {
+    error("failed to write genesis block hog ages: {}", age_write.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  // Genesis runs after direct db writes in tests (for example wasm
+  // code/metadata/balance initialization in the mempool test infra). We need to
+  // account for these writes in the db hash. Thus, we compute the db hash with
+  // those items alone in the db, then we use this hash as the base hash when
+  // calling [compute_db_hash()] below.
+  DbHash base_hash = ctx_.get_db().compute_full_db_hash();
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
@@ -327,11 +355,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
         return 0;
       },
       [&](auto const &contract) {
-        auto data = x23::serialize(*contract);
-        const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
-        auto buf = std::span<const std::byte>(cptr, data.size());
-        SHA256Hash hash = sha256(buf);
-        auto r = ctx_.get_db().write_wasm_code(hash, buf);
+        auto r = itx->request_new_contract(*contract);
         if (!r.has_value()) {
           error("failed to write genesis block contract: {}", r.error());
           failure = true;
@@ -396,23 +420,25 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
   itx->commit();
+  DbHash db_hash = r.value()->get().compute_db_hash(base_hash);
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
-  uint128_t initial_hog_token_supply =
-      GenesisConfigurationLoader::initial_hog_token_supply();
-
-  // Initialize the genesis address with scheduler state
-  CHECK(
-      ctx_.get_db()
-          .write_address_average_hog_age(HogAge{
-              .address = GenesisConfigurationLoader::kDeployContractAddress,
-              .num_hogs = {to_xdr(initial_hog_token_supply),
-                           to_xdr(uint128_t{0}), to_xdr(uint128_t{0})},
-              .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
-          })
-          .has_value());
-
-  co_return to_db_result(commit_block(kGenesisBlockID, block_hash, r.value()));
+  // Since the genesis block is the first block, we set [prev_block_hash] to
+  // null.
+  constexpr BlockHash kNullBlockHash{};
+  const BlockHeader header{.network_id = network_id,
+                           .txset_hash = txset_hash,
+                           .db_hash = db_hash,
+                           .events_hash = events_hash,
+                           .prev_block_hash = kNullBlockHash};
+  auto ret =
+      to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
+                                r.value(), db_hash));
+  // Just to be safe, we recompute the db hash from scratch and ensure that
+  // [db_hash] is equal to it.
+  DbHash full_hash = ctx_.get_db().compute_full_db_hash();
+  CHECK_EQ(full_hash, db_hash);
+  co_return ret;
 }
 
 x23::Async<DbShardResult>

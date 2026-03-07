@@ -152,9 +152,12 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   LoadgenContextID context_id = result.success().context_id;
 
   // Load the genesis configuration from loadgen to the database
-  constexpr BlockHash kBlockHash{};
+  uint64_t network_id = 0x0;
+  SHA256Hash txset_hash{};
+  SHA256Hash events_hash{};
   auto db_res = db_client_.dbsched_load_genesis_configuration(
-      result.success().genesis_configuration, kBlockHash);
+      result.success().genesis_configuration, network_id, txset_hash,
+      events_hash);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
   // Initialize the executor with a shard pointing to our mock database server
@@ -245,9 +248,12 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   LoadgenContextID context_id = result.success().context_id;
 
   // Load the genesis configuration from loadgen to the database
-  constexpr BlockHash kBlockHash{};
+  uint64_t network_id = 0x0;
+  SHA256Hash txset_hash{};
+  SHA256Hash events_hash{};
   auto db_res = db_client_.dbsched_load_genesis_configuration(
-      result.success().genesis_configuration, kBlockHash);
+      result.success().genesis_configuration, network_id, txset_hash,
+      events_hash);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
   // Initialize the executor

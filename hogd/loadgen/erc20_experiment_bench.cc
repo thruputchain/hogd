@@ -4,11 +4,13 @@
 #include <cstdlib>
 #include <stdexcept>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
+#include "transaction.hh"
 
 namespace hogd {
 

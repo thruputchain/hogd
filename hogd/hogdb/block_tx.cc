@@ -15,16 +15,19 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/auth_lock.h"
 #include "hogd/hogdb/item_lock/balance_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "x23/x23.h"
 
@@ -236,7 +239,7 @@ BlockTX::commit(WorkerPool &pool)
           return;
         }
         HogDBStatus<void> tmp = v.second.write_committed_change(
-            LockContext(&db_, block_height_, v.first, &cost_model_), trie_);
+            LockContext(&db_, block_height_, v.first, &cost_model_));
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
@@ -272,8 +275,7 @@ BlockTX::commit(WorkerPool &pool)
 
         HogDBStatus<void> tmp = v.second.write_committed_change(
             LockContext(&db_, block_height_,
-                        make_address_balance_item_key(v.first), &cost_model_),
-            get_trie());
+                        make_address_balance_item_key(v.first), &cost_model_));
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
@@ -295,6 +297,39 @@ BlockTX::commit(WorkerPool &pool)
   }
 
   return ret;
+}
+
+DbHash
+BlockTX::compute_db_hash(const DbHash &base_hash)
+{
+  LtHash16 hash = lthash16_from_db_hash(base_hash);
+  std::mutex hash_lock;
+
+  item_locks_.for_each_parallel([&](std::pair<const ItemKey &, ItemLock &> v) {
+    if (!v.second.is_finalized()) {
+      return;
+    }
+    std::scoped_lock g(hash_lock);
+    auto ret = v.second.apply_db_hash_delta(LockContext(&db_, block_height_,
+                                                        v.first, &cost_model_),
+                                            hash);
+    CHECK(ret.has_value());
+  });
+
+  addr_balance_locks_.for_each_parallel(
+      [&](std::pair<const Address &, ItemLock &> v) {
+        if (!v.second.is_finalized()) {
+          return;
+        }
+        std::scoped_lock g(hash_lock);
+        auto ret = v.second.apply_db_hash_delta(
+            LockContext(&db_, block_height_,
+                        make_address_balance_item_key(v.first), &cost_model_),
+            hash);
+        CHECK(ret.has_value());
+      });
+
+  return db_hash_from_lthash16(hash);
 }
 
 } // namespace hogd

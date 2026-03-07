@@ -6,14 +6,15 @@
 #include <limits>
 #include <span>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -114,8 +115,7 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
 }
 
 HogDBStatus<void>
-NNInt128Lock::write_committed_change(LockContext const &ctx,
-                                     MerkleTriePrefix &trie) const
+NNInt128Lock::write_committed_change(LockContext const &ctx) const
 {
   assert(!ctx.key.is_address_balance());
   auto delta = delta_bounds_.get_delta();
@@ -123,18 +123,19 @@ NNInt128Lock::write_committed_change(LockContext const &ctx,
   CHECK(!of);
 
   assert(ctx.dao);
-  HogDBStatus<void> ret = ctx.dao->write_nnint128(ctx.key, value);
-  if (ret) {
-    std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&value),
-                                    sizeof(value));
-    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
-    // [trie.insert_or_update()] only fails if we attempt to insert an empty
-    // key.
-    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, kNNInt128,
-                                                    value_span)
-              .has_value());
-  }
-  return ret;
+  return ctx.dao->write_nnint128(ctx.key, value);
+}
+
+HogDBStatus<void>
+NNInt128Lock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+{
+  assert(ctx.dao);
+  auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
+  CHECK(!of);
+  int128_t out = cpu_to_le(value);
+  auto key = make_contract_data_key(ctx.key.as_bytes());
+  replace_known_item(hash, *ctx.dao, key, kNNInt128, byte_view(out));
+  return {};
 }
 
 } // namespace hogd

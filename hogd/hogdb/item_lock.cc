@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <format>
 #include <limits>
 #include <mutex>
@@ -13,7 +12,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/balance_lock.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
@@ -59,12 +57,12 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   if (lock_state == kFinalizedPermamentExclusiveLock) {
     return HogDBError{HogDBCode::kConflict};
   }
-  assert(lock_state == kUncommitted);
+  CHECK_EQ(lock_state, kUncommitted);
 
   std::unique_lock<x23::TestLock> lock(lock_);
 
   if (before == nullptr) {
-    assert(after != nullptr);
+    CHECK_CONST_PTR(after);
 
     if constexpr (is_debug_build()) {
       if (ctx.key.is_address_balance()) {
@@ -75,15 +73,16 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   }
 
   if (after == nullptr) {
-    assert(before != nullptr);
+    CHECK_CONST_PTR(before);
     handle_release_uncommitted_lock(before, ctx, lock);
     // this value should be ignored, so returning a value that is obviously
     // invalid
     return std::numeric_limits<int128_t>::max();
   }
 
-  assert(before != nullptr && after != nullptr);
-  assert(pending_refcount_ > 0);
+  CHECK_CONST_PTR(before);
+  CHECK_CONST_PTR(after);
+  CHECK_GT(pending_refcount_, 0U);
   // No need to modify pending_refcount_ here -- we already have a reference and
   // don't need to release it, as both before and after are non-null.
   return handle_try_atomic_from_pending(before, after, ctx, lock);
@@ -97,7 +96,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
   auto lock_state = lock_state_.load(std::memory_order_acquire);
   // Release-acquire ensures that if lock_state_ != kUncommitted,
   // then the current thread will never read lock_change_ as ExclusiveLock.
-  assert(lock_state != kFinalizedPermamentExclusiveLock);
+  CHECK_NE(lock_state, kFinalizedPermamentExclusiveLock);
 
   if (lock_state == kUncommitted) {
     // We only need to acquire the lock here if change_ is an exclusive change.
@@ -106,7 +105,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
     // if we're committing an exclusive change.
     if (change.is_exclusive()) {
       std::unique_lock<x23::TestLock> lock(lock_);
-      assert(pending_refcount_ == 1);
+      CHECK_EQ(pending_refcount_, 1U);
 
       // The workflow for downgrading from exclusive to nonexclusive is to
       // initialize the lock as the proper type, but with no changes applied.
@@ -125,7 +124,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
             else {
               using change_type = typename lock_t::change_type;
               auto const *inner = change.get_inner<change_type>();
-              assert(inner != nullptr);
+              CHECK_CONST_PTR(inner);
               auto r = lock.try_atomic_change_lock(nullptr, inner, ctx);
               CHECK(r.has_value());
             }
@@ -161,7 +160,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
         }
         else {
           auto const *inner = change.get_inner<typename lock_t::change_type>();
-          assert(inner != nullptr);
+          CHECK_CONST_PTR(inner);
           return lock.commit_change(did_finalize, snapshot_cost_, *inner,
                                     ctx.cost_model);
         }
@@ -174,9 +173,9 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
                                            const ItemChange *after,
                                            const LockContext &ctx)
 {
-  assert(!std::holds_alternative<std::monostate>(lock_contents_));
-  assert(!std::holds_alternative<ExclusiveLock>(lock_contents_));
-  assert(before == nullptr || (!before->is_exclusive()));
+  CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
+  CHECK(!std::holds_alternative<ExclusiveLock>(lock_contents_));
+  CHECK(before == nullptr || (!before->is_exclusive()));
 
   if (after != nullptr && after->is_exclusive()) {
     return HogDBError{HogDBCode::kConflict};
@@ -196,7 +195,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
           change_type const *before_inner = nullptr;
           if (before != nullptr) {
             before_inner = before->get_inner<change_type>();
-            assert(before_inner != nullptr);
+            CHECK_CONST_PTR(before_inner);
           }
 
           change_type const *after_inner = nullptr;
@@ -213,8 +212,8 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
   if (!local_cost.has_value()) {
     return local_cost;
   }
-  assert((before == nullptr || !before->is_permanent_exclusive()) &&
-         (after == nullptr || !after->is_permanent_exclusive()));
+  CHECK((before == nullptr || !before->is_permanent_exclusive()) &&
+        (after == nullptr || !after->is_permanent_exclusive()));
 
   return snapshot_cost_transform(local_cost.value(), snapshot_cost_, false);
 }
@@ -227,18 +226,18 @@ ItemLock::handle_try_atomic_from_pending(
     const ItemChange *before, const ItemChange *after, const LockContext &ctx,
     std::unique_lock<x23::TestLock> const &ul)
 {
-  assert(!std::holds_alternative<std::monostate>(lock_contents_));
-  assert(ul.owns_lock());
-  assert(before == nullptr || pending_refcount_ > 0);
+  CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
+  CHECK(ul.owns_lock());
+  CHECK(before == nullptr || pending_refcount_ > 0);
 
   bool before_holds_exclusive_lock =
       (before != nullptr && before->is_exclusive());
 
   if (before_holds_exclusive_lock) {
-    assert(std::holds_alternative<ExclusiveLock>(lock_contents_));
+    CHECK(std::holds_alternative<ExclusiveLock>(lock_contents_));
     // If after is nullptr, this case is handled elsewhere
     // (handle_release_uncommitted_lock)
-    assert(after != nullptr);
+    CHECK_CONST_PTR(after);
 
     if (after->is_exclusive()) {
       auto res = std::get<ExclusiveLock>(lock_contents_)
@@ -267,9 +266,9 @@ ItemLock::handle_try_atomic_from_pending(
           else {
             using change_type = typename lock_t::change_type;
             auto const *after_inner = after->get_inner<change_type>();
-            assert(after_inner != nullptr);
+            CHECK_CONST_PTR(after_inner);
             auto res = lock.try_atomic_change_lock(nullptr, after_inner, ctx);
-            assert(res.has_value());
+            CHECK(res.has_value());
             return res.value();
           }
         },
@@ -280,7 +279,7 @@ ItemLock::handle_try_atomic_from_pending(
   }
 
   if (after != nullptr && after->is_exclusive()) {
-    assert(!before_holds_exclusive_lock);
+    CHECK(!before_holds_exclusive_lock);
     // upgrading from non-exclusive to exclusive
 
     if (before == nullptr && pending_refcount_ > 0) {
@@ -290,14 +289,14 @@ ItemLock::handle_try_atomic_from_pending(
     }
 
     if (before != nullptr && pending_refcount_ > 1) {
-      assert(!before->is_exclusive());
+      CHECK(!before->is_exclusive());
       // we have a lock, but some other transaction already has a ref on this
       // lock. Cannot acquire in exclusive mode
       return HogDBError{HogDBCode::kConflict};
     }
 
-    assert((before == nullptr && pending_refcount_ == 0) ||
-           (before != nullptr && pending_refcount_ == 1));
+    CHECK((before == nullptr && pending_refcount_ == 0) ||
+          (before != nullptr && pending_refcount_ == 1));
 
     set_exclusive_lock(ul);
 
@@ -326,7 +325,7 @@ ItemLock::handle_try_atomic_from_pending(
           change_type const *before_inner = nullptr;
           if (before != nullptr) {
             before_inner = before->get_inner<change_type>();
-            assert(before_inner != nullptr);
+            CHECK_CONST_PTR(before_inner);
           }
 
           change_type const *after_inner = nullptr;
@@ -358,8 +357,8 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
                                           std::unique_lock<x23::TestLock> &ul)
 {
   if (pending_refcount_ == 0) {
-    assert(std::holds_alternative<std::monostate>(lock_contents_));
-    assert(after != nullptr);
+    CHECK(std::holds_alternative<std::monostate>(lock_contents_));
+    CHECK_CONST_PTR(after);
     prepare_lock_contents(after, ctx, ul);
   }
 
@@ -382,9 +381,9 @@ ItemLock::handle_release_uncommitted_lock(
     const ItemChange *before, const LockContext &ctx,
     std::unique_lock<x23::TestLock> const &ul)
 {
-  assert(ul.owns_lock());
-  assert(pending_refcount_ > 0);
-  assert(before != nullptr);
+  CHECK(ul.owns_lock());
+  CHECK_GT(pending_refcount_, 0U);
+  CHECK_CONST_PTR(before);
   pending_refcount_--;
   if (pending_refcount_ == 0) {
     reset_lock_contents(ul);
@@ -400,8 +399,8 @@ ItemLock::handle_release_uncommitted_lock(
 void
 ItemLock::set_exclusive_lock(std::unique_lock<x23::TestLock> const &ul)
 {
-  assert(ul.owns_lock());
-  assert(pending_refcount_ <= 1);
+  CHECK(ul.owns_lock());
+  CHECK_LE(pending_refcount_, 1U);
   lock_contents_.emplace<ExclusiveLock>();
 }
 
@@ -410,13 +409,13 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
                                 const LockContext & /*ctx*/,
                                 std::unique_lock<x23::TestLock> const &ul)
 {
-  assert((pending_refcount_ == 0 &&
-          std::holds_alternative<std::monostate>(lock_contents_)) ||
-         (pending_refcount_ == 1 &&
-          std::holds_alternative<ExclusiveLock>(lock_contents_)));
+  CHECK((pending_refcount_ == 0 &&
+         std::holds_alternative<std::monostate>(lock_contents_)) ||
+        (pending_refcount_ == 1 &&
+         std::holds_alternative<ExclusiveLock>(lock_contents_)));
 
-  assert(after != nullptr);
-  assert(ul.owns_lock());
+  CHECK_CONST_PTR(after);
+  CHECK(ul.owns_lock());
 
   if (after->is_bytes()) {
     lock_contents_.emplace<BytestringLock>(after->to_bytes());
@@ -484,8 +483,8 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
 void
 ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
 {
-  assert(ul.owns_lock());
-  assert(pending_refcount_ == 0);
+  CHECK(ul.owns_lock());
+  CHECK_EQ(pending_refcount_, 0U);
 
   lock_contents_ = std::monostate{};
 }
@@ -511,12 +510,11 @@ ItemLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDBStatus<void>
-ItemLock::write_committed_change(LockContext const &ctx,
-                                 MerkleTriePrefix &trie) const
+ItemLock::write_committed_change(LockContext const &ctx) const
 {
-  assert(is_finalized());
-  assert(!std::holds_alternative<std::monostate>(lock_contents_));
-  assert(!std::holds_alternative<ExclusiveLock>(lock_contents_));
+  CHECK(is_finalized());
+  CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
+  CHECK(!std::holds_alternative<ExclusiveLock>(lock_contents_));
   return std::visit(
       [&](auto &lock) -> HogDBStatus<void> {
         if constexpr (std::is_same_v<std::decay_t<decltype(lock)>,
@@ -526,7 +524,28 @@ ItemLock::write_committed_change(LockContext const &ctx,
           panic("bad finalized state");
         }
         else {
-          return lock.write_committed_change(ctx, trie);
+          return lock.write_committed_change(ctx);
+        }
+      },
+      lock_contents_);
+}
+
+HogDBStatus<void>
+ItemLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
+{
+  CHECK(is_finalized());
+  CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
+  CHECK(!std::holds_alternative<ExclusiveLock>(lock_contents_));
+  return std::visit(
+      [&](auto &lock) -> HogDBStatus<void> {
+        if constexpr (std::is_same_v<std::decay_t<decltype(lock)>,
+                                     std::monostate> ||
+                      std::is_same_v<std::decay_t<decltype(lock)>,
+                                     ExclusiveLock>) {
+          panic("bad finalized state");
+        }
+        else {
+          return lock.apply_db_hash_delta(ctx, hash);
         }
       },
       lock_contents_);

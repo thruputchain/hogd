@@ -42,8 +42,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  // Expected block height is 1 (genesis block, tip hasn't advanced yet)
-  BlockHeight expected_height = 1;
+  // Expected block height is 0 (genesis block, tip hasn't advanced yet)
+  BlockHeight expected_height = 0;
 
   // Create a native contract with a method that calls GetBlockHeight and
   // verifies it matches the expected height passed as calldata
@@ -54,7 +54,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
       [](NativeSyscallContext &ctx,
          BlockHeight expected_height) -> InvokeStatus<void> {
         // Call GetBlockHeight syscall
-        BlockHeight block_height = 0;
+        BlockHeight block_height = 100;
         auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
@@ -116,8 +116,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
   advance_block();
   advance_block();
 
-  // After 3 advances from genesis (height 1), we should be at height 4
-  BlockHeight expected_height = 4;
+  // After 3 advances from genesis (height 0), we should be at height 3
+  BlockHeight expected_height = 3;
 
   // Create a native contract with a method that calls GetBlockHeight and
   // verifies it matches the expected height passed as calldata
