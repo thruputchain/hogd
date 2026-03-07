@@ -123,7 +123,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
   else {
     CHECK_EQ(db_hash, DbHash{});
-    ctx.get_tip().height = 0;
+    ctx.get_tip().height = -1;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
 
