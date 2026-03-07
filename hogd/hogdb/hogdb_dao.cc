@@ -4,7 +4,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
