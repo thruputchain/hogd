@@ -152,6 +152,11 @@ is_state_item(std::span<const std::byte> key)
     return false;
   }
 
+  // skip global state.
+  if (static_cast<char>(key[0]) == '>') {
+    return false;
+  }
+
   auto prefix = static_cast<Prefix>(key[0]);
   switch (prefix) {
   case Prefix::kBalance:
