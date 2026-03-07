@@ -752,6 +752,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
+  // TODO(jhumphri): chuckd does not know the current [db_hash], so we only
+  // check the other fields in [db_tip]. Beyond this, I feel like it is
+  // incorrect to have [schedulercoord_nominate()] have the [DbTip] type as a
+  // parameter--I feel like it should only take the latest *block* hash as a
+  // parameter, and maybe we could also have the latest block height as a
+  // parameter if we wanted to have checks that everything is consistent.
+  //
+  // Similarly, for [schedulercoord_validate()], I think we should only take
+  // [nomination] as a parameter, which includes the latest block hash and
+  // height as fields. We should remove [db_tip].
+  //
+  // I am going to discuss this with Petar and address accordingly.
   // if (db_tip != last_committed_block_) {
   if (db_tip.height != last_committed_block_.height ||
       db_tip.id != last_committed_block_.id ||
