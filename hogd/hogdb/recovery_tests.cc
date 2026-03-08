@@ -40,7 +40,6 @@ make_hog_age(uint128_t num_hogs, BlockHeight average_age)
 
 TEST(RecoveryTests, RecoveryVaryingItems)
 {
-
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
 
