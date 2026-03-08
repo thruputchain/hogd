@@ -1035,6 +1035,187 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
       << "Metadata should be removed from ramdb after explicit deletion";
 }
 
+TEST_F(HogDBTest,
+       RCQBlockIntegrityTypeChangeBytestringRemovesAllBlocksFromDbHash)
+{
+  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  // Test that type change from RCQ to Bytestring properly removes all RCQ
+  // blocks from both DAO and db hash.
+
+  // Setup: create contract with enough storage tokens
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 4);
+
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
+                           .contract_size = 10}));
+
+  constexpr size_t kEntriesPerBlock = 100;
+  constexpr size_t kNumBlocks = 3;
+
+  // Create blocks
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.resize(kEntriesPerBlock);
+    for (size_t i = 0; i < kEntriesPerBlock; i++) {
+      delta.insert.added_entries[i] =
+          QueueEntry{static_cast<uint8_t>(block_idx)};
+    }
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  DbHash db_hash_before_type_change = db_.compute_full_db_hash();
+
+  // Explicitly delete the RCQ using request_deletion (goes through
+  // DeletionLock)
+  DbHash db_hash_after_type_change;
+  {
+    BlockHeight height = kNumBlocks + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        rcq_key, std::span<const std::byte>(std::as_bytes(std::span("test"))),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    db_hash_after_type_change =
+        block_tx.get().compute_db_hash(db_hash_before_type_change);
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash = db_.compute_full_db_hash();
+  EXPECT_EQ(db_hash_after_type_change, full_db_hash);
+
+  // Verify db hash changed after deleting all blocks
+  EXPECT_NE(db_hash_before_type_change, db_hash_after_type_change)
+      << "db hash did not change after type change - blocks may not have "
+         "been removed from db";
+
+  // Verify all blocks are removed from ramdb
+  for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
+    auto block_result = db_.read_retrocausal_queue_block(rcq_key, block_num);
+    EXPECT_FALSE(block_result.has_value())
+        << "Block " << block_num
+        << " should be removed from ramdb after explicit deletion";
+  }
+
+  // Verify metadata is also removed
+  auto meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  EXPECT_FALSE(meta_result.has_value())
+      << "Metadata should be removed from ramdb after explicit deletion";
+}
+
+TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
+{
+  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  // Test that type change from RCQ to NNInt properly removes all RCQ blocks
+  // from both DAO and db hash.
+
+  // Setup: create contract with enough storage tokens
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 4);
+
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
+                           .contract_size = 10}));
+
+  constexpr size_t kEntriesPerBlock = 100;
+  constexpr size_t kNumBlocks = 3;
+
+  // Create blocks
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.resize(kEntriesPerBlock);
+    for (size_t i = 0; i < kEntriesPerBlock; i++) {
+      delta.insert.added_entries[i] =
+          QueueEntry{static_cast<uint8_t>(block_idx)};
+    }
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  DbHash db_hash_before_type_change = db_.compute_full_db_hash();
+
+  // Explicitly delete the RCQ using request_deletion (goes through
+  // DeletionLock)
+  DbHash db_hash_after_type_change;
+  {
+    BlockHeight height = kNumBlocks + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        rcq_key, 100,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    db_hash_after_type_change =
+        block_tx.get().compute_db_hash(db_hash_before_type_change);
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Verify incremental db hash produced by the block tx matches the db hash
+  // generated from scratch
+  DbHash full_db_hash = db_.compute_full_db_hash();
+  EXPECT_EQ(db_hash_after_type_change, full_db_hash);
+
+  // Verify db hash changed after deleting all blocks
+  EXPECT_NE(db_hash_before_type_change, db_hash_after_type_change)
+      << "db hash did not change after type change - blocks may not have "
+         "been removed from db";
+
+  // Verify all blocks are removed from ramdb
+  for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
+    auto block_result = db_.read_retrocausal_queue_block(rcq_key, block_num);
+    EXPECT_FALSE(block_result.has_value())
+        << "Block " << block_num
+        << " should be removed from ramdb after explicit deletion";
+  }
+
+  // Verify metadata is also removed
+  auto meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  EXPECT_FALSE(meta_result.has_value())
+      << "Metadata should be removed from ramdb after explicit deletion";
+}
+
 } // namespace hogd
 
 int
