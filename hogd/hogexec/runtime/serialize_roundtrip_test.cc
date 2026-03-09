@@ -13,7 +13,6 @@
 #include "built_contracts/cxs_roundtrip.h"
 #include "built_contracts/roundtrip.hh"
 #include "built_contracts/txs_roundtrip.h"
-#include "built_contracts/txs_roundtrip.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"

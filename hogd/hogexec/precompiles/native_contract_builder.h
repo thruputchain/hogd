@@ -179,11 +179,17 @@ public:
       // Wrap an error in CrossExn format (CXS-encoded), matching SDK behavior.
       // CrossExn layout: i32 discriminant (0=Contract) + CXS-encoded E.
       auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
-        x23::Buf buf;
-        x23::store_cxs_int<int32_t>(buf, 0);
-        x23::serialize_cxs_to(buf, err_value);
-        ctx.handler().set_return_buffer(std::move(buf), true);
-        return {};
+        try {
+          x23::Buf buf;
+          x23::store_cxs_int<int32_t>(buf, 0);
+          x23::serialize_cxs_to(buf, err_value);
+          ctx.handler().set_return_buffer(std::move(buf), true);
+          return {};
+        } catch (const x23::XdrException &e) {
+          error("unrecoverable: do_revert CXS serialization failed: {}",
+                e.what());
+          return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+        }
       };
 
       if constexpr (is_contract_result_type<return_t>) {
