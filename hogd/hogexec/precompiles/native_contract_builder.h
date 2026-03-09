@@ -20,6 +20,8 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
