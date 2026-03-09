@@ -19,3 +19,13 @@ mkdir -p $CWD/tmp
 $BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp onetomany_payments -n 1000000 -w 24 -N | sed 's/^/ReplayCache: /'
 
 rm -rf $CWD/tmp
+mkdir -p $CWD/tmp
+
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp onetomany_payments -n 1000000 -w 24 -d | sed 's/^/DBHash: /'
+
+rm -rf $CWD/tmp
+mkdir -p $CWD/tmp
+
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp onetomany_payments -n 1000000 -w 24 -N -d | sed 's/^/ReplayCache+DBHash: /'
+
+rm -rf $CWD/tmp
