@@ -35,7 +35,7 @@ template<> struct Serializer<SerializationFormat::kTxs> {
   {
     try {
       return x23::serialize(args...);
-    } catch (const x23::XdrBadInput &e) {
+    } catch (const x23::XdrException &e) {
       trace("TXS Serialize failed: {}", e.what());
       return std::nullopt;
     }
@@ -48,7 +48,7 @@ template<> struct Serializer<SerializationFormat::kTxs> {
     auto args = std::tuple<std::remove_cvref_t<Args>...>{};
     try {
       x23::deserialize(&args, x23::BufView{data});
-    } catch (const x23::XdrBadInput &e) {
+    } catch (const x23::XdrException &e) {
       trace("TXS Deserialize failed: {}", e.what());
       return std::nullopt;
     }
@@ -68,7 +68,7 @@ template<> struct Serializer<SerializationFormat::kCxs> {
   {
     try {
       return x23::serialize_cxs(args...);
-    } catch (const x23::XdrBadInput &e) {
+    } catch (const x23::XdrException &e) {
       trace("CXS Serialize failed: {}", e.what());
       return std::nullopt;
     }
@@ -83,7 +83,7 @@ template<> struct Serializer<SerializationFormat::kCxs> {
       x23::deserialize_cxs(&args,
                            {reinterpret_cast<const uint8_t *>(data.data()),
                             data.size()});
-    } catch (const x23::XdrBadInput &e) {
+    } catch (const x23::XdrException &e) {
       trace("CXS Deserialize failed: {}", e.what());
       return std::nullopt;
     }

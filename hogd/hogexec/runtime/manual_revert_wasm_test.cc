@@ -23,7 +23,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
-#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -107,17 +106,9 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              auto const &err = result.err();
-             auto expected_err = manual_revert_test::Error(
-                 manual_revert_test::ErrorType::Contract);
-             expected_err.contract_error() = manual_revert_test::ContractError(
-                 manual_revert_test::ContractErrorType::Syscall);
-             // Error code is arbitrarily chosen, but set specifically within
-             // the manual_revert_test wasm
-             expected_err.contract_error().syscall_error() = std::to_underlying(
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-             if (err != expected_err) {
-               ADD_FAILURE()
-                   << "Function call should have returned a contract error";
+             if (err !=
+                 manual_revert_test::ManualRevertTestError::BasicRevert) {
+               ADD_FAILURE() << "Expected BasicRevert error";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

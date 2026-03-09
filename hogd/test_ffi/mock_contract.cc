@@ -1,6 +1,7 @@
 #include "hogd/test_ffi/mock_contract.h"
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include <string>
@@ -13,6 +14,9 @@ MockContract::invoke(std::string_view method)
 {
   auto id = Runtime::method_id_from_name(std::string(method));
   if (!id.has_value()) {
+    error("Unrecoverable: MockContract::invoke failed to parse method name "
+          "'{}'",
+          method);
     return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   }
   auto res = entry_point_(foreign_context_, *id);

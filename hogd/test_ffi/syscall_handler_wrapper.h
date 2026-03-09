@@ -198,6 +198,9 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
 
   auto *handler = SyscallHandlerContext::get_context();
   if (!handler) {
+    error("Unrecoverable: mock_syscall_parser got null "
+          "SyscallHandlerContext for syscall {}",
+          std::to_underlying(syscall_no));
     return unrecoverable_error();
   }
 

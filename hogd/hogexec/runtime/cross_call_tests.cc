@@ -6,7 +6,6 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -124,9 +123,14 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
                                           uint64_t{1000})}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_FALSE(res.is_root_success());
-    ASSERT_EQ(res.result_.error().code(),
-              InvokeErrorCode::kInvokeDeterministic);
+    // The inner call runs out of gas. call_fibonacci uses the non-try
+    // slow_fibonacci(), which aborts with CrossExn on error. The outer
+    // contract completes execution (returns via kReturn with
+    // revert_frame=TRUE), so root_invoke reports success, but commit
+    // detects the revert.
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
   }
 }
 

@@ -20,6 +20,8 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -166,14 +168,27 @@ public:
       // Now we check whether the return value is a plain value,
       // or a variant of Result<T,E>
 
-      auto do_return = [&ctx](auto const &r,
-                              bool revert_frame) -> InvokeStatus<void> {
+      auto do_return = [&ctx](auto const &r) -> InvokeStatus<void> {
         auto return_buffer = Serializer<Format>::serialize(r);
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         ctx.handler().set_return_buffer(std::move(return_buffer.value()),
-                                        revert_frame);
+                                        false);
+        return {};
+      };
+
+      // Wrap an error in CrossExn envelope, matching SDK behavior.
+      // Layout: CXS i32 discriminant + Format-encoded E.
+      auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
+        auto body = Serializer<Format>::serialize(err_value);
+        if (!body.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+        }
+        x23::Buf buf;
+        x23::store_cxs_int<int32_t>(buf, kCrossExnContractDiscriminant);
+        buf.append(body->begin(), body->end());
+        ctx.handler().set_return_buffer(std::move(buf), true);
         return {};
       };
 
@@ -183,26 +198,26 @@ public:
         if (r.is_ok()) {
           // void is so annoying
           if constexpr (std::is_same_v<decltype(r.ok()), void>) {
-            return do_return(std::tuple<>{}, false);
+            return do_return(std::tuple<>{});
           }
           else {
-            return do_return(r.ok(), false);
+            return do_return(r.ok());
           }
         }
         if constexpr (std::is_same_v<decltype(r.err()), void>) {
-          return do_return(std::tuple<>{}, true);
+          return do_revert(std::tuple<>{});
         }
         else {
-          return do_return(r.err(), true);
+          return do_revert(r.err());
         }
       }
       else {
         // otherwise, return the received value
         if constexpr (std::is_same_v<decltype(return_value.value()), void>) {
-          return do_return(std::tuple<>{}, false);
+          return do_return(std::tuple<>{});
         }
         else {
-          return do_return(return_value.value(), false);
+          return do_return(return_value.value());
         }
       }
     };

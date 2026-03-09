@@ -21,18 +21,12 @@ unset CARGO_ENCODED_RUSTFLAGS
 
 # Set environment variables
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
-export RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
 
-# Build the command with any additional flags from $@
-exec cargo build \
+# Build using contract.toml config (includes rustflags, build-std, profile settings)
+exec cargo --config .cargo/contract.toml build \
     -p "${TARGET_NAME}" \
-    --target wasm32-unknown-unknown \
     --locked \
     --frozen \
-    -F guest \
     --offline \
     --target-dir "${TARGET_DIR}" \
-    -Zbuild-std=core,alloc \
-    -Zbuild-std-features=std/optimize_for_size \
     "$@"
-

@@ -2165,4 +2165,275 @@ TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
             kTestFFIErrorCodeNone);
 }
 
+namespace {
+
+// Reproduction of SIGABRT from test_ffi trace.
+// Pattern: root mock contract -> kInvoke to contract 1 (returns normally) ->
+// kInvoke to contract 1 (which kInvoke's contract 2 with gas=1000) ->
+// contract 2 calls kSHA256 -> out of gas -> SDK observed a SIGABRT.
+//
+// Contract 0 (root): deployed, called by root_invoke
+//   - kInvoke to contract 1 (first call, returns via kReturn)
+//   - kGetReturnedBuffer
+//   - kInvoke to contract 1 (second call, which nests into contract 2)
+//
+// Contract 1 (fibonacci_call analogue):
+//   - First call: kReturn (return normally)
+//   - Second call: kInvoke to contract 2 with gas_limit=1000
+//
+// Contract 2 (fibonacci analogue):
+//   - kSHA256 (should fail with out of gas)
+
+// MethodIDs passed as arg2 to kInvoke. kInvoke expects the raw MethodID
+// (uint64_t), NOT a ContractEntrypointID reinterpreted as uint64_t.
+//
+// Root cause was an abort_rs bug (fixed in 0.4.2), but leaving the test in
+// as it's a reasonable test case anyways.
+constexpr uint64_t kTraceMethodFirst = 0xAAAA;
+constexpr uint64_t kTraceMethodSecond = 0xBBBB;
+constexpr uint64_t kTraceMethodFib = 0xCCCC;
+
+// Contract 2: fibonacci analogue. Calls SHA256, which should run out of gas
+// when invoked with very limited gas.
+ForeignInvokeResult
+trace_contract_fibonacci(void * /*unused*/, uint64_t /*method_number*/)
+{
+  // Match trace line 68-69: kSHA256 (syscall=0)
+  // SHA256 input: 32 bytes; output: 32 bytes
+  uint8_t sha_input[32] = {};
+  SHA256Hash sha_output = {};
+  auto sha_res =
+      mock_syscall_entrypoint(std::to_underlying(SyscallNo::kSHA256),
+                              reinterpret_cast<uint64_t>(sha_input),
+                              sizeof(sha_input),
+                              reinterpret_cast<uint64_t>(sha_output.data()),
+                              sizeof(sha_output), 0, 0, 0);
+
+  // If SHA256 ran out of gas, panic propagates:
+  // trace shows panic=1 (kHostOutOfGas) here
+  if (sha_res.panic != 0) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeOutOfGas)};
+  }
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+}
+
+// Contract 1: fibonacci_call analogue.
+// First call (kTraceMethodFirst): just return normally via kReturn.
+// Second call (kTraceMethodSecond): kInvoke to contract 2 with gas=1000.
+ForeignInvokeResult
+trace_contract_fibonacci_call(void *foreign_context, uint64_t method_number)
+{
+  auto *contract_2_addr = static_cast<ContractAddress *>(foreign_context);
+
+  if (method_number == kTraceMethodFirst) {
+    // First call: return normally (matches trace kReturn with kHostReturn)
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  }
+
+  if (method_number == kTraceMethodSecond) {
+    // Second call: invoke contract 2 with gas_limit=1000
+    // Match trace line 65: kInvoke(syscall=5) with arg3=1000
+    RuntimeMemoryLength output_return_buffer_len = 0;
+    Calldata empty_calldata;
+    auto invoke_res = mock_syscall_entrypoint(
+        std::to_underlying(SyscallNo::kInvoke),
+        reinterpret_cast<uint64_t>(contract_2_addr->data()), kTraceMethodFib,
+        1000, // gas_limit = 1000, matching the trace
+        reinterpret_cast<uint64_t>(empty_calldata.data()),
+        empty_calldata.size(), 0,
+        reinterpret_cast<uint64_t>(&output_return_buffer_len));
+
+    // The inner call should have failed (out of gas).
+    // Trace shows result_code=-1 here (line 70).
+    if (invoke_res.panic != 0) {
+      return ForeignInvokeResult{.panic = invoke_res.panic};
+    }
+
+    // Even if panic==0, a nonzero result_code indicates error
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  }
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+}
+
+// Contract 0: root test-script mock contract (deployed).
+// - kInvoke to contract 1 (first call, returns normally)
+// - kGetReturnedBuffer
+// - kInvoke to contract 1 (second call, nests into contract 2)
+ForeignInvokeResult
+trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
+{
+  struct RootContext {
+    ContractAddress contract_1_addr;
+  };
+  auto *ctx = static_cast<RootContext *>(foreign_context);
+
+  // Step 1: kInvoke to contract 1, first call (trace lines 40-53)
+  {
+    RuntimeMemoryLength output_return_buffer_len = 0;
+    Calldata empty_calldata;
+    auto res = mock_syscall_entrypoint(
+        std::to_underlying(SyscallNo::kInvoke),
+        reinterpret_cast<uint64_t>(ctx->contract_1_addr.data()),
+        kTraceMethodFirst, UINT64_MAX,
+        reinterpret_cast<uint64_t>(empty_calldata.data()),
+        empty_calldata.size(), 0,
+        reinterpret_cast<uint64_t>(&output_return_buffer_len));
+
+    if (res.panic != 0) {
+      return ForeignInvokeResult{.panic = res.panic};
+    }
+  }
+
+  // Step 2: kGetReturnedBuffer (trace line 54)
+  {
+    uint8_t return_buf[500] = {};
+    RuntimeMemoryLength return_len = 0;
+    mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetReturnedBuffer),
+                            reinterpret_cast<uint64_t>(return_buf),
+                            sizeof(return_buf),
+                            reinterpret_cast<uint64_t>(&return_len), 0, 0, 0,
+                            0);
+  }
+
+  // Step 3: kInvoke to contract 1, second call (trace lines 56-70)
+  // This is where contract 1 will call contract 2 with gas=1000
+  // and contract 2 will run out of gas -> potential SIGABRT
+  {
+    RuntimeMemoryLength output_return_buffer_len = 0;
+    Calldata empty_calldata;
+    auto res = mock_syscall_entrypoint(
+        std::to_underlying(SyscallNo::kInvoke),
+        reinterpret_cast<uint64_t>(ctx->contract_1_addr.data()),
+        kTraceMethodSecond, UINT64_MAX,
+        reinterpret_cast<uint64_t>(empty_calldata.data()),
+        empty_calldata.size(), 0,
+        reinterpret_cast<uint64_t>(&output_return_buffer_len));
+
+    if (res.panic != 0) {
+      return ForeignInvokeResult{.panic = res.panic};
+    }
+  }
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+}
+
+} // namespace
+
+// Reproduction of SIGABRT observed in test_ffi Rust integration test.
+// A root mock contract invokes another mock contract which invokes a third
+// with limited gas. The innermost contract runs out of gas during SHA256.
+//
+// This test passed -- it turns out the issue was in abort_rs (fixed in 0.4.2).
+TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // Addresses for contracts 1 and 2
+  ContractAddress contract_1_addr{};
+  contract_1_addr[0] = 1;
+  ContractAddress contract_2_addr{};
+  contract_2_addr[0] = 2;
+
+  // Root context carries address of contract 1
+  struct {
+    ContractAddress contract_1_addr;
+  } root_context{.contract_1_addr = contract_1_addr};
+
+  // Register mock contracts (matching trace: 3 contracts, same pattern)
+  ASSERT_EQ(register_new_contract(rc, 0, trace_contract_root, &root_context),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(register_new_contract(rc, 1, trace_contract_fibonacci_call,
+                                  &contract_2_addr),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(register_new_contract(rc, 2, trace_contract_fibonacci, nullptr),
+            kTestFFIErrorCodeNone);
+
+  // Create mock contracts in the DB (matching trace: 3 setup_create_contract)
+  auto make_mock = [](int32_t id) {
+    Contract c(ContractType::kMockTest);
+    c.mock_contract_id() = id;
+    return c;
+  };
+
+  Contract c0 = make_mock(0);
+  Contract c1 = make_mock(1);
+  Contract c2 = make_mock(2);
+  auto bytes0 = x23::serialize(c0);
+  auto bytes1 = x23::serialize(c1);
+  auto bytes2 = x23::serialize(c2);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes0.data(), bytes0.size()),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes1.data(), bytes1.size()),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes2.data(), bytes2.size()),
+            kTestFFIErrorCodeNone);
+
+  // Deploy all 3 contracts at their addresses
+  ContractAddress root_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, root_addr.data(), sha256(c0).data(),
+                                  bytes0.size()),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_deploy_contract(db, contract_1_addr.data(), sha256(c1).data(),
+                                  bytes1.size()),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_deploy_contract(db, contract_2_addr.data(), sha256(c2).data(),
+                                  bytes2.size()),
+            kTestFFIErrorCodeNone);
+
+  // Grant storage tokens
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, root_addr.data(),
+                                                1'000'000'000),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, contract_1_addr.data(),
+                                                1'000'000'000),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, contract_2_addr.data(),
+                                                1'000'000'000),
+            kTestFFIErrorCodeNone);
+
+  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+
+  // Build signed transaction targeting root contract
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = root_addr,
+                     .entrypoint = entrypoint_from_method_id(0),
+                     .gas_limit = UINT64_MAX,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  // This is the critical point: root_invoke should NOT SIGABRT.
+  // The trace shows it crashed here when the inner SHA256 ran out of gas.
+  // That turns out to have been an error in abort_rs (upgrading from 0.4.0 to
+  // 0.4.2).
+  auto result = root_invoke(syscall_handler, 1 /* enable_tracing */);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  if (result.serialized_output.data) {
+    free_ffi_data_buffer(result.serialized_output);
+  }
+  if (result.serialized_trace.data) {
+    free_ffi_data_buffer(result.serialized_trace);
+  }
+}
+
 } // namespace hogd
