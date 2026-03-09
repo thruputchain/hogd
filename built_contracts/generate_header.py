@@ -110,8 +110,7 @@ struct {interface_name} {{
     constexpr static std::string_view kVersion = "{version}";
     {wasm_str}
 
-    // Specify serialization format, if non-default, with a line like the below.
-    // constexpr static std::string_view kSerializationFormat = "txs";
+    constexpr static std::string_view kSerializationFormat = "cxs";
 
     // These will be sorted before being passed as indices to method id derivation.
     constexpr static auto kExportNames = std::array<std::string_view, {len(export_names)}>{{

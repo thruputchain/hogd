@@ -95,6 +95,8 @@ SyscallHandlerContext::root_invoke()
   case InvokeErrorCode::kInvokeOutOfGas:
     panic("unreachable per above checks");
   case InvokeErrorCode::kInvokeUnrecoverable:
+    error("Unrecoverable: root_invoke got kInvokeUnrecoverable");
+    return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   case InvokeErrorCode::kInvokeValidationFailure:
     // TODO(geoff): this will need to be handled differently if we
     // add support in the SDK for testing transactions in validation mode.

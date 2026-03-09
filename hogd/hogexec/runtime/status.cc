@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "syscall_error.hh"
 #include "x23/format.h"
@@ -64,6 +65,9 @@ InvokeResult::to_host_fn_result() const
       return {HostFnError{HostFnErrorCode::kHostValidationFailure},
               gas_consumed_};
     default:
+      error("Unrecoverable: InvokeResult::to_host_fn_result got unknown "
+            "InvokeErrorCode {}",
+            std::to_underlying(result_.error().code()));
       return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
     }
     // unreachable

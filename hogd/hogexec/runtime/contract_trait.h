@@ -212,8 +212,32 @@ public:
     return [data, manually_reverted] -> std::optional<return_type> {
       if constexpr (is_contract_result_type<return_type>) {
         if (manually_reverted) {
-          auto out = Serializer<kSerializationFormat>::template deserialize<
-              typename return_type::err_type>(data);
+          // Abort buffers contain CXS-encoded CrossExn<E>.
+          // Layout: i32 discriminant (0=Contract, 1=Library, 2=Unknown)
+          // followed by the CXS-encoded variant payload.
+          std::span<const uint8_t> data_u8(reinterpret_cast<const uint8_t *>(
+                                               data.data()),
+                                           data.size());
+          int32_t discriminant;
+          try {
+            discriminant = x23::load_cxs_int<int32_t>(data_u8);
+          } catch (const x23::XdrException &e) {
+            trace("Decode Return Failed: Could not parse CrossExn "
+                  "discriminant: {}",
+                  e.what());
+            return std::nullopt;
+          }
+          if (discriminant != 0) {
+            trace("Decode Return: CrossExn discriminant {} is not Contract(0)",
+                  discriminant);
+            return std::nullopt;
+          }
+          std::span<const std::byte> remaining(
+              reinterpret_cast<const std::byte *>(data_u8.data()),
+              data_u8.size());
+          auto out =
+              Serializer<SerializationFormat::kCxs>::template deserialize<
+                  typename return_type::err_type>(remaining);
           if (!out.has_value()) {
             trace("Decode Return Failed: Failed to deserialize return error "
                   "type");

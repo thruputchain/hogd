@@ -68,7 +68,7 @@ template<> struct Serializer<SerializationFormat::kCxs> {
   {
     try {
       return x23::serialize_cxs(args...);
-    } catch (const x23::XdrBadInput &e) {
+    } catch (const x23::XdrException &e) {
       trace("CXS Serialize failed: {}", e.what());
       return std::nullopt;
     }
@@ -83,7 +83,7 @@ template<> struct Serializer<SerializationFormat::kCxs> {
       x23::deserialize_cxs(&args,
                            {reinterpret_cast<const uint8_t *>(data.data()),
                             data.size()});
-    } catch (const x23::XdrBadInput &e) {
+    } catch (const x23::XdrException &e) {
       trace("CXS Deserialize failed: {}", e.what());
       return std::nullopt;
     }

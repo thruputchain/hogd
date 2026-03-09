@@ -407,7 +407,8 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
         auto serialized_trace = x23::serialize(*trace);
         auto buffer = make_new_data_buffer(serialized_trace.size());
         if (!buffer.has_value()) {
-          error("failed to allocate memory for serialized trace!");
+          error(
+              "unrecoverable: failed to allocate memory for serialized trace!");
           return make_ffi_result_type<ForeignTracedInvokeResult>(
               kTestFFIErrorCodeUnrecoverableError);
         }
@@ -418,7 +419,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
     }
     return res;
   } catch (std::exception const &e) {
-    log_error("unhandled error during root_invoke: {}", e);
+    log_error("unrecoverable: unhandled error during root_invoke: {}", e);
     return kUnrecoverableError;
   }
 }
@@ -442,7 +443,7 @@ open_mock_invocation_frame(void *syscall_handler,
     log_error("error deserializing invocation: {}", e);
     return kTestFFIErrorCodeDeserializeError;
   } catch (std::exception const &e) {
-    log_error("error during open_mock_invocation_frame: {}", e);
+    log_error("unrecoverable: error during open_mock_invocation_frame: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
@@ -1227,8 +1228,11 @@ free_ffi_data_buffer(struct FFIDataBuffer buffer)
 {
   hogd::do_ffi_trace("FFI (start): free_ffi_data_buffer(buffer={})", buffer);
   auto result = hogd::free_ffi_data_buffer(buffer);
-  hogd::do_ffi_trace("FFI (end): free_ffi_data_buffer(buffer={}) -> {}", buffer,
-                     result);
+  // Log pointer address and length only — buffer.data has been freed, so the
+  // FFIDataBuffer formatter must not dereference it.
+  hogd::do_ffi_trace(
+      "FFI (end): free_ffi_data_buffer(data=<freed>, len={}) -> {}", buffer.len,
+      result);
   return result;
 }
 

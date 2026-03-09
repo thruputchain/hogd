@@ -587,7 +587,9 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       switch (syscall_result.error().code()) {
       case HostFnErrorCode::kHostAbortTransaction:
       case HostFnErrorCode::kHostValidationFailure:
+        return false;
       case HostFnErrorCode::kHostUnrecoverable:
+        error("Unrecoverable: syscall_entry_outer got kHostUnrecoverable");
         return false;
       case HostFnErrorCode::kHostOutOfGas:
       case HostFnErrorCode::kHostExit:
