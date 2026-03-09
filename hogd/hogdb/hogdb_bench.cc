@@ -85,16 +85,23 @@ struct Payment {
 class Benchmark {
 public:
   static std::unique_ptr<Benchmark>
-  make_one_to_many_payments_benchmark(size_t n, int workers, bool use_nonces);
+  make_one_to_many_payments_benchmark(size_t n, int workers, bool use_nonces,
+                                      bool db_hash);
   static std::unique_ptr<Benchmark>
-  make_many_to_one_payments_benchmark(size_t n, int workers, bool use_nonces);
+  make_many_to_one_payments_benchmark(size_t n, int workers, bool use_nonces,
+                                      bool db_hash);
   static std::unique_ptr<Benchmark>
-  make_round_robin_payments_benchmark(size_t n, int workers, bool use_nonces);
-  static std::unique_ptr<Benchmark>
-  make_new_storage_benchmark(size_t n, int workers, bool use_nonces);
+  make_round_robin_payments_benchmark(size_t n, int workers, bool use_nonces,
+                                      bool db_hash);
+  static std::unique_ptr<Benchmark> make_new_storage_benchmark(size_t n,
+                                                               int workers,
+                                                               bool use_nonces,
+                                                               bool db_hash);
 
-  Benchmark(HogDBDAO db, int workers, std::vector<Payment> &&ops)
-    : db_(std::move(db)), workers_(workers), ops_(std::move(ops))
+  Benchmark(HogDBDAO db, int workers, bool compute_db_hash,
+            std::vector<Payment> &&ops)
+    : db_(std::move(db)), workers_(workers), ops_(std::move(ops)),
+      compute_db_hash_(compute_db_hash)
   {}
   ~Benchmark() = default;
 
@@ -107,6 +114,7 @@ private:
   WorkerPool workers_;
   std::vector<Payment> ops_;
   AuthChangeSubscriptionManager subscription_manager_;
+  bool compute_db_hash_;
 
   StorageCostModel cost_model_{StorageCostModel::default_cost_model()};
 };
@@ -159,7 +167,7 @@ populate_account_balances(HogDBDAO &db, size_t n,
 
 std::unique_ptr<Benchmark>
 Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
-                                               bool nonces)
+                                               bool nonces, bool db_hash)
 {
   // generate payment ops.
   std::vector<Payment> ops;
@@ -172,8 +180,8 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
+                                           std::move(ops));
 
   // set up initial DB state.
   auto ret =
@@ -202,7 +210,7 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
 
 std::unique_ptr<Benchmark>
 Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
-                                               bool nonces)
+                                               bool nonces, bool db_hash)
 {
   // generate payment ops.
   std::vector<Payment> ops;
@@ -213,8 +221,8 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
+                                           std::move(ops));
 
   // set up initial DB state.
   auto ret =
@@ -240,7 +248,7 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
 
 std::unique_ptr<Benchmark>
 Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
-                                               bool use_nonces)
+                                               bool use_nonces, bool db_hash)
 {
   // generate payment ops.
   std::vector<Payment> ops;
@@ -251,8 +259,8 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
+                                           std::move(ops));
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
@@ -271,7 +279,8 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
 }
 
 std::unique_ptr<Benchmark>
-Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
+Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces,
+                                      bool db_hash)
 {
   // generate payment ops.
   std::vector<Payment> ops;
@@ -282,8 +291,8 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), workers, db_hash,
+                                           std::move(ops));
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
@@ -351,6 +360,13 @@ Benchmark::run()
   size_t width = ops_.size() / workers_.worker_count() / kBatchesPerWorker;
   workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
+  // Optionally compute the hash as part of the benchmark
+  if (compute_db_hash_) {
+    DbHash base_hash{};
+    base_hash = block.get().compute_db_hash(base_hash);
+    asm volatile("" : : "m"(base_hash) : "memory");
+  }
+
   // commit changes to the ramdb.
   auto ret = block.get().commit(workers_).and_then([this] {
     // persist everything to the database.
@@ -363,7 +379,7 @@ Benchmark::run()
 }
 
 using bench_fn = std::unique_ptr<Benchmark> (*)(size_t n, int workers,
-                                                bool use_nonces);
+                                                bool use_nonces, bool db_hash);
 
 const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
     {"roundrobin_payments", "each payer pays exactly one other payer",
@@ -864,6 +880,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     std::println("  -p, --producers <N>    rcq_concurrent producer threads "
                  "(default: workers/2)");
     std::println("  -N, --nonces           enable nonces (payment commands)");
+    std::println("  -d, --db_hash          compute db hash after execution");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -890,6 +907,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"queues",    required_argument, nullptr, 'q'},
       {"producers", required_argument, nullptr, 'p'},
       {"nonces",    no_argument,       nullptr, 'N'},
+      {"db_hash",   no_argument,       nullptr, 'd'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -900,11 +918,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   size_t num_queues = 1;
   int num_producers = -1; // -1 means default to workers/2
   bool use_nonces = false;
+  bool db_hash = false;
 
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Nh", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndh", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -921,6 +940,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'N':
       use_nonces = true;
+      break;
+    case 'd':
+      db_hash = true;
       break;
     case 'h':
       print_usage();
@@ -947,7 +969,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     if (cmd != name)
       continue;
 
-    std::unique_ptr<hogd::Benchmark> bench = fn(n, workers, use_nonces);
+    std::unique_ptr<hogd::Benchmark> bench =
+        fn(n, workers, use_nonces, db_hash);
     double sec = hogd::measure([&bench] { bench->run(); });
     std::println("took {} seconds", sec);
     hogd::info("took {} seconds", sec);
