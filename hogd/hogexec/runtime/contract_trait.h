@@ -36,6 +36,9 @@
 
 namespace hogd {
 
+// SDK CrossExn<E> discriminant for the Contract(E) variant.
+constexpr int32_t kCrossExnContractDiscriminant = 0;
+
 // Common utilities for building preset contracts
 
 ContractEntrypointID
@@ -237,17 +240,16 @@ public:
                   e.what());
             return std::nullopt;
           }
-          if (discriminant != 0) {
-            error("Decode Return: CrossExn discriminant {} is not Contract(0)",
-                  discriminant);
+          if (discriminant != kCrossExnContractDiscriminant) {
+            error("Decode Return: CrossExn discriminant {} is not Contract({})",
+                  discriminant, kCrossExnContractDiscriminant);
             return std::nullopt;
           }
           std::span<const std::byte> remaining(
               reinterpret_cast<const std::byte *>(data_u8.data()),
               data_u8.size());
-          auto out =
-              Serializer<SerializationFormat::kCxs>::template deserialize<
-                  typename return_type::err_type>(remaining);
+          auto out = Serializer<kSerializationFormat>::template deserialize<
+              typename return_type::err_type>(remaining);
           if (!out.has_value()) {
             error("Decode Return Failed: Failed to deserialize return error "
                   "type");

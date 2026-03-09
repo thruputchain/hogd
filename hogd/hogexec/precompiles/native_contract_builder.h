@@ -178,20 +178,18 @@ public:
         return {};
       };
 
-      // Wrap an error in CrossExn format (CXS-encoded), matching SDK behavior.
-      // CrossExn layout: i32 discriminant (0=Contract) + CXS-encoded E.
+      // Wrap an error in CrossExn envelope, matching SDK behavior.
+      // Layout: CXS i32 discriminant + Format-encoded E.
       auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
-        try {
-          x23::Buf buf;
-          x23::store_cxs_int<int32_t>(buf, 0);
-          x23::serialize_cxs_to(buf, err_value);
-          ctx.handler().set_return_buffer(std::move(buf), true);
-          return {};
-        } catch (const x23::XdrException &e) {
-          error("unrecoverable: do_revert CXS serialization failed: {}",
-                e.what());
+        auto body = Serializer<Format>::serialize(err_value);
+        if (!body.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
         }
+        x23::Buf buf;
+        x23::store_cxs_int<int32_t>(buf, kCrossExnContractDiscriminant);
+        buf.append(body->begin(), body->end());
+        ctx.handler().set_return_buffer(std::move(buf), true);
+        return {};
       };
 
       if constexpr (is_contract_result_type<return_t>) {
