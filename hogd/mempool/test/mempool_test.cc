@@ -7,6 +7,7 @@
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
