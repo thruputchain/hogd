@@ -173,6 +173,11 @@ public:
     return *coordinator_sched_server_->impl();
   }
 
+  TestEventAggregatorSchedRpc &event_sched_rpc()
+  {
+    return *event_sched_server_->impl();
+  }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;

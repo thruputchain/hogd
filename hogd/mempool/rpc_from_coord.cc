@@ -202,6 +202,12 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
+MempoolCoordinatorRpc::eventsched_get_block_hash(BlockID block_id)
+{
+  co_return co_await event_sched_client_->eventsched_get_block_hash(block_id);
+}
+
+x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                               BlockHeight block_height)
 {
@@ -238,7 +244,7 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(
     const x23::XdrVec<SignedTransactionHash> &hashes, const DbHash &db_hash,
-    const BlockHash &prev_block_hash)
+    const SHA256Hash &events_hash, const BlockHash &prev_block_hash)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
@@ -270,7 +276,7 @@ MempoolCoordinatorRpc::get_block_hash(
   BlockHeader header{.network_id = network_id_,
                      .txset_hash = root_hash,
                      .db_hash = db_hash,
-                     .events_hash = {},
+                     .events_hash = events_hash,
                      .prev_block_hash = prev_block_hash};
   return generate_block_hash(header);
 }
@@ -620,6 +626,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   double stage_spawn_finish_calls = 0.0;
   double stage_generate_block_hash = 0.0;
   double stage_close_snapshot = 0.0;
+  double stage_event_block_hash = 0.0;
   double stage_serialize_nomination = 0.0;
   double stage_await_finish_calls = 0.0;
 
@@ -632,18 +639,27 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   record_stage(stage_spawn_finish_calls);
 
+  x23::Async<EventBlockResult> event_block_hash_handle =
+      eventsched_get_block_hash(cache.block_id);
   {
     DbBlockResult result = co_await close_snapshot(cache.block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
     cache.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
+  SHA256Hash events_hash{};
+  {
+    EventBlockResult result = co_await event_block_hash_handle;
+    CHECK_EQ(result.error(), RPCError::kRPCNone);
+    events_hash = result.root_hash();
+    record_stage(stage_event_block_hash);
+  }
   {
     Nomination &nomination =
         cache.nomination_result.nominated_block().nomination;
     nomination.block_height = db_tip.height + 1;
     nomination.block_hash =
-        get_block_hash(cache.tx_hashes, cache.db_tip.db_hash,
+        get_block_hash(cache.tx_hashes, cache.db_tip.db_hash, events_hash,
                        /*prev_block_hash=*/db_tip.block_hash);
     record_stage(stage_generate_block_hash);
 
@@ -665,10 +681,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   record_stage(stage_await_finish_calls);
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
-       "close_snapshot={:.6f}, generate_block_hash={:.6f}, "
-       "serialize_nomination={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
-       "finish_handles={}",
-       stage_spawn_finish_calls, stage_close_snapshot,
+       "close_snapshot={:.6f}, event_block_hash={:.6f}, "
+       "generate_block_hash={:.6f}, serialize_nomination={:.6f}, "
+       "await_finish_calls={:.6f}, total={:.6f}, finish_handles={}",
+       stage_spawn_finish_calls, stage_close_snapshot, stage_event_block_hash,
        stage_generate_block_hash, stage_serialize_nomination,
        stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
   co_return;
@@ -1054,11 +1070,18 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
     cache.db_tip.db_hash = result.db_hash();
   }
+  SHA256Hash events_hash{};
+  {
+    EventBlockResult result =
+        co_await eventsched_get_block_hash(cache.block_id);
+    CHECK_EQ(result.error(), RPCError::kRPCNone);
+    events_hash = result.root_hash();
+  }
 
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
-  if (get_block_hash(cache.tx_hashes, cache.db_tip.db_hash,
+  if (get_block_hash(cache.tx_hashes, cache.db_tip.db_hash, events_hash,
                      /*prev_block_hash=*/nomination.prev_block_hash) !=
       nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);

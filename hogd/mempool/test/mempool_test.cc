@@ -250,6 +250,12 @@ TEST(Mempool, Validate)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -269,7 +275,7 @@ TEST(Mempool, Validate)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -300,6 +306,12 @@ TEST(Mempool, ValidateBatch)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -319,7 +331,7 @@ TEST(Mempool, ValidateBatch)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
 
@@ -366,6 +378,12 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -385,7 +403,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
 
     // Remove a transaction from the nomination.
@@ -430,6 +448,12 @@ TEST(Mempool, ValidateBatchMissingTx)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -446,7 +470,7 @@ TEST(Mempool, ValidateBatchMissingTx)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
 
@@ -485,6 +509,12 @@ TEST(Mempool, ValidateCommit)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -504,7 +534,7 @@ TEST(Mempool, ValidateCommit)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -541,6 +571,12 @@ TEST(Mempool, ValidateTwo)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -560,7 +596,7 @@ TEST(Mempool, ValidateTwo)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -569,6 +605,7 @@ TEST(Mempool, ValidateTwo)
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
+
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_validate.db_tip().id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -585,8 +622,9 @@ TEST(Mempool, ValidateTwo)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 2);
 
+    // TODO(jhumphri): Fix [event_block_hash].
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -624,6 +662,12 @@ TEST(Mempool, GetTip)
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
@@ -643,7 +687,7 @@ TEST(Mempool, GetTip)
     EXPECT_EQ(db_tip.height, 1);
 
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash,
+        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
