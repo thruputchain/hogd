@@ -5,8 +5,8 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 

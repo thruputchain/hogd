@@ -15,8 +15,8 @@
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/hogexec/runtime/item_view_type.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/item/item_view_type.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"

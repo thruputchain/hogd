@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/test_ffi/test_bindings.h"
 
 namespace hogd {

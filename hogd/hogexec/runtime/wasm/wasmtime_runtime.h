@@ -11,8 +11,8 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/rust/wasmtime/bindings.h"
 

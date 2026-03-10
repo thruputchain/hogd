@@ -1,4 +1,4 @@
-#include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/components/execution_mode.h"
 
 #include <cassert>
 #include <optional>

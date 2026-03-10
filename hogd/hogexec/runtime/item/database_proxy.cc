@@ -1,4 +1,4 @@
-#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/item/database_proxy.h"
 
 #include <cassert>
 #include <concepts>
@@ -18,7 +18,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"

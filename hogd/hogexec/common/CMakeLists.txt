@@ -1,0 +1,3 @@
+add_library(hogexec_common_objects OBJECT status.cc)
+target_link_libraries(hogexec_common_objects hogd_interface)
+add_library(hogexec_common STATIC $<TARGET_OBJECTS:hogexec_common_objects>)

@@ -4,8 +4,8 @@
 #include <string_view>
 #include <utility>
 
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"

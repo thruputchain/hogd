@@ -3,7 +3,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "syscall_error.hh"
 
 namespace hogd {

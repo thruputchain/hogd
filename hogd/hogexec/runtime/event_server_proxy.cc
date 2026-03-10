@@ -5,7 +5,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"

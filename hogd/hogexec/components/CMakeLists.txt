@@ -1,4 +1,5 @@
 add_library(components_objects OBJECT
+  execution_mode.cc
   hash_buffers.cc
 )
 target_link_libraries(components_objects hogd_interface)
@@ -8,8 +9,9 @@ target_link_libraries(components crypto)
 
 # Own test executable (same pattern as runtime_test)
 add_library(components_test_objects OBJECT
-  hash_buffers_test.cc
   alias_guard_test.cc
+  execution_mode_test.cc
+  hash_buffers_test.cc
 )
 target_link_libraries(components_test_objects GTest::gtest hogd_interface)
 target_include_directories(components_test_objects PRIVATE ${CMAKE_BINARY_DIR})

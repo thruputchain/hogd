@@ -8,22 +8,17 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 add_subdirectory(wasm)
+add_subdirectory(item)
 add_subdirectory(direct_rpc_tests)
 
 add_library(runtime_objects OBJECT
   contract_trait.cc
-  database_proxy.cc
   event_server_proxy.cc
-  execution_mode.cc
   invocation_frame.cc
-  item_view.cc
   native_runtime.cc
   metrics.cc
   multiplexed_context.cc
   runtime.cc
-  status.cc
-  storage_snapshot_cache.cc
-  snapshot_storage_item.cc
   syscall_auth.cc
   syscall_block_data.cc
   syscall_bytestring.cc
@@ -75,13 +70,11 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   event_test.cc
-  execution_mode_test.cc
   ffi_helpers_tests.cc
   fibonacci_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
   invoke_error_handling_test.cc
-  item_view_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_wasm_test.cc
   manual_revert_caller_wasm_test.cc
@@ -102,7 +95,6 @@ add_library(runtime_test_objects OBJECT
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
-  snapshot_storage_item_test.cc
   syscall_auth_config_test.cc
   syscall_block_data_test.cc
   syscall_entry_outer_tests.cc
@@ -127,6 +119,8 @@ add_executable(
 
 target_link_libraries(
   runtime
+  hogexec_common
+  item
   components
   unified_lib
   protocol
