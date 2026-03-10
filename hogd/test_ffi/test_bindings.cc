@@ -401,22 +401,6 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
       context->to_handler().enable_tracing();
     }
     auto res = context->root_invoke();
-    if (enable_tracing) {
-      auto const *trace = context->to_handler().get_trace();
-      if (trace) {
-        auto serialized_trace = x23::serialize(*trace);
-        auto buffer = make_new_data_buffer(serialized_trace.size());
-        if (!buffer.has_value()) {
-          error(
-              "unrecoverable: failed to allocate memory for serialized trace!");
-          return make_ffi_result_type<ForeignTracedInvokeResult>(
-              kTestFFIErrorCodeUnrecoverableError);
-        }
-        std::memcpy(buffer.value().data, serialized_trace.data(),
-                    serialized_trace.size());
-        res.serialized_trace = buffer.value();
-      }
-    }
     return res;
   } catch (std::exception const &e) {
     log_error("unrecoverable: unhandled error during root_invoke: {}", e);
