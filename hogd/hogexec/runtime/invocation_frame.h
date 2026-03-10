@@ -28,11 +28,20 @@ namespace hogd {
 class PerTransactionDatabaseProxy;
 struct InvokeResult;
 
+// Describes sponsorship of a child frame's storage costs by its parent.
+// The sponsor address is always the parent frame (msg_sender) and is derived
+// from the frame stack at settlement time rather than stored here.
+// A budget of 0 means no sponsorship is active.
+struct SponsorshipInfo {
+  int128_t budget = 0;             // max the sponsor will pay (0 = none)
+  int128_t consumed = 0;           // how much has been consumed so far
+};
+
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
-                  InvokeFlagSet flags);
+                  InvokeFlagSet flags, SponsorshipInfo sponsorship);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -152,6 +161,8 @@ public:
     return committed_contracts;
   }
 
+  auto& sponsorship(this auto& self) { return self.sponsorship_info_; }
+
   HashBuffers hash_buffers_;
 
 private:
@@ -175,6 +186,9 @@ private:
   // newly deployed contracts during the current call frame (and child frames)
   std::unordered_map<ContractAddress, DeployedContractHash>
       new_contract_deployments_;
+
+  // Sponsorship info for this frame. budget=0 means no sponsorship.
+  SponsorshipInfo sponsorship_info_;
 };
 
 // Stack of invocation frames.
@@ -194,7 +208,7 @@ public:
   bool empty() const { return frame_stack_.empty(); }
 
   void start_frame(ContractAddress const &address, Calldata &&calldata,
-                   InvokeFlagSet flags);
+                   InvokeFlagSet flags, SponsorshipInfo sponsorship);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   SystemStatus<std::pair<InvokeResult, bool>>

@@ -24,9 +24,10 @@
 namespace hogd {
 
 InvocationFrame::InvocationFrame(ContractAddress const &address,
-                                 Calldata &&calldata, InvokeFlagSet flags)
+                                 Calldata &&calldata, InvokeFlagSet flags,
+                                 SponsorshipInfo sponsorship)
   : address_(address), calldata_(std::forward<Calldata>(calldata)),
-    flags_(flags)
+    flags_(flags), sponsorship_info_(std::move(sponsorship))
 {}
 
 void
@@ -163,9 +164,11 @@ InvocationFrame::collect_storage_deltas(
 
 void
 InvocationFrameStack::start_frame(ContractAddress const &address,
-                                  Calldata &&calldata, InvokeFlagSet flags)
+                                  Calldata &&calldata, InvokeFlagSet flags,
+                                  SponsorshipInfo sponsorship)
 {
-  frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags);
+  frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
+                            std::move(sponsorship));
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>

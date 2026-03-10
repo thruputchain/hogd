@@ -162,7 +162,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.get()),
-                             calldata, input_flags);
+                             calldata, input_flags,
+                             /*sponsored_storage_budget=*/0);
 
   // invocation returned successfully
   if (invoke_res.has_value() &&

@@ -339,7 +339,8 @@ public:
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
-                       UINT64_MAX, calldata, Flags);
+                       UINT64_MAX, calldata, Flags,
+                       /*sponsored_storage_budget=*/0);
 
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
 

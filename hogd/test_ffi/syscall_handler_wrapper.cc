@@ -143,7 +143,8 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     }
   }
 
-  auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags);
+  auto stashed_parent_trace =
+      handler_.start_frame(invocation, invoke_flags, SponsorshipInfo{});
   if (stashed_parent_trace) {
     invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
   }

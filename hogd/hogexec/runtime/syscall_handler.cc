@@ -236,7 +236,8 @@ SystemCallHandler::root_invoke()
       invoke(root_invocation.invoked_address,
              sdk_method_id(root_invocation.entrypoint), available_gas,
              Calldata(root_invocation.calldata),
-             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+             std::to_underlying(InvokeFlag::kInvokeFlagNone),
+             /*sponsored_storage_budget=*/0);
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -442,7 +443,8 @@ SystemCallHandler::get_msg_sender() const
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
-                          Calldata calldata, InvokeFlagSet flags)
+                          Calldata calldata, InvokeFlagSet flags,
+                          int128_t sponsored_storage_budget)
 {
   if (!validate_flags<InvokeFlag::kInvokeFlagTryInvoke,
                       InvokeFlag::kInvokeFlagReadOnly>(flags)) {
@@ -468,7 +470,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  auto stashed_parent_trace = start_frame(invocation, flags);
+  auto stashed_parent_trace = start_frame(
+      invocation, flags,
+      SponsorshipInfo{.budget = sponsored_storage_budget});
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
@@ -495,8 +499,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 std::unique_ptr<InvocationFrameTrace>
-SystemCallHandler::start_frame(Invocation invocation,
-                               InvokeFlagSet flags) noexcept
+SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
+                               SponsorshipInfo sponsorship) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -516,7 +520,8 @@ SystemCallHandler::start_frame(Invocation invocation,
     panic("Failed to set invocation: {}", e.what());
   }
   invocation_frame_stack_.start_frame(invocation.invoked_address,
-                                      std::move(invocation.calldata), flags);
+                                      std::move(invocation.calldata), flags,
+                                      std::move(sponsorship));
   return stashed_parent_trace;
 }
 

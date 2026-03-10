@@ -124,7 +124,8 @@ public:
   // Returns the parent trace, if any, which should be stashed and restored in
   // finish_frame
   std::unique_ptr<InvocationFrameTrace>
-  start_frame(Invocation invocation, InvokeFlagSet flags) noexcept;
+  start_frame(Invocation invocation, InvokeFlagSet flags,
+              SponsorshipInfo sponsorship) noexcept;
   SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
@@ -186,7 +187,8 @@ public:
   // Should be called from within a syscall.
   [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, Runtime::MethodID method,
-         GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags);
+         GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
+         int128_t sponsored_storage_budget);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)

@@ -119,7 +119,8 @@ public:
     host_call_context->syscall_handler = &handler;
 
     handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                        std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                        SponsorshipInfo{});
 
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
@@ -153,7 +154,8 @@ public:
     host_call_context->syscall_handler = &handler;
 
     handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                        std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                        SponsorshipInfo{});
 
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
@@ -232,7 +234,8 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                      SponsorshipInfo{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -278,7 +281,8 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                      SponsorshipInfo{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -319,7 +323,8 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                      SponsorshipInfo{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -363,7 +368,8 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
+                      std::to_underlying(InvokeFlag::kInvokeFlagReadOnly),
+                      SponsorshipInfo{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -410,7 +416,8 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                      SponsorshipInfo{});
 
   // Create a buffer larger than kMaxReturnBufferLen (1024)
   std::array<std::byte, 1025> oversized_buffer{};
@@ -439,7 +446,8 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                      SponsorshipInfo{});
 
   std::array<std::byte, 10> valid_buffer{};
 
