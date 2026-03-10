@@ -18,7 +18,10 @@ add_library(item_test_objects OBJECT
 target_link_libraries(item_test_objects GTest::gtest hogd_interface)
 target_include_directories(item_test_objects PRIVATE ${CMAKE_BINARY_DIR})
 
-add_executable(item_test $<TARGET_OBJECTS:item_test_objects>)
+add_executable(item_test
+  item_test_main.cc
+  $<TARGET_OBJECTS:item_test_objects>
+)
 target_link_libraries(item_test
   item
   runtime_test_util
@@ -32,6 +35,5 @@ target_link_libraries(item_test
   hogdb
   storage_cost
   GTest::gtest
-  GTest::gtest_main
 )
 gtest_discover_tests(item_test)
