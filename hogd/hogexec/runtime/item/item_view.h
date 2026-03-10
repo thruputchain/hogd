@@ -26,6 +26,7 @@ namespace hogd {
 
 class SnapshotStorageItem;
 class StorageSnapshotCache;
+struct StorageCostModel;
 
 // Each of the item types has the following methods:
 // get_delta()
@@ -36,12 +37,16 @@ class StorageSnapshotCache;
 //   the set() call in the ItemView is a no-op.
 // kItemType (static constant)
 //   The type of the item view.
+// marginal_storage_cost(cost_model)
+//   Return the marginal storage cost of the item view.
+//   This logic should mirror the cost of writing the item in hogdb.
 
 // Representing the internal state of a bytestring item.
 class BytestringItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
+  int128_t marginal_storage_cost(const StorageCostModel &cost_model) const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
@@ -53,6 +58,8 @@ class NNIntItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
+  int128_t marginal_storage_cost(const StorageCostModel &cost_model) const;
+
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
   std::optional<int128_xdr> base_value_;
@@ -63,6 +70,7 @@ public:
 class NativeTokenBalanceItem : public NNIntItem {
 public:
   constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
+  int128_t marginal_storage_cost(const StorageCostModel &cost_model) const;
 };
 
 // Represent state of item that has been deleted.
@@ -74,6 +82,9 @@ public:
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
+  static int128_t marginal_storage_cost(const StorageCostModel &/*unused*/) {
+    return 0;
+  }
 };
 
 // Represent state of an item that is a retrocausal queue.

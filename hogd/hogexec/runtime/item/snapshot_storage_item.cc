@@ -18,6 +18,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
 
@@ -161,6 +162,36 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
     }
   }
   return entry;
+}
+
+std::optional<int128_t>
+SnapshotStorageItem::snapshot_storage_cost(StorageCostModel const& model) const
+{
+  return std::visit(
+      [&](auto const& arg) -> std::optional<int128_t> {
+        return arg.snapshot_storage_cost(model);
+      },
+      entry_);
+}
+
+int128_t SnapshotStorageItem::BytestringEntry::snapshot_storage_cost(StorageCostModel const& model) const
+{
+  return model.get_bytestring_cost(bytestring_.size());
+}
+
+int128_t SnapshotStorageItem::NNIntEntry::snapshot_storage_cost(StorageCostModel const& model)
+{
+  return model.get_nnint_cost();
+}
+
+int128_t SnapshotStorageItem::ReplayCacheEntry::snapshot_storage_cost(StorageCostModel const& model)
+{
+  return model.get_replay_cache_cost(1);
+}
+
+int128_t SnapshotStorageItem::NativeTokenBalanceEntry::snapshot_storage_cost(StorageCostModel const& model)
+{
+  return model.get_balance_cost();
 }
 
 } // namespace hogd
