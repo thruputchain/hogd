@@ -1,0 +1,37 @@
+add_library(item_objects OBJECT
+  item_view.cc
+  snapshot_storage_item.cc
+  database_proxy.cc
+  storage_snapshot_cache.cc
+)
+target_link_libraries(item_objects hogd_interface)
+target_include_directories(item_objects PRIVATE ${CMAKE_BINARY_DIR})
+
+add_library(item STATIC $<TARGET_OBJECTS:item_objects>)
+target_link_libraries(item hogexec_common)
+
+# Standalone item tests — no syscall handlers, WASM runtimes, or precompiles
+add_library(item_test_objects OBJECT
+  item_view_test.cc
+  snapshot_storage_item_test.cc
+)
+target_link_libraries(item_test_objects GTest::gtest hogd_interface)
+target_include_directories(item_test_objects PRIVATE ${CMAKE_BINARY_DIR})
+
+add_executable(item_test $<TARGET_OBJECTS:item_test_objects>)
+target_link_libraries(item_test
+  item
+  runtime_test_util
+  hogexec_common
+  components
+  unified_lib
+  protocol
+  metrics
+  event
+  db_interface
+  hogdb
+  storage_cost
+  GTest::gtest
+  GTest::gtest_main
+)
+gtest_discover_tests(item_test)

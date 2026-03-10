@@ -6,7 +6,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogexec_constants.hh"
 #include "syscall_error.hh"
 #include "types.hh"

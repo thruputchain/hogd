@@ -6,7 +6,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasm/wasmi_runtime.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/wasm/wasmtime_runtime.h"

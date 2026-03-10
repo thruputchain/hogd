@@ -1,4 +1,4 @@
-#include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/item/item_view.h"
 
 #include <algorithm>
 #include <cassert>
@@ -13,11 +13,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
-#include "hogd/hogexec/runtime/item_view_type.h"
-#include "hogd/hogexec/runtime/snapshot_storage_item.h"
-#include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/execution_mode.h"
+#include "hogd/hogexec/runtime/item/item_view_type.h"
+#include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"

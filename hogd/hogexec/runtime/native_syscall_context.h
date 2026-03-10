@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"

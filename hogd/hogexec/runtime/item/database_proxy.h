@@ -13,7 +13,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"

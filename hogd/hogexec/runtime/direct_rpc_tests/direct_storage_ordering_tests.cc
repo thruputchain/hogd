@@ -5,7 +5,7 @@
 
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"

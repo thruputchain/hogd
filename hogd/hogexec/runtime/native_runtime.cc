@@ -9,9 +9,9 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 

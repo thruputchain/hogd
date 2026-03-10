@@ -8,8 +8,8 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 
 namespace hogd {
