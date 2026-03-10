@@ -9,8 +9,8 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/snapshot_storage_item.h"
+#include "hogd/hogexec/runtime/item/database_proxy.h"
+#include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"

@@ -14,7 +14,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 
 namespace hogd {
 

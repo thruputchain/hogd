@@ -389,7 +389,7 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
 #include "event.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/rust/contract_types/bindings.h"
 #include "storage_item.hh"
@@ -458,7 +458,7 @@ def gen_syscall_frame(spec: list[dict], args: list[int]) -> str:
 #include <span>
 #include <utility>
 
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"

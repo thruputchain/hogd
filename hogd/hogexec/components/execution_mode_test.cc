@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/components/execution_mode.h"
 #include "retrocausal_queue.hh"
 #include "transaction.hh"
 #include "types.hh"

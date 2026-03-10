@@ -11,8 +11,8 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/init.h"

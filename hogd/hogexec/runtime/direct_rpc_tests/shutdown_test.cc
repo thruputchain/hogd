@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"

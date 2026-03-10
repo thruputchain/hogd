@@ -1,4 +1,4 @@
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 
 #include <cassert>
 #include <format>
@@ -11,9 +11,9 @@
 #include "hogd/base/log.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/snapshot_storage_item.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/item/database_proxy.h"
+#include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"

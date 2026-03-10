@@ -7,7 +7,7 @@
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/metrics/metrics.h"
 #include "rpc_types.hh"
 

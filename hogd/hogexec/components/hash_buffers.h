@@ -7,7 +7,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/common/status.h"
 #include "types.hh"
 
 namespace hogd {
