@@ -610,7 +610,29 @@ TEST(Mempool, ValidateTwo)
       res_validate.db_tip().id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
+  // Now nominate another block.
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  EXPECT_EQ(db_tip.height, 2);
+
+  res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  event_block_hash = server.event_sched_rpc().eventsched_get_block_hash(
+      res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
+  res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.nominated_block().block_id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
   // Now validate another block.
+  nomination = res_nominate.nominated_block().nomination;
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   {
@@ -620,9 +642,8 @@ TEST(Mempool, ValidateTwo)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.height, 2);
+    EXPECT_EQ(db_tip.height, 3);
 
-    // TODO(jhumphri): Fix [event_block_hash].
     nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
         tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
         /*prev_block_hash=*/nomination.prev_block_hash);
