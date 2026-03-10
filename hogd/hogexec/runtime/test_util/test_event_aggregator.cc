@@ -23,6 +23,26 @@ TestEventAggregator::open_block(BlockID block_id)
 }
 
 EventBlockResult
+TestEventAggregator::get_block_hash(BlockID block_id)
+{
+  std::scoped_lock lock(mtx_);
+  if (!block_refcounts_.contains(block_id)) {
+    error("Block {} is not open", block_id);
+    return EventBlockResult(RPCError::kRPCBadBlockID);
+  }
+
+  if (block_refcounts_.at(block_id) == 0) {
+    error("Block {} is not open", block_id);
+    return EventBlockResult(RPCError::kRPCBadBlockID);
+  }
+
+  SHA256Hash root_hash{}; // TODO(geoff): Implement
+  EventBlockResult result(RPCError::kRPCNone);
+  result.root_hash() = root_hash;
+  return result;
+}
+
+EventBlockResult
 TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
 {
   std::scoped_lock lock(mtx_);
