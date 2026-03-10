@@ -1,9 +1,11 @@
+#include <cstring>
 #include <gtest/gtest.h>
 
 #include <cassert>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,6 +46,22 @@ protected:
     return std::make_unique<SnapshotStorageItem>(
         WireStorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
         BlockID{1}, *db_proxy_);
+  }
+
+  static Bytestring make_bytestring(std::string_view str) {
+    Bytestring bytestring;
+    bytestring.resize_uninitialized(str.size());
+    std::memcpy(bytestring.data(), str.data(), str.size());
+    return bytestring;
+  }
+
+  static WireStorageItem make_bytestring_item(Bytestring const& bytestring) {
+    WireStorageItem item(StorageItemType::kItemTypeBytestring);
+    item.bytestring() = bytestring;
+    return item;
+  }
+  static WireStorageItem make_bytestring_item(std::string_view str) {
+    return make_bytestring_item(make_bytestring(str));
   }
 };
 
@@ -185,4 +203,19 @@ TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
   check_concurrent_entry(3, std::nullopt);
   check_concurrent_entry_bad(4);
 }
+
+TEST_F(SnapshotStorageItemTest, SnapshotStorageCostBasic)
+{
+  StorageCostModel cost_model(12000, 1, 5, 5, 1234);
+
+  SnapshotStorageItem bytestring_item(make_bytestring_item("hello"),
+    AddressAndKey{}, BlockID{1}, *db_proxy_);
+
+  EXPECT_EQ(bytestring_item.snapshot_storage_cost(cost_model), cost_model.get_bytestring_cost(5));
+
+  SnapshotStorageItem empty_item(WireStorageItem(StorageItemType::kItemTypeDeleted),
+    AddressAndKey{}, BlockID{1}, *db_proxy_);
+  EXPECT_EQ(empty_item.snapshot_storage_cost(cost_model), 0);
+}
+
 } // namespace hogd

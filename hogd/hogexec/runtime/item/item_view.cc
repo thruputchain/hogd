@@ -258,6 +258,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
             .max_fully_consumed_block_number = next_block->block_number;
         queue_delta_.consume->past_block_consume.partial_consumed_number = 0;
       }
+      past_block_consumed_count_++;
     }
 
     return next_block->entries[partial_consume_quantity];
@@ -473,6 +474,15 @@ UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
   }
   base_item_ = r.value();
   return {};
+}
+
+
+int128_t 
+UnmodifiedItem::get_current_storage_cost(StorageCostModel const &cost_model) const {
+  if (is_loaded()) {
+    return base_item().snapshot_storage_cost(cost_model);
+  }
+  return 0;
 }
 
 } // namespace hogd

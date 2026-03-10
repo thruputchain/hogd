@@ -33,8 +33,8 @@ struct InvokeResult;
 // from the frame stack at settlement time rather than stored here.
 // A budget of 0 means no sponsorship is active.
 struct SponsorshipInfo {
-  int128_t budget = 0;             // max the sponsor will pay (0 = none)
-  int128_t consumed = 0;           // how much has been consumed so far
+  int128_t budget = 0;   // max the sponsor will pay (0 = none)
+  int128_t consumed = 0; // how much has been consumed so far
 };
 
 // Stores all relevant data structures for one Invocation in a transaction.
@@ -161,7 +161,7 @@ public:
     return committed_contracts;
   }
 
-  auto& sponsorship(this auto& self) { return self.sponsorship_info_; }
+  auto &sponsorship(this auto &self) { return self.sponsorship_info_; }
 
   HashBuffers hash_buffers_;
 

@@ -114,7 +114,8 @@ public:
                                 concurrent_queue_entries_.begin() + count);
   }
 
-  std::optional<int128_t> snapshot_storage_cost(StorageCostModel const& model) const;
+  int128_t
+  snapshot_storage_cost(StorageCostModel const &model) const;
 
 private:
 #ifdef NDEBUG
@@ -127,14 +128,14 @@ private:
     Bytestring bytestring_;
     constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
-    int128_t snapshot_storage_cost(StorageCostModel const& model) const;
+    int128_t snapshot_storage_cost(StorageCostModel const &model) const;
   };
 
   struct NNIntEntry {
     const int128_t base_value_;
     constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
-    static int128_t snapshot_storage_cost(StorageCostModel const& model);
+    static int128_t snapshot_storage_cost(StorageCostModel const &model);
   };
 
   // StorageSnapshotCache caches negative lookups as a DeletedEntry,
@@ -142,7 +143,9 @@ private:
   // in this block and then we need to be able to have
   // the nondeterministic queue entry available for the address.
   struct DeletedEntry {
-    constexpr static int128_t snapshot_storage_cost(StorageCostModel const& /*unused*/) {
+    constexpr static int128_t
+    snapshot_storage_cost(StorageCostModel const & /*unused*/)
+    {
       return 0;
     }
   };
@@ -151,14 +154,14 @@ private:
     const int128_t base_value_;
     constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
 
-    static int128_t snapshot_storage_cost(StorageCostModel const& model);
+    static int128_t snapshot_storage_cost(StorageCostModel const &model);
   };
 
   struct AddressAuthDataEntry {
     AddressAuthData address_auth_data_;
     constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
 
-    int128_t snapshot_storage_cost(StorageCostModel const& model) const;
+    int128_t snapshot_storage_cost(StorageCostModel const &model) const;
   };
 
   class RetrocausalQueueEntry {
@@ -177,7 +180,7 @@ private:
 
     RetrocausalQueueMetadata const &metadata() const { return metadata_; }
 
-    int128_t snapshot_storage_cost(StorageCostModel const& model) const;
+    int128_t snapshot_storage_cost(StorageCostModel const &model) const;
 
     // only returns from past blocks
     SystemStatus<const RetrocausalQueueBlock *>
@@ -197,8 +200,8 @@ private:
 
   struct ReplayCacheEntry {
     constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
-    
-    static int128_t snapshot_storage_cost(StorageCostModel const& model);
+
+    static int128_t snapshot_storage_cost(StorageCostModel const &model);
   };
 
   using variant_type =

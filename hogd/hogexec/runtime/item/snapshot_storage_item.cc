@@ -14,11 +14,11 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
 
@@ -164,34 +164,75 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
   return entry;
 }
 
-std::optional<int128_t>
-SnapshotStorageItem::snapshot_storage_cost(StorageCostModel const& model) const
+int128_t
+SnapshotStorageItem::snapshot_storage_cost(StorageCostModel const &model) const
 {
   return std::visit(
-      [&](auto const& arg) -> std::optional<int128_t> {
+      [&](auto const &arg) -> int128_t {
         return arg.snapshot_storage_cost(model);
       },
       entry_);
 }
 
-int128_t SnapshotStorageItem::BytestringEntry::snapshot_storage_cost(StorageCostModel const& model) const
+int128_t
+SnapshotStorageItem::BytestringEntry::snapshot_storage_cost(
+    StorageCostModel const &model) const
 {
   return model.get_bytestring_cost(bytestring_.size());
 }
 
-int128_t SnapshotStorageItem::NNIntEntry::snapshot_storage_cost(StorageCostModel const& model)
+int128_t
+SnapshotStorageItem::NNIntEntry::snapshot_storage_cost(
+    StorageCostModel const &model)
 {
   return model.get_nnint_cost();
 }
 
-int128_t SnapshotStorageItem::ReplayCacheEntry::snapshot_storage_cost(StorageCostModel const& model)
+int128_t
+SnapshotStorageItem::ReplayCacheEntry::snapshot_storage_cost(
+    StorageCostModel const & /*unused*/)
 {
-  return model.get_replay_cache_cost(1);
+  // We never actually access the replay cache snapshot cost -- the replay cache
+  // modifications can never be sponsored (as they're only ever applied in the
+  // root frame). We may, in the future, want to add something to the
+  // transaction format to allow another account to sponsor from the root frame.
+  // At such a time, we would need to address this assumption.
+  //
+  // But that also opens up other questions, such as what to do about the case
+  // of the base item cost for the replay cache. Do we want to add a bespoke
+  // flag on that hypothetical transaction format to distinguish whether the
+  // base item exists already or not?  Maybe the simplest option would be to get
+  // rid of the base item cost on something like the replay cache, as we're
+  // expecting every address that originates transactions to have one anyways?
+  // Those questions are deferred until a later date.
+  panic("We should never be accessing the replay cache storage cost");
 }
 
-int128_t SnapshotStorageItem::NativeTokenBalanceEntry::snapshot_storage_cost(StorageCostModel const& model)
+int128_t
+SnapshotStorageItem::NativeTokenBalanceEntry::snapshot_storage_cost(
+    StorageCostModel const &model)
 {
   return model.get_balance_cost();
+}
+
+int128_t
+SnapshotStorageItem::AddressAuthDataEntry::snapshot_storage_cost(
+    StorageCostModel const &model) const
+{
+  size_t active_key_count = 0;
+  for (auto const &pk : address_auth_data_.public_keys) {
+    if (pk) {
+      active_key_count++;
+    }
+  }
+  return model.get_auth_data_cost(active_key_count);
+}
+
+int128_t
+SnapshotStorageItem::RetrocausalQueueEntry::snapshot_storage_cost(
+    StorageCostModel const &model) const
+{
+  return model.get_retrocausal_queue_cost(metadata_.live_entries);
 }
 
 } // namespace hogd

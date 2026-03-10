@@ -37,7 +37,7 @@ struct StorageCostModel;
 //   the set() call in the ItemView is a no-op.
 // kItemType (static constant)
 //   The type of the item view.
-// marginal_storage_cost(cost_model)
+// get_current_storage_cost(cost_model)
 //   Return the marginal storage cost of the item view.
 //   This logic should mirror the cost of writing the item in hogdb.
 
@@ -46,7 +46,7 @@ class BytestringItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
-  int128_t marginal_storage_cost(const StorageCostModel &cost_model) const;
+  int128_t get_current_storage_cost(const StorageCostModel &cost_model) const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
@@ -58,7 +58,7 @@ class NNIntItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
-  int128_t marginal_storage_cost(const StorageCostModel &cost_model) const;
+  int128_t get_current_storage_cost(const StorageCostModel &cost_model) const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
@@ -70,7 +70,7 @@ public:
 class NativeTokenBalanceItem : public NNIntItem {
 public:
   constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
-  int128_t marginal_storage_cost(const StorageCostModel &cost_model) const;
+  int128_t get_current_storage_cost(const StorageCostModel &cost_model) const;
 };
 
 // Represent state of item that has been deleted.
@@ -82,12 +82,19 @@ public:
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
-  static int128_t marginal_storage_cost(const StorageCostModel &/*unused*/) {
+  static int128_t get_current_storage_cost(const StorageCostModel & /*unused*/)
+  {
     return 0;
   }
 };
 
 // Represent state of an item that is a retrocausal queue.
+//
+// TODO(geoff): This is the biggest item.  Anything we can do
+// to reduce its size would reduce executor memory usage.
+// I would like to reduce the consumed index trackers to uint16_t
+// from uint32_t (saves 4 bytes + 4 bytes padding), but we can't guarantee
+// that until if/when we impose a limit on total number of insertions per transaction.
 class RetrocausalQueueItem {
 public:
   RetrocausalQueueItem(const SnapshotStorageItem &base_item)
@@ -118,6 +125,8 @@ public:
     return locally_consumed_index_;
   }
 
+  int128_t get_current_storage_cost(StorageCostModel const &cost_model) const;
+
 private:
   SystemStatus<const RetrocausalQueueBlock *>
   get_next_block(uint64_t search_start_index) const;
@@ -135,6 +144,10 @@ private:
   uint32_t self_consumed_index_ = 0;
   // count of retrocausally consumed entries from other transactions
   uint32_t locally_consumed_index_ = 0;
+
+  // Used for tracking storage costs -- how many entries are consumed from
+  // the snapshot queue
+  uint32_t past_block_consumed_count_ = 0;
 
   const SnapshotStorageItem *base_item_;
 };
@@ -240,6 +253,8 @@ public:
     return *base_item_.value(); // NOLINT(bugprone-unchecked-optional-access)
   }
 
+  int128_t get_current_storage_cost(StorageCostModel const &cost_model) const;
+
 private:
   mutable std::optional<const SnapshotStorageItem *> base_item_;
 };
@@ -328,6 +343,14 @@ public:
   uint32_t get_retrocausally_consumed_count() const
   {
     return retrocausally_consumed_count_;
+  }
+
+  int128_t get_current_storage_cost(StorageCostModel const &cost_model) const {
+    return std::visit(
+      [&](auto const &arg) -> int128_t {
+        return arg.get_current_storage_cost(cost_model);
+      },
+      delta_args_);
   }
 
 private:

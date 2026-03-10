@@ -470,9 +470,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  auto stashed_parent_trace = start_frame(
-      invocation, flags,
-      SponsorshipInfo{.budget = sponsored_storage_budget});
+  auto stashed_parent_trace =
+      start_frame(invocation, flags,
+                  SponsorshipInfo{.budget = sponsored_storage_budget});
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
