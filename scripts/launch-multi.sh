@@ -3,7 +3,7 @@
 # These parameters are CONFIGURABLE.
 # -------------------------------
 HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
-HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
+HOGD_BUILD_DIR="/tmp/gcc"
 
 # loadgen_server="hog3"
 # chuckd_server="hog3"
