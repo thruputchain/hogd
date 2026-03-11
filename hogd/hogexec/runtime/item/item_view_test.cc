@@ -70,9 +70,7 @@ protected:
   static void check_eq(QueueEntry const &value, uint32_t expected)
   {
     ASSERT_EQ(value.size(), sizeof(expected));
-    uint32_t entry;
-    std::memcpy(&entry, value.data(), sizeof(entry));
-    ASSERT_EQ(entry, expected);
+    ASSERT_EQ(read_entry(value), expected);
   }
 
   static uint32_t read_entry(QueueEntry const &value)

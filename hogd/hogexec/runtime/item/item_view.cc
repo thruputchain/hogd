@@ -341,7 +341,7 @@ RetrocausalQueueItem::get_delta() const
     // item.
     delta.retrocausal_queue().consume = queue_delta_.consume;
   }
-  assert(self_consumed_index_ <= queue_delta_.insert.added_entries.size());
+  CHECK_LE(self_consumed_index_, queue_delta_.insert.added_entries.size());
   delta.retrocausal_queue().insert.added_entries.append(
       queue_delta_.insert.added_entries.begin() + self_consumed_index_,
       queue_delta_.insert.added_entries.end());
