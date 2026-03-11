@@ -12,7 +12,6 @@ add_subdirectory(item)
 add_subdirectory(direct_rpc_tests)
 
 add_library(runtime_objects OBJECT
-  contract_trait.cc
   event_server_proxy.cc
   invocation_frame.cc
   native_runtime.cc
