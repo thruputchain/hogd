@@ -27,12 +27,7 @@ target_link_libraries(item_test
   runtime_test_util
   hogexec_common
   components
-  unified_lib
   protocol
-  metrics
-  event
-  db_interface
-  hogdb
   storage_cost
   GTest::gtest
 )

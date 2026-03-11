@@ -19,7 +19,6 @@ target_include_directories(components_test_objects PRIVATE ${CMAKE_BINARY_DIR})
 add_executable(components_test $<TARGET_OBJECTS:components_test_objects>)
 target_link_libraries(components_test
   components
-  runtime
   hogd
   GTest::gtest
   GTest::gtest_main

@@ -258,6 +258,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
             .max_fully_consumed_block_number = next_block->block_number;
         queue_delta_.consume->past_block_consume.partial_consumed_number = 0;
       }
+      past_block_consumed_count_++;
     }
 
     return next_block->entries[partial_consume_quantity];
@@ -329,10 +330,14 @@ RetrocausalQueueItem::get_delta() const
   return delta;
 }
 
-void
+SyscallStatus<void>
 RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 {
+  if (queue_delta_.insert.added_entries.size() >= kRetrocausalQueueBlockEntriesMaxLen) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   queue_delta_.insert.added_entries.push_back(entry);
+  return {};
 }
 
 SystemStatus<const RetrocausalQueueBlock *>

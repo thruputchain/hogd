@@ -193,7 +193,7 @@ TEST_F(ItemViewTest, RCQRead)
   server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
                                                  make_test_queue_entry(9));
 
-  rcq_item.insert_entry(make_test_queue_entry(7));
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(7)).has_value());
 
   check_item(7, false);
   check_item(7, true);
@@ -201,7 +201,7 @@ TEST_F(ItemViewTest, RCQRead)
   check_item(8, true);
   check_item(9, false);
 
-  rcq_item.insert_entry(make_test_queue_entry(10));
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(10)).has_value());
 
   check_item(10, false);
   check_item(10, true);
@@ -261,7 +261,7 @@ TEST_F(ItemViewTest, RCQRead)
   check_item_validation(std::nullopt, true);
   check_item_validation(std::nullopt, true);
 
-  validate_rcq_item.insert_entry(make_test_queue_entry(7));
+  ASSERT_TRUE(validate_rcq_item.insert_entry(make_test_queue_entry(7)).has_value());
 
   check_item_validation(7, false);
   check_item_validation(7, true);
@@ -269,7 +269,7 @@ TEST_F(ItemViewTest, RCQRead)
   check_item_validation(8, true);
   check_item_validation(9, false);
 
-  validate_rcq_item.insert_entry(make_test_queue_entry(10));
+  ASSERT_TRUE(validate_rcq_item.insert_entry(make_test_queue_entry(10)).has_value());
 
   check_item_validation(10, false);
   check_item_validation(10, true);
@@ -315,6 +315,62 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   ASSERT_TRUE(delta.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeBytestringSet);
+}
+
+TEST_F(ItemViewTest, RCQInsertOverflow)
+{
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+  for (int i = 0; i < kRetrocausalQueueBlockEntriesMaxLen; i++) {
+    ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(i)).has_value());
+  }
+  ASSERT_FALSE(rcq_item.insert_entry(make_test_queue_entry(0)).has_value());
+
+  // Now check the ordering
+  ExecutionModeData mode = ProposalModeData();
+
+  for (int i = 0; i < kRetrocausalQueueBlockEntriesMaxLen; i++) {
+    auto res = rcq_item.get_next_item(mode, true);
+    ASSERT_TRUE(res.has_value() && res.value().has_value());
+    auto const& val = res.value().value();
+    ASSERT_EQ(val.size(), 1);
+    uint8_t entry = i;
+    ASSERT_EQ(val[0], entry);
+  }
+  auto res = rcq_item.get_next_item(mode, true);
+  ASSERT_TRUE(res.has_value() && !res.value().has_value());
+}
+
+TEST_F(ItemViewTest, CurrentBlockConsumeOrder)
+{
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(3)).has_value());
+
+  ExecutionModeData mode = ProposalModeData();
+
+  auto check_read = [&] (uint8_t expect, bool advance_cursor) {
+    auto res = rcq_item.get_next_item(mode, advance_cursor);
+    ASSERT_TRUE(res.has_value() && res.value().has_value());
+    auto const& val = res.value().value();
+    ASSERT_EQ(val.size(), 1);
+    ASSERT_EQ(val[0], expect);
+  };
+
+  check_read(1, false);
+
+  check_read(1, true);
+  check_read(2, true);
+
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(4)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(5)).has_value());
+  check_read(3, true);
+  check_read(4, false);
+  check_read(4, true);
+  check_read(5, true);
 }
 
 } // namespace hogd
