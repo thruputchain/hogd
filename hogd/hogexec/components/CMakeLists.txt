@@ -1,11 +1,12 @@
 add_library(components_objects OBJECT
   execution_mode.cc
   hash_buffers.cc
+  ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/contract_trait.cc
 )
 target_link_libraries(components_objects hogd_interface)
 target_include_directories(components_objects PRIVATE ${CMAKE_BINARY_DIR})
 add_library(components STATIC $<TARGET_OBJECTS:components_objects>)
-target_link_libraries(components crypto)
+target_link_libraries(components crypto hogexec_common)
 
 # Own test executable (same pattern as runtime_test)
 add_library(components_test_objects OBJECT
