@@ -5,7 +5,7 @@ add_library(components_objects OBJECT
 target_link_libraries(components_objects hogd_interface)
 target_include_directories(components_objects PRIVATE ${CMAKE_BINARY_DIR})
 add_library(components STATIC $<TARGET_OBJECTS:components_objects>)
-target_link_libraries(components crypto hogexec_common)
+target_link_libraries(components crypto)
 
 # Own test executable (same pattern as runtime_test)
 add_library(components_test_objects OBJECT
@@ -19,6 +19,7 @@ target_include_directories(components_test_objects PRIVATE ${CMAKE_BINARY_DIR})
 add_executable(components_test $<TARGET_OBJECTS:components_test_objects>)
 target_link_libraries(components_test
   components
+  hogexec_common
   hogd
   GTest::gtest
   GTest::gtest_main
