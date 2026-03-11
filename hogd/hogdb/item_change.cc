@@ -15,7 +15,7 @@
 
 namespace hogd {
 
-bool
+HogDBStatus<bool>
 NNInt128::narrow(const NNInt128 &nnint)
 {
   assert_is_valid();
@@ -46,7 +46,7 @@ NNInt128::narrow(const NNInt128 &nnint)
   return true;
 }
 
-bool
+HogDBStatus<bool>
 Balance::narrow(const Balance &other)
 {
   assert_is_valid();
@@ -57,7 +57,7 @@ Balance::narrow(const Balance &other)
   return true;
 }
 
-bool
+HogDBStatus<bool>
 AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
   CHECK(base_auth_data() == auth_data_item.base_auth_data());
@@ -79,7 +79,7 @@ AuthDataItem::count_active_keys() const
   return active_keys;
 }
 
-bool
+HogDBStatus<bool>
 ReplayCacheIt::narrow( // NOLINT - lint wants static
     const ReplayCacheIt & /*unused*/)
 {
@@ -93,7 +93,7 @@ ReplayCacheIt::narrow( // NOLINT - lint wants static
   return false;
 }
 
-bool
+HogDBStatus<bool>
 RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
 {
   // Inserts are always compatible, but it is probably worth double checking
@@ -126,23 +126,26 @@ concept is_monostate = std::same_as<std::decay_t<T>, std::monostate>;
 
 } // namespace
 
-void
+HogDBStatus<void>
 ItemChange::narrow(const ItemChange &change)
 {
   if (type_.index() != change.type_.index() || change.exclusive_) {
     exclusive_ = true;
-    return;
+    return {};
   }
 
-  exclusive_ = exclusive_ ||
-               !std::visit(
-                   [&change](auto &arg) -> bool {
-                     if constexpr (!is_monostate<decltype(arg)>)
-                       return arg.narrow(
-                           std::get<std::decay_t<decltype(arg)>>(change.type_));
-                     return {};
-                   },
-                   type_);
+  auto result = std::visit(
+      [&change](auto &arg) -> HogDBStatus<bool> {
+        if constexpr (!is_monostate<decltype(arg)>)
+          return arg.narrow(
+              std::get<std::decay_t<decltype(arg)>>(change.type_));
+        return true;
+      },
+      type_);
+  if (!result)
+    return std::unexpected(result.error());
+  exclusive_ = exclusive_ || !*result;
+  return {};
 }
 
 } // namespace hogd

@@ -144,7 +144,7 @@ TEST(BalanceLockTest, AddAndSubAcquireAndRelease)
                   .has_value());
 
   Balance sub(-100);
-  ASSERT_TRUE(sub.narrow(add));
+  ASSERT_TRUE(sub.narrow(add).value());
   EXPECT_TRUE(lock.try_atomic_change_lock(&add, &sub, make_dummy_context())
                   .has_value());
 
