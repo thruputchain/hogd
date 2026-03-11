@@ -301,6 +301,11 @@ private:
                                  .id = 0};
       }
     }
+    info("finish_init(), system starting with db tip: height = {}, id = {}, "
+         "block_hash = {}, db_hash = {}",
+         last_committed_block_.height, last_committed_block_.id,
+         last_committed_block_.block_hash, last_committed_block_.db_hash);
+
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.height, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);

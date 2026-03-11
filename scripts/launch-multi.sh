@@ -80,12 +80,17 @@ all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_ser
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 results_only=false
+delete_db=true
 
 for arg in "$@"; do
-  if [[ $arg == "--results-only" ]]; then
+  case "$arg" in
+  --results-only)
     results_only=true
-    break
-  fi
+    ;;
+  --no-delete-db)
+    delete_db=false
+    ;;
+  esac
 done
 # -------------------------------
 
@@ -256,7 +261,9 @@ remote_launch "$indexer_server" "$INDEXER_BINARY" \
 echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
-  ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
+  if $delete_db; then
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
+  fi
   remote_launch "$s" "$HOGDB_BINARY" \
     --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --coordinator-addr "$mempool_server":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
 done
