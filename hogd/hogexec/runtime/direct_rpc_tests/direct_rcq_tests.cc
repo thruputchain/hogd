@@ -194,8 +194,8 @@ TEST_F(DirectRCQTests, ConcurrentEmptyConsume)
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
-  make_rcq_consume_delta(0, 0, {}),
-  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                make_rcq_consume_delta(0, 0, {}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx2.try_push_current_subtransaction();
   // second consume fails
   ASSERT_TRUE(r.has_value() && !r.value());
