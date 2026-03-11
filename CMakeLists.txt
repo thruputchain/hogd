@@ -168,6 +168,9 @@ option(BUILD_BENCHMARKS "" ON)
 
 if(BUILD_BENCHMARKS)
 add_subdirectory(external/benchmark)
+# Suppress -Wc2y-extensions from Clang ≥22 on benchmark.h's __COUNTER__ usage.
+target_compile_options(benchmark PRIVATE -Wno-c2y-extensions)
+target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions)
 set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
   CACHE PATH "Path to Google benchmark" FORCE)
 endif()
