@@ -7,9 +7,11 @@
 #include <utility>
 #include <vector>
 
+#include "address_auth.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
+#include "hogd/hogexec/runtime/item/item_view_type.h"
 #include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
@@ -46,6 +48,34 @@ protected:
         BlockID{1}, *db_proxy_);
   }
 };
+
+TEST_F(SnapshotStorageItemTest, AuthDataMakeVariant)
+{
+  AddressAndKey addrkey{.address = {},
+                        .key = StorageKey(
+                            StorageKeyType::kStorageKeyTypeAddressAuthData)};
+
+  WireStorageItem wire_item(StorageItemType::kItemTypeAuthData);
+  wire_item.auth_data().last_written_height = 42;
+
+  SnapshotStorageItem item(std::move(wire_item), std::move(addrkey), BlockID{1},
+                           *db_proxy_);
+  EXPECT_EQ(item.type(), ItemViewType::kAddressAuthData);
+  EXPECT_EQ(item.auth_data().last_written_height, 42U);
+}
+
+TEST_F(SnapshotStorageItemTest, AuthDataDeletedMakeVariant)
+{
+  AddressAndKey addrkey{.address = {},
+                        .key = StorageKey(
+                            StorageKeyType::kStorageKeyTypeAddressAuthData)};
+
+  WireStorageItem wire_item(StorageItemType::kItemTypeDeleted);
+
+  SnapshotStorageItem item(std::move(wire_item), std::move(addrkey), BlockID{1},
+                           *db_proxy_);
+  EXPECT_EQ(item.type(), std::nullopt);
+}
 
 TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
 {

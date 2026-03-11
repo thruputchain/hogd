@@ -101,6 +101,12 @@ public:
     return std::get<NativeTokenBalanceEntry>(entry_).base_value_;
   }
 
+  const AddressAuthData &auth_data() const
+  {
+    assert(type() == ItemViewType::kAddressAuthData);
+    return std::get<AddressAuthDataEntry>(entry_).address_auth_data_;
+  }
+
   auto const &addrkey() const { return addrkey_; }
 
   // We must have already loaded up to count retrocausally consumed entries from

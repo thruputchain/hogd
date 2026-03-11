@@ -71,6 +71,17 @@ SnapshotStorageItem::make_variant(WireStorageItem item,
       assert(false);
       throw std::runtime_error("Impossible");
     }
+  case StorageKeyType::kStorageKeyTypeAddressAuthData:
+    switch (item.type()) {
+    case StorageItemType::kItemTypeAuthData:
+      return variant_type{std::in_place_type<AddressAuthDataEntry>,
+                          std::move(item.auth_data())};
+    case StorageItemType::kItemTypeDeleted:
+      return variant_type{std::in_place_type<DeletedEntry>};
+    default:
+      assert(false);
+      throw std::runtime_error("Unexpected item type for auth data key");
+    }
   default:
     assert(false);
     throw std::runtime_error("Impossible");
