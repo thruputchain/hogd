@@ -278,20 +278,11 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 
   if (self_consume_res) {
     if (advance_cursor) {
+      CHECK_LT(self_consumed_index_, kRetrocausalQueueBlockEntriesMaxLen);
       ++self_consumed_index_;
       if (!queue_delta_.consume) {
         construct_consume_delta();
       }
-      // It should not be possible to overflow uint16 max --
-      // The most entries that could be in current_block_consumed is the max
-      // from other concurrent transactions
-      // (kRetrocausalQueueBlockEntriesMaxLen) and the max inserted within this
-      // transaction (kRetrocausalQueueBlockEntriesMaxLen)
-      static_assert(std::numeric_limits<uint16_t>::max() >=
-                    2 * kRetrocausalQueueBlockEntriesMaxLen);
-
-      CHECK_LT(queue_delta_.consume->current_block_consumed.size(),
-               std::numeric_limits<uint16_t>::max());
     }
     return {*self_consume_res};
   }

@@ -139,7 +139,7 @@ TEST_F(DirectRCQTests, ConcurrentInsert)
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 }
 
-TEST_F(DirectRCQTests, ConcurrentConsume)
+TEST_F(DirectRCQTests, ConcurrentInsert2)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
@@ -180,6 +180,28 @@ TEST_F(DirectRCQTests, ConcurrentConsume)
                                  1);
   ASSERT_TRUE(entry2.has_value());
   ASSERT_EQ(entry2.value(), make_rcq_entry({1}));
+}
+
+TEST_F(DirectRCQTests, ConcurrentEmptyConsume)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
+                make_rcq_consume_delta(0, 0, {}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
+  make_rcq_consume_delta(0, 0, {}),
+  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx2.try_push_current_subtransaction();
+  // second consume fails
+  ASSERT_TRUE(r.has_value() && !r.value());
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 }
 
 TEST_F(DirectRCQTests, ConcurrentConsumeSelf)
