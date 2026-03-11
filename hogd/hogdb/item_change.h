@@ -477,6 +477,7 @@ private:
   mutable uint64_t consumed_past_entries_{0};
 
   friend struct std::formatter<RetrocausalQueueIt>;
+  friend class ExclusiveLock;
   friend class RetrocausalQueueLock;
 };
 

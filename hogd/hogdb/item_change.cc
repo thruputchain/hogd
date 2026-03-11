@@ -98,24 +98,30 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
 {
   // Inserts are always compatible, but it is probably worth double checking
   // that the executor didn't do anything weird like drop any inserts compared
-  // with the prior delta for this transaction.
-  CHECK(delta_.insert.added_entries.size() >=
-        earlier.delta_.insert.added_entries.size());
+  // with the prior delta for this transaction. An honest executor never does
+  // this, so treat it as an error rather than promoting to exclusive.
+  if (delta_.insert.added_entries.size() <
+      earlier.delta_.insert.added_entries.size()) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
 
-  // If a transaction did a consume, the new delta shouldn't forget about it.
-  CHECK(!earlier.delta_.consume || delta_.consume);
+  // The cumulative delta's consume can only grow within a transaction:
+  // each frame inherits the prior frame's ItemView state (including consume),
+  // and the single-consumer constraint means only one tx per block can consume.
+  // An honest executor never drops or reduces consumes.
+  if (earlier.delta_.consume && !delta_.consume) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
 
-  // If the old and new delta both have a consume, they should be monotonic.
-  CHECK(!(earlier.delta_.consume && delta_.consume) || // both have consume or
-        (earlier.delta_.consume->past_block_consume <  // earlier <= newer
-         delta_.consume->past_block_consume) ||
-        ((earlier.delta_.consume->past_block_consume ==
-              delta_.consume->past_block_consume &&
-          earlier.delta_.consume->current_block_consumed.size() <=
-              delta_.consume->current_block_consumed.size())));
-
-  // In any case, hogexec shouldn't ever issue an incompatible delta since
-  // a consumer is always self-compatible and all inserters commute.
+  if (earlier.delta_.consume && delta_.consume &&
+      !(earlier.delta_.consume->past_block_consume <
+        delta_.consume->past_block_consume) &&
+      !(earlier.delta_.consume->past_block_consume ==
+            delta_.consume->past_block_consume &&
+        earlier.delta_.consume->current_block_consumed.size() <=
+            delta_.consume->current_block_consumed.size())) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
   return true;
 }
 

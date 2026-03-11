@@ -53,6 +53,8 @@ HogDBCategory::message(int code) const
     return "Conflict";
   case kExists:
     return "Exists";
+  case kInvalidExecutorBehavior:
+    return "Invalid Executor Behavior";
   default:
     return "Unknown Code (" + std::to_string(code) + ")";
   }
