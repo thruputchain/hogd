@@ -3,6 +3,7 @@
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "retrocausal_queue.hh"
 #include "x23/vec.h"
+#include <cstring>
 #include <utility>
 #include <vector>
 

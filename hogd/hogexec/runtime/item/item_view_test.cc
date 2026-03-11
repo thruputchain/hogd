@@ -352,6 +352,7 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeBytestringSet);
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(ItemViewTest, RCQInsertOverflow)
 {
   auto item = make_rcq_item();
@@ -625,5 +626,7 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
             (std::vector<uint32_t>{42, 99}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

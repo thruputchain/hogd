@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
@@ -278,7 +277,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 
   if (self_consume_res) {
     if (advance_cursor) {
-      CHECK_LT(self_consumed_index_, kRetrocausalQueueBlockEntriesMaxLen);
+      CHECK_LT(self_consumed_index_,
+               static_cast<uint16_t>(kRetrocausalQueueBlockEntriesMaxLen));
       ++self_consumed_index_;
       if (!queue_delta_.consume) {
         construct_consume_delta();
