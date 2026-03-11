@@ -120,13 +120,11 @@ private:
 
   void construct_consume_delta();
 
-  // std::optional<RetrocausalQueuePastBlockConsumeDelta> past_block_consume_;
-  //x23::Vec<QueueEntry> current_block_inserts_;
-
   RetrocausalQueueDelta queue_delta_{};
 
   // Can't overflow locally_consumed_index_ in a uint16
-  static_assert(std::numeric_limits<uint16_t>::max() >= kRetrocausalQueueBlockEntriesMaxLen);
+  static_assert(std::numeric_limits<uint16_t>::max() >=
+                kRetrocausalQueueBlockEntriesMaxLen);
 
   // count of entries consumed that were inserted by this transaction
   uint16_t self_consumed_index_ = 0;

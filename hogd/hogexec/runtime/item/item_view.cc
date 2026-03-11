@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
@@ -198,6 +199,11 @@ RetrocausalQueueItem::construct_consume_delta()
 // get that same entry.  But if we swapped steps 2 and 3, then
 // the entry I peeked at might not be the same as the entry I consume
 // (since a concurrent entry might have been added in the meantime).
+//
+// You could make a similar argument about peeking at the head of the queue
+// and seeing a concurrent entry, and then doing an insert and now peek returns
+// that self entry.  This is less weird of an ordering, because the observed
+// behavior of peek changed in direct response to an action by the contract.
 SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
@@ -276,7 +282,16 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       if (!queue_delta_.consume) {
         construct_consume_delta();
       }
-      queue_delta_.consume->current_block_consumed.push_back(*self_consume_res);
+      // It should not be possible to overflow uint16 max --
+      // The most entries that could be in current_block_consumed is the max
+      // from other concurrent transactions
+      // (kRetrocausalQueueBlockEntriesMaxLen) and the max inserted within this
+      // transaction (kRetrocausalQueueBlockEntriesMaxLen)
+      static_assert(std::numeric_limits<uint16_t>::max() >=
+                    2 * kRetrocausalQueueBlockEntriesMaxLen);
+
+      CHECK_LT(queue_delta_.consume->current_block_consumed.size(),
+               std::numeric_limits<uint16_t>::max());
     }
     return {*self_consume_res};
   }
@@ -296,6 +311,11 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       if (!queue_delta_.consume) {
         construct_consume_delta();
       }
+      if (queue_delta_.consume->current_block_consumed.size() >=
+          kRetrocausalQueueBlockEntriesMaxLen) {
+        CHECK(std::holds_alternative<ValidationModeData>(execution_mode_data));
+        return SystemError{SystemErrorCode::kSystemValidationFailure};
+      }
       queue_delta_.consume->current_block_consumed.push_back(
           *concurrent_entry.value());
     }
@@ -313,7 +333,19 @@ RetrocausalQueueItem::get_delta() const
 {
   StorageDelta delta =
       StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-  delta.retrocausal_queue() = queue_delta_;
+
+  // load the retrocausally consumed entries
+  if (queue_delta_.consume) {
+    // TODO(geoff): In proposal mode, we could reduce some copying in the
+    // ItemView by loading this list of consumed entries from the snapshot base
+    // item.
+    delta.retrocausal_queue().consume = queue_delta_.consume;
+  }
+  assert(self_consumed_index_ <= queue_delta_.insert.added_entries.size());
+  delta.retrocausal_queue().insert.added_entries.append(
+      queue_delta_.insert.added_entries.begin() + self_consumed_index_,
+      queue_delta_.insert.added_entries.end());
+
   // In debug builds, we shuffle the order of entries in the concurrent
   // consumes, as these are not supposed to affect the result of the db
   // operation.
@@ -333,7 +365,8 @@ RetrocausalQueueItem::get_delta() const
 SyscallStatus<void>
 RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 {
-  if (queue_delta_.insert.added_entries.size() >= kRetrocausalQueueBlockEntriesMaxLen) {
+  if (queue_delta_.insert.added_entries.size() >=
+      kRetrocausalQueueBlockEntriesMaxLen) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   queue_delta_.insert.added_entries.push_back(entry);

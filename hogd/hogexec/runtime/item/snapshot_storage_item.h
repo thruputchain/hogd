@@ -108,7 +108,7 @@ public:
   x23::Vec<QueueEntry> get_retrocausally_consumed_entries(uint32_t count) const
   {
     std::scoped_lock ul(rcq_mtx_);
-    CHECK(count <= concurrent_queue_entries_.size());
+    CHECK_LE(count, concurrent_queue_entries_.size());
     return x23::Vec<QueueEntry>(concurrent_queue_entries_.begin(),
                                 concurrent_queue_entries_.begin() + count);
   }
