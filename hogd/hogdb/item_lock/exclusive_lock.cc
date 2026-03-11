@@ -1,17 +1,13 @@
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
 
-#include <cassert>
-
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
-#include "storage_item.hh"
 #include "x23/debug.h"
 
 namespace hogd {
@@ -49,11 +45,10 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // cost that accounts for consumes immediately, since there is no
     // concurrency concern under an exclusive lock.
     auto inner = after->to_retrocausal_queue();
-    assert(inner.has_value());
+    CHECK(inner.has_value());
 
-    PointerLock<RetrocausalQueueLock> tmp;
-    auto *lock = tmp.get();
-    auto cost = lock->try_atomic_change_lock(nullptr, &*inner, ctx);
+    RetrocausalQueueLock lock;
+    auto cost = lock.try_atomic_change_lock(nullptr, &*inner, ctx);
     if (!cost) {
       return cost;
     }
@@ -61,7 +56,7 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // try_atomic_change_lock validated everything and stashed
     // consumed_past_entries_ on the delta.  get_meta returns the
     // already-cached metadata (no extra DAO read).
-    auto meta = lock->get_meta(nullptr);
+    auto meta = lock.get_meta(nullptr);
     CHECK(meta.has_value());
 
     uint64_t live = (*meta)->live_entries;

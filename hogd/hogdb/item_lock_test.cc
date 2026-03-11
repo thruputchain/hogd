@@ -187,7 +187,7 @@ TEST(ItemLockTest, NNIntChangeBase)
 
   r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_FALSE(r2.has_value());
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
   ASSERT_TRUE(second.is_exclusive());
   r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
@@ -236,7 +236,7 @@ TEST(ItemLockTest, NNIntChangeExclusiveAfterCommit)
           .has_value());
 
   ItemChange first2_copy = first2;
-  first2.narrow(second);
+  EXPECT_TRUE(first2.narrow(second).has_value());
 
   ASSERT_TRUE(first2.is_exclusive());
   EXPECT_FALSE(
@@ -258,7 +258,7 @@ TEST(ItemLockTest, ChangeItemType)
       lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
           .has_value());
 
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
   ASSERT_TRUE(second.is_exclusive());
   ASSERT_FALSE(
       lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
@@ -282,13 +282,13 @@ TEST(ItemLockTest, SeveralBytestringAcquires)
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_bytestring_cost(3));
 
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
   ASSERT_TRUE(second.is_exclusive());
   auto r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.get_bytestring_cost(5));
 
-  third.narrow(second);
+  EXPECT_TRUE(third.narrow(second).has_value());
   auto r3 = lock.try_atomic_change_lock(&second, &third, make_dummy_context());
   ASSERT_TRUE(r3.has_value());
   EXPECT_EQ(r3.value(), kTestCostModel.get_bytestring_cost(7));
@@ -306,7 +306,7 @@ TEST(ItemLockTest, SeveralBytestringAcquires)
 
   // can't acaquire exclusive lock now
   auto post_commit_exclusive = post_commit;
-  post_commit_exclusive.narrow(first);
+  EXPECT_TRUE(post_commit_exclusive.narrow(first).has_value());
   ASSERT_TRUE(post_commit_exclusive.is_exclusive());
   ASSERT_TRUE(
       lock.try_atomic_change_lock(nullptr, &post_commit, make_dummy_context())
@@ -335,7 +335,7 @@ TEST(ItemLockTest, PermamentExclusiveDowngrade)
   auto first = make_nnint_change(100, 10);
   first.set_permanent_exclusive();
   auto second = make_nnint_change(200, 20);
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
 
   auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
@@ -353,7 +353,7 @@ TEST(ItemLockTest, PermamentExclusiveUpgradeDowngrade)
   ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
   auto first = make_nnint_change(100, 10);
   auto second = make_nnint_change(200, 20);
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
   auto third = second;
   second.set_permanent_exclusive();
 
@@ -599,7 +599,7 @@ TEST(ItemLockTest, FinalizeExclusive)
   ItemLock lock(0);
   auto first = make_nnint_change(100, 10);
   auto second = make_nnint_change(200, 20);
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
 
   auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());

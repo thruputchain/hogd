@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <type_traits>
 #include <variant>
 
@@ -12,6 +13,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/status.h"
 
 namespace hogd {
 
@@ -113,14 +115,16 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
     return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
   }
 
-  if (earlier.delta_.consume && delta_.consume &&
-      !(earlier.delta_.consume->past_block_consume <
-        delta_.consume->past_block_consume) &&
-      !(earlier.delta_.consume->past_block_consume ==
-            delta_.consume->past_block_consume &&
-        earlier.delta_.consume->current_block_consumed.size() <=
-            delta_.consume->current_block_consumed.size())) {
-    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  if (earlier.delta_.consume && delta_.consume) {
+    auto const &ec = earlier.delta_.consume->past_block_consume;
+    auto const &nc = delta_.consume->past_block_consume;
+    bool monotonic =
+        (ec < nc) ||
+        (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
+                         delta_.consume->current_block_consumed.size());
+    if (!monotonic) {
+      return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+    }
   }
   return true;
 }

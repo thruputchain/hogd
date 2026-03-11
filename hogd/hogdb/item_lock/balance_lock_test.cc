@@ -90,13 +90,13 @@ TEST(BalanceLockTest, AddAndSubNarrowing)
                   .has_value());
 
   Balance second(-100);
-  second.narrow(first);
+  EXPECT_TRUE(second.narrow(first).has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(&first, &second, make_dummy_context())
                   .has_value());
 
   // we already have the lock for this one
   Balance third(100);
-  third.narrow(second);
+  EXPECT_TRUE(third.narrow(second).has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(&second, &third, make_dummy_context())
                   .has_value());
 
@@ -184,13 +184,13 @@ TEST(BalanceLockTest, HalfAcquireLock)
           .has_value());
 
   Balance good_sub(-50);
-  good_sub.narrow(too_much_add);
+  EXPECT_TRUE(good_sub.narrow(too_much_add).has_value());
   EXPECT_FALSE(
       lock.try_atomic_change_lock(nullptr, &good_sub, make_dummy_context())
           .has_value());
 
   Balance good_add(100);
-  good_add.narrow(too_much_sub);
+  EXPECT_TRUE(good_add.narrow(too_much_sub).has_value());
   EXPECT_FALSE(
       lock.try_atomic_change_lock(nullptr, &good_add, make_dummy_context())
           .has_value());
@@ -209,7 +209,7 @@ TEST(BalanceLockTest, MultipleAddsOnValue)
                   .has_value());
 
   Balance add2(50);
-  add2.narrow(add);
+  EXPECT_TRUE(add2.narrow(add).has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(&add, &add2, make_dummy_context())
                   .has_value());
   EXPECT_EQ(lock.get_add_capacity(),
