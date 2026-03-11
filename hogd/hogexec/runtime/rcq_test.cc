@@ -56,6 +56,9 @@ protected:
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
                  }
+                 if (!res.value().has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
                }
                return {};
              }},
@@ -110,6 +113,9 @@ protected:
                      key, std::as_bytes(std::span(&calldata[i], 1)));
                  if (!res.has_value()) {
                    return res.error().to_invoke_error();
+                 }
+                 if (!res.value().has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
                }
 

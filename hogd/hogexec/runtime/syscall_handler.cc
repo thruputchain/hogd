@@ -1210,8 +1210,8 @@ SystemCallHandler::retrocausal_queue_insert(
 
   // Now we have either grabbed the preexisting RCQItem, or created a new one.
   // In either case, we can now insert the new entry.
-  queue_item.value().value()->insert_entry(queue_entry_from_span(queue_entry));
-  return {};
+  return queue_item.value().value()->insert_entry(
+      queue_entry_from_span(queue_entry));
 }
 
 SystemStatus<SyscallStatus<QueueEntry>>

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
@@ -100,7 +101,7 @@ public:
   SystemStatus<std::optional<QueueEntry>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
 
-  void insert_entry(QueueEntry const &entry);
+  SyscallStatus<void> insert_entry(QueueEntry const &entry);
 
   uint32_t get_retrocausally_consumed_count() const
   {
@@ -120,10 +121,18 @@ private:
   void construct_consume_delta();
 
   RetrocausalQueueDelta queue_delta_{};
+
+  // Can't overflow locally_consumed_index_ in a uint16
+  static_assert(std::numeric_limits<uint16_t>::max() >=
+                kRetrocausalQueueBlockEntriesMaxLen);
+
   // count of entries consumed that were inserted by this transaction
-  uint32_t self_consumed_index_ = 0;
+  uint16_t self_consumed_index_ = 0;
   // count of retrocausally consumed entries from other transactions
-  uint32_t locally_consumed_index_ = 0;
+  uint16_t locally_consumed_index_ = 0;
+
+  // For (in future PR) tracking storage costs
+  uint32_t past_block_consumed_count_ = 0;
 
   const SnapshotStorageItem *base_item_;
 };

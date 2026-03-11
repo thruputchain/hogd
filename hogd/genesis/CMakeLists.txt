@@ -13,7 +13,7 @@ target_link_libraries(genesis
   storage_item
   protocol
   contract_loader
-  runtime
+  components
 )
 
 target_include_directories(genesis PRIVATE
