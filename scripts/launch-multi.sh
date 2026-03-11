@@ -282,7 +282,9 @@ remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
 
 # Launch chuckd.
 echo "Start chuckd..."
-ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+if $delete_db; then
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+fi
 
 remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --copy-file "$SCPD_BINARY" \
