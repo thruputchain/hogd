@@ -84,12 +84,12 @@ delete_db=true
 
 for arg in "$@"; do
   case "$arg" in
-    --results-only)
-      results_only=true
-      ;;
-    --no-delete-db)
-      delete_db=false
-      ;;
+  --results-only)
+    results_only=true
+    ;;
+  --no-delete-db)
+    delete_db=false
+    ;;
   esac
 done
 # -------------------------------
