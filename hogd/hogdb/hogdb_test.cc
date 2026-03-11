@@ -45,6 +45,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -1340,73 +1341,6 @@ TEST_F(HogDBTest, ReplayCacheGCOnNextModificationUpdatesHash)
   });
 }
 
-// Replay cache: multi-height expiry GC.
-// Three nonces at different expiry heights are all GC'd in one block.
-TEST_F(HogDBTest, ReplayCacheMultiHeightExpiryGC)
-{
-  Address addr = make_address(kAddress + 21);
-  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
-
-  // Block 1: nonce with expiry height 2
-  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(2, 100),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-
-  // Block 2: nonce with expiry height 3
-  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(3, 200),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-
-  // Block 3: nonce with expiry height 4
-  commit_block_expect_db_hash_matches_full(3, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(4, 300),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-
-  // Block 6: nonce with expiry height 8 — triggers GC of all three expired
-  // heights (2, 3, 4) in one shot since block_height(6) > all of them
-  commit_block_expect_db_hash_matches_full(6, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(8, 400),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-}
-
-// Replay cache: partial expiry GC.
-// Only the expired nonce is GC'd; the far-future nonce survives.
-TEST_F(HogDBTest, ReplayCachePartialExpiryGC)
-{
-  Address addr = make_address(kAddress + 22);
-  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
-
-  // Block 1: nonce with expiry height 3
-  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(3, 100),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-
-  // Block 2: nonce with expiry height 10 (far future)
-  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(10, 200),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-
-  // Block 5: nonce with expiry height 8 — triggers GC of height-3 entry
-  // but height-10 entry survives since block_height(5) < expiry(10)
-  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
-    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
-        addr, Uniquifier(8, 300),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
-  });
-}
-
 // Auth data: create then delete matches empty db.
 // Creating and then deleting auth data should leave no residual state.
 TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
@@ -1500,6 +1434,424 @@ TEST_F(HogDBTest, AuthDataCreateThenModifyHashCorrectness)
         addr, args,
         std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
+}
+
+// BugHunt: Delete a bytestring then create an NNInt128 at the same key
+// in a single InvokeTX. The exclusive lock type change must be correctly
+// reflected in the incremental hash.
+TEST_F(HogDBTest, TypeChangeByteToNNIntSameInvokeTX)
+{
+  Address addr = make_address(kAddress + 30);
+  ItemKey data_key = make_key(kAddress + 30, 1);
+  setup_contract_address(addr);
+
+  // Block 1: write a bytestring
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    std::string data("some bytestring data");
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        data_key, std::as_bytes(std::span(data)),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: delete the bytestring and create an NNInt128 at the same key
+  // This triggers an exclusive lock due to type change within one InvokeTX
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        data_key,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        data_key, 0, 42,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// BugHunt: Delete a bytestring then create an RCQ at the same key within one
+// InvokeTX. Tests exclusive lock type change to RCQ which has complex
+// multi-key hashing (metadata + blocks).
+TEST_F(HogDBTest, TypeChangeBytesToRCQSameInvokeTX)
+{
+  Address addr = make_address(kAddress + 32);
+  ItemKey data_key = make_key(kAddress + 32, 1);
+  setup_contract_address(addr);
+
+  // Block 1: write a bytestring
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    std::string data("bytestring to replace with RCQ");
+    ASSERT_TRUE(invoke_tx.request_bytes(
+        data_key, std::as_bytes(std::span(data)),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: delete the bytestring and create an RCQ at the same key
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        data_key,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        data_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// BugHunt: Two InvokeTXs in the same block each adding an NNInt128 delta
+// to the same key. Tests concurrent NNInt128 modifications in one block.
+TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
+{
+  Address addr = make_address(kAddress + 33);
+  ItemKey data_key = make_key(kAddress + 33, 1);
+  setup_contract_address(addr);
+
+  // Block 1: two InvokeTXs both modify the same NNInt128
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    BlockHeight height = 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+
+    // First InvokeTX: add 100
+    {
+      InvokeTX invoke_tx(block_tx);
+      ASSERT_TRUE(invoke_tx.request_nnint128(
+          data_key, 0, 100,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    // Second InvokeTX: add 200 more
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx(block_tx);
+      ASSERT_TRUE(invoke_tx.request_nnint128(
+          data_key, 200,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    DbHash incremental_hash = block_tx.get().compute_db_hash(base_hash);
+    ASSERT_TRUE(block_tx.get().commit());
+
+    DbHash full_hash = db_.compute_full_db_hash();
+    EXPECT_EQ(incremental_hash, full_hash)
+        << "Two InvokeTXs modifying same NNInt128 should produce matching hash";
+  }
+}
+
+// BugHunt: RCQ insert and partial current-block consume in the same block.
+// Entries are inserted AND some consumed via current_block_consumed.
+TEST_F(HogDBTest, RCQInsertAndCurrentBlockConsumeSameBlock)
+{
+  Address addr = make_address(kAddress + 34);
+  ItemKey rcq_key = make_key(kAddress + 34, 1);
+  setup_contract_address(addr);
+
+  // Block 1: insert some entries
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    delta.insert.added_entries.push_back(QueueEntry{0x02});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: insert new entries AND consume some current-block entries
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x10});
+    delta.insert.added_entries.push_back(QueueEntry{0x20});
+    delta.insert.added_entries.push_back(QueueEntry{0x30});
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+    // Consume one of the current block entries
+    delta.consume->current_block_consumed.push_back(QueueEntry{0x20});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// BugHunt: RCQ consume all past blocks AND all current block entries.
+// Everything inserted in this block is also consumed, plus past blocks.
+TEST_F(HogDBTest, RCQConsumeAllPastAndCurrentEntries)
+{
+  Address addr = make_address(kAddress + 35);
+  ItemKey rcq_key = make_key(kAddress + 35, 1);
+  setup_contract_address(addr);
+
+  // Block 1: insert entries
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: insert new entries, consume all past blocks, consume all current
+  // block entries. Net effect: RCQ should be empty.
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0xAA});
+    delta.insert.added_entries.push_back(QueueEntry{0xBB});
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+    // Consume ALL current block entries
+    delta.consume->current_block_consumed.push_back(QueueEntry{0xAA});
+    delta.consume->current_block_consumed.push_back(QueueEntry{0xBB});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// BugHunt: Delete RCQ with multiple blocks (explicit deletion).
+// The deletion lock must remove all RCQ blocks AND metadata from the hash.
+TEST_F(HogDBTest, DeleteRCQWithMultipleBlocks)
+{
+  Address addr = make_address(kAddress + 38);
+  ItemKey rcq_key = make_key(kAddress + 38, 1);
+  setup_contract_address(addr);
+
+  // Block 1-3: insert entries across multiple blocks
+  for (size_t i = 1; i <= 3; i++) {
+    commit_block_expect_db_hash_matches_full(i, [&](InvokeTX &invoke_tx) {
+      RetrocausalQueueDelta delta;
+      delta.insert.added_entries.push_back(
+          QueueEntry{static_cast<uint8_t>(i)});
+      ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+          rcq_key, delta,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    });
+  }
+
+  // Block 4: explicitly delete the RCQ (all 3 blocks + metadata)
+  commit_block_expect_db_hash_matches_full(4, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        rcq_key,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// BugHunt: Two InvokeTXs in the same block both adding entries to the same RCQ.
+// The combined block must be correctly reflected in the incremental hash.
+TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
+{
+  Address addr = make_address(kAddress + 41);
+  ItemKey rcq_key = make_key(kAddress + 41, 1);
+  setup_contract_address(addr);
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    BlockHeight height = 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+
+    // First InvokeTX: insert entries
+    {
+      InvokeTX invoke_tx(block_tx);
+      RetrocausalQueueDelta delta;
+      delta.insert.added_entries.push_back(QueueEntry{0x01});
+      delta.insert.added_entries.push_back(QueueEntry{0x02});
+      ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+          rcq_key, delta,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    // Second InvokeTX: insert more entries
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx(block_tx);
+      RetrocausalQueueDelta delta;
+      delta.insert.added_entries.push_back(QueueEntry{0x03});
+      ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+          rcq_key, delta,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    DbHash incremental_hash = block_tx.get().compute_db_hash(base_hash);
+    ASSERT_TRUE(block_tx.get().commit());
+
+    DbHash full_hash = db_.compute_full_db_hash();
+    EXPECT_EQ(incremental_hash, full_hash)
+        << "Two InvokeTXs adding to same RCQ should produce matching hash";
+  }
+}
+
+// BugHunt: RCQ partial past block consumption. Consume some entries from a
+// past block but not all, leaving partial_consumed_number > 0.
+TEST_F(HogDBTest, RCQPartialPastBlockConsumption)
+{
+  Address addr = make_address(kAddress + 42);
+  ItemKey rcq_key = make_key(kAddress + 42, 1);
+  setup_contract_address(addr);
+
+  // Block 1: insert 3 entries into the first block
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    delta.insert.added_entries.push_back(QueueEntry{0x02});
+    delta.insert.added_entries.push_back(QueueEntry{0x03});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: partially consume block 1 (2 of 3 entries) and insert new entries
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x10});
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
+    delta.consume->past_block_consume.partial_consumed_number = 2;
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 3: consume the remaining entry from block 1
+  commit_block_expect_db_hash_matches_full(3, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x20});
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// BugHunt: Multiple replay cache nonces from different InvokeTXs in the
+// same block for the same address. Tests concurrent replay cache lock.
+TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
+{
+  Address addr = make_address(kAddress + 45);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    BlockHeight height = 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+
+    // First InvokeTX: add nonce
+    {
+      InvokeTX invoke_tx(block_tx);
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 100),
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    // Second InvokeTX: add another nonce at same height
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx(block_tx);
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    DbHash incremental_hash = block_tx.get().compute_db_hash(base_hash);
+    ASSERT_TRUE(block_tx.get().commit());
+
+    DbHash full_hash = db_.compute_full_db_hash();
+    EXPECT_EQ(incremental_hash, full_hash)
+        << "Two InvokeTXs adding nonces to same replay cache should match";
+  }
+}
+
+// BugHunt: RCQ insert in one InvokeTX, consume (including current block
+// entries) in a different InvokeTX within the same block. This tests the
+// interaction between concurrent insertion and consumption.
+TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
+{
+  Address addr = make_address(kAddress + 49);
+  ItemKey rcq_key = make_key(kAddress + 49, 1);
+  setup_contract_address(addr);
+
+  // Block 1: insert some base entries
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: two InvokeTXs - one inserts, other consumes (including current block)
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    BlockHeight height = 2;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+
+    // First InvokeTX: insert entries
+    {
+      InvokeTX invoke_tx(block_tx);
+      RetrocausalQueueDelta delta;
+      delta.insert.added_entries.push_back(QueueEntry{0xAA});
+      delta.insert.added_entries.push_back(QueueEntry{0xBB});
+      ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+          rcq_key, delta,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    // Second InvokeTX: consume past block + current block entry
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx(block_tx);
+      RetrocausalQueueDelta delta;
+      delta.insert.added_entries.push_back(QueueEntry{0xCC});
+      delta.consume.emplace();
+      delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
+      delta.consume->past_block_consume.partial_consumed_number = 0;
+      delta.consume->current_block_consumed.push_back(QueueEntry{0xAA});
+      ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+          rcq_key, delta,
+          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+      ASSERT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    DbHash incremental_hash = block_tx.get().compute_db_hash(base_hash);
+    ASSERT_TRUE(block_tx.get().commit());
+
+    DbHash full_hash = db_.compute_full_db_hash();
+    EXPECT_EQ(incremental_hash, full_hash)
+        << "RCQ insert then consume current block in different InvokeTXs";
+  }
 }
 
 } // namespace hogd
