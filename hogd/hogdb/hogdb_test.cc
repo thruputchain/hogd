@@ -1216,6 +1216,292 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
       << "Metadata should be removed from ramdb after explicit deletion";
 }
 
+// Test that a fully consumed RCQ leaves no residual state in the db hash.
+// Two databases with identical base state should produce the same hash when
+// one has had an RCQ inserted and fully consumed over several blocks.
+TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
+{
+  Address contract_addr = make_address(kAddress);
+  ItemKey rcq_key = make_key(kAddress, 5);
+
+  // Setup contract on db_
+  ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db_.write_address_metadata(
+      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
+                                              std::span("rcq_consumed"))),
+                                          .contract_size = 10}));
+
+  // Create second database with identical base state
+  ErrnoStatus<Directory> dir2 = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir2));
+  constexpr size_t kHeapSize = 10_MiB;
+  auto raw_db2 = Database::open(dir2->get_path(),
+                                Database::estimate_heap_size(kHeapSize), 0);
+  ASSERT_TRUE(raw_db2);
+  HogDBDAO db2(RAMDB(std::move(*raw_db2)));
+
+  ASSERT_TRUE(db2.write_address_balance(contract_addr, 10'000'000));
+  ASSERT_TRUE(db2.write_address_metadata(
+      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
+                                              std::span("rcq_consumed"))),
+                                          .contract_size = 10}));
+
+  // Insert RCQ entries on db_ over several blocks
+  constexpr size_t kNumBlocks = 3;
+  for (size_t block_idx = 0; block_idx < kNumBlocks; block_idx++) {
+    BlockHeight height = block_idx + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(
+        QueueEntry{static_cast<uint8_t>(block_idx)});
+    delta.insert.added_entries.push_back(
+        QueueEntry{static_cast<uint8_t>(block_idx + 0x10)});
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Fully consume all entries
+  {
+    BlockHeight height = kNumBlocks + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    RetrocausalQueueDelta delta;
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number =
+        kNumBlocks;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, delta,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Sanity: all blocks and metadata should be gone
+  for (uint64_t block_num = 1; block_num <= kNumBlocks; block_num++) {
+    auto block_result = db_.read_retrocausal_queue_block(rcq_key, block_num);
+    EXPECT_FALSE(block_result.has_value())
+        << "Block " << block_num << " should be removed after full consumption";
+  }
+  auto meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  EXPECT_FALSE(meta_result.has_value())
+      << "Metadata item should be removed after full consumption";
+
+  // The fully consumed db should hash-match the empty db
+  DbHash consumed_hash = db_.compute_full_db_hash();
+  DbHash empty_hash = db2.compute_full_db_hash();
+  EXPECT_EQ(consumed_hash, empty_hash)
+      << "Fully consumed RCQ should leave no residual state in the db hash";
+}
+
+// Replay cache: GC on next modification updates hash correctly.
+// Height-3 nonces are GC'd when block height exceeds their expiry.
+TEST_F(HogDBTest, ReplayCacheGCOnNextModificationUpdatesHash)
+{
+  Address addr = make_address(kAddress + 20);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  // Block 1: insert nonce with expiry height 3
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(3, 100),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: insert another nonce also with expiry height 3
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(3, 200),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 5: insert nonce with expiry height 7 — triggers GC of height-3
+  // entries since block_height(5) > expiry(3)
+  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(7, 300),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// Replay cache: multi-height expiry GC.
+// Three nonces at different expiry heights are all GC'd in one block.
+TEST_F(HogDBTest, ReplayCacheMultiHeightExpiryGC)
+{
+  Address addr = make_address(kAddress + 21);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  // Block 1: nonce with expiry height 2
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(2, 100),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: nonce with expiry height 3
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(3, 200),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 3: nonce with expiry height 4
+  commit_block_expect_db_hash_matches_full(3, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(4, 300),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 6: nonce with expiry height 8 — triggers GC of all three expired
+  // heights (2, 3, 4) in one shot since block_height(6) > all of them
+  commit_block_expect_db_hash_matches_full(6, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 400),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// Replay cache: partial expiry GC.
+// Only the expired nonce is GC'd; the far-future nonce survives.
+TEST_F(HogDBTest, ReplayCachePartialExpiryGC)
+{
+  Address addr = make_address(kAddress + 22);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  // Block 1: nonce with expiry height 3
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(3, 100),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: nonce with expiry height 10 (far future)
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(10, 200),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 5: nonce with expiry height 8 — triggers GC of height-3 entry
+  // but height-10 entry survives since block_height(5) < expiry(10)
+  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 300),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
+// Auth data: create then delete matches empty db.
+// Creating and then deleting auth data should leave no residual state.
+TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
+{
+  Address addr = make_address(kAddress + 23);
+
+  // Setup identical base state on both databases
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  ErrnoStatus<Directory> dir2 = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir2));
+  constexpr size_t kHeapSize = 10_MiB;
+  auto raw_db2 = Database::open(dir2->get_path(),
+                                Database::estimate_heap_size(kHeapSize), 0);
+  ASSERT_TRUE(raw_db2);
+  HogDBDAO db2(RAMDB(std::move(*raw_db2)));
+
+  ASSERT_TRUE(db2.write_address_balance(addr, 10'000'000));
+
+  // Block 1 on db_: create auth data with nonce config
+  {
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    AuthDataChangeArgs args{};
+    args.new_nonce_config =
+        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, args,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Block 2 on db_: delete the auth data
+  {
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   2);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_deletion(
+        make_address_auth_data_item_key(addr),
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // db2 has no auth operations — hashes should match
+  DbHash created_then_deleted_hash = db_.compute_full_db_hash();
+  DbHash empty_hash = db2.compute_full_db_hash();
+  EXPECT_EQ(created_then_deleted_hash, empty_hash)
+      << "Auth data create-then-delete should leave no residual state";
+}
+
+// Auth data: create then modify hash correctness.
+// Incremental hash matches full hash after create and then modify.
+TEST_F(HogDBTest, AuthDataCreateThenModifyHashCorrectness)
+{
+  Address addr = make_address(kAddress + 24);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  // Block 1: create auth data with nonce config
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs args{};
+    args.new_nonce_config =
+        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, args,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+
+  // Block 2: modify auth data by adding a public key signer
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs args{};
+    PublicKey key;
+    key.ed25519().fill(0x42);
+    args.auth_data_change_signers.push_back(AuthDataChangeSigner{
+        .public_key_id = 0,
+        .public_key = x23::Ptr<PublicKeyConfig>(
+            new PublicKeyConfig{.key = key, .max_weight = 100})});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, args,
+        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+  });
+}
+
 } // namespace hogd
 
 int
