@@ -207,7 +207,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveLockBasic)
   // Acquire exclusive lock on key 0
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  item1.narrow(item1_narrow);
+  EXPECT_TRUE(item1.narrow(item1_narrow).has_value());
   auto status =
       lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context());
   EXPECT_TRUE(status.has_value());
@@ -241,7 +241,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveLockBlocksOthers)
   // Tx2 tries to acquire exclusive lock (should fail - someone else holds lock)
   auto tx2_item = make_auth_item(base, {{0, make_test_pk_config(1)}});
   auto tx2_item_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  tx2_item.narrow(tx2_item_narrow);
+  EXPECT_TRUE(tx2_item.narrow(tx2_item_narrow).has_value());
   EXPECT_FALSE(
       lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
           .has_value());
@@ -271,7 +271,7 @@ TEST(AuthLockTest, DISABLED_UpgradeToExclusive)
 
   // Upgrade to exclusive (should succeed since we're the only one)
   auto item2 = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  item2.narrow(item1);
+  EXPECT_TRUE(item2.narrow(item1).has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
@@ -301,7 +301,7 @@ TEST(AuthLockTest, DISABLED_CannotUpgradeToExclusiveWhenOthersHold)
 
   // Tx1 tries to upgrade to exclusive (should fail - Tx2 holds lock)
   auto tx1_exclusive = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  tx1_exclusive.narrow(tx1_item);
+  EXPECT_TRUE(tx1_exclusive.narrow(tx1_item).has_value());
   EXPECT_FALSE(lock.try_atomic_change_lock(&tx1_item, &tx1_exclusive,
                                            make_dummy_context())
                    .has_value());
@@ -317,7 +317,7 @@ TEST(AuthLockTest, DISABLED_DowngradeFromExclusive)
   // Acquire exclusive lock
   auto item1 = make_auth_item(base, {{0, pk}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  item1.narrow(item1_narrow);
+  EXPECT_TRUE(item1.narrow(item1_narrow).has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
@@ -402,7 +402,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
   // Acquire exclusive lock
   auto item1 = make_auth_item(base, {{0, pk}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  item1.narrow(item1_narrow);
+  EXPECT_TRUE(item1.narrow(item1_narrow).has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
@@ -523,9 +523,9 @@ TEST(AuthLockTest, DISABLED_ConcurrentExclusiveLocks)
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
   auto item2 = make_auth_item(base, {{1, make_test_pk_config(2)}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  item1.narrow(item1_narrow);
+  EXPECT_TRUE(item1.narrow(item1_narrow).has_value());
   auto item2_narrow = make_auth_item(base, {{1, make_test_pk_config(1)}});
-  item2.narrow(item2_narrow);
+  EXPECT_TRUE(item2.narrow(item2_narrow).has_value());
 
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
@@ -639,7 +639,7 @@ TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
 
   // None can upgrade to exclusive
   auto tx1_excl = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  tx1_excl.narrow(tx1);
+  EXPECT_TRUE(tx1_excl.narrow(tx1).has_value());
   EXPECT_FALSE(
       lock.try_atomic_change_lock(&tx1, &tx1_excl, make_dummy_context())
           .has_value());
