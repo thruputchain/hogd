@@ -168,17 +168,6 @@ option(BUILD_BENCHMARKS "" ON)
 
 if(BUILD_BENCHMARKS)
 add_subdirectory(external/benchmark)
-# Strip -Werror that leaks in from CMAKE_CXX_FLAGS so third-party warnings
-# (e.g. -Wc2y-extensions with Clang ≥22) don't break the build.
-get_target_property(_bench_opts benchmark COMPILE_OPTIONS)
-if(_bench_opts)
-  list(FILTER _bench_opts EXCLUDE REGEX "-Werror")
-  set_target_properties(benchmark PROPERTIES COMPILE_OPTIONS "${_bench_opts}")
-endif()
-# Also suppress -Wc2y-extensions directly in case -Werror comes from
-# CMAKE_CXX_FLAGS (which we cannot strip per-target).
-target_compile_options(benchmark PRIVATE -Wno-c2y-extensions)
-target_compile_options(benchmark_main PRIVATE -Wno-c2y-extensions)
 set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
   CACHE PATH "Path to Google benchmark" FORCE)
 endif()
