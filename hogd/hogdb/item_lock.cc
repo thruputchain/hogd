@@ -267,13 +267,13 @@ ItemLock::handle_try_atomic_from_pending(
             using change_type = typename lock_t::change_type;
             auto const *after_inner = after->get_inner<change_type>();
             CHECK_CONST_PTR(after_inner);
-            auto res = lock.try_atomic_change_lock(nullptr, after_inner, ctx);
-            CHECK(res.has_value());
-            return res.value();
+            return lock.try_atomic_change_lock(nullptr, after_inner, ctx);
           }
         },
         lock_contents_);
-    CHECK(res.has_value());
+    if (!res.has_value()) {
+      return res;
+    }
     CHECK(!after->is_permanent_exclusive());
     return snapshot_cost_transform(res.value(), snapshot_cost_, false);
   }

@@ -100,17 +100,22 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   CHECK(after != nullptr);
   auto const &delta = after->delta();
 
-  // If before && after has the executor guaranteed that before inserts are a
-  // prefix of after inserts? If so, we only need to deal with the new inserts.
-  CHECK(before == nullptr ||
-        std::equal(before->delta().insert.added_entries.begin(),
-                   before->delta().insert.added_entries.end(),
-                   delta.insert.added_entries.begin()));
-
-  // Executor should guarantee that before inserts are a prefix of after
-  // inserts.
-  CHECK(before == nullptr || (delta.insert.added_entries.size() >=
-                              before->delta().insert.added_entries.size()));
+  // Verify that the shorter insert list is a prefix of the longer one.
+  // During normal execution, after's inserts grow (after >= before).
+  // During rollback, after's inserts may shrink (after < before).
+  if (before != nullptr) {
+    auto const &before_entries = before->delta().insert.added_entries;
+    auto const &after_entries = delta.insert.added_entries;
+    auto const &shorter = (after_entries.size() <= before_entries.size())
+                              ? after_entries
+                              : before_entries;
+    auto const &longer = (after_entries.size() <= before_entries.size())
+                             ? before_entries
+                             : after_entries;
+    if (!std::equal(shorter.begin(), shorter.end(), longer.begin())) {
+      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+    }
+  }
 
   // Check strict single-consumer constraint
   const bool this_tx_already_consumed =
@@ -154,10 +159,10 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   const size_t new_entries_count = delta.insert.added_entries.size();
   const size_t previous_entries_count =
       (before != nullptr) ? before->delta().insert.added_entries.size() : 0;
-  CHECK(new_entries_count >= previous_entries_count);
-  const size_t additional_entries = new_entries_count - previous_entries_count;
 
-  if (additional_entries > 0) {
+  if (new_entries_count > previous_entries_count) {
+    const size_t additional_entries =
+        new_entries_count - previous_entries_count;
     const size_t reserved_before =
         reserved_entry_count_.fetch_add(additional_entries,
                                         std::memory_order_relaxed);
@@ -168,6 +173,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
                                       std::memory_order_relaxed);
       return HogDBError{HogDBCode::kConflict};
     }
+  }
+  else if (new_entries_count < previous_entries_count) {
+    // Rollback case: unreserve entries that are no longer needed.
+    const size_t entries_to_unreserve =
+        previous_entries_count - new_entries_count;
+    reserved_entry_count_.fetch_sub(entries_to_unreserve,
+                                    std::memory_order_relaxed);
   }
 
   if (delta.consume) {
@@ -181,8 +193,45 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     auto const &old_consume = meta.consume_state;
     auto const &new_consume = delta.consume->past_block_consume;
 
+    // Reject consumes that reference blocks beyond the current max live block.
+    // No valid hogexec could ever generate such a consume; attempting to
+    // consume persistent blocks that have not yet come into existance is
+    // impossible even in validation mode.
+    if (new_consume.max_fully_consumed_block_number > meta.max_live_block_num) {
+      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+    }
+
+    // If all live blocks are fully consumed, partial_consumed must be 0
+    // (there's no next block to partially consume from).
+    if (new_consume.max_fully_consumed_block_number ==
+            meta.max_live_block_num &&
+        new_consume.partial_consumed_number > 0) {
+      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+    }
+
     if (new_consume.max_fully_consumed_block_number ==
         old_consume.max_fully_consumed_block_number) {
+      // Reject backward partial_consumed within the same block.
+      if (new_consume.partial_consumed_number <
+          old_consume.partial_consumed_number) {
+        return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+      }
+
+      // Verify partial doesn't exceed actual block size.
+      if (new_consume.partial_consumed_number >
+          old_consume.partial_consumed_number) {
+        auto block_num = old_consume.max_fully_consumed_block_number + 1;
+        auto block = ctx.dao->read_retrocausal_queue_block(ctx.key, block_num);
+        if (block.has_value()) {
+          if (new_consume.partial_consumed_number > block->entries.size()) {
+            return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+          }
+        }
+        else if (block.error() != HogDBError{HogDBCode::kNotFound}) {
+          return block.error();
+        }
+      }
+
       consumed_entries += (new_consume.partial_consumed_number -
                            old_consume.partial_consumed_number);
     }
@@ -191,7 +240,9 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       auto first_block_num = old_consume.max_fully_consumed_block_number + 1;
       auto first_block =
           ctx.dao->read_retrocausal_queue_block(ctx.key, first_block_num);
-      CHECK(first_block.has_value());
+      if (!first_block.has_value()) {
+        return first_block.error();
+      }
       consumed_entries +=
           (first_block->entries.size() - old_consume.partial_consumed_number);
 
@@ -199,7 +250,9 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       for (uint64_t b = first_block_num + 1;
            b <= new_consume.max_fully_consumed_block_number; ++b) {
         auto block = ctx.dao->read_retrocausal_queue_block(ctx.key, b);
-        CHECK(block.has_value());
+        if (!block.has_value()) {
+          return block.error();
+        }
         consumed_entries += block->entries.size();
       }
 
@@ -364,7 +417,7 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx) const
     // that don't match any inserted entries.  Return an error instead of
     // crashing so the block can be rejected gracefully.
     if (!consumed_set.empty()) {
-      return HogDBError{HogDBCode::kInternal};
+      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
     }
   }
   else {
@@ -388,7 +441,12 @@ RetrocausalQueueLock::write_committed_change(LockContext const &ctx) const
     updated_metadata.max_live_block_num = new_block.block_number;
   }
 
-  updated_metadata.live_entries += committed_element_count_delta_;
+  int64_t new_live = static_cast<int64_t>(updated_metadata.live_entries) +
+                     committed_element_count_delta_;
+  if (new_live < 0) {
+    return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+  }
+  updated_metadata.live_entries = static_cast<uint64_t>(new_live);
 
   if (updated_metadata.live_entries == 0) {
     // Remove the item from the DAO if it actually existed in the snapshot.

@@ -56,6 +56,11 @@ enum class HogDBCode : uint8_t {
 
   // A transaction conflict occurred.
   kConflict,
+
+  // The executor produced a delta that violates internal invariants.
+  // This can only happen with a dishonest proposer or when replaying
+  // a dishonest block; an honest executor never triggers this.
+  kInvalidExecutorBehavior,
 };
 
 // HogDBCategory provides an error category for hogdb errors.
