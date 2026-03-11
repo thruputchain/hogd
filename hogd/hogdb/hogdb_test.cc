@@ -1626,8 +1626,7 @@ TEST_F(HogDBTest, DeleteRCQWithMultipleBlocks)
   for (size_t i = 1; i <= 3; i++) {
     commit_block_expect_db_hash_matches_full(i, [&](InvokeTX &invoke_tx) {
       RetrocausalQueueDelta delta;
-      delta.insert.added_entries.push_back(
-          QueueEntry{static_cast<uint8_t>(i)});
+      delta.insert.added_entries.push_back(QueueEntry{static_cast<uint8_t>(i)});
       ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
           rcq_key, delta,
           std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
@@ -1637,8 +1636,7 @@ TEST_F(HogDBTest, DeleteRCQWithMultipleBlocks)
   // Block 4: explicitly delete the RCQ (all 3 blocks + metadata)
   commit_block_expect_db_hash_matches_full(4, [&](InvokeTX &invoke_tx) {
     ASSERT_TRUE(invoke_tx.request_deletion(
-        rcq_key,
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
+        rcq_key, std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 }
 
@@ -1804,7 +1802,8 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
         std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)));
   });
 
-  // Block 2: two InvokeTXs - one inserts, other consumes (including current block)
+  // Block 2: two InvokeTXs - one inserts, other consumes (including current
+  // block)
   {
     DbHash base_hash = db_.compute_full_db_hash();
 
