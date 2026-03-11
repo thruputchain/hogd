@@ -51,9 +51,9 @@ protected:
 
 TEST_F(SnapshotStorageItemTest, AuthDataMakeVariant)
 {
-  AddressAndKey addrkey{
-      .address = {},
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressAuthData)};
+  AddressAndKey addrkey{.address = {},
+                        .key = StorageKey(
+                            StorageKeyType::kStorageKeyTypeAddressAuthData)};
 
   WireStorageItem wire_item(StorageItemType::kItemTypeAuthData);
   wire_item.auth_data().last_written_height = 42;
@@ -61,14 +61,14 @@ TEST_F(SnapshotStorageItemTest, AuthDataMakeVariant)
   SnapshotStorageItem item(std::move(wire_item), std::move(addrkey), BlockID{1},
                            *db_proxy_);
   EXPECT_EQ(item.type(), ItemViewType::kAddressAuthData);
-  EXPECT_EQ(item.auth_data().last_written_height, 42u);
+  EXPECT_EQ(item.auth_data().last_written_height, 42U);
 }
 
 TEST_F(SnapshotStorageItemTest, AuthDataDeletedMakeVariant)
 {
-  AddressAndKey addrkey{
-      .address = {},
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressAuthData)};
+  AddressAndKey addrkey{.address = {},
+                        .key = StorageKey(
+                            StorageKeyType::kStorageKeyTypeAddressAuthData)};
 
   WireStorageItem wire_item(StorageItemType::kItemTypeDeleted);
 
