@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -89,6 +90,9 @@ protected:
     for (auto const &entry : entries) {
       out.push_back(read_entry(entry));
     }
+    // get_delta() shuffles concurrent consumes in debug builds,
+    // so sort for deterministic comparison.
+    std::ranges::sort(out);
     return out;
   }
 };
