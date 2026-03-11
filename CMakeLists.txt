@@ -159,6 +159,9 @@ endif()
 # Enable performance (Google's benchmarking library)
 # BENCHMARK_ENABLE_TESTING enables the tests on the google benchmark library.
 option(BENCHMARK_ENABLE_TESTING "" OFF)
+# Disable -Werror inside benchmark — newer Clang emits -Wc2y-extensions for
+# __COUNTER__ which is outside our control.
+option(BENCHMARK_ENABLE_WERROR "" OFF)
 
 # BUILD_BENCHMARKS turns on or off the hogd benchmarks
 option(BUILD_BENCHMARKS "" ON)
