@@ -1626,7 +1626,7 @@ TEST_F(DirectRCQTests,
                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
-  // Sub3: retrocausally consume (entries that don't exist)
+  // Sub3: consume from current block (entry {10} is in this sub's inserts)
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({10})},
                                              {make_rcq_entry({10}),
@@ -1676,9 +1676,9 @@ TEST_F(DirectRCQTests, StressSameBlockPartialOverconsume)
 //
 // Single TX: NNInt set_add on key, push. Delete key, push. RCQ insert {a,b},
 // push. RCQ consume_insert consuming {a,b} from current block (live->0), push.
-// Crashes at assert(live_entries >= 0) in retrocausal_queue_lock.cc:262.
-// Same crash site as bug #3 (overconsume) but through NNInt type transition
-// path.
+// NNInt → delete → RCQ promotes to exclusive. ExclusiveLock delegates to
+// RetrocausalQueueLock for validation, then computes tight cost (0 for empty
+// queue).
 TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);

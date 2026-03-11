@@ -222,13 +222,11 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
           old_consume.partial_consumed_number) {
         auto block_num = old_consume.max_fully_consumed_block_number + 1;
         auto block = ctx.dao->read_retrocausal_queue_block(ctx.key, block_num);
-        if (block.has_value()) {
-          if (new_consume.partial_consumed_number > block->entries.size()) {
-            return HogDBError{HogDBCode::kInvalidExecutorBehavior};
-          }
-        }
-        else if (block.error() != HogDBError{HogDBCode::kNotFound}) {
+        if (!block.has_value()) {
           return block.error();
+        }
+        if (new_consume.partial_consumed_number > block->entries.size()) {
+          return HogDBError{HogDBCode::kInvalidExecutorBehavior};
         }
       }
 
