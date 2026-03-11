@@ -3,16 +3,21 @@
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "retrocausal_queue.hh"
 #include "x23/vec.h"
+#include <cstring>
 #include <utility>
 #include <vector>
 
 namespace hogd {
 
 QueueEntry
-make_test_queue_entry(uint8_t value)
+make_test_queue_entry(uint32_t value)
 {
-  return {value};
+  QueueEntry entry;
+  entry.resize(sizeof(value));
+  std::memcpy(entry.data(), &value, sizeof(value));
+  return entry;
 }
+
 namespace {
 RetrocausalQueue
 add_queue_block(RetrocausalQueue const &parent, x23::Vec<QueueEntry> entries)

@@ -9,7 +9,7 @@
 
 namespace hogd {
 
-QueueEntry make_test_queue_entry(uint8_t value);
+QueueEntry make_test_queue_entry(uint32_t value);
 RetrocausalQueue make_queue(std::vector<x23::Vec<QueueEntry>> const &blocks);
 
 } // namespace hogd
