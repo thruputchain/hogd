@@ -68,6 +68,17 @@ protected:
         AddressAndKey{}, BlockID{1}, *db_proxy_);
   }
 
+  std::unique_ptr<SnapshotStorageItem>
+  make_rcq_item_with_metadata(uint64_t live_entries,
+                              uint64_t max_live_block_num = 0)
+  {
+    WireStorageItem wire(StorageItemType::kItemTypeRetrocausalQueue);
+    wire.metadata().live_entries = live_entries;
+    wire.metadata().max_live_block_num = max_live_block_num;
+    return std::make_unique<SnapshotStorageItem>(
+        std::move(wire), AddressAndKey{}, BlockID{1}, *db_proxy_);
+  }
+
   static void check_eq(QueueEntry const &value, uint32_t expected)
   {
     ASSERT_EQ(value.size(), sizeof(expected));
@@ -628,5 +639,280 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+// ---------------------------------------------------------------------------
+// Storage cost tests
+// ---------------------------------------------------------------------------
+
+TEST_F(ItemViewTest, BytestringStorageCost)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  // default: base=12000, per_byte=10
+
+  ItemView view;
+  ASSERT_TRUE(view.set(BytestringItem{Bytestring{0, 1, 2, 3}}));
+  // 4 bytes: 12000 + 4*10 = 12040
+  EXPECT_EQ(view.get_current_storage_cost(cost_model), int128_t{12040});
+
+  // Overwrite with larger value
+  Bytestring big;
+  big.resize_uninitialized(100);
+  ASSERT_TRUE(view.set(BytestringItem{std::move(big)}));
+  // 100 bytes: 12000 + 100*10 = 13000
+  EXPECT_EQ(view.get_current_storage_cost(cost_model), int128_t{13000});
+
+  // Zero-length bytestring: base cost only
+  ASSERT_TRUE(view.set(BytestringItem{Bytestring{}}));
+  EXPECT_EQ(view.get_current_storage_cost(cost_model), int128_t{12000});
+}
+
+TEST_F(ItemViewTest, NNIntStorageCost)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  ItemView view;
+  ASSERT_TRUE(
+      view.set(NNIntItem{.base_value_ = to_xdr(int128_t{42}),
+                         .add_value_ = to_xdr(int128_t{0})}));
+  // NNInt is always base cost regardless of value
+  EXPECT_EQ(view.get_current_storage_cost(cost_model), int128_t{12000});
+}
+
+TEST_F(ItemViewTest, DeletedItemStorageCost)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  ItemView view;
+  ASSERT_TRUE(view.set(DeletedItem{}));
+  EXPECT_EQ(view.get_current_storage_cost(cost_model), int128_t{0});
+}
+
+TEST_F(ItemViewTest, UnmodifiedItemStorageCostNotLoaded)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  // Default-constructed ItemView holds an unloaded UnmodifiedItem
+  ItemView view;
+  EXPECT_EQ(view.get_current_storage_cost(cost_model), int128_t{0});
+}
+
+// ---------------------------------------------------------------------------
+// RCQ storage cost tests
+// ---------------------------------------------------------------------------
+
+TEST_F(ItemViewTest, RCQStorageCostEmptyNoOps)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  // default: base=12000, rcq_per_entry=8
+
+  // RCQ snapshot with 0 live entries, no operations
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+  // Empty queue: cost is 0 (not base cost)
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{0});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostInsertOnly)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(3)).has_value());
+
+  // 3 live entries: 12000 + 3*8 = 12024
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12024});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostInsertAndSelfConsume)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(3)).has_value());
+
+  ExecutionModeData mode = ProposalModeData();
+
+  // Consume 2 of the 3 self-inserted entries
+  auto res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+  res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+
+  // 3 inserted - 2 self-consumed = 1 net entry: 12000 + 1*8 = 12008
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12008});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostInsertAndConsumeAll)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
+
+  ExecutionModeData mode = ProposalModeData();
+
+  // Consume both entries
+  auto res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+  res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+
+  // All consumed, queue is empty: cost = 0
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{0});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostWithPastBlockEntries)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  // Snapshot metadata must reflect the 4 live entries in the past blocks
+  auto item = make_rcq_item_with_metadata(/*live_entries=*/4);
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  // Set up 4 entries across 2 past blocks on the server
+  auto queue = make_queue({
+      {make_test_queue_entry(1), make_test_queue_entry(2)},
+      {make_test_queue_entry(3), make_test_queue_entry(4)},
+  });
+
+  StorageCostModel server_cost_model(12000, 1, 5, 5, 0);
+  server_->impl()->setup_create_item(
+      AddressAndKey{},
+      StorageItemWrapper(std::move(queue), &server_cost_model));
+
+  ExecutionModeData mode = ProposalModeData();
+
+  // Before consuming: snapshot has 4 live entries
+  // 12000 + 4*8 = 12032
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12032});
+
+  // Consume 1 past-block entry
+  auto res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+
+  // 4 - 1 = 3 live entries: 12000 + 3*8 = 12024
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12024});
+
+  // Consume remaining 3
+  for (int i = 0; i < 3; i++) {
+    res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+    ASSERT_TRUE(res.has_value() && res.value().has_value());
+  }
+
+  // All past-block entries consumed: cost = 0
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{0});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostPastBlockConsumeAndInsert)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  // Snapshot metadata must reflect the 2 live entries
+  auto item = make_rcq_item_with_metadata(/*live_entries=*/2);
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  // Set up 2 entries in 1 past block on the server
+  auto queue = make_queue({
+      {make_test_queue_entry(1), make_test_queue_entry(2)},
+  });
+
+  StorageCostModel server_cost_model(12000, 1, 5, 5, 0);
+  server_->impl()->setup_create_item(
+      AddressAndKey{},
+      StorageItemWrapper(std::move(queue), &server_cost_model));
+
+  ExecutionModeData mode = ProposalModeData();
+
+  // Consume 1 past-block entry
+  auto res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+
+  // Insert 3 new entries
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(10)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(11)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(12)).has_value());
+
+  // snapshot(2) - consumed(1) + inserted(3) = 4 live entries
+  // 12000 + 4*8 = 12032
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12032});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostFullyConsumedThenInsertAndConsume)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  // default: base=12000, rcq_per_entry=8
+
+  // Start with an RCQ snapshot that has 3 live entries across past blocks
+  auto item = make_rcq_item_with_metadata(/*live_entries=*/3,
+                                          /*max_live_block_num=*/2);
+
+  // Fully consume the queue (as if another contract already drained it)
+  auto rcq_item =
+      RetrocausalQueueItem::make_fully_consumed_item(*item,
+                                                     /*retrocausally_consumed_count=*/0);
+
+  // All 3 past-block entries are consumed: cost = 0
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{0});
+
+  // Insert 4 new entries
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(10)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(11)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(12)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(13)).has_value());
+
+  // snapshot(3) - consumed(3) + inserted(4) = 4 net entries
+  // 12000 + 4*8 = 12032
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12032});
+
+  // Consume 2 of the self-inserted entries
+  ExecutionModeData mode = ProposalModeData();
+  auto res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+  res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+
+  // snapshot(3) - consumed(3) + inserted(4) - self_consumed(2) = 2 net entries
+  // 12000 + 2*8 = 12016
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12016});
+
+  // Consume the remaining 2 self-inserted entries
+  res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+  res = rcq_item.get_next_item(mode, /*advance_cursor=*/true);
+  ASSERT_TRUE(res.has_value() && res.value().has_value());
+
+  // Everything consumed: cost = 0
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{0});
+}
+
+TEST_F(ItemViewTest, RCQStorageCostFromDeletedSnapshot)
+{
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  // Start from a deleted (non-RCQ) snapshot item
+  auto item = make_empty_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  // No snapshot entries, no ops: cost = 0
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{0});
+
+  // Insert entries into the queue
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
+  ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
+
+  // 2 entries: 12000 + 2*8 = 12016
+  EXPECT_EQ(rcq_item.get_current_storage_cost(cost_model), int128_t{12016});
+}
 
 } // namespace hogd

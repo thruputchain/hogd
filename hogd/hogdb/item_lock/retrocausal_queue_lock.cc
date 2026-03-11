@@ -21,6 +21,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "x23/serialize.h"

@@ -54,7 +54,7 @@ struct StorageCostModel {
     return contract_size * kContractDeploymentCostPerByte;
   }
 
-  constexpr int128_t get_auth_data_cost(size_t num_keys) const
+  constexpr int128_t get_auth_data_cost(int64_t num_keys) const
   {
     return kBaseItemCost + (num_keys * kAuthPerKeyCost);
   }

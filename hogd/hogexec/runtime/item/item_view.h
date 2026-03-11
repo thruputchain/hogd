@@ -59,7 +59,7 @@ class NNIntItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
-  int128_t get_current_storage_cost(const StorageCostModel &cost_model) const;
+  static int128_t get_current_storage_cost(const StorageCostModel &cost_model);
 
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
@@ -71,7 +71,7 @@ public:
 class NativeTokenBalanceItem : public NNIntItem {
 public:
   constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
-  int128_t get_current_storage_cost(const StorageCostModel &cost_model) const;
+  static int128_t get_current_storage_cost(const StorageCostModel &cost_model);
 };
 
 // Represent state of item that has been deleted.
@@ -151,11 +151,8 @@ private:
   // count of retrocausally consumed entries from other transactions
   uint16_t locally_consumed_index_ = 0;
 
-  // For (in future PR) tracking storage costs
-  uint32_t past_block_consumed_count_ = 0;
-
   // Used for tracking storage costs -- how many entries are consumed from
-  // the snapshot queue
+  // the snapshot queue (past blocks only)
   uint32_t past_block_consumed_count_ = 0;
 
   const SnapshotStorageItem *base_item_;
@@ -174,6 +171,9 @@ public:
 
   StorageDelta get_delta() const;
   constexpr static SyscallStatus<void> validate() { return {}; }
+  static int128_t
+  get_current_storage_cost(const StorageCostModel & /*unused*/);
+
 
   constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
 
@@ -198,6 +198,7 @@ public:
   AddressAuthDataItem &operator=(AddressAuthDataItem const &other);
 
   StorageDelta get_delta() const;
+  int128_t get_current_storage_cost(const StorageCostModel &cost_model) const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
 

@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/item/item_view_type.h"
 #include "hogd/hogexec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -152,6 +153,7 @@ RetrocausalQueueItem::make_fully_consumed_item(
     if (base_item.type() == ItemViewType::kRetrocausalQueue) {
       auto const &meta = base_item.retrocausal_queue_metadata();
       past_consume.max_fully_consumed_block_number = meta.max_live_block_num;
+      item.past_block_consumed_count_ = meta.live_entries;
     }
     item.queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
         .past_block_consume = past_consume,
@@ -505,12 +507,104 @@ UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
 }
 
 
-int128_t 
-UnmodifiedItem::get_current_storage_cost(StorageCostModel const &cost_model) const {
+int128_t
+UnmodifiedItem::get_current_storage_cost(
+    StorageCostModel const &cost_model) const
+{
   if (is_loaded()) {
     return base_item().snapshot_storage_cost(cost_model);
   }
   return 0;
+}
+
+int128_t
+BytestringItem::get_current_storage_cost(
+    const StorageCostModel &cost_model) const
+{
+  return cost_model.get_bytestring_cost(bytestring_.size());
+}
+
+int128_t
+NNIntItem::get_current_storage_cost(const StorageCostModel &cost_model)
+{
+  return cost_model.get_nnint_cost();
+}
+
+int128_t
+NativeTokenBalanceItem::get_current_storage_cost(
+    const StorageCostModel &cost_model)
+{
+  return cost_model.get_balance_cost();
+}
+
+int128_t
+RetrocausalQueueItem::get_current_storage_cost(
+    StorageCostModel const &cost_model) const
+{
+  assert(base_item_);
+
+  int64_t snapshot_live = 0;
+  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    snapshot_live = base_item_->retrocausal_queue_metadata().live_entries;
+  }
+
+  // Net entries from self-inserts minus self-consumes.
+  auto net_self_inserts = static_cast<int64_t>(
+      queue_delta_.insert.added_entries.size() - self_consumed_index_);
+
+  int64_t estimated_live =
+      snapshot_live - past_block_consumed_count_ + net_self_inserts;
+
+  return cost_model.get_retrocausal_queue_cost(
+      std::max<int64_t>(estimated_live, 0));
+}
+
+int128_t
+ReplayCacheItem::get_current_storage_cost(const StorageCostModel & /*unused*/)
+{
+  // Replay cache modifications can never be sponsored (they are only ever
+  // applied in the root frame). We may, in the future, want to add something
+  // to the transaction format to allow another account to sponsor from the root
+  // frame. At such a time, we would need to address this assumption.
+  //
+  // But that also opens up other questions, such as what to do about the case
+  // of the base item cost for the replay cache. Do we want to add a bespoke
+  // flag on that hypothetical transaction format to distinguish whether the
+  // base item exists already or not?  Maybe the simplest option would be to get
+  // rid of the base item cost on something like the replay cache, as we're
+  // expecting every address that originates transactions to have one anyways?
+  // Those questions are deferred until a later date.
+  panic("ReplayCacheItem storage cost should never be queried");
+}
+
+int128_t
+AddressAuthDataItem::get_current_storage_cost(
+    const StorageCostModel &cost_model) const
+{
+  assert(internal_auth_data_);
+  // We only know the keys being set/removed in this delta, not the full
+  // snapshot key state. Since get_current_storage_cost is used to compute
+  // marginal deltas (new_cost - prior_cost), unchanged keys cancel out,
+  // so we only need the keys this transaction is touching.
+  //
+  // TODO(geoff): If we ever need the absolute cost (not just the delta),
+  // this will need a lazy lookup of the snapshot's active key count or a
+  // contract-supplied hint for the prior key count.
+  size_t new_keys = 0;
+  size_t deleted_keys = 0;
+  for (auto const &[key_index, new_key] : internal_auth_data_->pk_changes_) {
+    if (new_key) {
+      ++new_keys;
+    }
+    else {
+      ++deleted_keys;
+    }
+  }
+
+  // Net key count can be negative (more deletions than additions).
+  // Unchanged keys cancel out when computing marginal deltas.
+  auto net_keys = static_cast<int64_t>(new_keys) - static_cast<int64_t>(deleted_keys);
+  return cost_model.get_auth_data_cost(net_keys);
 }
 
 } // namespace hogd
