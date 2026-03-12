@@ -13,7 +13,8 @@
 
 namespace hogd {
 
-Prepared::Prepared(RAMDB *ramdb) : ramdb_(ramdb) {}
+Prepared::Prepared(RAMDB *ramdb) : ramdb_(ramdb)
+{}
 
 void
 Prepared::put(std::span<const std::byte> key, uint8_t type,
@@ -77,12 +78,12 @@ Prepared::close()
 {
   LtHash16 delta;
   auto ul = changes_.lock_threads();
-  changes_.for_each(
-      ul, [&delta](const std::vector<MaterializedChange> &changes) {
-        for (const auto &change : changes) {
-          change.apply_hash(delta);
-        }
-      });
+  changes_.for_each(ul,
+                    [&delta](const std::vector<MaterializedChange> &changes) {
+                      for (const auto &change : changes) {
+                        change.apply_hash(delta);
+                      }
+                    });
   return delta;
 }
 
