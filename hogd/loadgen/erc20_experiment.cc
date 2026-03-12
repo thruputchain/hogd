@@ -40,6 +40,15 @@ make_amount(uint128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
+
+std::pair<Ed25519PublicKey, Ed25519SecretKey>
+make_wallet_keypair(SHA256Hash const &wallet_contract_hash, size_t wallet_index)
+{
+  auto seed =
+      sha256(x23::serialize(wallet_contract_hash, static_cast<uint64_t>(
+                                                    wallet_index)));
+  return ed25519_keygen_from_seed(std::as_bytes(std::span(seed)));
+}
 } // namespace
 
 void
@@ -47,7 +56,7 @@ ERC20ExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
 {
   wallets_.reserve(config_.num_addresses + 1);
   for (size_t i = 0; i < config_.num_addresses + 1; ++i) {
-    auto keys = ed25519_keygen();
+    auto keys = make_wallet_keypair(wallet_contract_hash, i);
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
         .secret_key = keys.second,

@@ -182,6 +182,21 @@ ed25519_keygen()
   return {pk, sk};
 }
 
+// ed25519_keygen_from_seed deterministically derives an ed25519 keypair from
+// a 32-byte seed.
+inline std::pair<Ed25519PublicKey, Ed25519SecretKey>
+ed25519_keygen_from_seed(std::span<const std::byte, 32> seed)
+{
+  Ed25519PublicKey pk;
+  Ed25519SecretKey sk;
+  static_assert(sizeof(Ed25519PublicKey) == ED25519_PUBLIC_KEY_SIZE);
+  static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
+  ed25519_dalek_keygen(detail::span_to_pointer(seed),
+                       detail::span_to_writable_pointer(pk),
+                       detail::span_to_writable_pointer(sk));
+  return {pk, sk};
+}
+
 template<x23::is_bytespan T>
 inline bool
 ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
