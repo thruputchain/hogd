@@ -113,13 +113,13 @@ TEST_F(ItemChangeAuthTest, Narrow)
   auto pk_1 = make_pk_config(Weight{10});
   auth_data_2.set_new_pk(0, pk_1);
 
-  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
-  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_2).value());
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_2).value());
 
   AuthDataItem auth_data_3(base_data_);
   auth_data_3.set_new_pk(0, nullptr);
 
-  EXPECT_TRUE(auth_data_item.narrow(auth_data_3));
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_3).value());
 
   ItemLock lock(0);
   ItemChange change = ItemChange(std::move(auth_data_item));
@@ -153,7 +153,7 @@ TEST_F(ItemChangeAuthTest, NarrowUncommitted)
   auth_data_2.set_new_pk(3, make_pk_config(Weight{10}));
 
   AuthDataItem narrowed = auth_data_item;
-  EXPECT_TRUE(narrowed.narrow(auth_data_2));
+  EXPECT_TRUE(narrowed.narrow(auth_data_2).value());
 
   ItemChange change = ItemChange(std::move(narrowed));
 

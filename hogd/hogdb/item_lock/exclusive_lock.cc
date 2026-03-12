@@ -1,12 +1,16 @@
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
+
+#include <cassert>
+
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
 #include "x23/debug.h"
-#include <cassert>
 
 namespace hogd {
 
@@ -38,13 +42,42 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     return ctx.cost_model->get_auth_data_cost(auth_data->count_active_keys());
   }
   if (after->is_retrocausal_queue()) {
-    auto rcq = after->to_retrocausal_queue();
-    assert(rcq.has_value());
-    size_t entries = rcq->delta().insert.added_entries.size();
-    if (entries == 0) {
-      return 0;
+    // Delegate validation and consume-counting to RetrocausalQueueLock.
+    // We intentionally discard its returned cost and compute our own tight
+    // cost that accounts for consumes immediately, since there is no
+    // concurrency concern under an exclusive lock.
+    auto inner_opt = after->to_retrocausal_queue();
+    CHECK(inner_opt.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    auto &inner = *inner_opt;
+
+    RetrocausalQueueLock lock;
+    auto cost = lock.try_atomic_change_lock(nullptr, &inner, ctx);
+    if (!cost) {
+      return cost;
     }
-    return ctx.cost_model->get_retrocausal_queue_cost(entries);
+
+    // try_atomic_change_lock validated everything and stashed
+    // consumed_past_entries_ on the delta.  get_meta returns the
+    // already-cached metadata (no extra DAO read).
+    auto meta = lock.get_meta(nullptr);
+    CHECK(meta.has_value());
+
+    uint64_t live = (*meta)->live_entries;
+    uint64_t added = inner.delta().insert.added_entries.size();
+    uint64_t consumed = inner.consumed_past_entries_;
+    if (inner.delta().consume) {
+      consumed += inner.delta().consume->current_block_consumed.size();
+    }
+
+    if (consumed > live + added) {
+      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+    }
+    uint64_t total = live + added - consumed;
+    if (total == 0) {
+      return int128_t{0};
+    }
+    return ctx.cost_model->get_retrocausal_queue_cost(total);
   }
   panic("unimplemented");
 }

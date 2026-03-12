@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <type_traits>
 #include <variant>
 
@@ -12,10 +13,11 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/status.h"
 
 namespace hogd {
 
-bool
+HogDBStatus<bool>
 NNInt128::narrow(const NNInt128 &nnint)
 {
   assert_is_valid();
@@ -46,7 +48,7 @@ NNInt128::narrow(const NNInt128 &nnint)
   return true;
 }
 
-bool
+HogDBStatus<bool>
 Balance::narrow(const Balance &other)
 {
   assert_is_valid();
@@ -57,7 +59,7 @@ Balance::narrow(const Balance &other)
   return true;
 }
 
-bool
+HogDBStatus<bool>
 AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
   CHECK(base_auth_data() == auth_data_item.base_auth_data());
@@ -79,7 +81,7 @@ AuthDataItem::count_active_keys() const
   return active_keys;
 }
 
-bool
+HogDBStatus<bool>
 ReplayCacheIt::narrow( // NOLINT - lint wants static
     const ReplayCacheIt & /*unused*/)
 {
@@ -93,29 +95,37 @@ ReplayCacheIt::narrow( // NOLINT - lint wants static
   return false;
 }
 
-bool
+HogDBStatus<bool>
 RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
 {
   // Inserts are always compatible, but it is probably worth double checking
   // that the executor didn't do anything weird like drop any inserts compared
-  // with the prior delta for this transaction.
-  CHECK(delta_.insert.added_entries.size() >=
-        earlier.delta_.insert.added_entries.size());
+  // with the prior delta for this transaction. An honest executor never does
+  // this, so treat it as an error rather than promoting to exclusive.
+  if (delta_.insert.added_entries.size() <
+      earlier.delta_.insert.added_entries.size()) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
 
-  // If a transaction did a consume, the new delta shouldn't forget about it.
-  CHECK(!earlier.delta_.consume || delta_.consume);
+  // The cumulative delta's consume can only grow within a transaction:
+  // each frame inherits the prior frame's ItemView state (including consume),
+  // and the single-consumer constraint means only one tx per block can consume.
+  // An honest executor never drops or reduces consumes.
+  if (earlier.delta_.consume && !delta_.consume) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
 
-  // If the old and new delta both have a consume, they should be monotonic.
-  CHECK(!(earlier.delta_.consume && delta_.consume) || // both have consume or
-        (earlier.delta_.consume->past_block_consume <  // earlier <= newer
-         delta_.consume->past_block_consume) ||
-        ((earlier.delta_.consume->past_block_consume ==
-              delta_.consume->past_block_consume &&
-          earlier.delta_.consume->current_block_consumed.size() <=
-              delta_.consume->current_block_consumed.size())));
-
-  // In any case, hogexec shouldn't ever issue an incompatible delta since
-  // a consumer is always self-compatible and all inserters commute.
+  if (earlier.delta_.consume && delta_.consume) {
+    auto const &ec = earlier.delta_.consume->past_block_consume;
+    auto const &nc = delta_.consume->past_block_consume;
+    bool monotonic =
+        (ec < nc) ||
+        (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
+                         delta_.consume->current_block_consumed.size());
+    if (!monotonic) {
+      return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+    }
+  }
   return true;
 }
 
@@ -126,23 +136,26 @@ concept is_monostate = std::same_as<std::decay_t<T>, std::monostate>;
 
 } // namespace
 
-void
+HogDBStatus<void>
 ItemChange::narrow(const ItemChange &change)
 {
   if (type_.index() != change.type_.index() || change.exclusive_) {
     exclusive_ = true;
-    return;
+    return {};
   }
 
-  exclusive_ = exclusive_ ||
-               !std::visit(
-                   [&change](auto &arg) -> bool {
-                     if constexpr (!is_monostate<decltype(arg)>)
-                       return arg.narrow(
-                           std::get<std::decay_t<decltype(arg)>>(change.type_));
-                     return {};
-                   },
-                   type_);
+  auto result = std::visit(
+      [&change](auto &arg) -> HogDBStatus<bool> {
+        if constexpr (!is_monostate<decltype(arg)>)
+          return arg.narrow(
+              std::get<std::decay_t<decltype(arg)>>(change.type_));
+        return true;
+      },
+      type_);
+  if (!result)
+    return std::unexpected(result.error());
+  exclusive_ = exclusive_ || !*result;
+  return {};
 }
 
 } // namespace hogd

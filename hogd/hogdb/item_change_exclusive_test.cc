@@ -16,16 +16,16 @@ TEST(ItemChangeExclusiveTest, TestNarrow)
 
   ASSERT_FALSE(change1.is_exclusive());
 
-  change1.narrow(change2);
+  EXPECT_TRUE(change1.narrow(change2).has_value());
   ASSERT_TRUE(change1.is_exclusive());
 
   // the same as change1
   ItemChange change3(Bytes(std::as_bytes(std::span("hello"sv))));
   ASSERT_FALSE(change3.is_exclusive());
 
-  change1.narrow(change3);
+  EXPECT_TRUE(change1.narrow(change3).has_value());
   ASSERT_TRUE(change1.is_exclusive());
-  change1.narrow(change3);
+  EXPECT_TRUE(change1.narrow(change3).has_value());
   ASSERT_TRUE(change1.is_exclusive());
 }
 

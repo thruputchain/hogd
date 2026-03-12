@@ -59,11 +59,21 @@ concept is_item = requires(T t, HogDBDAO &db, const ItemKey &key, const T &arg,
   // an item.  Makes the change's reservation at least as restrictive as arg.
   // However, does not merge the value change in arg. Instead, the narrowed
   // change replaces the prior change for the item (InvokeTX::request_change).
-  // Returns true if narrowing was successful. If narrowing is unsuccessful,
-  // then the change becomes exclusive and all future changes (merges)
-  // attempted by other transactions for this item will fail.
-  // Note, `t` is the new change, and `arg` is the existing change.
-  { t.narrow(arg) } -> std::same_as<bool>;
+  //
+  // Return values:
+  //   true  — narrowing succeeded; reservations are compatible.
+  //   false — narrowing failed; the change will be promoted to an exclusive
+  //           lock. This is a legitimate outcome (not an error).
+  //   error — an internal invariant was violated (e.g., the executor produced
+  //           an impossible delta). The error propagates to the caller and
+  //           aborts the transaction.
+  //
+  // narrow() must not fail for I/O or other transient reasons; it operates
+  // purely on in-memory state. The only error it may return is
+  // kInvalidExecutorBehavior for invariant violations.
+  //
+  // Note: `t` is the new change, and `arg` is the existing change.
+  { t.narrow(arg) } -> std::same_as<HogDBStatus<bool>>;
 } && std::formattable<T, char>;
 
 template<is_item T> class PointerItem : public std::unique_ptr<T> {
@@ -94,7 +104,7 @@ public:
     return *this;
   }
 
-  bool narrow(const PointerItem &pointer_item)
+  HogDBStatus<bool> narrow(const PointerItem &pointer_item)
   {
     return this->get()->narrow(*pointer_item.get());
   }
@@ -130,7 +140,7 @@ public:
     minus_ = delta_;
   }
 
-  bool narrow(const NNInt128 &nnint);
+  HogDBStatus<bool> narrow(const NNInt128 &nnint);
 
   int128_t value() const { return base_ + delta_; }
 
@@ -191,7 +201,7 @@ public:
     }
   }
 
-  bool narrow(Balance const &other);
+  HogDBStatus<bool> narrow(Balance const &other);
 
   int128_t delta() const { return delta_; }
   int128_t plus() const { return add_; }
@@ -235,7 +245,7 @@ struct Bytes {
 public:
   Bytes(std::span<const std::byte> buf) : buf_(buf.begin(), buf.end()) {}
 
-  bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
+  HogDBStatus<bool> narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
 
   OwningSpan<const std::byte> value() const
   {
@@ -274,7 +284,7 @@ namespace hogd {
 class Deletion {
 public:
   static HogDBStatus<void> commit(HogDBDAO &db, const ItemKey &key);
-  static bool narrow(const Deletion & /*del*/) { return true; }
+  static HogDBStatus<bool> narrow(const Deletion & /*del*/) { return true; }
 };
 
 } // namespace hogd
@@ -298,7 +308,7 @@ public:
   {}
 
   HogDBStatus<void> commit(HogDBDAO &db, const ItemKey &key) const;
-  bool narrow(const DeployedContractData &deployed_contract_data)
+  HogDBStatus<bool> narrow(const DeployedContractData &deployed_contract_data)
   {
     assert(deployed_contract_hash_ ==
            deployed_contract_data.deployed_contract_hash_);
@@ -337,7 +347,7 @@ public:
     : new_contract_(std::move(new_contract))
   {}
 
-  bool narrow(const NewContractData &new_contract_data)
+  HogDBStatus<bool> narrow(const NewContractData &new_contract_data)
   {
     assert(new_contract_ == new_contract_data.new_contract_);
     return true;
@@ -380,7 +390,7 @@ public:
     gas_config_change_ = std::move(gas_config);
   }
 
-  bool narrow(const AuthDataItem &auth_data_item) const;
+  HogDBStatus<bool> narrow(const AuthDataItem &auth_data_item) const;
 
   AddressAuthData const &base_auth_data() const { return base_auth_data_; }
 
@@ -422,7 +432,7 @@ class ReplayCacheIt {
 public:
   ReplayCacheIt(Uniquifier const &uniquifier) : addition_(uniquifier) {}
 
-  bool narrow(const ReplayCacheIt &unused);
+  HogDBStatus<bool> narrow(const ReplayCacheIt &unused);
 
   Uniquifier const &addition() const { return addition_; }
 
@@ -456,7 +466,7 @@ class RetrocausalQueueIt {
 public:
   RetrocausalQueueIt(RetrocausalQueueDelta delta) : delta_(std::move(delta)) {}
 
-  bool narrow(const RetrocausalQueueIt &earlier);
+  HogDBStatus<bool> narrow(const RetrocausalQueueIt &earlier);
 
   RetrocausalQueueDelta const &delta() const { return delta_; }
 
@@ -467,6 +477,7 @@ private:
   mutable uint64_t consumed_past_entries_{0};
 
   friend struct std::formatter<RetrocausalQueueIt>;
+  friend class ExclusiveLock;
   friend class RetrocausalQueueLock;
 };
 
@@ -562,7 +573,7 @@ public:
   }
 
   // narrow combines the reservation of a change into this one.
-  void narrow(const ItemChange &change);
+  HogDBStatus<void> narrow(const ItemChange &change);
 
   auto get_type() const { return type_.index(); }
 

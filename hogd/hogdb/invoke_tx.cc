@@ -119,7 +119,8 @@ InvokeTX::update_balance_lock(Address const &addr)
   auto const &last = change.back();
   assert(last.tx_depth <= tx_depth_);
   assert(last.change.is_balance());
-  new_item.narrow(last.change);
+  if (auto r = new_item.narrow(last.change); !r)
+    return r.error();
 
   assert(last.change.is_balance());
   assert(new_item.is_balance());
@@ -329,7 +330,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // otherwise it is an existing change, so the item is already locked.
   ItemVersion &item = v.back();
-  change.narrow(item.change);
+  if (auto r = change.narrow(item.change); !r)
+    return r.error();
   HogDBStatus<int128_t> ret =
       block_.get().modify_lock(key, item.change, change);
   if (!ret) {
