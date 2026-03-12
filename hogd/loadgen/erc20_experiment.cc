@@ -44,9 +44,8 @@ make_amount(uint128_t amount)
 std::pair<Ed25519PublicKey, Ed25519SecretKey>
 make_wallet_keypair(SHA256Hash const &wallet_contract_hash, size_t wallet_index)
 {
-  auto seed =
-      sha256(x23::serialize(wallet_contract_hash, static_cast<uint64_t>(
-                                                    wallet_index)));
+  auto seed = sha256(x23::serialize(wallet_contract_hash,
+                                    static_cast<uint64_t>(wallet_index)));
   return ed25519_keygen_from_seed(std::as_bytes(std::span(seed)));
 }
 } // namespace
