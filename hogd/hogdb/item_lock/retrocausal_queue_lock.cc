@@ -190,14 +190,22 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     // and record it in case this transaction commits.
     size_t consumed_entries = 0;
 
-    auto const &old_consume = meta.consume_state;
+    auto const &snapshot_consume = meta.consume_state;
     auto const &new_consume = delta.consume->past_block_consume;
 
     // Reject consumes that reference blocks beyond the current max live block.
     // No valid hogexec could ever generate such a consume; attempting to
-    // consume persistent blocks that have not yet come into existance is
+    // consume persistent blocks that have not yet come into existence is
     // impossible even in validation mode.
     if (new_consume.max_fully_consumed_block_number > meta.max_live_block_num) {
+      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+    }
+
+    // Reject backward full-block consume. The snapshot's consume state is
+    // the committed block-start state, identical in both proposal and
+    // validation mode. hogexec can only consume forward from the snapshot.
+    if (new_consume.max_fully_consumed_block_number <
+        snapshot_consume.max_fully_consumed_block_number) {
       return HogDBError{HogDBCode::kInvalidExecutorBehavior};
     }
 
@@ -210,17 +218,17 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     }
 
     if (new_consume.max_fully_consumed_block_number ==
-        old_consume.max_fully_consumed_block_number) {
+        snapshot_consume.max_fully_consumed_block_number) {
       // Reject backward partial_consumed within the same block.
       if (new_consume.partial_consumed_number <
-          old_consume.partial_consumed_number) {
+          snapshot_consume.partial_consumed_number) {
         return HogDBError{HogDBCode::kInvalidExecutorBehavior};
       }
 
       // Verify partial doesn't exceed actual block size.
       if (new_consume.partial_consumed_number >
-          old_consume.partial_consumed_number) {
-        auto block_num = old_consume.max_fully_consumed_block_number + 1;
+          snapshot_consume.partial_consumed_number) {
+        auto block_num = snapshot_consume.max_fully_consumed_block_number + 1;
         auto block = ctx.dao->read_retrocausal_queue_block(ctx.key, block_num);
         if (!block.has_value()) {
           return block.error();
@@ -231,18 +239,19 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       }
 
       consumed_entries += (new_consume.partial_consumed_number -
-                           old_consume.partial_consumed_number);
+                           snapshot_consume.partial_consumed_number);
     }
     else {
       // First block (the one we were partially in)
-      auto first_block_num = old_consume.max_fully_consumed_block_number + 1;
+      auto first_block_num =
+          snapshot_consume.max_fully_consumed_block_number + 1;
       auto first_block =
           ctx.dao->read_retrocausal_queue_block(ctx.key, first_block_num);
       if (!first_block.has_value()) {
         return first_block.error();
       }
-      consumed_entries +=
-          (first_block->entries.size() - old_consume.partial_consumed_number);
+      consumed_entries += (first_block->entries.size() -
+                           snapshot_consume.partial_consumed_number);
 
       // Intermediate blocks
       for (uint64_t b = first_block_num + 1;
