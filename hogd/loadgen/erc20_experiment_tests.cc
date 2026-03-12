@@ -155,6 +155,24 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
   }
 }
 
+TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
+{
+  ERC20PaymentsConfig config{.num_addresses = 10};
+
+  auto state1 = std::make_shared<ERC20BasicAuthExperimentState>(config);
+  auto state2 = std::make_shared<ERC20BasicAuthExperimentState>(config);
+
+  auto result1 = state1->generate_experiment()();
+  auto result2 = state2->generate_experiment()();
+
+  ASSERT_TRUE(result1.has_value());
+  ASSERT_TRUE(result2.has_value());
+  EXPECT_EQ(result1.value().genesis_configuration,
+            result2.value().genesis_configuration);
+  EXPECT_EQ(result1.value().initialization_txs,
+            result2.value().initialization_txs);
+}
+
 TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
