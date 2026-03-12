@@ -323,7 +323,7 @@ private:
     auto &c = self.RefCount::count_;
     if (c.fetch_sub(1, std::memory_order_release) == 1) {
       // Synchronize with decrefs in other threads before freeing.
-      c.load(std::memory_order_acquire);
+      [[maybe_unused]] auto _ = c.load(std::memory_order_acquire);
       self.finalize();
     }
   }
@@ -366,7 +366,7 @@ public:
     else
       refcnt_.store(0, std::memory_order_relaxed);
     // Synchronize with all previous decrefs
-    refcnt_.load(std::memory_order_acquire);
+    [[maybe_unused]] auto _ = refcnt_.load(std::memory_order_acquire);
   }
 
 private:
