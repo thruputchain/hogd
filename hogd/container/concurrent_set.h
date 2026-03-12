@@ -108,9 +108,9 @@ public:
       }
       else {
         try_resize();
-        --level;  // Retry this level: ++level at outer restores it.
-                  // Concurrent inserts will eventually update inserts_,
-                  // allowing try_resize to add a level, or free up slots.
+        --level; // Retry this level: ++level at outer restores it.
+                 // Concurrent inserts will eventually update inserts_,
+                 // allowing try_resize to add a level, or free up slots.
       }
     }
   }
