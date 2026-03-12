@@ -47,6 +47,23 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
+x23::Async<void>
+Scheduler::write_all_average_hog_ages()
+{
+  // TODO(jhumphri): This should be a detached coroutine.
+
+  HogAgeBatch ages;
+  ages.reserve(accounts_.size());
+  accounts_.for_each_parallel([&](const std::pair<ContractAddress, HogAge> &p) {
+    const HogAge &age = p.second;
+    CHECK_EQ(p.first, age.address);
+    ages.push_back(age);
+  });
+  CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
+           DbSchedResult::DbSchedResultOK);
+  co_return;
+}
+
 std::pair<HogAge *, std::unique_lock<std::mutex>>
 Scheduler::get_cached_hog_age(const ContractAddress &address)
 {

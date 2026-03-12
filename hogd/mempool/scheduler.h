@@ -96,6 +96,8 @@ public:
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
+  x23::Async<void> write_all_average_hog_ages();
+
   x23::Async<void>
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
   x23::Async<std::unordered_set<ContractAddress>>
