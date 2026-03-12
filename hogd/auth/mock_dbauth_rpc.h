@@ -105,7 +105,12 @@ public:
   authdb_get_auth_data_batch(BlockHeight height,
                              ContractAddressBatch const &addresses);
 
-  static x23::Async<bool> dbauth_intro(AuthCard card) { co_return true; }
+  static x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
+  {
+    DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
+    ret.current_height() = -1;
+    co_return ret;
+  }
 
 private:
   // Find the most recent auth data for an address at or before the given height

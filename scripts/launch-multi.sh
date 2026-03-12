@@ -253,7 +253,9 @@ remote_launch "$event_server" "$EVENT_BINARY" \
 
 # Start indexer.
 echo "Start indexer..."
-ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
+if $delete_db; then
+  ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
+fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
   --event-addr "$event_server":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
 
@@ -282,7 +284,9 @@ remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
 
 # Launch chuckd.
 echo "Start chuckd..."
-ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+if $delete_db; then
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+fi
 
 remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --copy-file "$SCPD_BINARY" \

@@ -145,7 +145,21 @@ x23::Async<void>
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 {
-  return dbauth_client_.subscribe_to_auth_data_changes(card);
+  BlockHeight current_height =
+      co_await dbauth_client_.subscribe_to_auth_data_changes(card);
+  CHECK_EQ(current_height_futex_.load(), kUninitializedHeight);
+  if (current_height != -1) {
+    current_height_futex_.store(current_height);
+    info("initializing auth server to height {}", current_height);
+    // There should be no one waiting on [current_height_futex_] as we are
+    // setting [current_height_futex_] in the initialization path, so we are
+    // deliberately not calling [current_height_futex_.broadcast()] after
+    // storing a value to it.
+  }
+  else {
+    info("not initializing auth server height");
+  }
+  co_return;
 }
 
 x23::Async<AuthErrorCode>

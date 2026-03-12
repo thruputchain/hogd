@@ -161,6 +161,7 @@ public:
       co_return DbSchedResult::DbSchedResultError;
     }
     CHECK_EQ(last_committed_block_.height, -1);
+    CHECK_EQ(auth_data_height(), -1);
 
     MerkleTrie empty_trie;
     empty_trie.generate_all_hashes();
@@ -291,6 +292,7 @@ private:
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
         last_committed_block_ = db_res.db_tip();
         CHECK_GE(last_committed_block_.height, 0);
+        auth_data_height_.store(last_committed_block_.height);
       }
       else {
         // [dbsched_get_tip()] returned an error because no blocks have been
@@ -299,6 +301,7 @@ private:
                                  .block_hash = {},
                                  .db_hash = {},
                                  .id = 0};
+        auth_data_height_.store(-1);
       }
     }
     info("finish_init(), system starting with db tip: height = {}, id = {}, "
@@ -405,9 +408,7 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
   DbTip last_committed_block_{};
-
   x23::CoroFutex<int64_t> auth_data_height_{-1};
-  x23::CoroFutex<int> auth_ready_{0};
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 
