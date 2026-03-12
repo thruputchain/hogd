@@ -5,6 +5,7 @@
 #include <future>
 #include <limits>
 #include <random>
+#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
