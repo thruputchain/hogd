@@ -47,10 +47,10 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
-x23::Async<void>
+x23::Detached
 Scheduler::write_all_average_hog_ages()
 {
-  // TODO(jhumphri): This should be a detached coroutine.
+  co_await default_coropoll().pool_.bg();
 
   HogAgeBatch ages;
   ages.reserve(accounts_.size());
@@ -61,6 +61,8 @@ Scheduler::write_all_average_hog_ages()
   });
   CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
+
+  pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
   co_return;
 }
 
@@ -685,6 +687,9 @@ Scheduler::schedule(size_t num_txs,
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
+
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  write_all_average_hog_ages();
 }
 
 x23::Async<void>

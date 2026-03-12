@@ -31,6 +31,13 @@ public:
       db_sched_client_(std::move(db_sched_client))
   {}
 
+  ~Scheduler()
+  {
+    while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
   static x23::Async<void> shut_down() { co_return; }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
@@ -96,7 +103,7 @@ public:
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
-  x23::Async<void> write_all_average_hog_ages();
+  x23::Detached write_all_average_hog_ages();
 
   x23::Async<void>
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
@@ -240,6 +247,8 @@ private:
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
   std::shared_ptr<db_sched_client_t> db_sched_client_;
+
+  std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };
 
 } // namespace hogd

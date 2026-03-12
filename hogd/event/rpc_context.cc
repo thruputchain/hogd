@@ -170,7 +170,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     if (released || it->second.initiate_shutdown()) {
       event.gc_context_internal(it);
     }
-    event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_acquire);
+    event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
     co_return;
   }(*this, std::move(g), block_id, block_height, out_hash,
                                  std::move(file_wait));
