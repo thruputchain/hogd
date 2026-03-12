@@ -26,9 +26,9 @@ public:
 
   x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
-    if (!ctx_.get_auth_change_subscription_manager()
+    if (!co_await ctx_.get_auth_change_subscription_manager()
              .add_full_auth_change_subscriber(std::move(card))) {
-      co_return DBAuthIntroOutcome::kFailure;
+      co_return DBAuthIntroResult(DBAuthIntroOutcome::kFailure);
     }
     DBAuthIntroResult ret(DBAuthIntroOutcome::kSuccess);
     ret.current_height() = get_expected_query_height();
