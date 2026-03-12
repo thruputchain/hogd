@@ -104,9 +104,6 @@ public:
 
 TEST_F(DirectRCQTests, ValidationFailsThenPropose)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   auto handler = make_new_per_tx_db_proxy();
   handler.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                     make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
@@ -114,9 +111,11 @@ TEST_F(DirectRCQTests, ValidationFailsThenPropose)
                         StorageDeltaFlags::kStorageDeltaFlagNone));
   auto r = handler.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
+  // TX must be committed so the lock is finalized and
+  // prepare_committed_changes runs the consumed_set check.
+  ASSERT_TRUE(handler.commit_transaction({}).has_value());
 
-  advance_block(BlockExecutionMode::kBlockExecutionModeProposal,
-                DbSchedResult::DbSchedResultError);
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
 }
 
@@ -1084,9 +1083,6 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
 // added_entries_. Since {B} was never inserted, consumed_set won't be emptied.
 TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeValidation,
@@ -1116,9 +1112,9 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
     ASSERT_TRUE(tx1.commit_transaction({}).has_value());
     ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
-    // advance_block triggers write_committed_change where consumed_set check
-    // detects the mismatched entry and returns kInvalidExecutorBehavior.
-    advance_block(mode, DbSchedResult::DbSchedResultError);
+    // prepare_committed_changes detects the consumed_set mismatch and
+    // returns kInvalidExecutorBehavior. reject_block verifies no DAO mutation.
+    reject_block(mode);
   }
 }
 
@@ -1129,9 +1125,6 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
 // check should fail.
 TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_extra");
 
@@ -1150,14 +1143,13 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx2.try_push_current_subtransaction();
   // Lock-time validation doesn't check current-block consumed entries.
-  // Push succeeds; mismatch caught at finalization.
+  // Push succeeds; mismatch caught at prepare_committed_changes.
   ASSERT_TRUE(r.has_value() && r.value());
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  // consumed_set check at finalization detects the extra consumed entry.
-  advance_block(BlockExecutionMode::kBlockExecutionModeProposal,
-                DbSchedResult::DbSchedResultError);
+  // consumed_set check at prepare detects the extra consumed entry.
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
 }
 
 // StressConsumeMoreCurrentThanInserted
@@ -1167,9 +1159,6 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
 // check should fail.
 TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_extra");
@@ -1192,9 +1181,8 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  // consumed_set check at finalization detects the extra consumed entry.
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
-                DbSchedResult::DbSchedResultError);
+  // consumed_set check at prepare detects the extra consumed entry.
+  reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
 }
 
 // StressSameTxConsumeInsertMismatch
@@ -1205,9 +1193,6 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
 // was never inserted). At finalization CHECK(consumed_set.empty()) fires.
 TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_mismatch");
 
@@ -1231,19 +1216,15 @@ TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx.try_push_current_subtransaction();
   // Lock-time validation doesn't check current-block consumed entries.
-  // Push succeeds; mismatch caught at finalization.
+  // Push succeeds; mismatch caught at prepare_committed_changes.
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  // consumed_set check at finalization detects the mismatched entry.
-  advance_block(BlockExecutionMode::kBlockExecutionModeProposal,
-                DbSchedResult::DbSchedResultError);
+  // consumed_set check at prepare detects the mismatched entry.
+  reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
 }
 
 TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_val_mismatch");
@@ -1270,9 +1251,8 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
   // this is valid in validation mode
   ASSERT_TRUE(r.has_value() && r.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  // consumed_set check at finalization detects the mismatched entry.
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
-                DbSchedResult::DbSchedResultError);
+  // consumed_set check at prepare detects the mismatched entry.
+  reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
 }
 
 // StressValidationConsumeCurrentBlockZeroInserted
@@ -1283,9 +1263,6 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
 // added_entries_ to match against.
 TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
                     BlockExecutionMode::kBlockExecutionModeValidation}) {
     advance_block(mode);
@@ -1309,12 +1286,12 @@ TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
                   std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
     r = tx2.try_push_current_subtransaction();
     // Lock-time validation doesn't check current-block consumed entries.
-    // Push succeeds; mismatch caught at finalization.
+    // Push succeeds; mismatch caught at prepare_committed_changes.
     ASSERT_TRUE(r.has_value() && r.value());
     ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-    // consumed_set check at finalization detects that consumed entry {1}
+    // consumed_set check at prepare detects that consumed entry {1}
     // is not among the added_entries_ for this block.
-    advance_block(mode, DbSchedResult::DbSchedResultError);
+    reject_block(mode);
   }
 }
 
@@ -1561,9 +1538,6 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithConsumeDelta)
 TEST_F(DirectRCQTests,
        StressConsumeInsertDuplicateCurrentConsumedExceedsInserted)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
 
   for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
@@ -1591,13 +1565,13 @@ TEST_F(DirectRCQTests,
     r = tx2.try_push_current_subtransaction();
 
     // Lock-time validation doesn't check current-block consumed entries.
-    // Push succeeds in both modes; mismatch caught at finalization.
+    // Push succeeds in both modes; mismatch caught at prepare.
     ASSERT_TRUE(r.has_value() && r.value());
 
     ASSERT_TRUE(tx1.commit_transaction({}).has_value());
     ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-    // consumed_set check at finalization catches the duplicate consumption.
-    advance_block(mode, DbSchedResult::DbSchedResultError);
+    // consumed_set check at prepare catches the duplicate consumption.
+    reject_block(mode);
   }
 }
 
@@ -1960,29 +1934,19 @@ TEST_F(DirectRCQTests, StressExclusiveFlagInsertOverMaxEntriesPerBlock)
 // downgrade commit path -- consumed entry not in added_entries_.
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
-  for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
-                    BlockExecutionMode::kBlockExecutionModeValidation}) {
-    advance_block(mode);
-    auto key =
-        make_contract_data_addrkey(kContractAddress, "rcq_excl_new_mismatch");
-    auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(key,
-                 make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({99})},
-                                               {make_rcq_entry({10})}),
-                 std::to_underlying(
-                     StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
-    auto r = tx.try_push_current_subtransaction();
-    // ExclusiveLock doesn't validate consumed_set at lock time.
-    // Push succeeds. Mismatch caught at finalization.
-    ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
-    // consumed_set check at finalization catches {99} not in added_entries_.
-    advance_block(mode, DbSchedResult::DbSchedResultError);
-  }
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_excl_new_mismatch");
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key,
+               make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({99})},
+                                             {make_rcq_entry({10})}),
+               std::to_underlying(
+                   StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  auto r = tx.try_push_current_subtransaction();
+  // ExclusiveLock validates consumed entry identity at lock time.
+  // {99} not in added_entries {10} → rejected.
+  ASSERT_FALSE(r.has_value());
 }
 
 // StressExclusiveConsumeInsertOnExistingRCQCurrentBlockMismatch
@@ -1990,9 +1954,6 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch)
 TEST_F(DirectRCQTests,
        StressExclusiveConsumeInsertOnExistingRCQCurrentBlockMismatch)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_excl_exist_mismatch");
@@ -2013,20 +1974,14 @@ TEST_F(DirectRCQTests,
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx.try_push_current_subtransaction();
-  // ExclusiveLock doesn't validate consumed_set at lock time. Push succeeds.
-  ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  // consumed_set check at finalization catches {77} not in added_entries_.
-  advance_block(BlockExecutionMode::kBlockExecutionModeProposal,
-                DbSchedResult::DbSchedResultError);
+  // ExclusiveLock validates consumed entry identity at lock time.
+  // {77} not in added_entries {10} → rejected.
+  ASSERT_FALSE(r.has_value());
 }
 
 TEST_F(DirectRCQTests,
        StressExclusiveConsumeInsertOnExistingRCQCurrentBlockMismatchValidation)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key =
@@ -2048,11 +2003,9 @@ TEST_F(DirectRCQTests,
                std::to_underlying(
                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
   r = tx.try_push_current_subtransaction();
-  ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
-  // consumed_set check at finalization catches {77} not in added_entries_.
-  advance_block(BlockExecutionMode::kBlockExecutionModeValidation,
-                DbSchedResult::DbSchedResultError);
+  // ExclusiveLock validates consumed entry identity at lock time.
+  // {77} not in added_entries {10} → rejected.
+  ASSERT_FALSE(r.has_value());
 }
 
 // StressExclusiveConsumeInsertOverconsumeCurrentBlock
@@ -2532,33 +2485,24 @@ TEST_F(DirectRCQTests, StressExclusiveRCQThenNormalModifySameBlockDowngrade)
 // StressExclusiveConsumeInsertMismatchedCurrentBlock
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertMismatchedCurrentBlock)
 {
-  GTEST_SKIP()
-      << "Relies on write_committed_change failure during parallel block "
-         "finalization, which is unsafe (groundhogchain/hogd#1238)";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_mismatch_consumed");
 
-  for (auto mode : {BlockExecutionMode::kBlockExecutionModeProposal,
-                    BlockExecutionMode::kBlockExecutionModeValidation}) {
-    auto key =
-        make_contract_data_addrkey(kContractAddress, "rcq_mismatch_consumed");
-
-    // Fresh key: exclusive consume_insert with mismatched
-    // current_block_consumed. Insert [A={10}, B={20}] but consume [{99}] from
-    // current block.
-    auto tx = make_new_per_tx_db_proxy();
-    tx.add_delta(key,
-                 make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({99})},
-                                               {make_rcq_entry({10}),
-                                                make_rcq_entry({20})}),
-                 std::to_underlying(
-                     StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
-    auto r = tx.try_push_current_subtransaction();
-    // ExclusiveLock doesn't validate consumed_set at lock time. Push succeeds.
-    ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
-    // consumed_set check at finalization catches {99} not in added_entries_.
-    advance_block(mode, DbSchedResult::DbSchedResultError);
-  }
+  // Fresh key: exclusive consume_insert with mismatched
+  // current_block_consumed. Insert [A={10}, B={20}] but consume [{99}] from
+  // current block.
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key,
+               make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({99})},
+                                             {make_rcq_entry({10}),
+                                              make_rcq_entry({20})}),
+               std::to_underlying(
+                   StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+  auto r = tx.try_push_current_subtransaction();
+  // ExclusiveLock validates consumed entry identity at lock time.
+  // {99} not in added_entries {10, 20} → rejected.
+  ASSERT_FALSE(r.has_value());
 }
 
 TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
