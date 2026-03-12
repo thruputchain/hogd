@@ -1,5 +1,7 @@
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
 
+#include <cassert>
+
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
@@ -44,11 +46,13 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // We intentionally discard its returned cost and compute our own tight
     // cost that accounts for consumes immediately, since there is no
     // concurrency concern under an exclusive lock.
-    auto inner = after->to_retrocausal_queue();
-    CHECK(inner.has_value());
+    auto inner_opt = after->to_retrocausal_queue();
+    CHECK(inner_opt.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    auto &inner = *inner_opt;
 
     RetrocausalQueueLock lock;
-    auto cost = lock.try_atomic_change_lock(nullptr, &*inner, ctx);
+    auto cost = lock.try_atomic_change_lock(nullptr, &inner, ctx);
     if (!cost) {
       return cost;
     }
@@ -60,10 +64,10 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     CHECK(meta.has_value());
 
     uint64_t live = (*meta)->live_entries;
-    uint64_t added = inner->delta().insert.added_entries.size();
-    uint64_t consumed = inner->consumed_past_entries_;
-    if (inner->delta().consume) {
-      consumed += inner->delta().consume->current_block_consumed.size();
+    uint64_t added = inner.delta().insert.added_entries.size();
+    uint64_t consumed = inner.consumed_past_entries_;
+    if (inner.delta().consume) {
+      consumed += inner.delta().consume->current_block_consumed.size();
     }
 
     if (consumed > live + added) {
