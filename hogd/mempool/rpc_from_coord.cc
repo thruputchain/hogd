@@ -97,8 +97,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await cg(commit_lock_);
 
   const BlockHeight verify_height = scheduler_->current_block();
-  info("submit_unvetted will check if the txs are valid for height {}",
-       verify_height);
+  info("submit_unvetted will check if {} txs are valid for height {}",
+       txs->size(), verify_height);
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                              *txs);

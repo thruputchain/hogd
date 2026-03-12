@@ -24,10 +24,15 @@ public:
   authdb_get_auth_data_batch(BlockHeight height,
                              ContractAddressBatch addresses);
 
-  x23::Async<bool> dbauth_intro(AuthCard card)
+  x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
-    return ctx_.get_auth_change_subscription_manager()
-        .add_full_auth_change_subscriber(std::move(card));
+    if (!ctx_.get_auth_change_subscription_manager()
+             .add_full_auth_change_subscriber(std::move(card))) {
+      co_return DBAuthIntroOutcome::kFailure;
+    }
+    DBAuthIntroResult ret(DBAuthIntroOutcome::kSuccess);
+    ret.current_height() = get_expected_query_height();
+    co_return ret;
   }
 
   BlockHeight get_expected_query_height();
