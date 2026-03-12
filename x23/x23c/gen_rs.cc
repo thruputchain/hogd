@@ -526,8 +526,8 @@ GenRs::show_type(const StructBody &s, string const &tname)
       array_size = get_opaque_array_size(inner);
       if (array_size) {
         // This is a newtyped fixed-size array
-
-        if (*array_size != "64") {
+        size_t array_size_int = std::stoul(*array_size);
+        if (array_size_int <= 32) {
           // arrays with size over 32 don't implement Default, so we can't
           // derive it here
           derive_traits.emplace_back("Default");
