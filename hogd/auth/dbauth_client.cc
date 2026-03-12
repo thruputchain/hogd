@@ -35,7 +35,7 @@ x23::Async<BlockHeight>
 DBAuthClient::subscribe_to_auth_data_changes(AuthCard const &card)
 {
   DBAuthIntroResult res = co_await client_.dbauth_intro(card);
-  CHECK_EQ(res.outcome(), DBAuthIntroOutcome::kSuccess);
+  CHECK_EQ(res.outcome(), DBAuthIntroOutcome::kIntroSuccess);
   co_return res.current_height();
 }
 

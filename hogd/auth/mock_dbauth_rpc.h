@@ -107,7 +107,7 @@ public:
 
   static x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
-    DBAuthIntroResult ret(DBAuthIntroOutcome::kSuccess);
+    DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
     ret.current_height() = -1;
     co_return ret;
   }
