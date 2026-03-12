@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <optional>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -15,6 +16,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
@@ -75,7 +77,7 @@ public:
   HogDBStatus<std::optional<QueueEntry>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
-  DbHash compute_db_hash(const DbHash &base_hash);
+  HogDBStatus<DbHash> compute_db_hash(const DbHash &base_hash);
 
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
@@ -100,6 +102,7 @@ private:
   ConcurrentMap<ItemKey, ItemLock, SipHash24Hasher> item_locks_;
   BackgroundCommitWorker &background_commit_worker_;
   BlockHeight block_height_;
+  std::optional<Prepared> prepared_;
 
   static inline HogDBStatus<int128_t>
   do_lock(ItemLock &lock, const ItemChange &change, const LockContext &ctx);

@@ -164,9 +164,8 @@ public:
     return cost_model->kBaseItemCost;
   }
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
+                                              Prepared &prepared) const;
 
   // For balance items
   // Only should be called after all txs in a block are done.

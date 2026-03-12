@@ -30,6 +30,8 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/materialized_change.h"
+#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "x23/serialize.h"
@@ -645,6 +647,26 @@ HogDBDAO::remove_item(const ItemKey &key)
   error("unhandled item key type in remove_item: {}",
         std::to_underlying(key.key_type()));
   return HogDBError(HogDBCode::kInternal);
+}
+
+void
+HogDBDAO::apply(Prepared &prepared)
+{
+  auto ul = prepared.changes_.lock_threads();
+  prepared.changes_.for_each(ul, [this](
+                                     std::vector<MaterializedChange> &changes) {
+    for (const auto &change : changes) {
+      switch (change.op) {
+      case MaterializedChange::Op::kPut:
+        CHECK(db_.put(change.key, change.type, change.value).has_value());
+        break;
+      case MaterializedChange::Op::kRemove:
+        CHECK(db_.remove(change.key).has_value());
+        break;
+      }
+    }
+    changes.clear();
+  });
 }
 
 } // namespace hogd

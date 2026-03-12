@@ -259,11 +259,14 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
-  DbBlockResult ret(DbSchedResult::DbSchedResultOK);
-  DbHash db_hash =
+  auto db_hash_result =
       btx->get().compute_db_hash(/*base_hash=*/ctx_.get_tip().db_hash);
-  ctx_.cache_db_hash(id, db_hash);
-  ret.db_hash() = db_hash;
+  if (!db_hash_result) [[unlikely]] {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
+  DbBlockResult ret(DbSchedResult::DbSchedResultOK);
+  ctx_.cache_db_hash(id, *db_hash_result);
+  ret.db_hash() = *db_hash_result;
   co_return ret;
 }
 
@@ -420,7 +423,12 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
   itx->commit();
-  DbHash db_hash = r.value()->get().compute_db_hash(base_hash);
+  auto db_hash_result = r.value()->get().compute_db_hash(base_hash);
+  if (!db_hash_result) [[unlikely]] {
+    error("genesis compute_db_hash failed: {}", db_hash_result.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  DbHash db_hash = *db_hash_result;
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   // Since the genesis block is the first block, we set [prev_block_hash] to

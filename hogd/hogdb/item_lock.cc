@@ -510,7 +510,8 @@ ItemLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDBStatus<void>
-ItemLock::write_committed_change(LockContext const &ctx) const
+ItemLock::prepare_committed_changes(const LockContext &ctx,
+                                    Prepared &prepared) const
 {
   CHECK(is_finalized());
   CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
@@ -524,28 +525,7 @@ ItemLock::write_committed_change(LockContext const &ctx) const
           panic("bad finalized state");
         }
         else {
-          return lock.write_committed_change(ctx);
-        }
-      },
-      lock_contents_);
-}
-
-HogDBStatus<void>
-ItemLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
-{
-  CHECK(is_finalized());
-  CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
-  CHECK(!std::holds_alternative<ExclusiveLock>(lock_contents_));
-  return std::visit(
-      [&](auto &lock) -> HogDBStatus<void> {
-        if constexpr (std::is_same_v<std::decay_t<decltype(lock)>,
-                                     std::monostate> ||
-                      std::is_same_v<std::decay_t<decltype(lock)>,
-                                     ExclusiveLock>) {
-          panic("bad finalized state");
-        }
-        else {
-          return lock.apply_db_hash_delta(ctx, hash);
+          return lock.prepare_committed_changes(ctx, prepared);
         }
       },
       lock_contents_);

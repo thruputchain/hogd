@@ -363,7 +363,9 @@ Benchmark::run()
   // Optionally compute the hash as part of the benchmark
   if (compute_db_hash_) {
     DbHash base_hash{};
-    base_hash = block.get().compute_db_hash(base_hash);
+    auto hash_result = block.get().compute_db_hash(base_hash);
+    CHECK(hash_result.has_value());
+    base_hash = *hash_result;
     asm volatile("" : : "m"(base_hash) : "memory");
   }
 

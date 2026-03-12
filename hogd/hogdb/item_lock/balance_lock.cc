@@ -9,10 +9,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -77,28 +77,14 @@ BalanceLock::build_result(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-BalanceLock::write_committed_change(LockContext const &ctx) const
+BalanceLock::prepare_committed_changes(const LockContext &ctx,
+                                       Prepared &prepared) const
 {
-
   assert(ctx.key.is_address_balance());
-
   auto value = build_result(ctx);
-
-  assert(ctx.dao);
-  return ctx.dao->write_address_balance(ctx.key.get_address(), value);
-}
-
-HogDBStatus<void>
-BalanceLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
-{
-  assert(ctx.key.is_address_balance());
-  assert(ctx.dao);
-
+  int128_t encoded = cpu_to_le(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
-  int128_t after = build_result(ctx);
-  int128_t encoded_after = cpu_to_le(after);
-  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), kNNInt128,
-                     byte_view(encoded_after));
+  prepared.put(std::as_bytes(std::span(key)), kNNInt128, byte_view(encoded));
   return {};
 }
 

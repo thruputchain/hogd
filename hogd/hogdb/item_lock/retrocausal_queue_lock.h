@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -13,6 +16,15 @@
 #include "x23/testlock.h"
 
 namespace hogd {
+
+struct QueueEntryHasher {
+  size_t operator()(const QueueEntry &entry) const
+  {
+    return std::hash<std::string_view>{}(
+        std::string_view(reinterpret_cast<const char *>(entry.data()),
+                         entry.size()));
+  }
+};
 
 class RetrocausalQueueLock {
 public:
@@ -28,14 +40,18 @@ public:
                          const change_type &change,
                          const StorageCostModel *cost_model);
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
+                                              Prepared &prepared) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
   HogDBStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;
+
+  // Returns true if any consumed current-block entry was not matched by an
+  // insert across all committed TXs. Must be called after all commit_change()
+  // calls for the block have completed (i.e., at block close time).
+  bool has_unmatched_consumes() const;
 
   static uint64_t live_block_count(const RetrocausalQueueMetadata &meta)
   {
@@ -79,6 +95,14 @@ private:
   // This is used when calculating marginal storage costs for a committing delta
   // in commit_change.
   ssize_t committed_element_count_delta_{0};
+
+  // Tracks the balance between inserted and consumed current-block entries
+  // across all committed TXs. Incremented for each inserted entry, decremented
+  // for each consumed entry in current_block_consumed. At block close, any
+  // entry with a negative count was consumed but never inserted — indicating
+  // a malicious proposer.
+  std::unordered_map<QueueEntry, int64_t, QueueEntryHasher>
+      consumed_set_balance_;
 
   mutable std::mutex mtx_;
 };

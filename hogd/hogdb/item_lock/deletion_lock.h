@@ -32,9 +32,8 @@ public:
     return 0;
   }
 
-  static HogDBStatus<void> write_committed_change(LockContext const &ctx);
-  static HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                               LtHash16 &hash);
+  static HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
+                                                     Prepared &prepared);
 };
 
 static_assert(item_lock<DeletionLock>);

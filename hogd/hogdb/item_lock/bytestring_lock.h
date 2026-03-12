@@ -44,9 +44,8 @@ public:
     return 0;
   }
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
+                                              Prepared &prepared) const;
 
 private:
   const OwningSpan<const std::byte> bytestring_;

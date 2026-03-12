@@ -81,9 +81,8 @@ public:
   // change must be non-null.
   int128_t commit_change(const ItemChange &change, const LockContext &ctx);
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
+                                              Prepared &prepared) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 

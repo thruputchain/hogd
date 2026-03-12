@@ -37,6 +37,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
+#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -320,6 +321,12 @@ public:
 
   // returns the low-level ramdb (direct access to the DB).
   RAMDB &get_ramdb() { return db_; }
+
+  // Create a Prepared batch for accumulating materialized changes.
+  Prepared prepare() { return Prepared(&db_); }
+
+  // Apply all materialized changes from a Prepared batch to the database.
+  void apply(Prepared &prepared);
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }

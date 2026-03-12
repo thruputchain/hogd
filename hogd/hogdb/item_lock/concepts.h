@@ -12,7 +12,7 @@
 
 namespace hogd {
 
-class LtHash16;
+class Prepared;
 
 // Passed to item_lock::try_atomic_change_lock and item_lock::commit_change.
 // Used by some lock types to access the DAO, block height, and/or item key.
@@ -43,10 +43,9 @@ concept item_lock_unsized =
         lock.commit_change(finalize, snapshot_cost, *after, ctx.cost_model)
       } -> std::same_as<int128_t>;
     } &&
-    requires(Lock const &lock, const LockContext &ctx) {
-      { lock.write_committed_change(ctx) } -> std::same_as<HogDBStatus<void>>;
+    requires(Lock const &lock, const LockContext &ctx, Prepared &prepared) {
       {
-        lock.apply_db_hash_delta(ctx, std::declval<LtHash16 &>())
+        lock.prepare_committed_changes(ctx, prepared)
       } -> std::same_as<HogDBStatus<void>>;
     };
 

@@ -226,28 +226,28 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
-  std::mutex lock;
-  HogDBStatus<void> ret;
+  // Phase C — Flush: apply all materialized changes to RAMDB.
+  // If compute_db_hash() was not called, prepare now.
+  if (!prepared_.has_value()) {
+    auto r = compute_db_hash(DbHash{});
+    if (!r) {
+      return r.error();
+    }
+  }
+  db_.apply(*prepared_);
+  prepared_.reset();
 
+  // Phase D — Extract auth/balance data (parallel destructive, no DAO writes).
   PerThread<KeyChangeBatch> key_changes;
 
-  // write item changes.
   item_locks_.for_each_parallel_destructive(
-      [this, &lock, &ret,
-       &key_changes](std::pair<const ItemKey &, const ItemLock &> v) {
+      [&key_changes](std::pair<const ItemKey &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
-        }
-        HogDBStatus<void> tmp = v.second.write_committed_change(
-            LockContext(&db_, block_height_, v.first, &cost_model_));
-        if (!tmp) [[unlikely]] {
-          std::scoped_lock guard(lock);
-          ret = tmp;
         }
 
         if (v.first.is_address_auth_data()) {
           if (auto const *inner = v.second.get_inner<PointerLock<AuthLock>>()) {
-            AddressAuthData auth_data = inner->get()->build_result();
             key_changes->emplace_back(v.first.to_contract_address(),
                                       x23::Ptr<AddressAuthData>(
                                           new AddressAuthData(
@@ -265,20 +265,10 @@ BlockTX::commit(WorkerPool &pool)
 
   PerThread<std::vector<Delta>> balance_deltas;
 
-  // write address balances.
   addr_balance_locks_.for_each_parallel_destructive(
-      [this, &lock, &ret,
-       &balance_deltas](std::pair<const Address &, const ItemLock &> v) {
+      [&balance_deltas](std::pair<const Address &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
-        }
-
-        HogDBStatus<void> tmp = v.second.write_committed_change(
-            LockContext(&db_, block_height_,
-                        make_address_balance_item_key(v.first), &cost_model_));
-        if (!tmp) [[unlikely]] {
-          std::scoped_lock guard(lock);
-          ret = tmp;
         }
 
         auto const *inner = v.second.get_inner<BalanceLock>();
@@ -291,28 +281,32 @@ BlockTX::commit(WorkerPool &pool)
       },
       1024, pool);
 
-  if (ret) {
-    background_commit_worker_.submit_job(block_height_, std::move(key_changes),
-                                         std::move(balance_deltas));
-  }
+  background_commit_worker_.submit_job(block_height_, std::move(key_changes),
+                                       std::move(balance_deltas));
 
-  return ret;
+  return {};
 }
 
-DbHash
+HogDBStatus<DbHash>
 BlockTX::compute_db_hash(const DbHash &base_hash)
 {
-  LtHash16 final_hash = lthash16_from_db_hash(base_hash);
-  PerThread<LtHash16> per_thread_hash;
+  // Phase A — Prepare (parallel over locks, non-destructive).
+  // Materializes all finalized changes into a Prepared batch.
+  Prepared prepared = db_.prepare();
+
+  std::mutex err_lock;
+  HogDBStatus<void> prepare_status;
 
   item_locks_.for_each_parallel([&](std::pair<const ItemKey &, ItemLock &> v) {
     if (!v.second.is_finalized()) {
       return;
     }
-    auto ret = v.second.apply_db_hash_delta(LockContext(&db_, block_height_,
-                                                        v.first, &cost_model_),
-                                            *per_thread_hash);
-    CHECK(ret.has_value());
+    auto r = v.second.prepare_committed_changes(
+        LockContext(&db_, block_height_, v.first, &cost_model_), prepared);
+    if (!r) [[unlikely]] {
+      std::scoped_lock guard(err_lock);
+      prepare_status = r;
+    }
   });
 
   addr_balance_locks_.for_each_parallel(
@@ -320,17 +314,26 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
         if (!v.second.is_finalized()) {
           return;
         }
-        auto ret = v.second.apply_db_hash_delta(
+        auto r = v.second.prepare_committed_changes(
             LockContext(&db_, block_height_,
                         make_address_balance_item_key(v.first), &cost_model_),
-            *per_thread_hash);
-        CHECK(ret.has_value());
+            prepared);
+        if (!r) [[unlikely]] {
+          std::scoped_lock guard(err_lock);
+          prepare_status = r;
+        }
       });
 
-  auto ul = per_thread_hash.lock_threads();
-  per_thread_hash.for_each(ul, [&final_hash](const LtHash16 &hash) {
-    final_hash += hash;
-  });
+  if (!prepare_status) {
+    return prepare_status.error();
+  }
+
+  // Phase B — Hash (from MaterializedChange buffers).
+  LtHash16 delta = prepared.close();
+  LtHash16 final_hash = lthash16_from_db_hash(base_hash);
+  final_hash += delta;
+
+  prepared_ = std::move(prepared);
   return db_hash_from_lthash16(final_hash);
 }
 
