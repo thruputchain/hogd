@@ -31,7 +31,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/crypto/crypto.h"
 #include "nomination.hh"
 #include "parallel.hh"
 #include "rpc_types.hh"
@@ -241,10 +241,11 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
   }
 }
 
-SHA256Hash
-MempoolCoordinatorRpc::get_block_hash(
-    const x23::XdrVec<SignedTransactionHash> &hashes, const DbHash &db_hash,
-    const SHA256Hash &events_hash, const BlockHash &prev_block_hash)
+BlockHeader
+MempoolCoordinatorRpc::get_block_header(
+    BlockHeight block_height, const x23::XdrVec<SignedTransactionHash> &hashes,
+    const DbHash &db_hash, const SHA256Hash &events_hash,
+    const BlockHash &prev_block_hash)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
@@ -274,12 +275,12 @@ MempoolCoordinatorRpc::get_block_hash(
   SHA256Hash root_hash = trie.get_root_hash();
   // TODO(jhumphri): Fill in all of the fields correctly.
   BlockHeader header{.network_id = network_id_,
-                     .block_height = scheduler_->current_block(),
+                     .block_height = block_height,
                      .txset_hash = root_hash,
                      .db_hash = db_hash,
                      .events_hash = events_hash,
                      .prev_block_hash = prev_block_hash};
-  return generate_block_hash(header);
+  return header;
 }
 
 x23::Async<void>
@@ -660,8 +661,9 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
         cache.nomination_result.nominated_block().nomination;
     nomination.block_height = db_tip.height + 1;
     nomination.block_hash =
-        get_block_hash(cache.tx_hashes, cache.db_tip.db_hash, events_hash,
-                       /*prev_block_hash=*/db_tip.block_hash);
+        sha256(get_block_header(nomination.block_height, cache.tx_hashes,
+                                cache.db_tip.db_hash, events_hash,
+                                /*prev_block_hash=*/db_tip.block_hash));
     record_stage(stage_generate_block_hash);
 
     nomination.prev_block_hash = db_tip.block_hash;
@@ -1082,9 +1084,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
-  if (get_block_hash(cache.tx_hashes, cache.db_tip.db_hash, events_hash,
-                     /*prev_block_hash=*/nomination.prev_block_hash) !=
-      nomination.block_hash) {
+  SHA256Hash block_hash =
+      sha256(get_block_header(nomination.block_height, cache.tx_hashes,
+                              cache.db_tip.db_hash, events_hash,
+                              /*prev_block_hash=*/nomination.prev_block_hash));
+  if (block_hash != nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
