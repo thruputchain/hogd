@@ -427,6 +427,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // null.
   constexpr BlockHash kNullBlockHash{};
   const BlockHeader header{.network_id = network_id,
+                           .block_height = 0,
                            .txset_hash = txset_hash,
                            .db_hash = db_hash,
                            .events_hash = events_hash,
