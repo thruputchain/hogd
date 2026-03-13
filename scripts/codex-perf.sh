@@ -1,0 +1,3 @@
+for i in {1..20}; do
+  codex --approval-mode auto-edit "Optimize this codebase for speed without changing functionality. Feel free to optimize any part of the code. Once you make a change, compile the codebase and run a benchmark to verify that (1) the functionality didn't change and (2) that your change made a meaningful improvement to the performance. Feel free to write your own benchmarks, too, since not all parts of the codebase are covered by benchmarks. You are also welcome to use tools like perf, gdb, and others as your wish. If you make a change that satisfies both conditions, commit the change and include a detailed description in the commit message. Then push the change to HEAD."
+done
