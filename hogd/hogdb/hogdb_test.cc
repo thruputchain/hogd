@@ -491,7 +491,12 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 15));
   ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, 4, 3, 2, 10, 20, 30)));
+      make_hog_age(account, /*to_schedule=*/4,
+                   /*already_scheduled=*/3,
+                   /*received=*/2,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
 
   ASSERT_TRUE(reconcile_startup_hog_ages(db_));
 
@@ -510,7 +515,12 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationDrainsReceivedBeforeOtherGroups)
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 6));
   ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, 4, 3, 5, 10, 20, 30)));
+      make_hog_age(account, /*to_schedule=*/4,
+                   /*already_scheduled=*/3,
+                   /*received=*/5,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
 
   ASSERT_TRUE(reconcile_startup_hog_ages(db_));
 
@@ -529,7 +539,12 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationDrainsAllGroupsSequentially)
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 1));
   ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, 4, 3, 2, 10, 20, 30)));
+      make_hog_age(account, /*to_schedule=*/4,
+                   /*already_scheduled=*/3,
+                   /*received=*/2,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
 
   ASSERT_TRUE(reconcile_startup_hog_ages(db_));
 
