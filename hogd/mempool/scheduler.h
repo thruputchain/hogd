@@ -31,14 +31,13 @@ public:
       db_sched_client_(std::move(db_sched_client))
   {}
 
-  ~Scheduler()
-  {
-    while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-  }
+  ~Scheduler() { wait_for_pending_detached_coroutines(); }
 
-  static x23::Async<void> shut_down() { co_return; }
+  x23::Async<void> shut_down()
+  {
+    wait_for_pending_detached_coroutines();
+    co_return;
+  }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
   // scheduler detects and silently drops the duplicates rather than enqueue
@@ -213,6 +212,13 @@ private:
   static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
                                                    uint128_t num_hogs,
                                                    BlockHeight block_height);
+
+  void wait_for_pending_detached_coroutines()
+  {
+    while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
 
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
