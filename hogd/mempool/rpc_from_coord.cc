@@ -714,6 +714,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   };
   double stage_await_close_block = 0.0;
   double stage_await_commit_snapshot = 0.0;
+  double stage_write_average_hog_ages = 0.0;
 
   x23::Async<EventBlockResult> close_block_handle =
       eventsched_close_block(cache.block_id, scheduler_->current_block());
@@ -730,10 +731,14 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   record_stage(stage_await_commit_snapshot);
 
+  scheduler_->write_all_average_hog_ages_to_db();
+  record_stage(stage_write_average_hog_ages);
+
   info("commit_block() stages: await_close_block={:.6f}, "
-       "await_commit_snapshot={:.6f}, total={:.6f}, block_id={}",
-       stage_await_close_block, stage_await_commit_snapshot, timer.elapsed(),
-       cache.block_id);
+       "await_commit_snapshot={:.6f}, write_average_hog_ages={:.6f}, "
+       "total={:.6f}, block_id={}",
+       stage_await_close_block, stage_await_commit_snapshot,
+       stage_write_average_hog_ages, timer.elapsed(), cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
