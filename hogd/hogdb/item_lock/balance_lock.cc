@@ -82,11 +82,11 @@ BalanceLock::build_result(LockContext const &ctx) const
 HogDBStatus<void>
 BalanceLock::write_committed_change(LockContext const &ctx) const
 {
-
   assert(ctx.key.is_address_balance());
+  assert(ctx.dao);
 
   auto value = build_result(ctx);
-  CHECK(value >= 0);
+  CHECK_GE(value, 0);
 
   // Create the HogAge struct when the balance entry is created
   if (!snapshot_balance_.snapshot_value().has_value()) {
@@ -103,7 +103,6 @@ BalanceLock::write_committed_change(LockContext const &ctx) const
     }
   }
 
-  assert(ctx.dao);
   return ctx.dao->write_address_balance(ctx.key.get_address(), value);
 }
 
