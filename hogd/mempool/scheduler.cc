@@ -48,8 +48,15 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
+void
+Scheduler::write_all_average_hog_ages_to_db()
+{
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  write_all_average_hog_ages_helper();
+}
+
 x23::Detached
-Scheduler::write_all_average_hog_ages()
+Scheduler::write_all_average_hog_ages_helper()
 {
   co_await default_coropoll().pool_.bg();
 
@@ -696,9 +703,6 @@ Scheduler::schedule(size_t num_txs,
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
-
-  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
-  write_all_average_hog_ages();
 }
 
 x23::Async<void>

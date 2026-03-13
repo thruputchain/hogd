@@ -20,6 +20,7 @@ add_library(hogdb_objects OBJECT
   invoke_tx.cc
   item_change.cc
   hogdb_dao.cc
+  hog_age_reconciliation.cc
   rpc_context.cc
   rpc_from_auth.cc
   rpc_from_exec.cc
@@ -92,4 +93,3 @@ add_dependencies(hogdb_test all_wasm_contracts)
 gtest_discover_tests(
   hogdb_test
 )
-
