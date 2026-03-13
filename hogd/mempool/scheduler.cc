@@ -15,6 +15,7 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -52,13 +53,21 @@ Scheduler::write_all_average_hog_ages()
 {
   co_await default_coropoll().pool_.bg();
 
-  HogAgeBatch ages;
-  ages.reserve(accounts_.size());
+  PerThread<HogAgeBatch> ages_by_thread;
   accounts_.for_each_parallel([&](const std::pair<ContractAddress, HogAge> &p) {
     const HogAge &age = p.second;
     CHECK_EQ(p.first, age.address);
-    ages.push_back(age);
+    ages_by_thread->push_back(age);
   });
+
+  HogAgeBatch ages;
+  ages.reserve(accounts_.size());
+  {
+    auto ul = ages_by_thread.lock_threads();
+    ages_by_thread.for_each(ul, [&ages](HogAgeBatch &per_thread_ages) {
+      ages.insert(ages.end(), per_thread_ages.begin(), per_thread_ages.end());
+    });
+  }
   CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
 
