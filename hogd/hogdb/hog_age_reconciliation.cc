@@ -43,62 +43,33 @@ sum_hogs(const HogAge &age)
          from_xdr(age.num_hogs[kHogAgeGroupReceived]);
 }
 
-HogDBStatus<uint128_t>
-get_owned_hogs(HogDBDAO &db, const Address &account)
-{
-  auto balance = db.read_address_balance(account);
-  if (!balance.has_value()) {
-    if (balance.error() == HogDBCode::kNotFound) {
-      return uint128_t{0};
-    }
-    return balance.error();
-  }
-  if (*balance < 0) {
-    error("negative balance for account {} during hog age reconciliation",
-          account);
-    return HogDBError(HogDBCode::kInternal);
-  }
-  return static_cast<uint128_t>(*balance);
-}
-
 HogDBStatus<void>
-reconcile_account_hog_age(HogDBDAO &db, const Address &account)
+reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
+                                 HogDBDAO &db)
 {
-  auto age = db.read_address_average_hog_age(account);
-  if (!age.has_value()) {
-    error("missing hog age entry for account {} during startup reconciliation",
-          account);
-    return age.error();
-  }
-
-  auto owned_hogs = get_owned_hogs(db, account);
-  if (!owned_hogs.has_value()) {
-    return owned_hogs.error();
-  }
-
-  const uint128_t existing_total = sum_hogs(*age);
-  if (existing_total == *owned_hogs) {
+  const uint128_t existing_total = sum_hogs(age);
+  if (existing_total == balance) {
     return {};
   }
 
-  HogAge new_age = *age;
+  HogAge new_age = age;
   const uint128_t to_schedule_before =
-      from_xdr(age->num_hogs[kHogAgeGroupToSchedule]);
+      from_xdr(age.num_hogs[kHogAgeGroupToSchedule]);
   const uint128_t already_scheduled_before =
-      from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]);
+      from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]);
   const uint128_t received_before =
-      from_xdr(age->num_hogs[kHogAgeGroupReceived]);
+      from_xdr(age.num_hogs[kHogAgeGroupReceived]);
 
-  if (existing_total < *owned_hogs) {
-    const uint128_t deficit = *owned_hogs - existing_total;
+  if (existing_total < balance) {
+    const uint128_t deficit = balance - existing_total;
     new_age.num_hogs[kHogAgeGroupToSchedule] =
         to_xdr(to_schedule_before + deficit);
     info("reconciled hog age for {}: total {} -> {}, added {} hogs to "
          "ToSchedule",
-         account, existing_total, *owned_hogs, deficit);
+         age.address, existing_total, balance, deficit);
   }
   else {
-    uint128_t excess = existing_total - *owned_hogs;
+    uint128_t excess = existing_total - balance;
     uint128_t received = received_before;
     uint128_t already_scheduled = already_scheduled_before;
     uint128_t to_schedule = to_schedule_before;
@@ -122,7 +93,7 @@ reconcile_account_hog_age(HogDBDAO &db, const Address &account)
 
     info("reconciled hog age for {}: total {} -> {}, drained sequentially "
          "(Received {} -> {}, AlreadyScheduled {} -> {}, ToSchedule {} -> {})",
-         account, existing_total, *owned_hogs, received_before, received,
+         age.address, existing_total, balance, received_before, received,
          already_scheduled_before, already_scheduled, to_schedule_before,
          to_schedule);
   }
@@ -130,36 +101,45 @@ reconcile_account_hog_age(HogDBDAO &db, const Address &account)
   return db.write_address_average_hog_age(new_age);
 }
 
+HogDBStatus<void>
+reconcile_address_hog_age(HogDBDAO &db, const Address &address)
+{
+  HogDBStatus<uint128_t> balance = db.read_address_balance(address);
+  if (!balance.has_value()) {
+    return balance.error();
+  }
+  else if (*balance < 0) {
+    error("negative balance for address {} during hog age reconciliation",
+          address);
+    return HogDBError(HogDBCode::kInternal);
+  }
+  HogDBStatus<HogAge> age = db.read_address_average_hog_age(address);
+  if (!age.has_value()) {
+    error("address {} has a balance row but no hog age row", address);
+    return age.error();
+  }
+
+  return reconcile_address_hog_age_helper(*balance, *age, db);
+}
+
 } // namespace
 
 HogDBStatus<void>
 reconcile_startup_hog_ages(HogDBDAO &db)
 {
-  std::unordered_set<Address> accounts;
+  std::unordered_set<Address> addresses;
   db.get_ramdb().get_each_parallel(
-      [&accounts](std::span<const std::byte> key, uint8_t /*type*/,
-                  std::span<const std::byte> /*value*/) {
+      [&addresses](std::span<const std::byte> key, uint8_t /*type*/,
+                   std::span<const std::byte> /*value*/) {
         if (is_prefixed_address_key(key, Prefix::kBalance) ||
             is_prefixed_address_key(key, Prefix::kHogAge)) {
-          accounts.insert(address_from_prefixed_key(key));
+          addresses.insert(address_from_prefixed_key(key));
         }
       },
       1);
 
-  for (const Address &account : accounts) {
-    auto balance = db.read_address_balance(account);
-    if (balance.has_value()) {
-      auto age = db.read_address_average_hog_age(account);
-      if (!age.has_value()) {
-        error("account {} has a balance row but no hog age row", account);
-        return age.error();
-      }
-    }
-    else if (balance.error() != HogDBCode::kNotFound) {
-      return balance.error();
-    }
-
-    auto status = reconcile_account_hog_age(db, account);
+  for (const Address &address : addresses) {
+    HogDBStatus<void> status = reconcile_address_hog_age(db, account);
     if (!status.has_value()) {
       return status.error();
     }
