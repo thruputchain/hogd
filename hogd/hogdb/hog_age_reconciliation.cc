@@ -139,7 +139,7 @@ reconcile_startup_hog_ages(HogDBDAO &db)
       1);
 
   for (const Address &address : addresses) {
-    HogDBStatus<void> status = reconcile_address_hog_age(db, account);
+    HogDBStatus<void> status = reconcile_address_hog_age(db, address);
     if (!status.has_value()) {
       return status.error();
     }
