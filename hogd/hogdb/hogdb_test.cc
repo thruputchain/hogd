@@ -584,6 +584,23 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationFailsWhenHogAgeRowLacksBalance)
   EXPECT_EQ(status.error(), HogDBCode::kNotFound);
 }
 
+TEST_F(HogDBTest, StartupHogAgeReconciliationFailsWhenBalanceIsNegative)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, -1));
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/0,
+                   /*already_scheduled=*/0,
+                   /*received=*/0,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDBStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDBCode::kInternal);
+}
+
 TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
 {
   Address sender_addr = make_address(kAddress);
