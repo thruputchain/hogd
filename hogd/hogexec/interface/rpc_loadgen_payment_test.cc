@@ -148,9 +148,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose each transaction
-  for (const auto &tx : txs) {
+  for (const auto &stx : txs) {
     auto propose_res =
-        client_.executorsched_propose_transaction(test_block_id, tx);
+        client_.executorsched_propose_transaction(test_block_id, stx.tx);
     // Transactions might succeed or fail depending on account balances, etc.
     // But they should not return SystemError if everything is set up correctly
     ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
@@ -212,8 +212,14 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   parallel_batch_to_t(ext_result.success().work_txs, txs)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
-  // Propose the batch
-  auto batch_result = client_.executorsched_propose_batch(test_block_id, txs);
+  // Propose the batch (extract just the Transaction, skipping signatures)
+  TransactionBatch tx_batch;
+  tx_batch.reserve(txs.size());
+  for (const auto &stx : txs) {
+    tx_batch.push_back(stx.tx);
+  }
+  auto batch_result =
+      client_.executorsched_propose_batch(test_block_id, tx_batch);
   ASSERT_EQ(batch_result.size(), kNumTxs);
 
   // Check that all transactions were processed (may succeed or fail, but not

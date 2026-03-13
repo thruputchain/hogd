@@ -41,17 +41,15 @@ ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorMempoolRpc::executorsched_propose_transaction(
-    BlockID block_id, SignedTransaction signed_tx)
+ExecutorMempoolRpc::executorsched_propose_transaction(BlockID block_id,
+                                                      Transaction tx)
 {
-
   auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
-  auto r =
-      co_await ctx->get().propose_transaction(signed_tx.tx, allocate_tx_ids(1));
+  auto r = co_await ctx->get().propose_transaction(tx, allocate_tx_ids(1));
   co_await release_context(block_id, ctx);
   co_return r;
 }
@@ -72,19 +70,19 @@ ExecutorMempoolRpc::executorsched_validate_transaction(
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorMempoolRpc::executorsched_propose_batch(
-    BlockID block_id, SignedTransactionBatch signed_txs)
+ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
+                                                TransactionBatch txs)
 {
   auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
-    co_return ExecProposeBatchResult(signed_txs.size(),
+    co_return ExecProposeBatchResult(txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
   }
 
-  CHECK(signed_txs.size() <= std::numeric_limits<uint32_t>::max());
-  auto r = co_await ctx->get().propose_transaction_batch(
-      signed_txs, allocate_tx_ids(signed_txs.size()));
+  CHECK(txs.size() <= std::numeric_limits<uint32_t>::max());
+  auto first_tx_id = allocate_tx_ids(txs.size());
+  auto r = co_await ctx->get().propose_transaction_batch(txs, first_tx_id);
   co_await release_context(block_id, ctx);
   co_return r;
 }
