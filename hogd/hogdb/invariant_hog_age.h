@@ -37,8 +37,7 @@ private:
 
   static RawAddress raw_address_from_key(std::span<const std::byte> key);
 
-  void record_delta(std::span<const std::byte> key,
-                    ExistenceDelta delta,
+  void record_delta(std::span<const std::byte> key, ExistenceDelta delta,
                     ExistenceDelta Entry::*field);
 
   x23::MVar<std::map<RawAddress, Entry>> entries_;

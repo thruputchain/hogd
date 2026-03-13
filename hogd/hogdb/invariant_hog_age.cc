@@ -32,8 +32,8 @@ HogAgeInvariant::check()
 
 void
 HogAgeInvariant::log_item_change(std::span<const std::byte> key,
-                                  HogDBStatus<DBItem> const &before,
-                                  HogDBStatus<DBItem> const &after)
+                                 HogDBStatus<DBItem> const &before,
+                                 HogDBStatus<DBItem> const &after)
 {
   auto prefix = static_cast<Prefix>(key[0]);
   auto delta = compute_delta(before, after);
@@ -54,8 +54,8 @@ HogAgeInvariant::log_item_change(std::span<const std::byte> key,
 
 void
 HogAgeInvariant::record_delta(std::span<const std::byte> key,
-                               ExistenceDelta delta,
-                               ExistenceDelta Entry::*field)
+                              ExistenceDelta delta,
+                              ExistenceDelta Entry::*field)
 {
   auto raw = raw_address_from_key(key);
   entries_.with([&](auto &entries) { entries[raw].*field = delta; });
@@ -63,7 +63,7 @@ HogAgeInvariant::record_delta(std::span<const std::byte> key,
 
 HogAgeInvariant::ExistenceDelta
 HogAgeInvariant::compute_delta(HogDBStatus<DBItem> const &before,
-                                HogDBStatus<DBItem> const &after)
+                               HogDBStatus<DBItem> const &after)
 {
   bool existed_before = before.has_value();
   bool exists_after = after.has_value();
