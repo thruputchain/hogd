@@ -77,6 +77,10 @@ public:
   HogDBStatus<std::optional<QueueEntry>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
+  // Stage all finalized lock changes into a ChangeSet. Must be called
+  // before compute_db_hash(). Called automatically by commit() if needed.
+  HogDBStatus<void> close();
+
   HogDBStatus<DbHash> compute_db_hash(const DbHash &base_hash);
 
 private:

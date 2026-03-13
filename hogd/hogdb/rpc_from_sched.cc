@@ -259,6 +259,9 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
+  if (auto r = btx->get().close(); !r) [[unlikely]] {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
   auto db_hash_result =
       btx->get().compute_db_hash(/*base_hash=*/ctx_.get_tip().db_hash);
   if (!db_hash_result) [[unlikely]] {
@@ -423,6 +426,10 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
   itx->commit();
+  if (auto close_r = r.value()->get().close(); !close_r) [[unlikely]] {
+    error("genesis close failed: {}", close_r.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
   auto db_hash_result = r.value()->get().compute_db_hash(base_hash);
   if (!db_hash_result) [[unlikely]] {
     error("genesis compute_db_hash failed: {}", db_hash_result.error());

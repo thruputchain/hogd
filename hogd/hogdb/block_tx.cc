@@ -227,10 +227,9 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
-  // Apply all staged changes to RAMDB.
-  // If compute_db_hash() was not called, stage changes now.
+  // Stage changes if close() was not called yet.
   if (!prepared_.has_value()) {
-    if (auto r = compute_db_hash(DbHash{}); !r) {
+    if (auto r = close(); !r) {
       return r.error();
     }
   }
@@ -291,14 +290,13 @@ BlockTX::commit(WorkerPool &pool)
   return {};
 }
 
-HogDBStatus<DbHash>
-BlockTX::compute_db_hash(const DbHash &base_hash)
+HogDBStatus<void>
+BlockTX::close()
 {
-  // Stage all finalized changes (parallel over locks, non-destructive).
   ChangeSet changes = db_.create_changeset();
 
   std::mutex err_lock;
-  HogDBStatus<void> prepare_status;
+  HogDBStatus<void> status;
 
   item_locks_.for_each_parallel([&](std::pair<const ItemKey &, ItemLock &> v) {
     if (!v.second.is_finalized()) {
@@ -308,7 +306,7 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
         LockContext(&db_, block_height_, v.first, &cost_model_), changes);
     if (!r) [[unlikely]] {
       std::scoped_lock guard(err_lock);
-      prepare_status = r;
+      status = r;
     }
   });
 
@@ -323,20 +321,32 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
             changes);
         if (!r) [[unlikely]] {
           std::scoped_lock guard(err_lock);
-          prepare_status = r;
+          status = r;
         }
       });
 
-  if (!prepare_status) {
-    return prepare_status.error();
+  if (!status) {
+    return status;
   }
 
-  // Compute hash delta from all staged changes.
-  LtHash16 delta = changes.close();
+  prepared_ = std::move(changes);
+  return {};
+}
+
+HogDBStatus<DbHash>
+BlockTX::compute_db_hash(const DbHash &base_hash)
+{
+  if (!prepared_.has_value()) {
+    if (auto r = close(); !r) {
+      return r.error();
+    }
+  }
+  LtHash16 delta;
+  if (prepared_.has_value()) {
+    delta = prepared_->close();
+  }
   LtHash16 final_hash = lthash16_from_db_hash(base_hash);
   final_hash += delta;
-
-  prepared_ = std::move(changes);
   return db_hash_from_lthash16(final_hash);
 }
 
