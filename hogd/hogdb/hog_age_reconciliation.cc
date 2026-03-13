@@ -96,7 +96,7 @@ reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
 HogDBStatus<void>
 reconcile_address_hog_age(HogDBDAO &db, const Address &address)
 {
-  HogDBStatus<uint128_t> balance = db.read_address_balance(address);
+  HogDBStatus<int128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
     error("address 0x{} has a hog age row but could not read the balance row "
           "during reconciliation: {}",
