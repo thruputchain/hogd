@@ -327,7 +327,8 @@ public:
   ChangeSet create_changeset();
 
   // Apply all materialized changes from a ChangeSet to the database.
-  HogDBStatus<void> apply(ChangeSet &changes);
+  HogDBStatus<void> apply(ChangeSet &changes,
+                          WorkerPool &pool = WorkerPool::get_default_pool());
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }

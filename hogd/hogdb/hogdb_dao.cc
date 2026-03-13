@@ -1,6 +1,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -27,6 +28,7 @@
 
 #include "hogd/base/bits.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
@@ -657,30 +659,54 @@ HogDBDAO::create_changeset()
 }
 
 HogDBStatus<void>
-HogDBDAO::apply(ChangeSet &changes)
+HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
 {
-  HogDBStatus<void> status;
-  auto ul = changes.changes_.lock_threads();
-  changes.changes_.for_each(ul, [&](std::vector<MaterializedChange> &vec) {
-    for (const auto &change : vec) {
-      switch (change.op) {
-      case MaterializedChange::Op::kPut:
-        if (auto r = db_.put(change.key(), change.type, change.value()); !r) {
-          status = HogDBError(HogDBCode::kInternal);
-          return;
+  // Collect per-thread vector pointers under the PerThread lock, then release
+  // the lock and apply each vector in parallel. RAMDB's per-bucket locking
+  // handles concurrency for puts/removes to different keys.
+  std::vector<std::vector<MaterializedChange> *> vecs;
+  {
+    auto ul = changes.changes_.lock_threads();
+    changes.changes_.for_each(ul,
+                              [&vecs](std::vector<MaterializedChange> &vec) {
+                                if (!vec.empty()) {
+                                  vecs.push_back(&vec);
+                                }
+                              });
+  }
+
+  std::atomic<bool> had_error{false};
+  pool.for_each_parallel(
+      vecs,
+      [this, &had_error](std::vector<MaterializedChange> *vec) {
+        for (const auto &change : *vec) {
+          if (had_error.load(std::memory_order_relaxed)) {
+            return;
+          }
+          switch (change.op) {
+          case MaterializedChange::Op::kPut:
+            if (auto r = db_.put(change.key(), change.type, change.value());
+                !r) {
+              had_error.store(true, std::memory_order_relaxed);
+              return;
+            }
+            break;
+          case MaterializedChange::Op::kRemove:
+            if (auto r = db_.remove(change.key()); !r) {
+              had_error.store(true, std::memory_order_relaxed);
+              return;
+            }
+            break;
+          }
         }
-        break;
-      case MaterializedChange::Op::kRemove:
-        if (auto r = db_.remove(change.key()); !r) {
-          status = HogDBError(HogDBCode::kInternal);
-          return;
-        }
-        break;
-      }
-    }
-    vec.clear();
-  });
-  return status;
+        vec->clear();
+      },
+      1);
+
+  if (had_error.load(std::memory_order_relaxed)) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return {};
 }
 
 } // namespace hogd
