@@ -18,6 +18,7 @@
 // XDR headers
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "types.hh"
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -36,7 +37,6 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
-#include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
