@@ -54,14 +54,16 @@ public:
   // Reserve capacity in the calling thread's change vector.
   void reserve(size_t n);
 
-  // Compute the hash delta from all accumulated changes.
-  // Signals that no more changes will be added.
+  // Finalize the ChangeSet and return the hash delta.
+  // Hash deltas are accumulated inline during put()/remove(); close()
+  // merges the per-thread partial hashes.
   LtHash16 close();
 
 private:
   HogDBDAO *dao_;
   PerThread<ByteArena> alloc_;
   PerThread<std::vector<MaterializedChange>> changes_;
+  PerThread<LtHash16> hash_delta_;
 };
 
 } // namespace hogd

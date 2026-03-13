@@ -31,9 +31,11 @@ ChangeSet::put(std::span<const std::byte> key, uint8_t type,
   change.item = item;
 
   if (is_state_item(key)) {
+    auto &hash = *hash_delta_;
+    hash.add(key, type, value);
     auto old = dao_->get_ramdb().get(key);
     if (old.has_value()) {
-      change.old_item = alloc.store_item(key, old->type, old->value);
+      hash.remove(key, old->type, old->value);
     }
   }
 
@@ -46,17 +48,20 @@ ChangeSet::remove(std::span<const std::byte> key)
   auto &alloc = *alloc_;
   auto &changes = *changes_;
 
-  // Always read old value so key() can derive the key from old_item.
   auto old = dao_->get_ramdb().get(key);
   if (!old.has_value()) {
     // Key doesn't exist in RAMDB — nothing to remove or hash-update.
     return;
   }
 
+  if (is_state_item(key)) {
+    hash_delta_->remove(key, old->type, old->value);
+  }
+
   MaterializedChange change;
   change.op = MaterializedChange::Op::kRemove;
   change.key_len = key.size();
-  change.old_item = alloc.store_item(key, old->type, old->value);
+  change.item = alloc.store(key);
 
   changes.push_back(change);
 }
@@ -70,14 +75,12 @@ ChangeSet::reserve(size_t n)
 LtHash16
 ChangeSet::close()
 {
+  // Hash deltas were computed inline during put()/remove(), one per thread.
+  // Merge all per-thread deltas into a single result.
   LtHash16 delta;
-  auto ul = changes_.lock_threads();
-  changes_.for_each(ul,
-                    [&delta](const std::vector<MaterializedChange> &changes) {
-                      for (const auto &change : changes) {
-                        change.update_hash(delta);
-                      }
-                    });
+  auto ul = hash_delta_.lock_threads();
+  hash_delta_.for_each(ul,
+                       [&delta](const LtHash16 &partial) { delta += partial; });
   return delta;
 }
 
