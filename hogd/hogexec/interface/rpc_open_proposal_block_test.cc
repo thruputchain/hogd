@@ -171,16 +171,14 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
             ExecResult::ExecResultOK);
 
   EXPECT_EQ(client_
-                .executorsched_propose_transaction(test_block_id,
-                                                   Transaction{})
+                .executorsched_propose_transaction(test_block_id, Transaction{})
                 .result(),
             ExecResult::ExecResultTxDeterministicError);
 
   client_.executorsched_finish_block(test_block_id);
 
   EXPECT_EQ(client_
-                .executorsched_propose_transaction(test_block_id,
-                                                   Transaction{})
+                .executorsched_propose_transaction(test_block_id, Transaction{})
                 .result(),
             ExecResult::ExecResultSystemError);
 }
