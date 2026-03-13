@@ -129,7 +129,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
 
-  auto reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
+  HogDBStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
   if (!reconcile_status.has_value()) {
     critical("Failed to reconcile startup hog ages: {}",
              reconcile_status.error());

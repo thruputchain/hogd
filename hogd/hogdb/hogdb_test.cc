@@ -495,7 +495,7 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)
 
   ASSERT_TRUE(reconcile_startup_hog_ages(db_));
 
-  auto age = db_.read_address_average_hog_age(account);
+  HogDBStatus<HogAge> age = db_.read_address_average_hog_age(account);
   ASSERT_TRUE(age);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 10U);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 3U);
@@ -514,7 +514,7 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationDrainsReceivedBeforeOtherGroups)
 
   ASSERT_TRUE(reconcile_startup_hog_ages(db_));
 
-  auto age = db_.read_address_average_hog_age(account);
+  HogDBStatus<HogAge> age = db_.read_address_average_hog_age(account);
   ASSERT_TRUE(age);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 2U);
@@ -533,7 +533,7 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationDrainsAllGroupsSequentially)
 
   ASSERT_TRUE(reconcile_startup_hog_ages(db_));
 
-  auto age = db_.read_address_average_hog_age(account);
+  HogDBStatus<HogAge> age = db_.read_address_average_hog_age(account);
   ASSERT_TRUE(age);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
@@ -548,7 +548,7 @@ TEST_F(HogDBTest, StartupHogAgeReconciliationFailsWhenBalanceRowLacksHogAge)
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 10));
 
-  auto status = reconcile_startup_hog_ages(db_);
+  HogDBStatus<void> status = reconcile_startup_hog_ages(db_);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDBCode::kNotFound);
 }

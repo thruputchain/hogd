@@ -128,6 +128,9 @@ HogDBStatus<void>
 reconcile_startup_hog_ages(HogDBDAO &db)
 {
   std::unordered_set<Address> addresses;
+  // Careful: We are calling [get_each_parallel()] with a max width of 1, so
+  // this code is serial. If you change this to have multiple threads, then the
+  // body of the loop needs to be synchronized.
   db.get_ramdb().get_each_parallel(
       [&addresses](std::span<const std::byte> key, uint8_t /*type*/,
                    std::span<const std::byte> /*value*/) {
