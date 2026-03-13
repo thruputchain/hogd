@@ -37,6 +37,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db_hash.h"
+#include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
@@ -124,6 +125,20 @@ make_key(size_t addr, size_t item)
 }
 
 constexpr uint64_t kAddress = 0xdeadbeef;
+
+HogAge
+make_hog_age(const Address &addr, uint128_t to_schedule,
+             uint128_t already_scheduled, uint128_t received,
+             BlockHeight to_schedule_age, BlockHeight already_scheduled_age,
+             BlockHeight received_age)
+{
+  return HogAge{
+      .address = addr.get_raw(),
+      .num_hogs = {to_xdr(to_schedule), to_xdr(already_scheduled),
+                   to_xdr(received)},
+      .average_ages = {to_schedule_age, already_scheduled_age, received_age},
+  };
+}
 
 } // namespace
 
@@ -468,6 +483,73 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   ASSERT_TRUE(recipient_balance);
   EXPECT_EQ(kTransferAmount - cost_model_.get_balance_cost(),
             *recipient_balance);
+}
+
+TEST_F(HogDBTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 15));
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, 4, 3, 2, 10, 20, 30)));
+
+  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+
+  auto age = db_.read_address_average_hog_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 10U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 3U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 2U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+}
+
+TEST_F(HogDBTest, StartupHogAgeReconciliationDrainsReceivedBeforeOtherGroups)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 6));
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, 4, 3, 5, 10, 20, 30)));
+
+  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+
+  auto age = db_.read_address_average_hog_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 2U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 4U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+}
+
+TEST_F(HogDBTest, StartupHogAgeReconciliationDrainsAllGroupsSequentially)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 1));
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, 4, 3, 2, 10, 20, 30)));
+
+  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+
+  auto age = db_.read_address_average_hog_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 1U);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+}
+
+TEST_F(HogDBTest, StartupHogAgeReconciliationFailsWhenBalanceRowLacksHogAge)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  auto status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDBCode::kNotFound);
 }
 
 TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
