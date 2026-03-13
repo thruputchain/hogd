@@ -1,16 +1,15 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 
 #include <cassert>
-#include <cstddef>
 #include <span>
 #include <utility>
 
 #include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -42,28 +41,11 @@ DeletionLock::stage_committed_changes(const LockContext &ctx,
   }
 
   if (type_ret.value() == kRetrocausalQueue) {
-    // Remove all RCQ blocks + metadata.
-    auto meta_ret = ctx.dao->read_retrocausal_queue_metadata(ctx.key);
-    if (meta_ret.has_value()) {
-      auto const &meta = meta_ret.value();
-      uint64_t start_block =
-          meta.consume_state.max_fully_consumed_block_number + 1;
-      for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
-        auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
-        changes.remove(std::as_bytes(std::span(block_key)));
-      }
-    }
-    else if (meta_ret.error() != HogDBCode::kNotFound) {
-      return meta_ret.error();
-    }
-    auto meta_key = make_contract_data_key(ctx.key.as_bytes());
-    changes.remove(meta_key);
-  }
-  else {
-    auto key = make_contract_data_key(ctx.key.as_bytes());
-    changes.remove(key);
+    return RetrocausalQueueLock::cleanup_on_deletion(ctx, changes);
   }
 
+  auto key = make_contract_data_key(ctx.key.as_bytes());
+  changes.remove(key);
   return {};
 }
 

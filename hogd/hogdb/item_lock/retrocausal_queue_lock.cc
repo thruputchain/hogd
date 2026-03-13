@@ -519,7 +519,8 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDBStatus<void>
-RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx)
+RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
+                                          ChangeSet &changes)
 {
   assert(ctx.dao);
 
@@ -535,20 +536,16 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx)
 
   auto const &meta = meta_ret.value();
 
-  // Remove all unconsumed blocks from the DAO.
+  // Remove all unconsumed blocks.
   uint64_t start_block = meta.consume_state.max_fully_consumed_block_number + 1;
   for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
-    auto block_remove = ctx.dao->remove_retrocausal_queue_block(ctx.key, b);
-    if (!block_remove.has_value()) {
-      return block_remove.error();
-    }
+    auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
+    changes.remove(std::as_bytes(std::span(block_key)));
   }
 
-  // Remove the metadata from the DAO.
-  auto meta_remove = ctx.dao->remove_retrocausal_queue_metadata(ctx.key);
-  if (!meta_remove.has_value()) {
-    return meta_remove.error();
-  }
+  // Remove the metadata.
+  auto meta_key = make_contract_data_key(ctx.key.as_bytes());
+  changes.remove(meta_key);
 
   return {};
 }

@@ -57,9 +57,9 @@ public:
   }
 
   // Cleanup all RCQ-specific storage (blocks and metadata) when an RCQ is
-  // deleted. This mutates DAO state only; db hash updates are handled in
-  // apply_db_hash_delta paths.
-  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx);
+  // deleted. Stages removals into the given ChangeSet.
+  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx,
+                                               ChangeSet &changes);
 
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.
