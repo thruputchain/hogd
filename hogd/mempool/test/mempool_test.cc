@@ -177,6 +177,37 @@ TEST(Mempool, NominateEmpty)
   }
 }
 
+TEST(Mempool, BlockHeightsIncrement)
+{
+  MempoolTestInfra server;
+
+  constexpr size_t kNumBlocks = 5;
+  for (size_t i = 0; i < kNumBlocks; i++) {
+    SchedulerGetTipResult get_tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    DbTip db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, i);
+
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+
+    const Nomination &nomination = res_nominate.nominated_block().nomination;
+    EXPECT_EQ(nomination.block_height, i + 1);
+
+    auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+        res_nominate.nominated_block().block_id)();
+    ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  }
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().height, kNumBlocks);
+}
+
 TEST(Mempool, NominateCommit)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -275,9 +306,10 @@ TEST(Mempool, Validate)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -331,9 +363,10 @@ TEST(Mempool, ValidateBatch)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -355,6 +388,62 @@ TEST(Mempool, ValidateEmpty)
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip,
                                                          Nomination{})();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+}
+
+TEST(Mempool, ValidateWrongBlockHeight)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  EventBlockResult event_block_hash =
+      server.event_sched_rpc().eventsched_get_block_hash(
+          res_nominate.nominated_block().block_id);
+  EXPECT_EQ(event_block_hash.error(), RPCError::kRPCNone);
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.nominated_block().block_id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.height, 1);
+
+    // Compute block_hash with a wrong block_height. This should cause
+    // validation to fail because block_height is part of the block hash.
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height + 1, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
+  }
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
@@ -403,9 +492,10 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
 
     // Remove a transaction from the nomination.
     tx_hashes.pop_back();
@@ -470,9 +560,10 @@ TEST(Mempool, ValidateBatchMissingTx)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
 
   // Remove a transaction.
@@ -534,9 +625,10 @@ TEST(Mempool, ValidateCommit)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -596,9 +688,10 @@ TEST(Mempool, ValidateTwo)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -645,9 +738,10 @@ TEST(Mempool, ValidateTwo)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 3);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -708,9 +802,10 @@ TEST(Mempool, GetTip)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = server.mempool_coord_rpc().get_block_hash(
-        tx_hashes, db_tip.db_hash, event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
+        nomination.block_height, tx_hashes, db_tip.db_hash,
+        event_block_hash.root_hash(),
+        /*prev_block_hash=*/nomination.prev_block_hash));
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
