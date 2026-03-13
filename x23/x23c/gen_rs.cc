@@ -351,7 +351,6 @@ pub trait {}_{}: Send + Sync {{)",
   for (auto const &proc : vers.procs) {
     std::vector<string> args = {
         "&self",
-        "client: &::std::sync::Arc<::rpc_driver::ClientHandle>",
     };
     for (size_t i = 0; i < proc.arg_types.size(); i++) {
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
@@ -381,11 +380,11 @@ impl {0}_{1}_Dispatcher {{
 }}
 
 #[async_trait::async_trait]
-impl ::rpc_driver::ServerDispatch for {0}_{1}_Dispatcher {{
+impl ::rpc_driver::handler::RpcHandler for {0}_{1}_Dispatcher {{
     fn prog_vers(&self) -> ::rpc_driver::ProgVers {{
         ::rpc_driver::ProgVers::new({2}, {3})
     }}
-    async fn dispatch(&self, proc: u32, data: &[u8], client: &::std::sync::Arc<::rpc_driver::ClientHandle>) -> Result<Vec<u8>, ::rpc_driver::RpcError> {{
+    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_driver::RpcError> {{
         match proc {{
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -411,11 +410,9 @@ impl ::rpc_driver::ServerDispatch for {0}_{1}_Dispatcher {{
     prtop("                    xdrs::txs::decode(data).map_err(|_| "
           "::rpc_driver::RpcError::GarbageArguments)?;\n");
     auto detuple = make_arg_detuple(proc.arg_types.size());
-    auto call_args =
-        detuple.empty() ? std::string("client") : "client, " + detuple;
     prtop("                let res = self.inner.{}({}).await.map_err(|_| "
           "::rpc_driver::RpcError::SystemError)?;\n",
-          proc.id, call_args);
+          proc.id, detuple);
     prtop("                xdrs::txs::encode(&res).map_err(|_| "
           "::rpc_driver::RpcError::SystemError)\n");
     prtop("            }}\n");
@@ -434,13 +431,13 @@ GenRs::show_vers_client(const VersDef &vers, const std::string &prog_name,
 {
 
   prtop(R"(
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct {0}_{1}_Client {{
-    handle: ::std::sync::Arc<::rpc_driver::ClientHandle>,
+    handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>,
 }}
 
 impl {0}_{1}_Client {{
-    pub fn new(handle: ::std::sync::Arc<::rpc_driver::ClientHandle>) -> Self {{
+    pub fn new(handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>) -> Self {{
         Self {{ handle }}
     }}
 
