@@ -28,9 +28,9 @@
 
 #include "hogd/base/bits.h"
 #include "hogd/base/perthread.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
