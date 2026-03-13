@@ -274,9 +274,12 @@ HogDBStatus<void>
 HogDBDAO::write_address_average_hog_age(const HogAge &age)
 {
   auto key = make_address_key(age.address, Prefix::kHogAge);
+  auto before_item = get_before_item(key);
   auto buf = x23::serialize(age);
-  return db_.put(std::as_bytes(std::span(key)), 0,
-                 std::as_bytes(std::span(buf)));
+  auto ret =
+      db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  update_invariants_post(key, before_item);
+  return ret;
 }
 
 // TODO(jhumphri): Handle [block_id].

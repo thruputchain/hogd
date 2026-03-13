@@ -16,6 +16,7 @@ add_library(hogdb_objects OBJECT
   item_lock/replay_cache_lock.cc
   item_lock/retrocausal_queue_lock.cc
   item_lock.cc
+  invariant_hog_age.cc
   invariant_hog_conservation.cc
   invoke_tx.cc
   item_change.cc
