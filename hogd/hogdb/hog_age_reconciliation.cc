@@ -64,9 +64,6 @@ reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
     const uint128_t deficit = balance - existing_total;
     new_age.num_hogs[kHogAgeGroupToSchedule] =
         to_xdr(to_schedule_before + deficit);
-    info("reconciled hog age for {}: total {} -> {}, added {} hogs to "
-         "ToSchedule",
-         age.address, existing_total, balance, deficit);
   }
   else {
     uint128_t excess = existing_total - balance;
@@ -90,12 +87,6 @@ reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
     new_age.num_hogs[kHogAgeGroupReceived] = to_xdr(received);
     new_age.num_hogs[kHogAgeGroupAlreadyScheduled] = to_xdr(already_scheduled);
     new_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(to_schedule);
-
-    info("reconciled hog age for {}: total {} -> {}, drained sequentially "
-         "(Received {} -> {}, AlreadyScheduled {} -> {}, ToSchedule {} -> {})",
-         age.address, existing_total, balance, received_before, received,
-         already_scheduled_before, already_scheduled, to_schedule_before,
-         to_schedule);
   }
 
   return db.write_address_average_hog_age(new_age);
@@ -106,6 +97,9 @@ reconcile_address_hog_age(HogDBDAO &db, const Address &address)
 {
   HogDBStatus<uint128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
+    error("error reading account balance for address {} during hog age "
+          "reconciliation: {}",
+          address, balance.error());
     return balance.error();
   }
   if (*balance < 0) {
