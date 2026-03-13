@@ -26,8 +26,8 @@ public:
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const DeployedContractData & /*unused*/,
                          const StorageCostModel *cost_model) const;
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
 private:
   const DeployedContractHash deployed_contract_hash_;

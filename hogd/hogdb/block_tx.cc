@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -233,10 +234,12 @@ BlockTX::commit(WorkerPool &pool)
       return r.error();
     }
   }
-  if (auto r = db_.apply(*prepared_); !r) {
-    return r.error();
+  if (prepared_.has_value()) {
+    if (auto r = db_.apply(*prepared_); !r) {
+      return r.error();
+    }
+    prepared_.reset();
   }
-  prepared_.reset();
 
   // Extract auth/balance data (parallel destructive, no DAO writes).
   PerThread<KeyChangeBatch> key_changes;
@@ -292,7 +295,7 @@ HogDBStatus<DbHash>
 BlockTX::compute_db_hash(const DbHash &base_hash)
 {
   // Stage all finalized changes (parallel over locks, non-destructive).
-  Prepared prepared = db_.prepare();
+  ChangeSet changes = db_.create_changeset();
 
   std::mutex err_lock;
   HogDBStatus<void> prepare_status;
@@ -301,8 +304,8 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
     if (!v.second.is_finalized()) {
       return;
     }
-    auto r = v.second.prepare_committed_changes(
-        LockContext(&db_, block_height_, v.first, &cost_model_), prepared);
+    auto r = v.second.stage_committed_changes(
+        LockContext(&db_, block_height_, v.first, &cost_model_), changes);
     if (!r) [[unlikely]] {
       std::scoped_lock guard(err_lock);
       prepare_status = r;
@@ -314,10 +317,10 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
         if (!v.second.is_finalized()) {
           return;
         }
-        auto r = v.second.prepare_committed_changes(
+        auto r = v.second.stage_committed_changes(
             LockContext(&db_, block_height_,
                         make_address_balance_item_key(v.first), &cost_model_),
-            prepared);
+            changes);
         if (!r) [[unlikely]] {
           std::scoped_lock guard(err_lock);
           prepare_status = r;
@@ -329,11 +332,11 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
   }
 
   // Compute hash delta from all staged changes.
-  LtHash16 delta = prepared.close();
+  LtHash16 delta = changes.close();
   LtHash16 final_hash = lthash16_from_db_hash(base_hash);
   final_hash += delta;
 
-  prepared_ = std::move(prepared);
+  prepared_ = std::move(changes);
   return db_hash_from_lthash16(final_hash);
 }
 

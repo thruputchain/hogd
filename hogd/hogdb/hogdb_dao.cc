@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "address_auth.hh"
@@ -28,10 +29,10 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/materialized_change.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "x23/serialize.h"
@@ -649,29 +650,35 @@ HogDBDAO::remove_item(const ItemKey &key)
   return HogDBError(HogDBCode::kInternal);
 }
 
+ChangeSet
+HogDBDAO::create_changeset()
+{
+  return ChangeSet(this);
+}
+
 HogDBStatus<void>
-HogDBDAO::apply(Prepared &prepared)
+HogDBDAO::apply(ChangeSet &changes)
 {
   HogDBStatus<void> status;
-  auto ul = prepared.changes_.lock_threads();
-  prepared.changes_.for_each(ul, [&](std::vector<MaterializedChange> &changes) {
-    for (const auto &change : changes) {
+  auto ul = changes.changes_.lock_threads();
+  changes.changes_.for_each(ul, [&](std::vector<MaterializedChange> &vec) {
+    for (const auto &change : vec) {
       switch (change.op) {
       case MaterializedChange::Op::kPut:
-        if (auto r = db_.put(change.key, change.type, change.value); !r) {
+        if (auto r = db_.put(change.key(), change.type, change.value()); !r) {
           status = HogDBError(HogDBCode::kInternal);
           return;
         }
         break;
       case MaterializedChange::Op::kRemove:
-        if (auto r = db_.remove(change.key); !r) {
+        if (auto r = db_.remove(change.key()); !r) {
           status = HogDBError(HogDBCode::kInternal);
           return;
         }
         break;
       }
     }
-    changes.clear();
+    vec.clear();
   });
   return status;
 }

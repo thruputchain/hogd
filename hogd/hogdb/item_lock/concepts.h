@@ -12,7 +12,7 @@
 
 namespace hogd {
 
-class Prepared;
+class ChangeSet;
 
 // Passed to item_lock::try_atomic_change_lock and item_lock::commit_change.
 // Used by some lock types to access the DAO, block height, and/or item key.
@@ -43,9 +43,9 @@ concept item_lock_unsized =
         lock.commit_change(finalize, snapshot_cost, *after, ctx.cost_model)
       } -> std::same_as<int128_t>;
     } &&
-    requires(Lock const &lock, const LockContext &ctx, Prepared &prepared) {
+    requires(Lock const &lock, const LockContext &ctx, ChangeSet &changes) {
       {
-        lock.prepare_committed_changes(ctx, prepared)
+        lock.stage_committed_changes(ctx, changes)
       } -> std::same_as<HogDBStatus<void>>;
     };
 

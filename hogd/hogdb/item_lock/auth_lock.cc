@@ -8,11 +8,11 @@
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/serialize.h"
@@ -144,15 +144,15 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-AuthLock::prepare_committed_changes(const LockContext &ctx,
-                                    Prepared &prepared) const
+AuthLock::stage_committed_changes(const LockContext &ctx,
+                                  ChangeSet &changes) const
 {
   assert(ctx.key.is_address_auth_data());
   auto auth = build_result();
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
   auto serialized = x23::serialize(auth);
-  prepared.put(std::as_bytes(std::span(key)), 0,
-               std::as_bytes(std::span(serialized)));
+  changes.put(std::as_bytes(std::span(key)), 0,
+              std::as_bytes(std::span(serialized)));
   return {};
 }
 

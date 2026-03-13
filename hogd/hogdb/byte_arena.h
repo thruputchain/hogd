@@ -26,10 +26,10 @@ public:
     return dest;
   }
 
-  // Build a hash element [key + type_byte + value] in the arena.
-  std::span<const std::byte>
-  build_hash_element(std::span<const std::byte> key, uint8_t type,
-                     std::span<const std::byte> value)
+  // Store an item [key + type_byte + value] contiguously in the arena.
+  std::span<const std::byte> store_item(std::span<const std::byte> key,
+                                        uint8_t type,
+                                        std::span<const std::byte> value)
   {
     size_t total = key.size() + 1 + value.size();
     auto dest = alloc(total);

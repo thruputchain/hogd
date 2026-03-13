@@ -41,8 +41,8 @@ public:
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<AuthDataItem> &after,
                          const StorageCostModel *cost_model);
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
   AddressAuthData build_result() const;
 

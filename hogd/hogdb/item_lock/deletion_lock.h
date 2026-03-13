@@ -32,8 +32,8 @@ public:
     return 0;
   }
 
-  static HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                                     Prepared &prepared);
+  static HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                                   ChangeSet &changes);
 };
 
 static_assert(item_lock<DeletionLock>);

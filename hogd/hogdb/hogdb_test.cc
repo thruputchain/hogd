@@ -350,9 +350,9 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     auto commit_cost = lock.commit_change(c1, ctx);
     EXPECT_EQ(cost_model_.kBaseItemCost + cost_model_.kReplayCacheCostPerEntry,
               commit_cost);
-    auto prepared = db_.prepare();
-    ASSERT_TRUE(lock.prepare_committed_changes(ctx, prepared));
-    ASSERT_TRUE(db_.apply(prepared));
+    auto changes = db_.create_changeset();
+    ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+    ASSERT_TRUE(db_.apply(changes));
   }
 
   height++;
@@ -396,9 +396,9 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
 
     auto commit_cost = lock2.commit_change(c3, ctx);
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
-    auto prepared = db_.prepare();
-    ASSERT_TRUE(lock2.prepare_committed_changes(ctx, prepared));
-    ASSERT_TRUE(db_.apply(prepared));
+    auto changes = db_.create_changeset();
+    ASSERT_TRUE(lock2.stage_committed_changes(ctx, changes));
+    ASSERT_TRUE(db_.apply(changes));
   }
 
   // Read final metadata and data

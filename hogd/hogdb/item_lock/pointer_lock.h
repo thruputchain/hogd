@@ -31,10 +31,10 @@ public:
     return this->get()->commit_change(did_finalize, snapshot_cost, after,
                                       cost_model);
   }
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const
   {
-    return this->get()->prepare_committed_changes(ctx, prepared);
+    return this->get()->stage_committed_changes(ctx, changes);
   }
 };
 

@@ -5,7 +5,6 @@
 #include <utility>
 #include <vector>
 
-#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"

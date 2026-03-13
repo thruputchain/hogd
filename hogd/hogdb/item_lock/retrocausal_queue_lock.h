@@ -42,8 +42,8 @@ public:
                          const change_type &change,
                          const StorageCostModel *cost_model);
 
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
@@ -70,7 +70,7 @@ private:
 
   // Set to true when get_meta() encounters a kTypeMismatch error, indicating
   // the key exists in the DAO as a different type (e.g. bytestring). Used by
-  // prepare_committed_changes to know it must remove the old item even when
+  // stage_committed_changes to know it must remove the old item even when
   // no RCQ metadata existed in the snapshot.
   mutable bool base_was_different_type_{false};
 
@@ -85,7 +85,7 @@ private:
 
   // Used in commit_change to calculate the cost of the change and
   // stage all changes for writing. Not accessed concurrently, since
-  // access is limited to commit_change and prepare_committed_changes.
+  // access is limited to commit_change and stage_committed_changes.
   std::vector<QueueEntry> added_entries_;
   std::optional<RetrocausalQueueConsumeDelta> consume_delta_;
   // Change in entry count in the whole queue over the set of committed deltas.
@@ -102,7 +102,7 @@ private:
       consumed_set_balance_;
 
   // Returns true if any consumed current-block entry was not matched by an
-  // insert across all committed TXs. Called by prepare_committed_changes()
+  // insert across all committed TXs. Called by stage_committed_changes()
   // at block close time to detect malicious proposer fabrication.
   bool has_unmatched_consumes() const;
 

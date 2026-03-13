@@ -68,8 +68,8 @@ public:
     return 0;
   }
 
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
   static int128_t
   get_storage_cost_of_committed_value(const StorageCostModel *cost_model)

@@ -14,11 +14,11 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
@@ -260,8 +260,8 @@ ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-ReplayCacheLock::prepare_committed_changes(const LockContext &ctx,
-                                           Prepared &prepared) const
+ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
+                                         ChangeSet &changes) const
 {
   assert(ctx.key.is_replay_cache());
 
@@ -280,7 +280,7 @@ ReplayCacheLock::prepare_committed_changes(const LockContext &ctx,
   size_t pruned_count = 0;
   for (auto it = meta.heights.begin(); it != prune_end; ++it) {
     auto key = make_replay_cache_data_key(ctx.key.get_address(), it->height);
-    prepared.remove(std::as_bytes(std::span(key)));
+    changes.remove(std::as_bytes(std::span(key)));
     pruned_count += it->nonce_count;
   }
 
@@ -312,8 +312,8 @@ ReplayCacheLock::prepare_committed_changes(const LockContext &ctx,
 
     auto key = make_replay_cache_data_key(ctx.key.get_address(), height);
     auto buf = x23::serialize(*res);
-    prepared.put(std::as_bytes(std::span(key)), 0,
-                 std::as_bytes(std::span(buf)));
+    changes.put(std::as_bytes(std::span(key)), 0,
+                std::as_bytes(std::span(buf)));
 
     new_heights.emplace_back(height,
                              static_cast<unsigned int>(res->nonces.size()));
@@ -329,8 +329,8 @@ ReplayCacheLock::prepare_committed_changes(const LockContext &ctx,
 
   auto meta_key = make_address_key(ctx.key.get_address(), Prefix::kReplayCache);
   auto meta_buf = x23::serialize(meta);
-  prepared.put(std::as_bytes(std::span(meta_key)), 0,
-               std::as_bytes(std::span(meta_buf)));
+  changes.put(std::as_bytes(std::span(meta_key)), 0,
+              std::as_bytes(std::span(meta_buf)));
 
   return {};
 }

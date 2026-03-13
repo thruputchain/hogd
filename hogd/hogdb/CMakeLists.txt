@@ -4,7 +4,7 @@ add_library(hogdb_objects OBJECT
   auth_change_subscription_manager.cc
   background_commit_worker.cc
   block_tx.cc
-  prepared.cc
+  change_set.cc
   block_id_manager.cc
   item_lock/auth_lock.cc
   item_lock/balance_lock.cc

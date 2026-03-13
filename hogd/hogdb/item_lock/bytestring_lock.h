@@ -44,8 +44,8 @@ public:
     return 0;
   }
 
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
 private:
   const OwningSpan<const std::byte> bytestring_;

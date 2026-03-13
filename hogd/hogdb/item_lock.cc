@@ -510,8 +510,8 @@ ItemLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDBStatus<void>
-ItemLock::prepare_committed_changes(const LockContext &ctx,
-                                    Prepared &prepared) const
+ItemLock::stage_committed_changes(const LockContext &ctx,
+                                  ChangeSet &changes) const
 {
   CHECK(is_finalized());
   CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
@@ -525,7 +525,7 @@ ItemLock::prepare_committed_changes(const LockContext &ctx,
           panic("bad finalized state");
         }
         else {
-          return lock.prepare_committed_changes(ctx, prepared);
+          return lock.stage_committed_changes(ctx, changes);
         }
       },
       lock_contents_);

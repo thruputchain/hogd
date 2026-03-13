@@ -5,10 +5,10 @@
 #include <span>
 
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -25,11 +25,11 @@ BytestringLock::try_atomic_change_lock(const Bytes *before, const Bytes *after,
 }
 
 HogDBStatus<void>
-BytestringLock::prepare_committed_changes(const LockContext &ctx,
-                                          Prepared &prepared) const
+BytestringLock::stage_committed_changes(const LockContext &ctx,
+                                        ChangeSet &changes) const
 {
   auto key = make_contract_data_key(ctx.key.as_bytes());
-  prepared.put(key, kBytes, std::as_bytes(std::span(bytestring_)));
+  changes.put(key, kBytes, std::as_bytes(std::span(bytestring_)));
   return {};
 }
 

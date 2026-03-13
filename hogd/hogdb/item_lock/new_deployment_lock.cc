@@ -4,14 +4,13 @@
 #include <span>
 
 #include "db_sched.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
@@ -50,18 +49,18 @@ NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-NewDeploymentLock::prepare_committed_changes(const LockContext &ctx,
-                                             Prepared &prepared) const
+NewDeploymentLock::stage_committed_changes(const LockContext &ctx,
+                                           ChangeSet &changes) const
 {
   assert(ctx.key.is_address_metadata());
 
   // Write deployed contract metadata (part of blockchain state).
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);
   auto serialized = x23::serialize(deployed_contract_hash_);
-  prepared.put(std::as_bytes(std::span(key)), 0,
-               std::as_bytes(std::span(serialized)));
+  changes.put(std::as_bytes(std::span(key)), 0,
+              std::as_bytes(std::span(serialized)));
 
-  // Write empty HogAge record (not part of blockchain state — Prepared
+  // Write empty HogAge record (not part of blockchain state — ChangeSet
   // will skip hash element construction because is_state_item returns false
   // for kHogAge).
   auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
@@ -72,8 +71,8 @@ NewDeploymentLock::prepare_committed_changes(const LockContext &ctx,
       .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
   };
   auto age_buf = x23::serialize(age);
-  prepared.put(std::as_bytes(std::span(hog_age_key)), 0,
-               std::as_bytes(std::span(age_buf)));
+  changes.put(std::as_bytes(std::span(hog_age_key)), 0,
+              std::as_bytes(std::span(age_buf)));
 
   return {};
 }

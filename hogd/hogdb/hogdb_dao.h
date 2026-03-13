@@ -37,13 +37,14 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
+
+class ChangeSet;
 
 // RAMDB is the low-level interface used by hogdb to access the ramdb.
 class RAMDB {
@@ -322,11 +323,11 @@ public:
   // returns the low-level ramdb (direct access to the DB).
   RAMDB &get_ramdb() { return db_; }
 
-  // Create a Prepared batch for accumulating materialized changes.
-  Prepared prepare() { return Prepared(&db_); }
+  // Create a ChangeSet for accumulating materialized changes.
+  ChangeSet create_changeset();
 
-  // Apply all materialized changes from a Prepared batch to the database.
-  HogDBStatus<void> apply(Prepared &prepared);
+  // Apply all materialized changes from a ChangeSet to the database.
+  HogDBStatus<void> apply(ChangeSet &changes);
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }

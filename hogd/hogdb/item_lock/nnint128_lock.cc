@@ -4,17 +4,16 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
-#include <span>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -115,15 +114,15 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
 }
 
 HogDBStatus<void>
-NNInt128Lock::prepare_committed_changes(const LockContext &ctx,
-                                        Prepared &prepared) const
+NNInt128Lock::stage_committed_changes(const LockContext &ctx,
+                                      ChangeSet &changes) const
 {
   assert(!ctx.key.is_address_balance());
   auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
   CHECK(!of);
   int128_t out = cpu_to_le(value);
   auto key = make_contract_data_key(ctx.key.as_bytes());
-  prepared.put(key, kNNInt128, byte_view(out));
+  changes.put(key, kNNInt128, byte_view(out));
   return {};
 }
 

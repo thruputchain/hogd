@@ -10,13 +10,13 @@
 #include "hogd/container/concurrent_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/background_commit_worker.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
@@ -102,7 +102,7 @@ private:
   ConcurrentMap<ItemKey, ItemLock, SipHash24Hasher> item_locks_;
   BackgroundCommitWorker &background_commit_worker_;
   BlockHeight block_height_;
-  std::optional<Prepared> prepared_;
+  std::optional<ChangeSet> prepared_;
 
   static inline HogDBStatus<int128_t>
   do_lock(ItemLock &lock, const ItemChange &change, const LockContext &ctx);

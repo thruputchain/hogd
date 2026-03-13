@@ -164,8 +164,8 @@ public:
     return cost_model->kBaseItemCost;
   }
 
-  HogDBStatus<void> prepare_committed_changes(const LockContext &ctx,
-                                              Prepared &prepared) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
   // For balance items
   // Only should be called after all txs in a block are done.

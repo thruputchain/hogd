@@ -4,11 +4,11 @@
 #include <span>
 
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -31,13 +31,13 @@ NewContractLock::try_atomic_change_lock(const NewContractData *before,
 }
 
 HogDBStatus<void>
-NewContractLock::prepare_committed_changes(const LockContext &ctx,
-                                           Prepared &prepared) const
+NewContractLock::stage_committed_changes(const LockContext &ctx,
+                                         ChangeSet &changes) const
 {
   SHA256Hash code_hash = ctx.key.get_contract_code_hash();
   auto key = make_wasm_code_key(code_hash);
   auto buf = x23::serialize(contract_);
-  prepared.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  changes.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
   return {};
 }
 

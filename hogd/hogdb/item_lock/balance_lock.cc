@@ -9,10 +9,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#include "hogd/hogdb/prepared.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -77,14 +77,14 @@ BalanceLock::build_result(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-BalanceLock::prepare_committed_changes(const LockContext &ctx,
-                                       Prepared &prepared) const
+BalanceLock::stage_committed_changes(const LockContext &ctx,
+                                     ChangeSet &changes) const
 {
   assert(ctx.key.is_address_balance());
   auto value = build_result(ctx);
   int128_t encoded = cpu_to_le(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
-  prepared.put(std::as_bytes(std::span(key)), kNNInt128, byte_view(encoded));
+  changes.put(std::as_bytes(std::span(key)), kNNInt128, byte_view(encoded));
   return {};
 }
 
