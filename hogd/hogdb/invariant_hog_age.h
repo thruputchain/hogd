@@ -27,15 +27,19 @@ private:
     kCreated = 1,
   };
 
-  static ExistenceDelta compute_delta(HogDBStatus<DBItem> const &before,
-                                      HogDBStatus<DBItem> const &after);
-
-  static Address address_from_key(std::span<const std::byte> key);
-
   struct Entry {
     ExistenceDelta balance{ExistenceDelta::kUnchanged};
     ExistenceDelta hog_age{ExistenceDelta::kUnchanged};
   };
+
+  static ExistenceDelta compute_delta(HogDBStatus<DBItem> const &before,
+                                      HogDBStatus<DBItem> const &after);
+
+  static RawAddress raw_address_from_key(std::span<const std::byte> key);
+
+  void record_delta(std::span<const std::byte> key,
+                    ExistenceDelta delta,
+                    ExistenceDelta Entry::*field);
 
   x23::MVar<std::map<RawAddress, Entry>> entries_;
 };

@@ -32,38 +32,38 @@ HogAgeInvariant::check()
 
 void
 HogAgeInvariant::log_item_change(std::span<const std::byte> key,
-                                 HogDBStatus<DBItem> const &before,
-                                 HogDBStatus<DBItem> const &after)
+                                  HogDBStatus<DBItem> const &before,
+                                  HogDBStatus<DBItem> const &after)
 {
   auto prefix = static_cast<Prefix>(key[0]);
+  auto delta = compute_delta(before, after);
+  if (delta == ExistenceDelta::kUnchanged)
+    return;
 
   switch (prefix) {
   case Prefix::kBalance:
-  {
-    auto delta = compute_delta(before, after);
-    if (delta == ExistenceDelta::kUnchanged)
-      return;
-    auto raw = address_from_key(key).get_raw();
-    entries_.with([&](auto &entries) { entries[raw].balance = delta; });
+    record_delta(key, delta, &Entry::balance);
     return;
-  }
   case Prefix::kHogAge:
-  {
-    auto delta = compute_delta(before, after);
-    if (delta == ExistenceDelta::kUnchanged)
-      return;
-    auto raw = address_from_key(key).get_raw();
-    entries_.with([&](auto &entries) { entries[raw].hog_age = delta; });
+    record_delta(key, delta, &Entry::hog_age);
     return;
-  }
   default:
     return;
   }
 }
 
+void
+HogAgeInvariant::record_delta(std::span<const std::byte> key,
+                               ExistenceDelta delta,
+                               ExistenceDelta Entry::*field)
+{
+  auto raw = raw_address_from_key(key);
+  entries_.with([&](auto &entries) { entries[raw].*field = delta; });
+}
+
 HogAgeInvariant::ExistenceDelta
 HogAgeInvariant::compute_delta(HogDBStatus<DBItem> const &before,
-                               HogDBStatus<DBItem> const &after)
+                                HogDBStatus<DBItem> const &after)
 {
   bool existed_before = before.has_value();
   bool exists_after = after.has_value();
@@ -74,14 +74,14 @@ HogAgeInvariant::compute_delta(HogDBStatus<DBItem> const &before,
   return ExistenceDelta::kUnchanged;
 }
 
-Address
-HogAgeInvariant::address_from_key(std::span<const std::byte> key)
+RawAddress
+HogAgeInvariant::raw_address_from_key(std::span<const std::byte> key)
 {
   assert(key.size() == kAddressSize + 1);
   RawAddress raw{};
   std::ranges::copy(key.subspan(1),
                     std::begin(std::as_writable_bytes(std::span(raw))));
-  return Address(raw);
+  return raw;
 }
 
 } // namespace hogd
