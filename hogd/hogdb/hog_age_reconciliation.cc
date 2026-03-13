@@ -108,7 +108,7 @@ reconcile_address_hog_age(HogDBDAO &db, const Address &address)
   if (!balance.has_value()) {
     return balance.error();
   }
-  else if (*balance < 0) {
+  if (*balance < 0) {
     error("negative balance for address {} during hog age reconciliation",
           address);
     return HogDBError(HogDBCode::kInternal);
