@@ -275,14 +275,14 @@ struct Serializer {
   }
   void putbytes(const void *buf, size_t len)
   {
-    if (size_t rem = len % 4) {
-      putbe(p + len - rem, uint32_t{0});
-      memcpy(p, buf, len);
-      p += len + (4 - rem);
-    }
-    else if (len) {
+    if (len) {
       memcpy(p, buf, len);
       p += len;
+      if (size_t rem = len % 4) {
+        size_t pad = 4 - rem;
+        memset(p, 0, pad);
+        p += pad;
+      }
     }
   }
 

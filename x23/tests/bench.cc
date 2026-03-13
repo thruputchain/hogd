@@ -1,5 +1,6 @@
 
 #include <vector>
+#include <numeric>
 
 #include <x23/async.h>
 #include <x23/event.h>
@@ -133,5 +134,24 @@ time_append_range(benchmark::State &state)
 }
 BENCHMARK(time_append_range<std::vector<std::uint8_t>>);
 BENCHMARK(time_append_range<x23::Buf>);
+
+template<size_t N>
+void
+serialize_bufview(benchmark::State &state)
+{
+  std::array<std::uint8_t, N> bytes;
+  std::iota(bytes.begin(), bytes.end(), std::uint8_t{1});
+  x23::Buf out;
+  out.reserve(x23::xdr_size(x23::BufView(bytes)));
+  for (auto _ : state) {
+    out.clear();
+    x23::serialize_to(&out, x23::BufView(bytes));
+    benchmark::DoNotOptimize(out.front());
+    benchmark::DoNotOptimize(out.back());
+    benchmark::ClobberMemory();
+  }
+}
+BENCHMARK(serialize_bufview<48>);
+BENCHMARK(serialize_bufview<51>);
 
 BENCHMARK_MAIN();
