@@ -6,9 +6,13 @@
 #include <span>
 #include <unordered_set>
 
+#include "db_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/status.h"
 
 namespace hogd {
 

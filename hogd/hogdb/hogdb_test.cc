@@ -11,6 +11,7 @@
 // xdr types
 #include "address_auth.hh"
 #include "contract.hh"
+#include "db_sched.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
