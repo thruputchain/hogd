@@ -1,7 +1,7 @@
 set -e
 
 for i in {1..20}; do
-  codex --approval-mode auto-edit "
+  codex --full-auto "
 Goal: improve runtime performance without changing behavior.
 
 Procedure:
