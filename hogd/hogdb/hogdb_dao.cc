@@ -39,8 +39,8 @@ namespace hogd {
 
 namespace {
 
-constexpr std::string kGlobalTipKey = ">DBTIP";
-constexpr std::string kGlobalCostModelKey = ">COSTMODEL";
+constexpr std::string kGlobalTipKey = "<DBTIP";
+constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
 } // namespace
 
