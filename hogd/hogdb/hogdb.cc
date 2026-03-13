@@ -37,6 +37,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"

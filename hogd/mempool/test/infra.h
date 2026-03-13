@@ -88,7 +88,13 @@ public:
       // does not send an RPC to a stopped server and then throw an exception
       // when the RPC fails.
       sched_db_server_.impl()->reset_scheduler()();
-      Scheduler::shut_down()();
+      // The scheduler sends RPCs to [db_scheduler_server_] in a detached
+      // coroutine. It is important to call [Scheduler::shut_down()] before we
+      // destroy [db_scheduler_server_] so that we wait for any detached
+      // coroutines to complete. Otherwise, if we destroy [db_scheduler_server_]
+      // first, the detached coroutines may attempt to send RPCs on an invalid
+      // file descriptor, which will cause an exception to be thrown.
+      mempool_coord_server_.impl()->scheduler()->shut_down()();
       // mempool_coord_server_.shut_down();
 
       // TODO(jhumphri): Implement clean shutdown for all RPC servers.
