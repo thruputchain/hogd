@@ -44,7 +44,7 @@ public:
   ExecutionMode mode() const { return mode_; }
 
   x23::Async<ExecProposeBatchResult>
-  propose_transaction_batch(SignedTransactionBatch const &signed_txs,
+  propose_transaction_batch(TransactionBatch const &txs,
                             TransactionID first_tx_id);
   x23::Async<ExecValidateBatchResult>
   validate_transaction_batch(ProposedTransactionBatch const &proposed_txs,

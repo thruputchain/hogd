@@ -223,7 +223,7 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
   open_db_block(block_id);
 
   // Empty batch should return an empty result, not crash
-  SignedTransactionBatch empty_batch;
+  TransactionBatch empty_batch;
   auto result = client_.executorsched_propose_batch(block_id, empty_batch);
   EXPECT_EQ(result.size(), 0);
 

@@ -78,7 +78,7 @@ public:
 
   x23::Async<ExecProposeBatchResult>
   executorsched_propose_batch(BlockID block_id,
-                              SignedTransactionBatch signed_txs);
+                              TransactionBatch txs);
   x23::Async<ExecValidateBatchResult>
   executorsched_validate_batch(BlockID block_id,
                                ProposedTransactionBatch proposed_txs);

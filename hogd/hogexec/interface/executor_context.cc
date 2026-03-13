@@ -52,21 +52,21 @@ ExecutorContext::propose_transaction(Transaction const &tx, TransactionID tx_id)
 
 x23::Async<ExecProposeBatchResult>
 ExecutorContext::propose_transaction_batch(
-    SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
+    TransactionBatch const &txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   x23::Awaitable<ExecProposeBatchResult> awaitable;
   x23::CoroCB<ExecProposeBatchResult> cb(awaitable);
-  worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
+  worker_pool_.submit([this, &txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
-    for (size_t i = 0; i < signed_txs.size(); i++) {
+    for (size_t i = 0; i < txs.size(); i++) {
       batch_res.push_back(
-          run_propose_transaction(signed_txs[i].tx, first_tx_id + i));
+          run_propose_transaction(txs[i], first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
   auto r = co_await awaitable;
-  assert(r.size() == signed_txs.size());
+  assert(r.size() == txs.size());
   co_return std::move(r);
 }
 
