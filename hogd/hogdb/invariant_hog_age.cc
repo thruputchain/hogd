@@ -1,11 +1,13 @@
 #include "hogd/hogdb/invariant_hog_age.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <span>
 
 #include "hogd/base/log.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 
