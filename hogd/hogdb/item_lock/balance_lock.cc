@@ -4,16 +4,19 @@
 #include <cstddef>
 #include <span>
 
+#include "db_sched.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -83,6 +86,22 @@ BalanceLock::write_committed_change(LockContext const &ctx) const
   assert(ctx.key.is_address_balance());
 
   auto value = build_result(ctx);
+  CHECK(value >= 0);
+
+  // Create the HogAge struct when the balance entry is created
+  if (!snapshot_balance_.snapshot_value().has_value()) {
+    uint128_t value_uint128 = value;
+    HogAge age = {
+        .address = ctx.key.to_contract_address(),
+        .num_hogs = {to_xdr(value_uint128), to_xdr(uint128_t{0}),
+                     to_xdr(uint128_t{0})},
+        .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+    };
+    auto r = ctx.dao->write_address_average_hog_age(age);
+    if (!r.has_value()) {
+      return r.error();
+    }
+  }
 
   assert(ctx.dao);
   return ctx.dao->write_address_balance(ctx.key.get_address(), value);
