@@ -3,10 +3,7 @@
 #include <cassert>
 #include <span>
 
-#include "db_sched.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -14,7 +11,6 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "types.hh"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -44,17 +40,6 @@ NewDeploymentLock::write_committed_change(LockContext const &ctx) const
   HogDBStatus<void> ret =
       ctx.dao->write_address_metadata(ctx.key.get_address(),
                                       deployed_contract_hash_);
-
-  // Create an empty data record for this address for scheduler state;
-  // the scheduler is responsible for populating this with nonzero data.
-  auto r = ctx.dao->write_address_average_hog_age(HogAge{
-      .address = ctx.key.get_address().get_raw(),
-      .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
-                   to_xdr(uint128_t{0})},
-      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
-  });
-
-  CHECK(r.has_value());
 
   return ret;
 }
