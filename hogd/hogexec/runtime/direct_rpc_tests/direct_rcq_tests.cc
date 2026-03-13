@@ -1929,8 +1929,8 @@ TEST_F(DirectRCQTests, StressExclusiveFlagInsertOverMaxEntriesPerBlock)
 }
 
 // StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch
-// Crashes at retrocausal_queue_lock.cc:356 (existing site #5) via exclusive
-// downgrade commit path -- consumed entry not in added_entries_.
+// ExclusiveLock validates consumed entry identity at lock time:
+// consumed {99} not in added_entries {10} → rejected.
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -1949,7 +1949,8 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch)
 }
 
 // StressExclusiveConsumeInsertOnExistingRCQCurrentBlockMismatch
-// Crashes at invoke_tx.cc:195 (existing site #6) via exclusive downgrade
+// ExclusiveLock validates consumed entry identity on existing RCQ:
+// consumed {77} not in added_entries {10} → rejected.
 TEST_F(DirectRCQTests,
        StressExclusiveConsumeInsertOnExistingRCQCurrentBlockMismatch)
 {
@@ -2008,7 +2009,8 @@ TEST_F(DirectRCQTests,
 }
 
 // StressExclusiveConsumeInsertOverconsumeCurrentBlock
-// Crashes at retrocausal_queue_lock.cc:262 (existing site #4) via exclusive
+// ExclusiveLock detects overconsume (5 consumed from block with 2 entries)
+// and returns kInvalidExecutorBehavior.
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOverconsumeCurrentBlock)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -2066,7 +2068,7 @@ TEST_F(DirectRCQTests,
 }
 
 // StressExclusiveConsumeInsertPastBlockOnFreshKey
-// Crashes at retrocausal_queue_lock.cc:193 (existing site #2) via exclusive
+// ExclusiveLock rejects consume of past block on fresh key (no metadata).
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertPastBlockOnFreshKey)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -2145,7 +2147,7 @@ TEST_F(DirectRCQTests, StressPopSubtransactionExclusiveToNonExclusiveRCQ)
 }
 
 // StressExclusiveRCQConsumeOnlyOnFreshKey
-// Crashes at retrocausal_queue_lock.cc:262 (existing site #4) via exclusive
+// ExclusiveLock rejects consume-only on fresh key (total entries < 0).
 //
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressExclusiveRCQConsumeOnlyOnFreshKey)
@@ -2162,7 +2164,7 @@ TEST_F(DirectRCQTests, StressExclusiveRCQConsumeOnlyOnFreshKey)
 }
 
 // StressExclusiveConsumeInsertPastBlockOnExistingRCQ
-// Crashes at retrocausal_queue_lock.cc:201 (existing site #3) via exclusive
+// ExclusiveLock rejects consume of block beyond max_live on existing RCQ.
 //
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressExclusiveConsumeInsertPastBlockOnExistingRCQ)
@@ -2188,7 +2190,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertPastBlockOnExistingRCQ)
 }
 
 // StressMultiKeyExclusiveAndNormalRCQSameTx
-// Crashes at invoke_tx.cc:195 (existing site #6) via exclusive cost mismatch
+// Verifies a TX can mix exclusive and normal RCQ ops on different keys.
 TEST_F(DirectRCQTests, StressMultiKeyExclusiveAndNormalRCQSameTx)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -2219,7 +2221,7 @@ TEST_F(DirectRCQTests, StressMultiKeyExclusiveAndNormalRCQSameTx)
 }
 
 // StressConsumeAfterFullConsumeAndReinsertSameBlock
-// Crashes at retrocausal_queue_lock.cc:262 (existing site #4)
+// Rejects overconsume (partial=5) on block with only 3 entries.
 //
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressConsumeAfterFullConsumeAndReinsertSameBlock)
@@ -2256,7 +2258,7 @@ TEST_F(DirectRCQTests, StressConsumeAfterFullConsumeAndReinsertSameBlock)
 }
 
 // StressExclusiveRCQWithVeryLargePartialConsume
-// Crashes at retrocausal_queue_lock.cc:262 (existing site #4) via exclusive
+// ExclusiveLock rejects partial=UINT32_MAX on block with 2 entries.
 //
 // This constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressExclusiveRCQWithVeryLargePartialConsume)
@@ -2281,7 +2283,7 @@ TEST_F(DirectRCQTests, StressExclusiveRCQWithVeryLargePartialConsume)
 }
 
 // StressExclusiveConsumeBlockBeyondMaxLiveOnExistingRCQ
-// Crashes at retrocausal_queue_lock.cc:201 (existing site #3) via exclusive
+// ExclusiveLock rejects consume of block 5 when max_live is 1.
 //
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressExclusiveConsumeBlockBeyondMaxLiveOnExistingRCQ)
@@ -2307,9 +2309,8 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeBlockBeyondMaxLiveOnExistingRCQ)
   ASSERT_FALSE(r.has_value());
 }
 
-// Crashes at invoke_tx.cc:195 (site #6): cost mismatch from exclusive
-// overconsume. Persists corrupted metadata (partial_consumed > block entries)
-// but the cost CHECK fires before the underflow at line 194-195 is reached.
+// Rejects partial overconsume (partial=3 on block with 2 entries) at lock
+// time.
 //
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyPartialGreaterThanBlockSize)
@@ -2344,8 +2345,8 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyPartialGreaterThanBlockSize)
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
-// Crashes at invoke_tx.cc:195 (site #6): exclusive overconsume partial=5
-// on block with 2 entries, then normal consume triggers cost mismatch.
+// ExclusiveLock rejects partial overconsume (partial=5 on block with 2
+// entries) at lock time before any metadata corruption can occur.
 //
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests, StressExclusivePartialOverconsumeFollowedByFullConsume)
@@ -2379,8 +2380,8 @@ TEST_F(DirectRCQTests, StressExclusivePartialOverconsumeFollowedByFullConsume)
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
-// Crashes at invoke_tx.cc:195 (site #6): same-block consume after exclusive
-// overconsume of partial count.
+// ExclusiveLock rejects partial overconsume (partial=5 on block with 2
+// entries) at lock time, preventing same-block consume corruption.
 // This test constitutes invalid inputs from the executor.
 TEST_F(DirectRCQTests,
        StressExclusivePartialOverconsumeFollowedBySameBlockConsume)
