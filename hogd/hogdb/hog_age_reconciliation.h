@@ -5,7 +5,6 @@
 
 namespace hogd {
 
-HogDBStatus<void>
-reconcile_startup_hog_ages(HogDBDAO &db);
+HogDBStatus<void> reconcile_startup_hog_ages(HogDBDAO &db);
 
 } // namespace hogd

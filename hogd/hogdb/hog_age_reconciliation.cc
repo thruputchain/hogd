@@ -82,7 +82,8 @@ reconcile_account_hog_age(HogDBDAO &db, const Address &account)
       from_xdr(age->num_hogs[kHogAgeGroupToSchedule]);
   const uint128_t already_scheduled_before =
       from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]);
-  const uint128_t received_before = from_xdr(age->num_hogs[kHogAgeGroupReceived]);
+  const uint128_t received_before =
+      from_xdr(age->num_hogs[kHogAgeGroupReceived]);
 
   if (existing_total < *owned_hogs) {
     const uint128_t deficit = *owned_hogs - existing_total;
