@@ -65,7 +65,7 @@ Scheduler::write_all_average_hog_ages()
   {
     auto ul = ages_by_thread.lock_threads();
     ages_by_thread.for_each(ul, [&ages](HogAgeBatch &per_thread_ages) {
-      ages.insert(ages.end(), per_thread_ages.begin(), per_thread_ages.end());
+      ages += per_thread_ages;
     });
   }
   CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
