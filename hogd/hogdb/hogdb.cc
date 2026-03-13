@@ -18,6 +18,7 @@
 // XDR headers
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "types.hh"
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"

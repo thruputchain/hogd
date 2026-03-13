@@ -13,6 +13,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
