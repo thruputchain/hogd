@@ -70,8 +70,7 @@ public:
   static x23::Async<void> executorsched_null() { co_return; }
 
   x23::Async<ExecProposeResult>
-  executorsched_propose_transaction(BlockID block_id,
-                                    SignedTransaction signed_tx);
+  executorsched_propose_transaction(BlockID block_id, Transaction tx);
   x23::Async<ExecResult>
   executorsched_validate_transaction(BlockID block_id,
                                      ProposedTransaction proposed_tx);

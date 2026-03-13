@@ -148,9 +148,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose each transaction
-  for (const auto &tx : txs) {
+  for (const auto &stx : txs) {
     auto propose_res =
-        client_.executorsched_propose_transaction(test_block_id, tx);
+        client_.executorsched_propose_transaction(test_block_id, stx.tx);
     // Transactions might succeed or fail depending on account balances, etc.
     // But they should not return SystemError if everything is set up correctly
     ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);

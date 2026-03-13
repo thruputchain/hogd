@@ -42,16 +42,15 @@ ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
 
 x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(
-    BlockID block_id, SignedTransaction signed_tx)
+    BlockID block_id, Transaction tx)
 {
-
   auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
   auto r =
-      co_await ctx->get().propose_transaction(signed_tx.tx, allocate_tx_ids(1));
+      co_await ctx->get().propose_transaction(tx, allocate_tx_ids(1));
   co_await release_context(block_id, ctx);
   co_return r;
 }

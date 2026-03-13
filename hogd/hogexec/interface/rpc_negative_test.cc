@@ -119,7 +119,7 @@ TEST_F(RpcNegativeTest, TestModeMismatchProposeOnValidationBlock)
 
   // Proposing on a validation block should fail
   auto result =
-      client_.executorsched_propose_transaction(block_id, SignedTransaction{});
+      client_.executorsched_propose_transaction(block_id, Transaction{});
   EXPECT_EQ(result.result(), ExecResult::ExecResultSystemError);
 
   client_.executorsched_finish_block(block_id);
@@ -175,7 +175,7 @@ TEST_F(RpcNegativeTest, TestProposeToNonExistentBlock)
 
   // Block 999999 was never opened
   auto result =
-      client_.executorsched_propose_transaction(999999, SignedTransaction{});
+      client_.executorsched_propose_transaction(999999, Transaction{});
   EXPECT_EQ(result.result(), ExecResult::ExecResultSystemError);
 }
 

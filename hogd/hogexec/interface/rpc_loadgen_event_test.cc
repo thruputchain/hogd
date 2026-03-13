@@ -176,9 +176,9 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
-    for (const auto &tx : init_block) {
+    for (const auto &stx : init_block) {
       auto propose_res =
-          client_.executorsched_propose_transaction(current_block_id, tx);
+          client_.executorsched_propose_transaction(current_block_id, stx.tx);
       ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
     }
 
@@ -208,9 +208,9 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   }
 
   // Propose each transaction
-  for (const auto &tx : txs) {
+  for (const auto &stx : txs) {
     auto propose_res =
-        client_.executorsched_propose_transaction(test_block_id, tx);
+        client_.executorsched_propose_transaction(test_block_id, stx.tx);
     // Transactions might succeed or fail depending on account balances, etc.
     // But they should not return SystemError if everything is set up correctly
     ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
@@ -272,9 +272,9 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
-    for (const auto &tx : init_block) {
+    for (const auto &stx : init_block) {
       auto propose_res =
-          client_.executorsched_propose_transaction(current_block_id, tx);
+          client_.executorsched_propose_transaction(current_block_id, stx.tx);
       ASSERT_EQ(propose_res.result(), ExecResult::ExecResultOK);
     }
 
@@ -307,9 +307,9 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   }
 
   // Propose transactions while events are blocked
-  for (const auto &tx : txs) {
+  for (const auto &stx : txs) {
     auto propose_res =
-        client_.executorsched_propose_transaction(test_block_id, tx);
+        client_.executorsched_propose_transaction(test_block_id, stx.tx);
     ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
   }
 
