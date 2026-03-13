@@ -204,8 +204,7 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id),
             ExecResult::ExecResultOK);
 
-  TransactionBatch txs = {Transaction{}, Transaction{},
-                           Transaction{}};
+  TransactionBatch txs = {Transaction{}, Transaction{}, Transaction{}};
   auto result = client_.executorsched_propose_batch(test_block_id, txs);
   ASSERT_EQ(result.size(), 3);
   for (auto &res : result) {

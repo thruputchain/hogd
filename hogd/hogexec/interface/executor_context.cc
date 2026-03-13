@@ -51,8 +51,8 @@ ExecutorContext::propose_transaction(Transaction const &tx, TransactionID tx_id)
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorContext::propose_transaction_batch(
-    TransactionBatch const &txs, TransactionID first_tx_id)
+ExecutorContext::propose_transaction_batch(TransactionBatch const &txs,
+                                           TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   x23::Awaitable<ExecProposeBatchResult> awaitable;
@@ -60,8 +60,7 @@ ExecutorContext::propose_transaction_batch(
   worker_pool_.submit([this, &txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < txs.size(); i++) {
-      batch_res.push_back(
-          run_propose_transaction(txs[i], first_tx_id + i));
+      batch_res.push_back(run_propose_transaction(txs[i], first_tx_id + i));
     }
     cb(std::move(batch_res));
   });

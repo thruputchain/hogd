@@ -72,8 +72,8 @@ ExecutorMempoolRpc::executorsched_validate_transaction(
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorMempoolRpc::executorsched_propose_batch(
-    BlockID block_id, TransactionBatch txs)
+ExecutorMempoolRpc::executorsched_propose_batch(BlockID block_id,
+                                                TransactionBatch txs)
 {
   auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
@@ -83,8 +83,8 @@ ExecutorMempoolRpc::executorsched_propose_batch(
   }
 
   CHECK(txs.size() <= std::numeric_limits<uint32_t>::max());
-  auto r = co_await ctx->get().propose_transaction_batch(
-      txs, allocate_tx_ids(txs.size()));
+  auto r = co_await ctx->get().propose_transaction_batch(txs, allocate_tx_ids(
+                                                                  txs.size()));
   co_await release_context(block_id, ctx);
   co_return r;
 }
