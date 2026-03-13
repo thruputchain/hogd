@@ -649,24 +649,31 @@ HogDBDAO::remove_item(const ItemKey &key)
   return HogDBError(HogDBCode::kInternal);
 }
 
-void
+HogDBStatus<void>
 HogDBDAO::apply(Prepared &prepared)
 {
+  HogDBStatus<void> status;
   auto ul = prepared.changes_.lock_threads();
-  prepared.changes_.for_each(ul, [this](
-                                     std::vector<MaterializedChange> &changes) {
+  prepared.changes_.for_each(ul, [&](std::vector<MaterializedChange> &changes) {
     for (const auto &change : changes) {
       switch (change.op) {
       case MaterializedChange::Op::kPut:
-        CHECK(db_.put(change.key, change.type, change.value).has_value());
+        if (auto r = db_.put(change.key, change.type, change.value); !r) {
+          status = HogDBError(HogDBCode::kInternal);
+          return;
+        }
         break;
       case MaterializedChange::Op::kRemove:
-        CHECK(db_.remove(change.key).has_value());
+        if (auto r = db_.remove(change.key); !r) {
+          status = HogDBError(HogDBCode::kInternal);
+          return;
+        }
         break;
       }
     }
     changes.clear();
   });
+  return status;
 }
 
 } // namespace hogd

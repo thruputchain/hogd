@@ -226,18 +226,19 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
-  // Phase C — Flush: apply all materialized changes to RAMDB.
-  // If compute_db_hash() was not called, prepare now.
+  // Apply all staged changes to RAMDB.
+  // If compute_db_hash() was not called, stage changes now.
   if (!prepared_.has_value()) {
-    auto r = compute_db_hash(DbHash{});
-    if (!r) {
+    if (auto r = compute_db_hash(DbHash{}); !r) {
       return r.error();
     }
   }
-  db_.apply(*prepared_);
+  if (auto r = db_.apply(*prepared_); !r) {
+    return r.error();
+  }
   prepared_.reset();
 
-  // Phase D — Extract auth/balance data (parallel destructive, no DAO writes).
+  // Extract auth/balance data (parallel destructive, no DAO writes).
   PerThread<KeyChangeBatch> key_changes;
 
   item_locks_.for_each_parallel_destructive(
@@ -290,8 +291,7 @@ BlockTX::commit(WorkerPool &pool)
 HogDBStatus<DbHash>
 BlockTX::compute_db_hash(const DbHash &base_hash)
 {
-  // Phase A — Prepare (parallel over locks, non-destructive).
-  // Materializes all finalized changes into a Prepared batch.
+  // Stage all finalized changes (parallel over locks, non-destructive).
   Prepared prepared = db_.prepare();
 
   std::mutex err_lock;
@@ -328,7 +328,7 @@ BlockTX::compute_db_hash(const DbHash &base_hash)
     return prepare_status.error();
   }
 
-  // Phase B — Hash (from MaterializedChange buffers).
+  // Compute hash delta from all staged changes.
   LtHash16 delta = prepared.close();
   LtHash16 final_hash = lthash16_from_db_hash(base_hash);
   final_hash += delta;

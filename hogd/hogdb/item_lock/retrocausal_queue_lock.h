@@ -17,6 +17,8 @@
 
 namespace hogd {
 
+// TODO(rstutsman): Consider using SipHash with a per-block random seed to
+// defend against adversarial hash collision attacks on consumed_set_balance_.
 struct QueueEntryHasher {
   size_t operator()(const QueueEntry &entry) const
   {
@@ -48,11 +50,6 @@ public:
   HogDBStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;
 
-  // Returns true if any consumed current-block entry was not matched by an
-  // insert across all committed TXs. Must be called after all commit_change()
-  // calls for the block have completed (i.e., at block close time).
-  bool has_unmatched_consumes() const;
-
   static uint64_t live_block_count(const RetrocausalQueueMetadata &meta)
   {
     return meta.max_live_block_num -
@@ -73,8 +70,8 @@ private:
 
   // Set to true when get_meta() encounters a kTypeMismatch error, indicating
   // the key exists in the DAO as a different type (e.g. bytestring). Used by
-  // write_committed_change to know it must remove the old item even when no
-  // RCQ metadata existed in the snapshot.
+  // prepare_committed_changes to know it must remove the old item even when
+  // no RCQ metadata existed in the snapshot.
   mutable bool base_was_different_type_{false};
 
   // Used in try_atomic_change_lock to ensure MPSC semantics;
@@ -88,7 +85,7 @@ private:
 
   // Used in commit_change to calculate the cost of the change and
   // stage all changes for writing. Not accessed concurrently, since
-  // access is limited to commit_change and write_committed_change.
+  // access is limited to commit_change and prepare_committed_changes.
   std::vector<QueueEntry> added_entries_;
   std::optional<RetrocausalQueueConsumeDelta> consume_delta_;
   // Change in entry count in the whole queue over the set of committed deltas.
@@ -103,6 +100,11 @@ private:
   // a malicious proposer.
   std::unordered_map<QueueEntry, int64_t, QueueEntryHasher>
       consumed_set_balance_;
+
+  // Returns true if any consumed current-block entry was not matched by an
+  // insert across all committed TXs. Called by prepare_committed_changes()
+  // at block close time to detect malicious proposer fabrication.
+  bool has_unmatched_consumes() const;
 
   mutable std::mutex mtx_;
 };

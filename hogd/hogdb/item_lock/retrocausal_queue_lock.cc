@@ -438,6 +438,9 @@ RetrocausalQueueLock::prepare_committed_changes(const LockContext &ctx,
         remaining_entries.push_back(entry);
       }
     }
+    // consumed_set was already validated by has_unmatched_consumes() in
+    // prepare_committed_changes(). This CHECK guards against logic errors
+    // in the filtering — it should never fire.
     CHECK(consumed_set.empty());
   }
   else {

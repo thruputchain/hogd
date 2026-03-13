@@ -326,7 +326,7 @@ public:
   Prepared prepare() { return Prepared(&db_); }
 
   // Apply all materialized changes from a Prepared batch to the database.
-  void apply(Prepared &prepared);
+  HogDBStatus<void> apply(Prepared &prepared);
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }

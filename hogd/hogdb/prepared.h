@@ -24,8 +24,8 @@ class Prepared {
   explicit Prepared(RAMDB *ramdb);
 
 public:
-  // Called by locks during Phase A (parallel over locks).
-  // Reads old value from RAMDB internally for hash element construction.
+  // Called by locks during block close to stage changes.
+  // Reads old value from RAMDB for hash element construction.
   void put(std::span<const std::byte> key, uint8_t type,
            std::span<const std::byte> value);
   void remove(std::span<const std::byte> key);

@@ -58,7 +58,7 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
       return cost;
     }
 
-    // Phase 1b: Under exclusive lock there is no concurrency, so every
+    // Under exclusive lock there is no concurrency, so every
     // current-block consumed entry must have been added by this same TX.
     // Verify identity: each consumed entry exists in added_entries.
     if (inner.delta().consume &&

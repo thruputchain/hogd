@@ -2,12 +2,12 @@
 
 #pragma once
 
+#include "x23/nmvec.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <memory>
 #include <span>
-#include <vector>
 
 namespace hogd {
 
@@ -56,9 +56,10 @@ private:
 
   struct Chunk {
     std::unique_ptr<std::byte[]> data;
-    size_t capacity;
+    size_t capacity = 0;
     size_t used = 0;
 
+    Chunk() = default;
     explicit Chunk(size_t cap)
       : data(std::make_unique<std::byte[]>(cap)), capacity(cap)
     {}
@@ -76,18 +77,18 @@ private:
 
   std::span<std::byte> alloc(size_t n)
   {
-    if (!chunks_.empty()) {
-      auto result = chunks_.back().try_alloc(n);
+    if (chunks_.size() > 0) {
+      auto result = chunks_[chunks_.size() - 1].try_alloc(n);
       if (!result.empty()) {
         return result;
       }
     }
     size_t cap = std::max(kChunkSize, n);
-    chunks_.emplace_back(cap);
-    return chunks_.back().try_alloc(n);
+    size_t idx = chunks_.emplace_back(cap);
+    return chunks_[idx].try_alloc(n);
   }
 
-  std::vector<Chunk> chunks_;
+  x23::NMVec<Chunk> chunks_;
 };
 
 } // namespace hogd

@@ -12,7 +12,7 @@ namespace hogd {
 
 // A single materialized DAO mutation with pre-built hash elements.
 // Byte data (keys, values, hash elements) stored as spans pointing into
-// a BumpAllocator arena. Zero per-record heap allocations.
+// a ByteArena. Zero per-record heap allocations.
 struct MaterializedChange {
   enum class Op : uint8_t { kPut, kRemove };
 
