@@ -98,19 +98,20 @@ reconcile_address_hog_age(HogDBDAO &db, const Address &address)
 {
   HogDBStatus<uint128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
-    error("address {} has a hog age row but could not read the balance row "
+    error("address 0x{} has a hog age row but could not read the balance row "
           "during reconciliation: {}",
           encode_hex(address.as_bytes()), balance.error());
     return balance.error();
   }
   if (*balance < 0) {
-    error("negative balance {} for address {} during hog age reconciliation",
-          *balance, encode_hex(address.as_bytes()));
+    error(
+        "address 0x{} has a negative balance {} during hog age reconciliation",
+        encode_hex(address.as_bytes()), *balance);
     return HogDBError(HogDBCode::kInternal);
   }
   HogDBStatus<HogAge> age = db.read_address_average_hog_age(address);
   if (!age.has_value()) {
-    error("address {} has a balance row but could not hog age row during "
+    error("address 0x{} has a balance row but could not hog age row during "
           "reconciliation: {}",
           encode_hex(address.as_bytes()), age.error());
     return age.error();
