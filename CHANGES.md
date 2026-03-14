@@ -1,5 +1,14 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::add_txs_with_prefetched_accounts()` overhead in [hogd/mempool/scheduler.cc] by lowering the background coroutine cap from 128 to 32 after profiling still showed the 256-transaction enqueue benchmark spending most of its CPU time in thread-pool futex waits and wakeups. The previous cap-to-work-size change removed empty workers, but 128 wakeups were still too expensive for medium and large batches.
+- Added a focused `bench_scheduler_schedule` benchmark in `hogd/mempool/test/bench.cc` so the scheduler path can be measured separately from enqueue and transfer processing when checking for regressions.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_add_txs/64` improved from about `0.76 ms` to `0.37 ms` CPU time, and `bench_scheduler_add_txs/256` from about `1.42 ms` to `0.47 ms`, while the schedule and transfer benchmarks stayed in the same range (`bench_scheduler_schedule/256`: `0.59 ms` to `0.60 ms`, `bench_scheduler_process_transfers/256`: `0.87 ms` to `0.82 ms`).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Reduced `hogd::Scheduler::process_transfers()` fan-out in [hogd/mempool/scheduler.cc] from 100 workers to 32 after profiling showed the 256-delta benchmark still spending most of its CPU time in thread-pool wakeups and futex contention rather than transfer math. The old split gave many workers only a couple of deltas each, so scheduler overhead dominated.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `bench_scheduler_process_transfers/64` improved from about `1.06 ms` to `0.78 ms` CPU time, and `bench_scheduler_process_transfers/256` from about `1.43 ms` to `0.83 ms`, while the smaller cases stayed roughly flat (`1`: `0.47 ms` to `0.44 ms`, `8`: `0.57 ms` to `0.57 ms`).

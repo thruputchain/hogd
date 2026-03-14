@@ -227,7 +227,9 @@ Scheduler::add_txs_with_prefetched_accounts(
     const x23::XdrVec<SignedTransaction> &txs,
     const std::unordered_set<ContractAddress> &accounts)
 {
-  constexpr size_t kMaxNumThreads = 128;
+  // Keep enqueue chunks coarse enough that worker wakeups do not dominate the
+  // per-transaction hashing and map insertion work.
+  constexpr size_t kMaxNumThreads = 32;
   const size_t num_threads = std::min(txs.size(), kMaxNumThreads);
   if (num_threads == 0) {
     co_return;
