@@ -131,3 +131,21 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+add_executable(
+  multiplexed_context_bench
+  multiplexed_context_bench.cc
+)
+target_link_libraries(
+  multiplexed_context_bench
+  hogd
+  runtime
+  benchmark::benchmark
+)
+
+target_include_directories(
+  multiplexed_context_bench
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+set_property(TARGET multiplexed_context_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

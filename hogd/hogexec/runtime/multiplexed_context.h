@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -15,9 +16,19 @@ namespace hogd {
 // contract instantiation to specialized contexts based on the contract type.
 class MultiplexedContext : public RuntimeContext {
 public:
+  struct RuntimeContextEntry {
+    RuntimeContext *context = nullptr;
+    bool owned = false;
+  };
+
   MultiplexedContext(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
           contexts);
+  MultiplexedContext(RuntimeContextEntry wasmi_context,
+                     RuntimeContextEntry native_context);
+  MultiplexedContext(RuntimeContextEntry wasmi_context,
+                     RuntimeContextEntry native_context,
+                     RuntimeContextEntry mock_context);
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
@@ -28,15 +39,17 @@ public:
 
   ~MultiplexedContext() override
   {
-    for (auto [_, context] : contexts_) {
-      if (context.second) {
-        delete context.first;
+    for (auto context : contexts_) {
+      if (context.owned) {
+        delete context.context;
       }
     }
   }
 
 private:
-  std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>> contexts_;
+  static size_t context_index(ContractType type);
+
+  std::array<RuntimeContextEntry, 3> contexts_{};
 };
 
 } // namespace hogd

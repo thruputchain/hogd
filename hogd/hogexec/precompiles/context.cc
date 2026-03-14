@@ -40,9 +40,13 @@ make_hogexec_context()
   auto hogexec_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
   return std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {hogexec_context.release(), true}},
-          {ContractType::kNative, {hogexec_native_context.get(), false}},
+      MultiplexedContext::RuntimeContextEntry{
+          .context = hogexec_context.release(),
+          .owned = true,
+      },
+      MultiplexedContext::RuntimeContextEntry{
+          .context = hogexec_native_context.get(),
+          .owned = false,
       });
 }
 
