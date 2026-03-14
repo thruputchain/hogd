@@ -635,7 +635,6 @@ Scheduler::schedule(size_t num_txs,
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       if (it == txs_to_schedule.end()) {
         account_it++;
-        CHECK(removed_accounts.insert(account).second);
         break;
       }
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
