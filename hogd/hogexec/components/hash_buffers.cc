@@ -13,6 +13,28 @@
 
 namespace hogd {
 
+namespace {
+
+std::vector<std::byte>
+make_buffer(std::span<const std::byte> data)
+{
+  std::vector<std::byte> buffer;
+  buffer.reserve(kSHA256BufferMaxSize);
+  buffer.insert(buffer.end(), data.begin(), data.end());
+  return buffer;
+}
+
+void
+prepare_buffer_for_reuse(std::vector<std::byte> &buffer)
+{
+  buffer.clear();
+  if (buffer.capacity() < kSHA256BufferMaxSize) {
+    buffer.reserve(kSHA256BufferMaxSize);
+  }
+}
+
+} // namespace
+
 SyscallStatus<SHA256Hash>
 HashBuffers::finalize(uint32_t index, size_t *output_size)
 {
@@ -37,7 +59,7 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
 
   auto it = buffers_.find(index);
   if (it != buffers_.end()) {
-    it->second.clear();
+    prepare_buffer_for_reuse(it->second);
     return update_existing_buffer(index, data);
   }
 
@@ -49,7 +71,7 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  buffers_[index] = std::vector<std::byte>(data.begin(), data.end());
+  buffers_[index] = make_buffer(data);
   return {};
 }
 

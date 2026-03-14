@@ -26,3 +26,22 @@ target_link_libraries(components_test
   GTest::gtest_main
 )
 gtest_discover_tests(components_test)
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    hash_buffers_bench
+    hash_buffers_bench.cc
+  )
+  target_link_libraries(
+    hash_buffers_bench
+    components
+    hogexec_common
+    hogd
+    benchmark::benchmark
+    benchmark::benchmark_main
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET hash_buffers_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()
