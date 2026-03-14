@@ -184,8 +184,31 @@ public:
   {
     CHECK_LE(start, size_);
     CHECK_LE(end, size_);
-    HexArray h;
-    append_helper(h, *this, start, end);
+    if (start == end) {
+      return HexArray();
+    }
+
+    HexArray h(UninitializedTag{});
+    h.size_ = end - start;
+    std::byte *dst = h.backing_store_.data();
+    const std::byte *src = backing_store_.data() + (start / 2);
+    size_t bytes_to_copy = (h.size_ + 1) / 2;
+
+    if (start % 2 == 0) {
+      memcpy(dst, src, bytes_to_copy);
+    }
+    else {
+      size_t source_bytes = (h.size_ + 2) / 2;
+      for (size_t i = 0; i < bytes_to_copy; i++) {
+        auto cur = static_cast<uint8_t>(src[i]);
+        auto next = (i + 1 < source_bytes) ? static_cast<uint8_t>(src[i + 1])
+                                            : 0U;
+        dst[i] = std::byte(((cur & 0x0F) << 4) | ((next & 0xF0) >> 4));
+      }
+    }
+    if (h.size_ % 2) {
+      dst[bytes_to_copy - 1] &= std::byte{0xF0};
+    }
     return h;
   }
 
@@ -222,8 +245,15 @@ public:
   bool empty() const { return size_ == 0U; }
 
 private:
+  struct UninitializedTag {
+  };
+
   // [kMaxNumHexDigits] is always even (see the static_assert() above).
   static constexpr size_t kArrayLength = kMaxNumHexDigits / 2;
+
+  explicit HexArray(UninitializedTag)
+  {
+  }
 
   void init()
   {
