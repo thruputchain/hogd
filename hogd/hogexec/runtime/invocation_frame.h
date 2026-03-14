@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -27,6 +28,15 @@ namespace hogd {
 
 class PerTransactionDatabaseProxy;
 struct InvokeResult;
+class InvocationFrame;
+
+namespace detail {
+
+std::optional<DeployedContractHash>
+lookup_locally_deployed_contract(std::span<const InvocationFrame> frames,
+                                 ContractAddress const &addr);
+
+} // namespace detail
 
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {

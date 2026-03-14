@@ -23,6 +23,23 @@
 
 namespace hogd {
 
+namespace detail {
+
+std::optional<DeployedContractHash>
+lookup_locally_deployed_contract(std::span<const InvocationFrame> frames,
+                                 ContractAddress const &addr)
+{
+  for (auto it = frames.rbegin(); it != frames.rend(); ++it) {
+    if (auto out = it->lookup_locally_deployed_contract(addr)) {
+      assert(out.has_value());
+      return out;
+    }
+  }
+  return std::nullopt;
+}
+
+} // namespace detail
+
 InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags)
   : address_(address), calldata_(std::forward<Calldata>(calldata)),
@@ -291,13 +308,7 @@ std::optional<DeployedContractHash>
 InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {
-  for (auto const &frame : frame_stack_) {
-    if (auto out = frame.lookup_locally_deployed_contract(addr)) {
-      assert(out.has_value());
-      return out;
-    }
-  }
-  return std::nullopt;
+  return detail::lookup_locally_deployed_contract(frame_stack_, addr);
 }
 
 ItemView *
