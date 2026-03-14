@@ -476,6 +476,18 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
+
+  // Small and medium transfer batches do not have enough per-delta work to
+  // amortize waking the thread pool, so handle them inline while holding the
+  // same scheduler lock as the parallel path.
+  constexpr size_t kInlineTransferBatchLimit = 256;
+  if (transfers.deltas.size() <= kInlineTransferBatchLimit) {
+    for (const Delta &delta : transfers.deltas) {
+      process_transfers_helper(delta, transfers.block);
+    }
+    co_return;
+  }
+
   std::vector<x23::Async<void>> handles;
   handles.reserve(num_threads);
   for (size_t i = 0; i < num_threads; i++) {
