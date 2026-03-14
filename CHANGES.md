@@ -1,5 +1,13 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::schedule()` inner-loop overhead in [hogd/mempool/scheduler.cc] by dropping the redundant `size_` atomic load from each per-transaction iteration and hoisting the next-block height calculation once per call. The current account's runqueue iterator already tells the loop when that account is drained, so repeatedly re-reading the global scheduler size was avoidable work in the hottest scheduling path.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_schedule/256` improved from about `0.54 ms` to `0.49 ms` CPU time, while the focused deep-runqueue case improved from about `0.35 ms` to `0.34 ms` CPU time (`bench_scheduler_schedule_single_account/256`: `345 us` to `336 us`). The enqueue and transfer benchmarks stayed in the same range or improved slightly (`bench_scheduler_add_txs/256`: `0.47 ms` to `0.40 ms`, `bench_scheduler_process_transfers/256`: `0.48 ms` to `0.48 ms`).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Reduced `hogd::Scheduler::schedule()` runqueue-removal overhead in [hogd/mempool/scheduler.cc] by batching each account's scheduled-prefix erase into a single `std::map::erase()` call and updating `size_` once per account. The previous loop erased every scheduled transaction individually, so deep and medium runqueues paid repeated tree-rebalance cost while walking the same prefix.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `bench_scheduler_schedule/256` improved from about `0.53 ms` to `0.49 ms` CPU time, while the other mempool benchmarks stayed in the same range (`bench_scheduler_add_txs/256`: `0.48 ms` to `0.38 ms`, `bench_scheduler_process_transfers/256`: `0.48 ms` to `0.48 ms`, `bench_scheduler_schedule_single_account/256`: `0.33 ms` to `0.34 ms`).

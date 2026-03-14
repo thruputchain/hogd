@@ -599,6 +599,7 @@ Scheduler::schedule(size_t num_txs,
 
   const TxKey lower_bound = {.expiry_block_height = current_block(),
                              .tx_hash = {}};
+  const BlockHeight next_block = current_block() + 1;
   auto account_it = ready_accounts_.begin();
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
     if (account_it == ready_accounts_.end()) {
@@ -641,7 +642,7 @@ Scheduler::schedule(size_t num_txs,
     size_t num_removed_by_account = 0;
     size_t num_scheduled_by_account = 0;
     const auto scheduled_begin = it;
-    while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
+    while (num_scheduled < num_txs) {
       if (it == txs_to_schedule.end()) {
         account_it++;
         break;
@@ -706,7 +707,7 @@ Scheduler::schedule(size_t num_txs,
       // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
       // this account.
       move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
-                                           current_block() + 1);
+                                           next_block);
     }
   }
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
