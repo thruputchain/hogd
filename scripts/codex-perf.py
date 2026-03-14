@@ -4,6 +4,8 @@ for i in {1..100}; do
   timeout 60m codex exec --dangerously-bypass-approvals-and-sandbox "
 Goal: improve runtime performance without changing behavior.
 
+Make sure you start in the main branch if you are not there already.
+
 Procedure:
 1. Read CHANGES.md first so you do not repeat previous work.
 2. Identify one hotspot using benchmarks or profiling.
@@ -25,7 +27,11 @@ Procedure:
    - commit all relevant changes with a detailed commit message in this new
      branch
    - push to HEAD
-   - stop immediately without switching back to the previous branch
+   - switch back to the main branch
+   - open a GitHub PR for review with the gh command line tool and fill in the
+     command accordingly: gh pr create --base main --head my-branch --title \"My
+     PR title\" --body \"Description of the change\"
+   - stop immediately
 8. If the change is not correct or not faster, revert it and stop without making
 a new branch or committing.
 
