@@ -28,15 +28,15 @@ for i in {1..100}; do
     -p MemoryMax=300G \
     -p MemorySwapMax=0 \
     sudo -u "$USER" \
-      env \
-        HOME="$HOME" \
-        PATH="$PATH" \
-        XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-        XDG_CONFIG_HOME="${XDG_CONFIG_HOME-}" \
-        XDG_CACHE_HOME="${XDG_CACHE_HOME-}" \
-        OPENAI_API_KEY="${OPENAI_API_KEY-}" \
-        OPENAI_BASE_URL="${OPENAI_BASE_URL-}" \
-        OPENAI_ORG_ID="${OPENAI_ORG_ID-}" \
+    env \
+    HOME="$HOME" \
+    PATH="$PATH" \
+    XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+    XDG_CONFIG_HOME="${XDG_CONFIG_HOME-}" \
+    XDG_CACHE_HOME="${XDG_CACHE_HOME-}" \
+    OPENAI_API_KEY="${OPENAI_API_KEY-}" \
+    OPENAI_BASE_URL="${OPENAI_BASE_URL-}" \
+    OPENAI_ORG_ID="${OPENAI_ORG_ID-}" \
     timeout --kill-after=30s 60m \
     codex exec --dangerously-bypass-approvals-and-sandbox "
 Goal: improve runtime performance without changing behavior.
@@ -78,7 +78,7 @@ Prioritize making changes to \"${FOCUS_DIR}\".
 Use \"$WORKSPACE_PATH\" as your workspace (make the directory if needed).
 Do not make more than one optimization in this run.
 "; then
-  echo "Iteration $i failed or timed out" >&2
-  exit 1
-fi
+    echo "Iteration $i failed or timed out" >&2
+    exit 1
+  fi
 done
