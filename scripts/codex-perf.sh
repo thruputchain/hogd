@@ -23,7 +23,7 @@ for i in {1..100}; do
   git reset --hard
   git clean -fd
 
-  systemd-run --user --scope \
+  systemd-run --scope \
     -p MemoryHigh=270G \
     -p MemoryMax=300G \
     -p MemorySwapMax=0 \
