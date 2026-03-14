@@ -17,6 +17,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -59,6 +60,47 @@ precompute_paths(size_t num_paths)
     paths.push_back(generate_64_byte_path());
   }
   return paths;
+}
+
+std::vector<std::byte>
+get_sample_branch_encoding()
+{
+  Node branch;
+  branch.clear();
+  branch.init_branch(/*parent=*/nullptr);
+  branch.value_hash = SHA256Hash();
+
+  std::array<Node, Node::kMaxNumBranches> children;
+  for (size_t i = 0; i < children.size(); i++) {
+    children[i].clear();
+    children[i].init_leaf(/*parent=*/&branch);
+    children[i].hash.fill(static_cast<unsigned char>(i));
+    branch.child[i] = &children[i];
+  }
+
+  return branch.get_node_encoding();
+}
+
+std::vector<std::byte>
+get_sample_extension_encoding()
+{
+  Node extension;
+  extension.clear();
+  extension.init_extension(/*parent=*/nullptr);
+
+  std::array<std::byte, 63> path_bytes;
+  for (size_t i = 0; i < path_bytes.size(); i++) {
+    path_bytes[i] = std::byte{static_cast<unsigned char>(i)};
+  }
+  extension.path = HexArray(path_bytes);
+
+  Node child;
+  child.clear();
+  child.init_leaf(/*parent=*/&extension);
+  child.hash.fill(0xAB);
+  extension.child[0] = &child;
+
+  return extension.get_node_encoding();
 }
 
 // Inserts 2 million KV pairs into a trie. Node hashes are computed on every
@@ -435,6 +477,35 @@ prove(benchmark::State &state)
   }
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
+
+void
+decode_branch_node_encoding(benchmark::State &state)
+{
+  const std::vector<std::byte> encoding = get_sample_branch_encoding();
+  Node::Raw node;
+  for (auto _ : state) {
+    size_t idx = 0;
+    CHECK(Node::get_node_from_encoding(encoding, idx, node));
+    CHECK_EQ(idx, encoding.size());
+    benchmark::DoNotOptimize(node.hash);
+  }
+}
+BENCHMARK(decode_branch_node_encoding)->Unit(benchmark::kNanosecond);
+
+void
+decode_extension_node_encoding(benchmark::State &state)
+{
+  const std::vector<std::byte> encoding = get_sample_extension_encoding();
+  Node::Raw node;
+  for (auto _ : state) {
+    size_t idx = 0;
+    CHECK(Node::get_node_from_encoding(encoding, idx, node));
+    CHECK_EQ(idx, encoding.size());
+    benchmark::DoNotOptimize(node.hash);
+    benchmark::DoNotOptimize(node.path);
+  }
+}
+BENCHMARK(decode_extension_node_encoding)->Unit(benchmark::kNanosecond);
 
 void
 hash_parallel(benchmark::State &state, size_t num_threads)
