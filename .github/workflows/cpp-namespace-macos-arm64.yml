@@ -107,6 +107,13 @@ jobs:
       - name: Build Clang Debug
         run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
 
+      - name: Pre-build Rust Test Binaries
+        run: |
+          cd hogd/rust
+          cargo test --workspace --no-run --locked --frozen --offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+
       - name: Run Tests
         run: |
           echo "::warning::Known issue: Sha2InContractTest.InvokeFFFFF is broken on ARM64 due to winch miscompilation. The test will be skipped automatically."
