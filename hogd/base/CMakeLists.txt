@@ -26,6 +26,7 @@ add_library(base_test_objects OBJECT
   bits_test.cc
   cpputil_test.cc
   io_test.cc
+  log_test.cc
   perthread_arc_test.cc
   perthread_test.cc
   status_test.cc
@@ -51,3 +52,19 @@ target_link_libraries(
   GTest::gtest
 )
 gtest_discover_tests(base_test)
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    base_bench
+    log_bench.cc
+  )
+  target_link_libraries(
+    base_bench
+    base
+    benchmark::benchmark
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET base_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

@@ -116,6 +116,15 @@ namespace detail {
 
 extern std::unique_ptr<Logger> logger;
 
+inline std::string_view
+source_basename(std::string_view path)
+{
+  size_t pos = path.rfind('/');
+  if (pos == std::string_view::npos)
+    return path;
+  return path.substr(pos + 1);
+}
+
 template<LogLevel Level>
 void
 do_log(std::string_view fmt, const std::source_location &loc,
