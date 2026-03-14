@@ -360,12 +360,13 @@ Benchmark::run()
   size_t width = ops_.size() / workers_.worker_count() / kBatchesPerWorker;
   workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
-  // Optionally compute the hash as part of the benchmark
+  // Close the block (stages changes and computes hash).
+  auto hash_result = block.get().close(DbHash{});
+  CHECK(hash_result.has_value());
+
+  // Optionally use the hash result as part of the benchmark.
   if (compute_db_hash_) {
-    DbHash base_hash{};
-    auto hash_result = block.get().close(base_hash);
-    CHECK(hash_result.has_value());
-    base_hash = *hash_result;
+    DbHash base_hash = *hash_result;
     asm volatile("" : : "m"(base_hash) : "memory");
   }
 
