@@ -6,6 +6,8 @@
 #include <cassert>
 #include <concepts>
 #include <coroutine>
+#include <cstdint>
+#include <cstdlib>
 #include <new>
 #include <source_location>
 #include <string>
@@ -26,6 +28,36 @@
 namespace x23 {
 
 using std::source_location;
+
+namespace detail {
+
+inline void *
+allocate_aligned_frame(std::size_t size, std::align_val_t align)
+{
+  std::size_t alignment = static_cast<std::size_t>(align);
+  std::size_t bytes = size + alignment - 1 + sizeof(void *);
+  if (bytes < size) [[unlikely]]
+    throw std::bad_alloc{};
+
+  void *raw = std::malloc(bytes);
+  if (!raw) [[unlikely]]
+    throw std::bad_alloc{};
+
+  auto base = reinterpret_cast<std::uintptr_t>(raw) + sizeof(void *);
+  auto aligned =
+      reinterpret_cast<void *>((base + alignment - 1) & ~(alignment - 1));
+  reinterpret_cast<void **>(aligned)[-1] = raw;
+  return aligned;
+}
+
+inline void
+deallocate_aligned_frame(void *ptr) noexcept
+{
+  if (ptr)
+    std::free(reinterpret_cast<void **>(ptr)[-1]);
+}
+
+} // namespace detail
 
 #if X23_CORO_TRACE
 
@@ -63,11 +95,15 @@ struct PromiseBase {
       hardware_destructive_interference_size};
   void *operator new(std::size_t size)
   {
-    return ::operator new(size, kFrameAlign);
+    return detail::allocate_aligned_frame(size, kFrameAlign);
   }
   void operator delete(void *ptr, std::size_t size)
   {
-    ::operator delete(ptr, size, kFrameAlign);
+    detail::deallocate_aligned_frame(ptr);
+  }
+  void operator delete(void *ptr) noexcept
+  {
+    detail::deallocate_aligned_frame(ptr);
   }
 
   PromiseBase(source_location sloc) noexcept
@@ -145,11 +181,15 @@ struct PromiseBase {
       hardware_destructive_interference_size};
   void *operator new(std::size_t size)
   {
-    return ::operator new(size, kFrameAlign);
+    return detail::allocate_aligned_frame(size, kFrameAlign);
   }
   void operator delete(void *ptr, std::size_t size)
   {
-    ::operator delete(ptr, size, kFrameAlign);
+    detail::deallocate_aligned_frame(ptr);
+  }
+  void operator delete(void *ptr) noexcept
+  {
+    detail::deallocate_aligned_frame(ptr);
   }
 
   PromiseBase() noexcept = default;

@@ -1,5 +1,12 @@
 2026-03-13
 
+- Optimized coroutine frame allocation in `x23/x23/corotrace.h` by replacing the aligned global `operator new`/`operator delete` path with a small manual cache-line-aligned allocator. `x23::PromiseBase` still returns frames aligned to `hardware_destructive_interference_size`, but avoids the heavier libc aligned-allocation path on every coroutine creation and destruction.
+- Benchmark result on `/tmp/codex/hogd-head-baseline-build/x23/tests/bench` versus `/tmp/codex/hogd-build/x23/tests/bench` with `--benchmark_filter='synchronous_empty_coro|coawait_empty_async|time_async_return|time_maybesync_return_async' --benchmark_min_time=1s --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `synchronous_empty_coro` improved from about `13.6 ns` to `9.03 ns`, `coawait_empty_async` from `13.9 ns` to `8.94 ns`, `time_async_return` from `18.9 ns` to `13.3 ns`, and `time_maybesync_return_async` from `19.5 ns` to `13.5 ns` CPU time.
+- Validation:
+  `scripts/build.sh -d /tmp/codex/hogd-build`
+  `ctest --test-dir /tmp/codex/hogd-build/x23/tests --output-on-failure`
+
 - Optimized the byte-backed `HexArray` constructors in `hogd/container/merkle/hex_array.h` to skip zero-initializing the entire backing store before copying input bytes. Those constructors always produce an even-length logical path, so the untouched suffix stays unobservable until later writes, and the old memset was pure overhead on every Merkle path materialization.
 - Added a focused `bench_hex_array_from_bytes` benchmark in `hogd/container/merkle/merkle_trie_bench.cc` to keep the constructor cost measurable.
 - Benchmark result on `/tmp/codex/hogd-build/hogd/container/merkle/merkle_trie_bench --benchmark_filter='bench_hex_array_from_bytes' --benchmark_min_time=1s --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
