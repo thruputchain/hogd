@@ -240,6 +240,25 @@ TEST(HexArray, NotLessThanBecauseLongerLength)
   EXPECT_FALSE(a < b);
 }
 
+TEST(HexArray, CommonRangeLengthAligned)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("01234567fedcba98");
+
+  EXPECT_EQ(a.get_common_range_length(b, 0, 0), 8);
+  EXPECT_EQ(a.get_common_range_length(b, 2, 2), 6);
+}
+
+TEST(HexArray, CommonRangeLengthMisaligned)
+{
+  HexArray a("f123456789");
+  HexArray b("00123456ab");
+
+  EXPECT_EQ(a.get_common_range_length(b, 1, 2), 6);
+  EXPECT_EQ(a.get_common_range_length(b, 3, 4), 4);
+  EXPECT_EQ(a.get_common_range_length(b, 8, 7), 0);
+}
+
 TEST(HexArray, GetSubarrayEntireArray)
 {
   HexArray a("0123456789abcdef");

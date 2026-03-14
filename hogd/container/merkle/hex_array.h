@@ -128,6 +128,43 @@ public:
     return false;
   }
 
+  size_t get_common_range_length(const HexArray &other, size_t this_start,
+                                 size_t other_start) const
+  {
+    CHECK_LE(this_start, size_);
+    CHECK_LE(other_start, other.size_);
+
+    size_t remaining =
+        std::min(size_ - this_start, other.size_ - other_start);
+    size_t common_length = 0;
+    while (remaining && ((this_start % 2 != 0U) || (other_start % 2 != 0U))) {
+      if (get(this_start) != other.get(other_start)) {
+        return common_length;
+      }
+      this_start++;
+      other_start++;
+      remaining--;
+      common_length++;
+    }
+
+    while (remaining >= 2) {
+      std::byte lhs = backing_store_[this_start / 2];
+      std::byte rhs = other.backing_store_[other_start / 2];
+      if (lhs != rhs) {
+        return common_length + (((lhs >> 4) == (rhs >> 4)) ? 1U : 0U);
+      }
+      this_start += 2;
+      other_start += 2;
+      remaining -= 2;
+      common_length += 2;
+    }
+
+    if (remaining == 1 && get(this_start) == other.get(other_start)) {
+      common_length++;
+    }
+    return common_length;
+  }
+
   std::string str() const
   {
     std::ostringstream oss;

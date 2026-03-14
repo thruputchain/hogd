@@ -27,21 +27,7 @@ size_t
 get_longest_common_range_length(const HexArray &a, size_t a_start,
                                 const HexArray &b, size_t b_start)
 {
-  CHECK_LE(a_start, a.size());
-  CHECK_LE(b_start, b.size());
-
-  size_t a_size = a.size() - a_start;
-  size_t length = 0;
-  for (size_t i = 0; i < a_size; i++) {
-    if (i + b_start >= b.size()) {
-      break;
-    }
-    if (a.get(i + a_start) != b.get(i + b_start)) {
-      break;
-    }
-    length++;
-  }
-  return length;
+  return a.get_common_range_length(b, a_start, b_start);
 }
 
 bool
