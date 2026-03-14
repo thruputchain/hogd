@@ -286,7 +286,7 @@ BlockTX::commit(WorkerPool &pool)
 }
 
 HogDBStatus<void>
-BlockTX::close()
+BlockTX::close_skip_hash_for_testing()
 {
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
   if (auto r = stage_locks(changes); !r) {

@@ -367,7 +367,7 @@ Benchmark::run()
     asm volatile("" : : "m"(*hash_result) : "memory");
   }
   else {
-    CHECK(block.get().close().has_value());
+    CHECK(block.get().close_skip_hash_for_testing().has_value());
   }
 
   // commit changes to the ramdb.
@@ -536,7 +536,7 @@ RCQBenchmark::run_sequential()
           work_items.size() / workers_.worker_count() / kBatchesPerWorker;
       workers_.for_each_parallel(work_items, insert_fn, std::max(width, 1UL));
 
-      CHECK(block_tx.get().close().has_value());
+      CHECK(block_tx.get().close_skip_hash_for_testing().has_value());
       HogDBStatus<void> ret = block_tx.get().commit(workers_).and_then(
           [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)
@@ -613,7 +613,7 @@ RCQBenchmark::run_sequential()
 
       workers_.for_each_parallel(queue_indices, consume_fn, 1);
 
-      CHECK(block_tx.get().close().has_value());
+      CHECK(block_tx.get().close_skip_hash_for_testing().has_value());
       auto ret = block_tx.get().commit(workers_).and_then(
           [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)
@@ -825,7 +825,7 @@ RCQBenchmark::run_concurrent()
            block_start_ns) *
           1e-9;
 
-      CHECK(block_tx.get().close().has_value());
+      CHECK(block_tx.get().close_skip_hash_for_testing().has_value());
       auto ret = block_tx.get().commit(workers_).and_then(
           [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)

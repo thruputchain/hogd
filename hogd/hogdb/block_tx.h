@@ -71,12 +71,13 @@ public:
   HogDBStatus<std::optional<QueueEntry>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
-  // Stage all finalized lock changes into a ChangeSet. Must be called
-  // before commit(). When base_hash is provided, also computes the hash
-  // delta and returns the final db hash. Without base_hash, stages
-  // changes only (skips hash computation for better performance).
+  // Stage all finalized lock changes into a ChangeSet and compute the hash
+  // delta. Returns the final db hash. Must be called before commit().
   HogDBStatus<DbHash> close(const DbHash &base_hash);
-  HogDBStatus<void> close();
+
+  // Test/benchmark only: stage changes without computing the hash.
+  // Do not use in production code — the db hash is required for consensus.
+  HogDBStatus<void> close_skip_hash_for_testing();
 
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
