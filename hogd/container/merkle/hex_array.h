@@ -70,9 +70,8 @@ public:
   }
   {
     CHECK_LE(bytes.size(), kArrayLength);
-
-    init();
-
+    // For byte-backed construction the logical length is always even, so any
+    // untouched suffix bytes remain unobservable until later writes fill them.
     if (!bytes.empty()) {
       std::memcpy(backing_store_.data(), bytes.data(), bytes.size());
     }
@@ -82,9 +81,6 @@ public:
   HexArray(const SHA256Hash &hash)
   {
     CHECK_LE(hash.size(), kArrayLength);
-
-    init();
-
     memcpy(backing_store_.data(), &hash, hash.size() * sizeof(hash[0]));
     size_ = hash.size() * 2;
   }

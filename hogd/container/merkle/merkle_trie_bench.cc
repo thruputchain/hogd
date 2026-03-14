@@ -646,6 +646,21 @@ insert_with_128_threads(benchmark::State &state)
 }
 BENCHMARK(insert_with_128_threads)->Unit(benchmark::kMillisecond);
 
+void
+bench_hex_array_from_bytes(benchmark::State &state)
+{
+  std::array<std::byte, 64> bytes;
+  for (size_t i = 0; i < bytes.size(); ++i)
+    bytes[i] = static_cast<std::byte>(i);
+
+  for (auto _ : state) {
+    HexArray path(bytes);
+    benchmark::DoNotOptimize(path);
+    benchmark::ClobberMemory();
+  }
+}
+BENCHMARK(bench_hex_array_from_bytes);
+
 struct Init {
   Init()
   {
