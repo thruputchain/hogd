@@ -464,39 +464,23 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   co_await read_average_hog_ages(transfers);
 
   constexpr size_t kNumThreads = 100;
-  size_t deltas_per_thread = transfers.deltas.size() / kNumThreads;
-  if (transfers.deltas.size() % kNumThreads) {
-    // Have each thread handle an extra delta so that there are no deltas
-    // leftover. Note that some of the threads may end up doing more work than
-    // other threads.
-    //
-    // e.g.,
-    // If there are 1,000 deltas and 128 threads:
-    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
-    // [deltas_per_thread] = 8.
-    // Threads 0-124 will handle 8 detlas.
-    // Threads 125, 126, and 127 will handle *no* deltas.
-    deltas_per_thread++;
-  }
+  const std::vector<ChunkRange> chunks =
+      make_chunks(transfers.deltas.size(), kNumThreads);
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
-  handles.reserve(kNumThreads);
-  for (size_t i = 0; i < kNumThreads; i++) {
-    handles.push_back([](size_t coro_idx, const HogsTransferred *transfers,
-                         size_t deltas_per_thread,
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
                          Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * deltas_per_thread;
-      size_t possible_end = (coro_idx + 1) * deltas_per_thread;
-      size_t end = std::min(possible_end, transfers->deltas.size());
-      for (size_t delta_idx = start; delta_idx < end; delta_idx++) {
+      for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
         scheduler->process_transfers_helper(transfers->deltas[delta_idx],
                                             transfers->block);
       }
       co_return;
-    }(/*coro_idx=*/i, &transfers, deltas_per_thread, this));
+    }(chunk, &transfers, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
