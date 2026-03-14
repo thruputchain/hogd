@@ -59,3 +59,14 @@ target_link_libraries(
 )
 
 set_property(TARGET coordinator PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+if(BENCHMARK_PATH)
+add_executable(
+  mempool_bench
+  bench.cc
+)
+target_link_libraries(mempool_bench
+  mempool
+  benchmark::benchmark
+)
+endif()

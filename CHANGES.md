@@ -1,5 +1,14 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::add_txs()` enqueue overhead in [hogd/mempool/scheduler.cc] by capping the number of background coroutines to the amount of real work instead of always launching 128 workers. Small and medium transaction batches were paying nearly constant scheduler overhead because most of those coroutines immediately found empty slices.
+- Added a focused enqueue benchmark in `hogd/mempool/test/bench.cc` that preloads account ages and measures only the post-lookup insertion path, so the scheduler hot path is observable without the RAM DB test harness dominating results.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_add_txs/1` improved from about `1.08 ms` to `0.016 ms` CPU time, `bench_scheduler_add_txs/8` from about `1.09 ms` to `0.097 ms`, and `bench_scheduler_add_txs/64` from about `1.14 ms` to `0.70 ms`, while the large-batch case stayed effectively flat (`256` txs: `1.23 ms` to `1.27 ms`).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Added a ready-result fast path to `x23::Async<T>::operator()(Callback)` in `x23/x23/async.h`. Previously every callback invocation spawned a trampoline coroutine even when the `Async` had already completed, which added avoidable overhead to immediate-return paths such as `async_return()`.
 - Benchmark result on `/tmp/hogd-codex-build/x23/tests/bench --benchmark_filter='time_async_return|time_sync_return|time_maybesync_return_async|time_maybesync_return_sync' --benchmark_min_time=1s --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `time_async_return` improved from about `32.0 ns` to `19.2 ns`, and `time_maybesync_return_async` improved from about `30.8 ns` to `18.6 ns`, while the synchronous baselines stayed flat (`time_sync_return` at `4.00 ns`, `time_maybesync_return_sync` at `1.33 ns`).

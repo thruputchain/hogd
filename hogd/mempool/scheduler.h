@@ -50,6 +50,12 @@ public:
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
 
+  // Exposed for testing and benchmarking so the enqueue path can be measured
+  // independently once account ages are already cached.
+  x23::Async<void> add_txs_with_prefetched_accounts(
+      const x23::XdrVec<SignedTransaction> &txs,
+      const std::unordered_set<ContractAddress> &accounts);
+
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
@@ -110,6 +116,12 @@ public:
   read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
   x23::Async<std::unordered_set<ContractAddress>>
   read_average_hog_ages(const HogsTransferred &transfers);
+
+  void set_cached_hog_age_for_testing(const HogAge &age)
+  {
+    auto [value_in_map, lock] = accounts_[age.address];
+    value_in_map = age;
+  }
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:

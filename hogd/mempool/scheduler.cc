@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/bits.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
@@ -218,26 +219,24 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   // [read_average_hog_ages] on a separate thread.
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
+  co_await add_txs_with_prefetched_accounts(txs, accounts);
+}
 
-  constexpr size_t kNumThreads = 128;
-  size_t txs_per_thread = txs.size() / kNumThreads;
-  if (txs.size() % kNumThreads) {
-    // Have each thread handle an extra tx so that there are no txs leftover.
-    // Note that some of the threads may end up doing more work than other
-    // threads.
-    //
-    // e.g.,
-    // If there are 1,000 txs and 128 threads:
-    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
-    // [txs_per_thread] = 8.
-    // Threads 0-124 will handle 8 txs.
-    // Threads 125, 126, and 127 will handle *no* txs.
-    txs_per_thread++;
+x23::Async<void>
+Scheduler::add_txs_with_prefetched_accounts(
+    const x23::XdrVec<SignedTransaction> &txs,
+    const std::unordered_set<ContractAddress> &accounts)
+{
+  constexpr size_t kMaxNumThreads = 128;
+  const size_t num_threads = std::min(txs.size(), kMaxNumThreads);
+  if (num_threads == 0) {
+    co_return;
   }
+  const size_t txs_per_thread = divide_up(txs.size(), num_threads);
 
   std::vector<x23::Async<void>> handles;
-  handles.reserve(kNumThreads);
-  for (size_t i = 0; i < kNumThreads; i++) {
+  handles.reserve(num_threads);
+  for (size_t i = 0; i < num_threads; i++) {
     handles.push_back([](size_t coro_idx,
                          const x23::XdrVec<hogd::SignedTransaction> &txs,
                          size_t txs_per_thread,
