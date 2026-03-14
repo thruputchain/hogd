@@ -189,6 +189,27 @@ public:
     return h;
   }
 
+  bool range_equals(size_t start, size_t end, const HexArray &other) const
+  {
+    CHECK_LE(start, size_);
+    CHECK_LE(end, size_);
+    CHECK_LE(start, end);
+
+    size_t range_size = end - start;
+    if (range_size != other.size()) {
+      return false;
+    }
+    if (range_size == 0U) {
+      return true;
+    }
+
+    if (start % 2 != 0) {
+      return range_equals_slow(start, end, /*other_start=*/0, other);
+    }
+
+    return range_equals_aligned(start, end, /*other_start=*/0, other);
+  }
+
   void to_byte_vector(std::vector<std::byte> &v) const
   {
     std::copy_n(backing_store_.begin(), (size_ + 1) / 2, std::back_inserter(v));
@@ -275,6 +296,49 @@ private:
       }
     }
     append_to.size_ += append_size;
+  }
+
+  bool range_equals_aligned(size_t start, size_t end, size_t other_start,
+                            const HexArray &other) const
+  {
+    CHECK_LE(start, size_);
+    CHECK_LE(end, size_);
+    CHECK_LE(start, end);
+    CHECK_LE(other_start, other.size_);
+    CHECK_EQ(start % 2, other_start % 2);
+
+    size_t remaining_size = end - start;
+    CHECK_LE(other_start + remaining_size, other.size_);
+
+    size_t byte_count = remaining_size / 2;
+    if (byte_count > 0 &&
+        std::memcmp(backing_store_.data() + (start / 2),
+                    other.backing_store_.data() + (other_start / 2),
+                    byte_count) != 0) {
+      return false;
+    }
+    if (remaining_size % 2 == 0) {
+      return true;
+    }
+
+    return get(end - 1) == other.get(other_start + remaining_size - 1);
+  }
+
+  bool range_equals_slow(size_t start, size_t end, size_t other_start,
+                         const HexArray &other) const
+  {
+    CHECK_LE(start, size_);
+    CHECK_LE(end, size_);
+    CHECK_LE(start, end);
+    CHECK_LE(other_start, other.size_);
+    CHECK_LE(other_start + (end - start), other.size_);
+
+    for (size_t i = 0; i < end - start; i++) {
+      if (get(start + i) != other.get(other_start + i)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   std::array<std::byte, kArrayLength> backing_store_;

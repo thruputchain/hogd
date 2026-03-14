@@ -304,6 +304,54 @@ TEST(HexArray, GetSubarrayClipEnd)
   EXPECT_FALSE(subarray.empty());
 }
 
+TEST(HexArray, RangeEqualsMatchAtBeginning)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("012345");
+
+  EXPECT_TRUE(a.range_equals(0, b.size(), b));
+}
+
+TEST(HexArray, RangeEqualsMatchInMiddle)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("789abc");
+
+  EXPECT_TRUE(a.range_equals(7, 13, b));
+}
+
+TEST(HexArray, RangeEqualsOddStartOddLength)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("56789");
+
+  EXPECT_TRUE(a.range_equals(5, 10, b));
+}
+
+TEST(HexArray, RangeEqualsDifferentContents)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("789abd");
+
+  EXPECT_FALSE(a.range_equals(7, 13, b));
+}
+
+TEST(HexArray, RangeEqualsDifferentLength)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("789abc0");
+
+  EXPECT_FALSE(a.range_equals(7, 13, b));
+}
+
+TEST(HexArray, RangeEqualsEmptyRange)
+{
+  HexArray a("0123456789abcdef");
+  HexArray empty;
+
+  EXPECT_TRUE(a.range_equals(5, 5, empty));
+}
+
 TEST(HexArray, ToByteVector)
 {
   HexArray a("0123456789abcdef");
