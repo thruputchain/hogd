@@ -1,7 +1,7 @@
 set -euo pipefail
 
 for i in {1..20}; do
-  timeout 60m codex exec --full-auto "
+  timeout 60m codex exec --dangerously-bypass-approvals-and-sandbox "
 Goal: improve runtime performance without changing behavior.
 
 Procedure:
