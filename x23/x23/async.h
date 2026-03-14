@@ -562,15 +562,25 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto /*cb*/
+  void operator()(detail::is_callback_of<R> auto cb
                       SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
-    // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
-    // If you see a segfault on the line below, it may be because you wrote a
-    // function that returns an [x23::Async<T>] and you forgot to include a
-    // return/co_return statement at the end of the function.
-    co_return co_await self;
+    promise_type &p = self.callee_.promise();
+    if (!p.await_ready()) {
+      callback_bridge(std::move(self), std::move(cb) SLOC_COMMA_VAR);
+      return;
+    }
+    try {
+      if constexpr (std::is_void_v<R>) {
+        p.await_resume();
+        std::invoke(std::move(cb));
+      }
+      else
+        std::invoke(std::move(cb), p.await_resume());
+    } catch (...) {
+      trace_unhandled_exception(&p);
+    }
   }
   template<std::convertible_to<Callback<R>> CB>
   requires (!detail::is_callback_of<CB, R>)
@@ -602,6 +612,15 @@ template<typename R> struct [[nodiscard]] Async {
   }
 
 private:
+  static void callback_bridge(Async self, detail::is_callback_of<R> auto cb
+                                     SLOC_DECL) // NOLINT(misc-unused-parameters)
+  {
+    // If you see a segfault on the line below, it may be because you wrote a
+    // function that returns an [x23::Async<T>] and you forgot to include a
+    // return/co_return statement at the end of the function.
+    co_return co_await self;
+  }
+
   handle_type callee_;
   Async(handle_type h) : callee_(h) { h.promise().launch(); }
 };
