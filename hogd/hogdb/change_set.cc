@@ -7,10 +7,10 @@
 
 #include "hogd/base/log.h"
 #include "hogd/crypto/lthash16.h"
-#include "hogd/ramdb/db_status.h"
 #include "hogd/hogdb/byte_arena.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/materialized_change.h"
+#include "hogd/ramdb/db_status.h"
 
 namespace hogd {
 
