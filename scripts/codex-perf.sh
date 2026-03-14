@@ -26,6 +26,7 @@ for i in {1..100}; do
   systemd-run --user --scope \
     -p MemoryHigh=270G \
     -p MemoryMax=300G \
+    -p MemorySwapMax=0 \
     timeout 60m codex exec --dangerously-bypass-approvals-and-sandbox "
 Goal: improve runtime performance without changing behavior.
 
