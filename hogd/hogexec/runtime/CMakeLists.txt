@@ -173,3 +173,24 @@ add_dependencies(
   runtime_test
   all_wasm_contracts
 )
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    invocation_frame_bench
+    invocation_frame_bench.cc
+  )
+  target_link_libraries(
+    invocation_frame_bench
+    runtime
+    benchmark::benchmark_main
+  )
+  target_include_directories(
+    invocation_frame_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET invocation_frame_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()
