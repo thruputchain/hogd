@@ -1408,11 +1408,10 @@ MerkleTrie::compute_node_hash(Node &node) const
 void
 MerkleTrie::generate_all_hashes()
 {
-  HexArray prefix;
-  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+  auto f = [&](Node &node, Node * /*parent*/) {
     node.hash = node.compute_node_hash();
   };
-  walk<Node>(&root_, prefix, f);
+  walk_without_path<Node>(&root_, f);
 }
 
 void
@@ -1421,18 +1420,16 @@ MerkleTrie::generate_top_level_hashes()
   // We do not hold any locks for these nodes. It only makes sense to call this
   // function when there are no other threads mutating the trie. Otherwise, even
   // before this function returns the hashes we recompute here will be stale.
-  HexArray prefix;
-  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+  auto f = [&](Node &node, Node * /*parent*/) {
     node.hash = node.compute_node_hash();
   };
-  walk<Node>(&root_, prefix, f, /*max_depth=*/no_hash_depth_);
+  walk_without_path<Node>(&root_, f, /*max_depth=*/no_hash_depth_);
 }
 
 void
 MerkleTrie::free_all_nodes(Node *root)
 {
-  HexArray prefix;
-  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+  auto f = [&](Node &node, Node * /*parent*/) {
     // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
     // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
@@ -1442,7 +1439,7 @@ MerkleTrie::free_all_nodes(Node *root)
       allocator_.free(&node);
     }
   };
-  walk<Node>(root, prefix, f);
+  walk_without_path<Node>(root, f);
 }
 
 } // namespace hogd

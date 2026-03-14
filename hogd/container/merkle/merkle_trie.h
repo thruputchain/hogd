@@ -421,6 +421,80 @@ private:
     }
   }
 
+  template<typename NodeType, typename Fn>
+  static void
+  walk_without_path(NodeType *root, Fn &&f,
+                    std::optional<size_t> max_depth = std::nullopt)
+  {
+    static_assert(std::is_same_v<NodeType, Node> ||
+                      std::is_same_v<NodeType, const Node>,
+                  "[NodeType] must be [Node] or [const Node].");
+
+    struct CheckInfo {
+      NodeType *node;
+      NodeType *parent;
+      size_t next_child_to_visit;
+      size_t depth;
+    };
+
+    std::stack<CheckInfo> path;
+    path.push(CheckInfo{.node = root,
+                        .parent = nullptr,
+                        .next_child_to_visit = 0,
+                        .depth = 0});
+
+    while (!path.empty()) {
+      CheckInfo &info = path.top();
+
+      if (!info.node) {
+        path.pop();
+        continue;
+      }
+
+      switch (info.node->type) {
+      case Node::Type::kBranch:
+        CHECK_LE(info.next_child_to_visit, info.node->child.size());
+        if (info.next_child_to_visit == info.node->child.size() ||
+            (max_depth && info.depth == max_depth.value())) {
+          f(*info.node, info.parent);
+        }
+        else {
+          path.push({.node = info.node->child[info.next_child_to_visit],
+                     .parent = info.node,
+                     .next_child_to_visit = 0,
+                     .depth = info.depth + 1});
+          info.next_child_to_visit++;
+          continue;
+        }
+        break;
+      case Node::Type::kExtension:
+        CHECK_LE(info.next_child_to_visit, 1UL);
+        if (info.next_child_to_visit == 1 ||
+            (max_depth && info.depth == max_depth.value())) {
+          f(*info.node, info.parent);
+        }
+        else {
+          path.push({.node = info.node->child[0],
+                     .parent = info.node,
+                     .next_child_to_visit = 0,
+                     .depth = info.depth + 1});
+          info.next_child_to_visit++;
+          continue;
+        }
+        break;
+      case Node::Type::kLeaf:
+        CHECK_EQ(info.next_child_to_visit, 0UL);
+        if (max_depth) {
+          CHECK_LE(info.depth, max_depth.value());
+        }
+        f(*info.node, info.parent);
+        break;
+      }
+
+      path.pop();
+    }
+  }
+
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
   // [branch_depth] is the depth of the returned branch.
