@@ -391,7 +391,7 @@ HogDBStatus<void>
 RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
                                               ChangeSet &changes) const
 {
-  assert(ctx.dao);
+  CHECK(ctx.dao != nullptr);
 
   // The consumed_set_balance_ was maintained incrementally in commit_change().
   // Every consumed entry must have a matching insert (non-negative balance).
@@ -519,7 +519,7 @@ HogDBStatus<void>
 RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
                                           ChangeSet &changes)
 {
-  assert(ctx.dao);
+  CHECK(ctx.dao != nullptr);
 
   // Read the RCQ metadata to find all blocks that need cleanup
   auto meta_ret = ctx.dao->read_retrocausal_queue_metadata(ctx.key);

@@ -79,7 +79,7 @@ HogDBStatus<void>
 BalanceLock::stage_committed_changes(const LockContext &ctx,
                                      ChangeSet &changes) const
 {
-  assert(ctx.key.is_address_balance());
+  CHECK(ctx.key.is_address_balance());
   auto value = build_result(ctx);
   int128_t encoded = cpu_to_le(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);

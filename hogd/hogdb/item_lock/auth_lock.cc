@@ -146,7 +146,7 @@ HogDBStatus<void>
 AuthLock::stage_committed_changes(const LockContext &ctx,
                                   ChangeSet &changes) const
 {
-  assert(ctx.key.is_address_auth_data());
+  CHECK(ctx.key.is_address_auth_data());
   auto auth = build_result();
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
   auto serialized = x23::serialize(auth);

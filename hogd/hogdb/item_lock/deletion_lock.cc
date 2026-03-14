@@ -1,6 +1,5 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 
-#include <cassert>
 #include <utility>
 
 #include "hogd/base/log.h"
@@ -30,7 +29,7 @@ DeletionLock::stage_committed_changes(const LockContext &ctx,
     return HogDBError(HogDBCode::kInternal);
   }
 
-  assert(ctx.dao);
+  CHECK(ctx.dao != nullptr);
   auto type_ret = ctx.dao->get_item_type(ctx.key);
   if (!type_ret) {
     if (type_ret.error() == HogDBCode::kNotFound) {

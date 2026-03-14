@@ -3,6 +3,7 @@
 #include <cassert>
 
 #include "db_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/change_set.h"
@@ -51,7 +52,7 @@ HogDBStatus<void>
 NewDeploymentLock::stage_committed_changes(const LockContext &ctx,
                                            ChangeSet &changes) const
 {
-  assert(ctx.key.is_address_metadata());
+  CHECK(ctx.key.is_address_metadata());
 
   // Write deployed contract metadata (part of blockchain state).
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);

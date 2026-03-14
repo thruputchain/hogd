@@ -263,9 +263,9 @@ HogDBStatus<void>
 ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
                                          ChangeSet &changes) const
 {
-  assert(ctx.key.is_replay_cache());
+  CHECK(ctx.key.is_replay_cache());
 
-  assert(meta_.load(std::memory_order_acquire) != nullptr);
+  CHECK(meta_.load(std::memory_order_acquire) != nullptr);
   auto meta = **get_meta(nullptr);
 
   auto sl = bases_lock_.hold_shared();
