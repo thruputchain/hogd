@@ -631,6 +631,12 @@ Scheduler::schedule(size_t num_txs,
       size_ -= to_remove;
       it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
     }
+    uint128_t hogs_available =
+        from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
+    const uint128_t already_scheduled_hogs =
+        from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]);
+    const uint128_t received_hogs =
+        from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       if (it == txs_to_schedule.end()) {
@@ -639,11 +645,8 @@ Scheduler::schedule(size_t num_txs,
       }
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
-      const uint128_t hogs_available =
-          from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
       if (tx.tx.invocation.gas_limit <= hogs_available) {
-        hog_ages->num_hogs[kHogAgeGroupToSchedule] =
-            to_xdr(hogs_available - tx.tx.invocation.gas_limit);
+        hogs_available -= tx.tx.invocation.gas_limit;
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes.push_back(tx_hash);
@@ -657,10 +660,8 @@ Scheduler::schedule(size_t num_txs,
       }
       else {
         const uint128_t all_hogs_available =
-            hogs_spent_by_account +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]) +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]) +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
+            hogs_spent_by_account + hogs_available + already_scheduled_hogs +
+            received_hogs;
         if (tx.tx.invocation.gas_limit > all_hogs_available) {
           // This account does not have enough hogs across all three of its
           // groups to schedule the tx, so we discard the tx.
@@ -693,6 +694,7 @@ Scheduler::schedule(size_t num_txs,
       }
     }
     if (hogs_spent_by_account) {
+      hog_ages->num_hogs[kHogAgeGroupToSchedule] = to_xdr(hogs_available);
       // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
       // this account.
       move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,

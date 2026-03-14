@@ -1,5 +1,13 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::schedule()` inner-loop overhead in [hogd/mempool/scheduler.cc] by caching the current account's hog-group balances in native integers while walking its runqueue, then writing the updated `kHogAgeGroupToSchedule` value back once after scheduling from that account. The previous loop re-decoded and re-encoded the same XDR hog-balance fields for every scheduled transaction.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_schedule/256` improved from about `0.55 ms` to `0.48 ms` CPU time, while the focused deep-runqueue case also improved slightly (`bench_scheduler_schedule_single_account/256`: `0.33 ms` to `0.33 ms`, about `335 us` to `328 us`). The enqueue and transfer benchmarks stayed in the same range (`bench_scheduler_add_txs/256`: `0.48 ms` to `0.44 ms`, `bench_scheduler_process_transfers/256`: `0.48 ms` to `0.48 ms`).
+- Additional validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `perf stat -r 5 /tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_schedule/256|bench_scheduler_schedule_single_account/256'`
+
 - Reduced `hogd::Scheduler::schedule()` overhead in [hogd/mempool/scheduler.cc] by stopping the scheduler from re-queueing accounts whose runqueue was already drained during the current pass. Benchmarking showed the 256-account schedule path was still paying for a full `cycle_accounts_during_schedule_helper()` rescan over accounts that no longer had any transactions.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `bench_scheduler_schedule/256` improved from about `0.57 ms` to `0.49 ms` CPU time, while the focused single-account case stayed flat (`bench_scheduler_schedule_single_account/256`: `0.33 ms` before and after). The enqueue and transfer benchmarks also stayed in the same range.
