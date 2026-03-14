@@ -9,6 +9,7 @@ Procedure:
 2. Identify one hotspot using benchmarks or profiling.
    You may use existing benchmarks or add focused new ones.
    You may use tools like perf, gdb, and other local tools.
+   The machine has over 300 GiB of DRAM, but be careful to not use up all the memory and resort to swapping and/or getting killed by the OOM killer.
 3. Make one focused optimization.
 4. Build the project.
 5. Run tests to confirm functionality is unchanged.
