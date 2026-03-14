@@ -173,3 +173,19 @@ add_dependencies(
   runtime_test
   all_wasm_contracts
 )
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    runtime_bench
+    runtime_bench.cc
+  )
+  target_link_libraries(
+    runtime_bench
+    runtime
+    benchmark::benchmark
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET runtime_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

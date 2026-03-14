@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstring>
@@ -161,9 +162,21 @@ public:
 
   // Turns a method ID (uint32) into a method name string that
   // can be invoked within wasm.
+  constexpr static void write_invoke_name(MethodID method,
+                                          std::span<char, 16> out) noexcept
+  {
+    constexpr std::string_view kHexDigits = "0123456789ABCDEF";
+    for (size_t i = out.size(); i-- > 0;) {
+      out[i] = kHexDigits[method & 0xF];
+      method >>= 4;
+    }
+  }
+
   constexpr static std::string invoke_name(MethodID method)
   {
-    return std::format("{:016X}", method);
+    std::string out(16, '0');
+    write_invoke_name(method, std::span<char, 16>(out.data(), out.size()));
+    return out;
   }
   // WASM name -> Method ID (inverse of invoke_name)
   constexpr static std::optional<MethodID>
@@ -184,7 +197,10 @@ public:
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
   InvokeResult invoke(MethodID entrypoint, uint64_t gas_limit)
   {
-    return invoke(invoke_name(entrypoint), gas_limit);
+    std::array<char, 16> method_name;
+    write_invoke_name(entrypoint, method_name);
+    return invoke(std::string_view(method_name.data(), method_name.size()),
+                  gas_limit);
   }
 
   // Returns FALSE if gas consumption failed.
