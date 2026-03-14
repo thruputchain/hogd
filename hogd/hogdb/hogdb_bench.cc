@@ -411,20 +411,32 @@ class RCQBenchmark {
 public:
   static std::unique_ptr<RCQBenchmark> make(size_t num_entries, int num_workers,
                                             size_t num_queues, bool concurrent,
-                                            int num_producers);
+                                            int num_producers,
+                                            bool compute_db_hash);
 
   void run();
 
 private:
   RCQBenchmark(HogDBDAO db, int num_workers, size_t num_entries,
-               size_t num_queues, bool concurrent, int num_producers)
+               size_t num_queues, bool concurrent, int num_producers,
+               bool compute_db_hash)
     : db_(std::move(db)), workers_(num_workers), num_entries_(num_entries),
       num_queues_(num_queues), concurrent_(concurrent),
-      num_producers_(num_producers)
+      num_producers_(num_producers), compute_db_hash_(compute_db_hash)
   {}
 
   void run_sequential();
   void run_concurrent();
+
+  void close_block(BlockTX &btx) const
+  {
+    if (compute_db_hash_) {
+      CHECK(btx.close(DbHash{}).has_value());
+    }
+    else {
+      CHECK(btx.close_skip_hash_for_testing().has_value());
+    }
+  }
 
   HogDBDAO db_;
   WorkerPool workers_;
@@ -437,13 +449,14 @@ private:
   size_t num_queues_;
   bool concurrent_;
   size_t num_producers_;
+  bool compute_db_hash_;
 
   std::vector<ItemKey> queue_keys_;
 };
 
 std::unique_ptr<RCQBenchmark>
 RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
-                   bool concurrent, int num_producers)
+                   bool concurrent, int num_producers, bool compute_db_hash)
 {
   // Estimate DB items for heap sizing: each queue needs its data blocks,
   // a metadata item, and a balance entry.
@@ -451,7 +464,7 @@ RCQBenchmark::make(size_t num_entries, int num_workers, size_t num_queues,
   size_t n = num_queues * (blocks_per_queue + 2);
   auto bench = std::unique_ptr<RCQBenchmark>(
       new RCQBenchmark(open_ramdb(n), num_workers, num_entries, num_queues,
-                       concurrent, num_producers));
+                       concurrent, num_producers, compute_db_hash));
 
   // Generate queue keys: queue i lives at address i, item slot 0.
   bench->queue_keys_.reserve(num_queues);
@@ -536,7 +549,7 @@ RCQBenchmark::run_sequential()
           work_items.size() / workers_.worker_count() / kBatchesPerWorker;
       workers_.for_each_parallel(work_items, insert_fn, std::max(width, 1UL));
 
-      CHECK(block_tx.get().close_skip_hash_for_testing().has_value());
+      close_block(block_tx.get());
       HogDBStatus<void> ret = block_tx.get().commit(workers_).and_then(
           [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)
@@ -613,7 +626,7 @@ RCQBenchmark::run_sequential()
 
       workers_.for_each_parallel(queue_indices, consume_fn, 1);
 
-      CHECK(block_tx.get().close_skip_hash_for_testing().has_value());
+      close_block(block_tx.get());
       auto ret = block_tx.get().commit(workers_).and_then(
           [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)
@@ -825,7 +838,7 @@ RCQBenchmark::run_concurrent()
            block_start_ns) *
           1e-9;
 
-      CHECK(block_tx.get().close_skip_hash_for_testing().has_value());
+      close_block(block_tx.get());
       auto ret = block_tx.get().commit(workers_).and_then(
           [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)
@@ -966,7 +979,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     if (num_producers < 0)
       num_producers = workers / 2;
     auto bench = hogd::RCQBenchmark::make(n, workers, num_queues, concurrent,
-                                          num_producers);
+                                          num_producers, db_hash);
     bench->run();
     return 0;
   }
