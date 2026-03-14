@@ -1,4 +1,13 @@
+#!/usr/bin/env bash
 set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Error: you must specify the directory to have the agent focus on." >&2
+  echo "Usage: $0 <directory>" >&2
+  exit 1
+fi
+
+FOCUS_DIR="$1"
 
 for i in {1..100}; do
   timeout 60m codex exec --dangerously-bypass-approvals-and-sandbox "
@@ -35,7 +44,7 @@ Procedure:
 8. If the change is not correct or not faster, revert it and stop without making
 a new branch or committing.
 
-Prioritize making changes to hogd/mempool/.
+Prioritize making changes to ${FOCUS_DIR}.
 Use /tmp/codex as your workspace (make the directory if needed).
 Do not make more than one optimization in this run.
 "
