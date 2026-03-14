@@ -1,5 +1,13 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::process_transfers()` fan-out in [hogd/mempool/scheduler.cc] from 100 workers to 32 after profiling showed the 256-delta benchmark still spending most of its CPU time in thread-pool wakeups and futex contention rather than transfer math. The old split gave many workers only a couple of deltas each, so scheduler overhead dominated.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_process_transfers/64` improved from about `1.06 ms` to `0.78 ms` CPU time, and `bench_scheduler_process_transfers/256` from about `1.43 ms` to `0.83 ms`, while the smaller cases stayed roughly flat (`1`: `0.47 ms` to `0.44 ms`, `8`: `0.57 ms` to `0.57 ms`).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Reduced `hogd::Scheduler::process_transfers()` overhead in [hogd/mempool/scheduler.cc] by capping the number of background coroutines to the number of transfer deltas instead of always launching 100 workers. Small transfer batches were paying nearly constant thread-pool wakeup overhead because most workers received empty slices.
 - Added a focused transfer-processing benchmark in `hogd/mempool/test/bench.cc` that preloads cached account ages and measures only the scheduler transfer path, so the fixed worker-launch cost is visible without the RAM DB harness.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:

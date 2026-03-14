@@ -462,7 +462,9 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // [read_average_hog_ages] on a separate thread.
   co_await read_average_hog_ages(transfers);
 
-  constexpr size_t kMaxNumThreads = 100;
+  // Keep transfer chunks coarse enough that the coroutine wakeup cost does not
+  // dominate the small amount of per-delta work.
+  constexpr size_t kMaxNumThreads = 32;
   const size_t num_threads = std::min(transfers.deltas.size(), kMaxNumThreads);
   if (num_threads == 0) {
     co_return;
