@@ -189,6 +189,47 @@ public:
     return h;
   }
 
+  bool range_equals(size_t start, size_t end, const HexArray &other) const
+  {
+    CHECK_LE(start, size_);
+    CHECK_LE(end, size_);
+    if (end - start != other.size_) {
+      return false;
+    }
+    if (end == start) {
+      return true;
+    }
+
+    size_t length = end - start;
+    if (start % 2 == 0) {
+      size_t full_bytes = length / 2;
+      if (full_bytes != 0U &&
+          std::memcmp(backing_store_.data() + (start / 2),
+                      other.backing_store_.data(), full_bytes) != 0) {
+        return false;
+      }
+    }
+    else {
+      const size_t byte_offset = start / 2;
+      const size_t full_bytes = length / 2;
+      for (size_t i = 0; i < full_bytes; i++) {
+        unsigned char lhs =
+            static_cast<unsigned char>(backing_store_[byte_offset + i]);
+        lhs = static_cast<unsigned char>(lhs << 4);
+        lhs |= static_cast<unsigned char>(
+            backing_store_[byte_offset + i + 1] >> 4);
+        if (std::byte{lhs} != other.backing_store_[i]) {
+          return false;
+        }
+      }
+    }
+
+    if (length % 2 != 0U) {
+      return get(end - 1) == other.get(other.size_ - 1);
+    }
+    return true;
+  }
+
   void to_byte_vector(std::vector<std::byte> &v) const
   {
     std::copy_n(backing_store_.begin(), (size_ + 1) / 2, std::back_inserter(v));

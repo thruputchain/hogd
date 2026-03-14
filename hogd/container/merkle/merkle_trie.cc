@@ -1274,7 +1274,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       // two values are equal, the path maps to the child node, which is always
       // a branch.
       if (idx + root->path.size() <= path.size() &&
-          path.get_subarray(idx, idx + root->path.size()) == root->path) {
+          path.range_equals(idx, idx + root->path.size(), root->path)) {
         idx += root->path.size();
         branch_depth++;
         CHECK_PTR(root->child[0]);
@@ -1298,7 +1298,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       break;
     }
     case Node::Type::kLeaf:
-      if (path.get_subarray(idx, path.size()) == root->path) {
+      if (path.range_equals(idx, path.size(), root->path)) {
         // [path] maps to this leaf node.
         existing_key = root;
       }

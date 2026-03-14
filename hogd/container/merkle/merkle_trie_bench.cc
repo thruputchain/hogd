@@ -61,6 +61,36 @@ precompute_paths(size_t num_paths)
   return paths;
 }
 
+void
+path_compare_via_subarray(benchmark::State &state)
+{
+  HexArray path(
+      "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+  HexArray expected("5566778899aabbccddee");
+  constexpr size_t kStart = 10;
+  constexpr size_t kEnd = kStart + 20;
+
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(path.get_subarray(kStart, kEnd) == expected);
+  }
+}
+BENCHMARK(path_compare_via_subarray)->Unit(benchmark::kNanosecond);
+
+void
+path_compare_range_equals(benchmark::State &state)
+{
+  HexArray path(
+      "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+  HexArray expected("5566778899aabbccddee");
+  constexpr size_t kStart = 10;
+  constexpr size_t kEnd = kStart + 20;
+
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(path.range_equals(kStart, kEnd, expected));
+  }
+}
+BENCHMARK(path_compare_range_equals)->Unit(benchmark::kNanosecond);
+
 // Inserts 2 million KV pairs into a trie. Node hashes are computed on every
 // insert operation.
 void
