@@ -1,6 +1,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "address_auth.hh"
@@ -28,8 +30,11 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/materialized_change.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "x23/serialize.h"
@@ -648,6 +653,63 @@ HogDBDAO::remove_item(const ItemKey &key)
   error("unhandled item key type in remove_item: {}",
         std::to_underlying(key.key_type()));
   return HogDBError(HogDBCode::kInternal);
+}
+
+ChangeSet
+HogDBDAO::create_changeset(bool compute_hash)
+{
+  return ChangeSet(this, compute_hash);
+}
+
+HogDBStatus<void>
+HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
+{
+  // Collect per-thread vector pointers under the PerThread lock, then release
+  // the lock and apply each vector in parallel. RAMDB's per-bucket locking
+  // handles concurrency for puts/removes to different keys.
+  std::vector<std::vector<MaterializedChange> *> vecs;
+  {
+    auto ul = changes.changes_.lock_threads();
+    changes.changes_.for_each(ul,
+                              [&vecs](std::vector<MaterializedChange> &vec) {
+                                if (!vec.empty()) {
+                                  vecs.push_back(&vec);
+                                }
+                              });
+  }
+
+  std::atomic<bool> had_error{false};
+  pool.for_each_parallel(
+      vecs,
+      [this, &had_error](std::vector<MaterializedChange> *vec) {
+        for (const auto &change : *vec) {
+          if (had_error.load(std::memory_order_relaxed)) {
+            return;
+          }
+          switch (change.op) {
+          case MaterializedChange::Op::kPut:
+            if (auto r = db_.put(change.key(), change.type, change.value());
+                !r) {
+              had_error.store(true, std::memory_order_relaxed);
+              return;
+            }
+            break;
+          case MaterializedChange::Op::kRemove:
+            if (auto r = db_.remove(change.key()); !r) {
+              had_error.store(true, std::memory_order_relaxed);
+              return;
+            }
+            break;
+          }
+        }
+        vec->clear();
+      },
+      1);
+
+  if (had_error.load(std::memory_order_relaxed)) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return {};
 }
 
 } // namespace hogd

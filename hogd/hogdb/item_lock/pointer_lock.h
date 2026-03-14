@@ -31,14 +31,10 @@ public:
     return this->get()->commit_change(did_finalize, snapshot_cost, after,
                                       cost_model);
   }
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const
   {
-    return this->get()->write_committed_change(ctx);
-  }
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const
-  {
-    return this->get()->apply_db_hash_delta(ctx, hash);
+    return this->get()->stage_committed_changes(ctx, changes);
   }
 };
 

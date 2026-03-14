@@ -40,6 +40,18 @@ public:
 
   void add(x23::BufView element) { apply(element, false); }
   void remove(x23::BufView element) { apply(element, true); }
+
+  // Piecewise overloads: hash [key + type_byte + value] without requiring a
+  // contiguous buffer.
+  void add(x23::BufView key, uint8_t type, x23::BufView value)
+  {
+    apply_pieces(key, type, value, false);
+  }
+  void remove(x23::BufView key, uint8_t type, x23::BufView value)
+  {
+    apply_pieces(key, type, value, true);
+  }
+
   void reset() { state_.fill(0); }
 
   const State &state() const { return state_; }
@@ -77,11 +89,26 @@ public:
 private:
   void apply(x23::BufView element, bool negate)
   {
-    alignas(64) uint16_t components[kNumComponents];
-
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
     blake3_hasher_update(&hasher, element.data(), element.size());
+    finalize(hasher, negate);
+  }
+
+  void apply_pieces(x23::BufView key, uint8_t type, x23::BufView value,
+                    bool negate)
+  {
+    blake3_hasher hasher;
+    blake3_hasher_init(&hasher);
+    blake3_hasher_update(&hasher, key.data(), key.size());
+    blake3_hasher_update(&hasher, &type, 1);
+    blake3_hasher_update(&hasher, value.data(), value.size());
+    finalize(hasher, negate);
+  }
+
+  void finalize(blake3_hasher &hasher, bool negate)
+  {
+    alignas(64) uint16_t components[kNumComponents];
     blake3_hasher_finalize(&hasher, reinterpret_cast<uint8_t *>(components),
                            kStateBytes);
     // clang and gcc both seem to vectorize this well
