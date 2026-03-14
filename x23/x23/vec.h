@@ -768,11 +768,16 @@ protected:
     if (b_.begin) {
       size_t new_size = std::min(size(), n);
       newb.end = newb.begin + new_size;
-      [&] noexcept {
-        // for simplicity, use noexcept lambda to crash if move throws
-        std::uninitialized_move_n(b_.begin, new_size, newb.begin);
-      }();
-      std::destroy(b_.begin, b_.end);
+      if constexpr (std::is_trivially_copyable_v<value_type>) {
+        std::memcpy(newb.begin, b_.begin, new_size * sizeof(value_type));
+      }
+      else {
+        [&] noexcept {
+          // for simplicity, use noexcept lambda to crash if move throws
+          std::uninitialized_move_n(b_.begin, new_size, newb.begin);
+        }();
+        std::destroy(b_.begin, b_.end);
+      }
       a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
                     (b_.bufend - b_.begin) + ExtraAlloc);
     }
