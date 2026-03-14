@@ -109,10 +109,6 @@ public:
 // reference should be released allowing other operations to succeed
 TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "RCQ is not supported in HogDB";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
@@ -212,10 +208,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 // reference should be released allowing other types to be reserved
 TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Replay cache is not supported in HogDB";
-    return;
-  }
+  // Replay cache is supported in HogDB.
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
