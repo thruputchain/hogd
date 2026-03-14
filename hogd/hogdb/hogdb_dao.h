@@ -36,6 +36,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/invariant.h"
+#include "hogd/hogdb/invariant_hog_age.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
@@ -151,11 +152,6 @@ constexpr bool
 is_state_item(std::span<const std::byte> key)
 {
   if (key.empty()) {
-    return false;
-  }
-
-  // skip global state.
-  if (static_cast<char>(key[0]) == '>') {
     return false;
   }
 
@@ -344,6 +340,7 @@ public:
     assert(invariants_.empty());
     invariants_.push_back(
         std::make_unique<HogConservationInvariant>(cost_model));
+    invariants_.push_back(std::make_unique<HogAgeInvariant>());
   }
 
   void clear_invariants() { invariants_.clear(); }

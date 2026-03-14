@@ -26,6 +26,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -126,6 +127,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     CHECK_EQ(db_hash, DbHash{});
     ctx.get_tip().height = -1;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
+  }
+
+  HogDBStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
+  if (!reconcile_status.has_value()) {
+    critical("Failed to reconcile startup hog ages: {}",
+             reconcile_status.error());
+    return EXIT_FAILURE;
   }
 
   // start the executor server.

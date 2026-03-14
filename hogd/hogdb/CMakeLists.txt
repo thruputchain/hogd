@@ -17,10 +17,12 @@ add_library(hogdb_objects OBJECT
   item_lock/replay_cache_lock.cc
   item_lock/retrocausal_queue_lock.cc
   item_lock.cc
+  invariant_hog_age.cc
   invariant_hog_conservation.cc
   invoke_tx.cc
   item_change.cc
   hogdb_dao.cc
+  hog_age_reconciliation.cc
   rpc_context.cc
   rpc_from_auth.cc
   rpc_from_exec.cc
@@ -93,4 +95,3 @@ add_dependencies(hogdb_test all_wasm_contracts)
 gtest_discover_tests(
   hogdb_test
 )
-
