@@ -17,6 +17,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -435,6 +436,22 @@ prove(benchmark::State &state)
   }
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
+
+void
+hash_leaf_long_path(benchmark::State &state)
+{
+  Node leaf;
+  leaf.clear();
+  leaf.init_leaf(/*parent=*/nullptr);
+  leaf.path = HexArray(std::string(127, 'a'));
+  leaf.value_hash = SHA256Hash();
+  leaf.value_hash->fill(0x5a);
+
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(leaf.compute_node_hash());
+  }
+}
+BENCHMARK(hash_leaf_long_path)->Unit(benchmark::kNanosecond);
 
 void
 hash_parallel(benchmark::State &state, size_t num_threads)

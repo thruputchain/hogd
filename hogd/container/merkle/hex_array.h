@@ -191,7 +191,12 @@ public:
 
   void to_byte_vector(std::vector<std::byte> &v) const
   {
-    std::copy_n(backing_store_.begin(), (size_ + 1) / 2, std::back_inserter(v));
+    const size_t num_bytes = (size_ + 1) / 2;
+    const size_t original_size = v.size();
+    v.resize(original_size + num_bytes);
+    if (num_bytes != 0U) {
+      std::memcpy(v.data() + original_size, backing_store_.data(), num_bytes);
+    }
     if (size_ % 2) {
       // If the size is odd, zero out the last 4 bits to ensure we consistently
       // return the same array. Otherwise, we could end up returning garbage in
