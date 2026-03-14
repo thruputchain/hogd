@@ -378,17 +378,10 @@ SystemCallHandler::try_commit_transaction()
     return ExecResult::ExecResultTxNonDeterministicError;
   }
 
-  auto new_contract_hashes =
-      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-          .value()
-          .get_committed_contracts();
   NewContractBatch new_contracts;
-  for (auto const &hash : new_contract_hashes) {
-    auto contract_entry = newly_created_contracts_.find(hash);
-    if (contract_entry != newly_created_contracts_.end()) {
-      new_contracts.push_back(*contract_entry->second);
-    }
-  }
+  last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+      .value()
+      .append_new_contract_batch(newly_created_contracts_, new_contracts);
 
   auto res = db_proxy_.commit_transaction(std::move(new_contracts));
   if (!res.has_value()) {

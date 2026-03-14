@@ -162,6 +162,29 @@ InvocationFrame::collect_storage_deltas(
 }
 
 void
+InvocationFrame::append_new_contract_batch(
+    std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> const
+        &newly_created_contracts,
+    NewContractBatch &out) const
+{
+  out.reserve(out.size() + new_contract_deployments_.size());
+
+  std::unordered_set<SHA256Hash> seen_hashes;
+  seen_hashes.reserve(new_contract_deployments_.size());
+
+  for (auto const &[_, deployment] : new_contract_deployments_) {
+    if (!seen_hashes.emplace(deployment.hash).second) {
+      continue;
+    }
+
+    auto contract_entry = newly_created_contracts.find(deployment.hash);
+    if (contract_entry != newly_created_contracts.end()) {
+      out.push_back(*contract_entry->second);
+    }
+  }
+}
+
+void
 InvocationFrameStack::start_frame(ContractAddress const &address,
                                   Calldata &&calldata, InvokeFlagSet flags)
 {

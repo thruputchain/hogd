@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,6 +12,7 @@
 
 #include "contract.hh"
 #include "event.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -151,6 +153,11 @@ public:
     }
     return committed_contracts;
   }
+
+  void append_new_contract_batch(
+      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> const
+          &newly_created_contracts,
+      NewContractBatch &out) const;
 
   HashBuffers hash_buffers_;
 
