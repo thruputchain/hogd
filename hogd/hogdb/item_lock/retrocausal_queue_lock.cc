@@ -7,7 +7,6 @@
 #include <mutex>
 #include <optional>
 #include <set>
-#include <span>
 #include <utility>
 #include <vector>
 
@@ -415,7 +414,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
          b < updated_past_block_consume.max_fully_consumed_block_number; ++b) {
       const uint64_t block_num = b + 1;
       auto block_key = make_retrocausal_queue_block_key(ctx.key, block_num);
-      changes.remove(std::as_bytes(std::span(block_key)));
+      changes.remove(block_key);
     }
     updated_metadata.consume_state = updated_past_block_consume;
   }
@@ -457,8 +456,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
     auto block_key =
         make_retrocausal_queue_block_key(ctx.key, new_block.block_number);
     auto block_buf = x23::serialize(new_block);
-    changes.put(std::as_bytes(std::span(block_key)), 0,
-                std::as_bytes(std::span(block_buf)));
+    changes.put(block_key, 0, block_buf);
 
     updated_metadata.max_live_block_num = new_block.block_number;
   }
@@ -488,7 +486,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
       for (uint64_t b = start_block; b <= base_metadata.max_live_block_num;
            ++b) {
         auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
-        changes.remove(std::as_bytes(std::span(block_key)));
+        changes.remove(block_key);
       }
       changes.remove(meta_key);
     }
@@ -500,8 +498,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
   }
   else {
     auto meta_buf = x23::serialize(updated_metadata);
-    changes.put(meta_key, kRetrocausalQueue,
-                std::as_bytes(std::span(meta_buf)));
+    changes.put(meta_key, kRetrocausalQueue, meta_buf);
   }
 
   return {};
@@ -540,7 +537,7 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
   uint64_t start_block = meta.consume_state.max_fully_consumed_block_number + 1;
   for (uint64_t b = start_block; b <= meta.max_live_block_num; ++b) {
     auto block_key = make_retrocausal_queue_block_key(ctx.key, b);
-    changes.remove(std::as_bytes(std::span(block_key)));
+    changes.remove(block_key);
   }
 
   // Remove the metadata.

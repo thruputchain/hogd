@@ -280,7 +280,7 @@ ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
   size_t pruned_count = 0;
   for (auto it = meta.heights.begin(); it != prune_end; ++it) {
     auto key = make_replay_cache_data_key(ctx.key.get_address(), it->height);
-    changes.remove(std::as_bytes(std::span(key)));
+    changes.remove(key);
     pruned_count += it->nonce_count;
   }
 
@@ -312,8 +312,7 @@ ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
 
     auto key = make_replay_cache_data_key(ctx.key.get_address(), height);
     auto buf = x23::serialize(*res);
-    changes.put(std::as_bytes(std::span(key)), 0,
-                std::as_bytes(std::span(buf)));
+    changes.put(key, 0, buf);
 
     new_heights.emplace_back(height,
                              static_cast<unsigned int>(res->nonces.size()));
@@ -329,8 +328,7 @@ ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
 
   auto meta_key = make_address_key(ctx.key.get_address(), Prefix::kReplayCache);
   auto meta_buf = x23::serialize(meta);
-  changes.put(std::as_bytes(std::span(meta_key)), 0,
-              std::as_bytes(std::span(meta_buf)));
+  changes.put(meta_key, 0, meta_buf);
 
   return {};
 }

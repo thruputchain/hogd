@@ -1,7 +1,6 @@
 #include "hogd/hogdb/item_lock/new_deployment_lock.h"
 
 #include <cassert>
-#include <span>
 
 #include "db_sched.hh"
 #include "hogd/base/types.h"
@@ -57,8 +56,7 @@ NewDeploymentLock::stage_committed_changes(const LockContext &ctx,
   // Write deployed contract metadata (part of blockchain state).
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);
   auto serialized = x23::serialize(deployed_contract_hash_);
-  changes.put(std::as_bytes(std::span(key)), 0,
-              std::as_bytes(std::span(serialized)));
+  changes.put(key, 0, serialized);
 
   // Write empty HogAge record (not part of blockchain state — ChangeSet
   // will skip hash element construction because is_state_item returns false
@@ -71,8 +69,7 @@ NewDeploymentLock::stage_committed_changes(const LockContext &ctx,
       .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
   };
   auto age_buf = x23::serialize(age);
-  changes.put(std::as_bytes(std::span(hog_age_key)), 0,
-              std::as_bytes(std::span(age_buf)));
+  changes.put(hog_age_key, 0, age_buf);
 
   return {};
 }

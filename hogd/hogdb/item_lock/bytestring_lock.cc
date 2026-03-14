@@ -29,7 +29,7 @@ BytestringLock::stage_committed_changes(const LockContext &ctx,
                                         ChangeSet &changes) const
 {
   auto key = make_contract_data_key(ctx.key.as_bytes());
-  changes.put(key, kBytes, std::as_bytes(std::span(bytestring_)));
+  changes.put(key, kBytes, bytestring_);
   return {};
 }
 

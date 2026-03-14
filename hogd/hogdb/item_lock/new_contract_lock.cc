@@ -1,7 +1,6 @@
 #include "hogd/hogdb/item_lock/new_contract_lock.h"
 
 #include <cassert>
-#include <span>
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
@@ -37,7 +36,7 @@ NewContractLock::stage_committed_changes(const LockContext &ctx,
   SHA256Hash code_hash = ctx.key.get_contract_code_hash();
   auto key = make_wasm_code_key(code_hash);
   auto buf = x23::serialize(contract_);
-  changes.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  changes.put(key, 0, buf);
   return {};
 }
 

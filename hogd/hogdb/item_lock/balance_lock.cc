@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <span>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
@@ -84,7 +83,7 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
   auto value = build_result(ctx);
   int128_t encoded = cpu_to_le(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
-  changes.put(std::as_bytes(std::span(key)), kNNInt128, byte_view(encoded));
+  changes.put(key, kNNInt128, byte_view(encoded));
   return {};
 }
 

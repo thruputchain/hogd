@@ -1,7 +1,6 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 
 #include <cassert>
-#include <span>
 #include <utility>
 
 #include "hogd/base/log.h"
@@ -21,7 +20,7 @@ DeletionLock::stage_committed_changes(const LockContext &ctx,
   if (ctx.key.is_address_auth_data()) {
     auto key =
         make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
-    changes.remove(std::as_bytes(std::span(key)));
+    changes.remove(key);
     return {};
   }
 

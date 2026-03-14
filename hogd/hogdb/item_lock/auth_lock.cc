@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <mutex>
-#include <span>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -151,8 +150,7 @@ AuthLock::stage_committed_changes(const LockContext &ctx,
   auto auth = build_result();
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
   auto serialized = x23::serialize(auth);
-  changes.put(std::as_bytes(std::span(key)), 0,
-              std::as_bytes(std::span(serialized)));
+  changes.put(key, 0, serialized);
   return {};
 }
 
