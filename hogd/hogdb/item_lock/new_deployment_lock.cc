@@ -2,10 +2,8 @@
 
 #include <cassert>
 
-#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -13,7 +11,6 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "types.hh"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -58,20 +55,6 @@ NewDeploymentLock::stage_committed_changes(const LockContext &ctx,
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);
   auto serialized = x23::serialize(deployed_contract_hash_);
   changes.put(key, 0, serialized);
-
-  // Write empty HogAge record (not part of blockchain state — ChangeSet
-  // will skip hash element construction because is_state_item returns false
-  // for kHogAge).
-  auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
-  HogAge age{
-      .address = ctx.key.get_address().get_raw(),
-      .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
-                   to_xdr(uint128_t{0})},
-      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
-  };
-  auto age_buf = x23::serialize(age);
-  changes.put(hog_age_key, 0, age_buf);
-
   return {};
 }
 
