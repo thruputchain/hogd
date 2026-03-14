@@ -259,11 +259,7 @@ HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
-  if (auto r = btx->get().close(); !r) [[unlikely]] {
-    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
-  }
-  auto db_hash_result =
-      btx->get().compute_db_hash(/*base_hash=*/ctx_.get_tip().db_hash);
+  auto db_hash_result = btx->get().close(/*base_hash=*/ctx_.get_tip().db_hash);
   if (!db_hash_result) [[unlikely]] {
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
@@ -325,7 +321,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // code/metadata/balance initialization in the mempool test infra). We need to
   // account for these writes in the db hash. Thus, we compute the db hash with
   // those items alone in the db, then we use this hash as the base hash when
-  // calling [compute_db_hash()] below.
+  // calling close() below.
   DbHash base_hash = ctx_.get_db().compute_full_db_hash();
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
@@ -426,13 +422,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
   itx->commit();
-  if (auto close_r = r.value()->get().close(); !close_r) [[unlikely]] {
-    error("genesis close failed: {}", close_r.error());
-    co_return DbSchedResult::DbSchedResultError;
-  }
-  auto db_hash_result = r.value()->get().compute_db_hash(base_hash);
+  auto db_hash_result = r.value()->get().close(base_hash);
   if (!db_hash_result) [[unlikely]] {
-    error("genesis compute_db_hash failed: {}", db_hash_result.error());
+    error("genesis close failed: {}", db_hash_result.error());
     co_return DbSchedResult::DbSchedResultError;
   }
   DbHash db_hash = *db_hash_result;

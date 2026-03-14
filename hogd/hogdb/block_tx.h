@@ -11,7 +11,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/change_set.h"
-#include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -19,9 +18,7 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "sched_db.hh"
 #include "types.hh"
-#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -30,9 +27,6 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
-  using sched_db_client_t =
-      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   BlockTX(HogDBDAO &db, const StorageCostModel &cost_model,
           BackgroundCommitWorker &background_commit_worker,
           BlockHeight block_height)
@@ -46,8 +40,8 @@ public:
   HogDBDAO &get_db() const { return db_; }
   BlockHeight get_height() const { return block_height_; }
 
-  // commit applies all changes to the database. If this fails, nothing will be
-  // written to disk, but the database may be left in an inconsistent state.
+  // commit applies the staged ChangeSet to the database.
+  // Requires close() to have been called first.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
 
   // lock reserves the right to apply change to an item.
@@ -77,11 +71,9 @@ public:
   HogDBStatus<std::optional<QueueEntry>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
-  // Stage all finalized lock changes into a ChangeSet. Must be called
-  // before compute_db_hash(). Called automatically by commit() if needed.
-  HogDBStatus<void> close();
-
-  HogDBStatus<DbHash> compute_db_hash(const DbHash &base_hash);
+  // Stage all finalized lock changes into a ChangeSet, compute the hash
+  // delta, and return the final db hash. Must be called before commit().
+  HogDBStatus<DbHash> close(const DbHash &base_hash);
 
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
@@ -106,7 +98,7 @@ private:
   ConcurrentMap<ItemKey, ItemLock, SipHash24Hasher> item_locks_;
   BackgroundCommitWorker &background_commit_worker_;
   BlockHeight block_height_;
-  std::optional<ChangeSet> prepared_;
+  std::optional<ChangeSet> changeset_;
 
   static inline HogDBStatus<int128_t>
   do_lock(ItemLock &lock, const ItemChange &change, const LockContext &ctx);

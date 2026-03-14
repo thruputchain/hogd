@@ -98,7 +98,7 @@ protected:
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
 
-    auto hash_result = block_tx.get().compute_db_hash(base_hash);
+    auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     DbHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
@@ -319,6 +319,7 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();
 
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   auto res = db_.read_address_balance(addr3);
@@ -457,6 +458,7 @@ TEST_F(HogDBTest, BalanceTransferReducesByCost)
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();
 
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   // Read back the sender's balance
@@ -527,6 +529,7 @@ TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
   }
 
   // Commit the block transaction
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
   // Verify sender's balance
@@ -728,6 +731,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
 
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -820,6 +824,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -846,7 +851,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     {
-      auto r = block_tx.get().compute_db_hash(db_hash_before_consume);
+      auto r = block_tx.get().close(db_hash_before_consume);
       ASSERT_TRUE(r.has_value());
       db_hash_after_consume = *r;
     }
@@ -906,6 +911,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -934,7 +940,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     {
-      auto r = block_tx.get().compute_db_hash(db_hash_before_delete);
+      auto r = block_tx.get().close(db_hash_before_delete);
       ASSERT_TRUE(r.has_value());
       db_hash_after_delete = *r;
     }
@@ -999,6 +1005,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1020,7 +1027,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     {
-      auto r = block_tx.get().compute_db_hash(db_hash_before_delete);
+      auto r = block_tx.get().close(db_hash_before_delete);
       ASSERT_TRUE(r.has_value());
       db_hash_after_delete = *r;
     }
@@ -1092,6 +1099,7 @@ TEST_F(HogDBTest,
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1114,7 +1122,7 @@ TEST_F(HogDBTest,
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     {
-      auto r = block_tx.get().compute_db_hash(db_hash_before_type_change);
+      auto r = block_tx.get().close(db_hash_before_type_change);
       ASSERT_TRUE(r.has_value());
       db_hash_after_type_change = *r;
     }
@@ -1185,6 +1193,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1207,7 +1216,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
     {
-      auto r = block_tx.get().compute_db_hash(db_hash_before_type_change);
+      auto r = block_tx.get().close(db_hash_before_type_change);
       ASSERT_TRUE(r.has_value());
       db_hash_after_type_change = *r;
     }
@@ -1289,6 +1298,7 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1312,6 +1322,7 @@ TEST_F(HogDBTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1398,6 +1409,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1415,6 +1427,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     invoke_tx.commit();
     invoke_tx.release_blocktx_reference();
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
     ASSERT_TRUE(block_tx.get().commit());
   }
 
@@ -1556,7 +1569,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameNNInt128Key)
       invoke_tx.release_blocktx_reference();
     }
 
-    auto hash_result = block_tx.get().compute_db_hash(base_hash);
+    auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     DbHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
@@ -1707,7 +1720,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameRCQ)
       invoke_tx.release_blocktx_reference();
     }
 
-    auto hash_result = block_tx.get().compute_db_hash(base_hash);
+    auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     DbHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
@@ -1800,7 +1813,7 @@ TEST_F(HogDBTest, TwoInvokeTXsSameReplayCache)
       invoke_tx.release_blocktx_reference();
     }
 
-    auto hash_result = block_tx.get().compute_db_hash(base_hash);
+    auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     DbHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());
@@ -1871,7 +1884,7 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
       invoke_tx.release_blocktx_reference();
     }
 
-    auto hash_result = block_tx.get().compute_db_hash(base_hash);
+    auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     DbHash incremental_hash = *hash_result;
     ASSERT_TRUE(block_tx.get().commit());

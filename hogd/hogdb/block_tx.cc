@@ -227,18 +227,13 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
-  // Stage changes if close() was not called yet.
-  if (!prepared_.has_value()) {
-    if (auto r = close(); !r) {
-      return r.error();
-    }
+  if (!changeset_.has_value()) {
+    return HogDBError(HogDBCode::kInternal);
   }
-  if (prepared_.has_value()) {
-    if (auto r = db_.apply(*prepared_); !r) {
-      return r.error();
-    }
-    prepared_.reset();
+  if (auto r = db_.apply(*changeset_); !r) {
+    return r.error();
   }
+  changeset_.reset();
 
   // Extract auth/balance data (parallel destructive, no DAO writes).
   PerThread<KeyChangeBatch> key_changes;
@@ -290,8 +285,8 @@ BlockTX::commit(WorkerPool &pool)
   return {};
 }
 
-HogDBStatus<void>
-BlockTX::close()
+HogDBStatus<DbHash>
+BlockTX::close(const DbHash &base_hash)
 {
   ChangeSet changes = db_.create_changeset();
 
@@ -326,25 +321,12 @@ BlockTX::close()
       });
 
   if (!status) {
-    return status;
+    return status.error();
   }
 
-  prepared_ = std::move(changes);
-  return {};
-}
+  LtHash16 delta = changes.close();
+  changeset_ = std::move(changes);
 
-HogDBStatus<DbHash>
-BlockTX::compute_db_hash(const DbHash &base_hash)
-{
-  if (!prepared_.has_value()) {
-    if (auto r = close(); !r) {
-      return r.error();
-    }
-  }
-  LtHash16 delta;
-  if (prepared_.has_value()) {
-    delta = prepared_->close();
-  }
   LtHash16 final_hash = lthash16_from_db_hash(base_hash);
   final_hash += delta;
   return db_hash_from_lthash16(final_hash);
