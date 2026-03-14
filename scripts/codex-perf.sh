@@ -20,7 +20,8 @@ Procedure:
    - stop immediately
 8. If the change is not correct or not faster, revert it and stop without committing.
 
-Use /tmp/codex as your workspace (make the directory if needed).
+Prioritize making changes to hogd/mempool/.
+Use /tmp/codex2 as your workspace (make the directory if needed).
 Do not push any commits. Do not make more than one optimization in this run.
 "
 done
