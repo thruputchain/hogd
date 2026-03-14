@@ -26,9 +26,8 @@ public:
   {
     return 0;
   }
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
 private:
   const Contract contract_;

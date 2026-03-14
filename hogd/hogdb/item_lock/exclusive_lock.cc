@@ -1,6 +1,7 @@
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
 
 #include <cassert>
+#include <set>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -55,6 +56,24 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     auto cost = lock.try_atomic_change_lock(nullptr, &inner, ctx);
     if (!cost) {
       return cost;
+    }
+
+    // Under exclusive lock there is no concurrency, so every
+    // current-block consumed entry must have been added by this same TX.
+    // Verify identity: each consumed entry exists in added_entries.
+    if (inner.delta().consume &&
+        !inner.delta().consume->current_block_consumed.empty()) {
+      auto const &consumed = inner.delta().consume->current_block_consumed;
+      auto const &added = inner.delta().insert.added_entries;
+
+      std::multiset<QueueEntry> added_set(added.begin(), added.end());
+      for (auto const &entry : consumed) {
+        auto it = added_set.find(entry);
+        if (it == added_set.end()) {
+          return HogDBError{HogDBCode::kInvalidExecutorBehavior};
+        }
+        added_set.erase(it);
+      }
     }
 
     // try_atomic_change_lock validated everything and stashed

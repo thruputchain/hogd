@@ -64,6 +64,57 @@ NativeContractTestFramework::advance_block(
 }
 
 void
+NativeContractTestFramework::reject_block(BlockExecutionMode mode)
+{
+  // Capture the db hash before the block close attempt.
+  auto tip_before = get_db_tip();
+
+  // Close should fail — prepare_committed_changes detected an error
+  // (e.g. consumed_set mismatch). No DAO mutations have occurred.
+  {
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
+    if (r.result() != DbSchedResult::DbSchedResultError) {
+      throw std::runtime_error(
+          "reject_block: expected dbsched_close_snapshot to fail");
+    }
+  }
+
+  // Abandon the block — clean up without committing.
+  {
+    auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("reject_block: dbsched_abandon_snapshot failed");
+    }
+  }
+
+  // Verify DAO is unchanged: since prepare failed before any mutation,
+  // the db hash must be identical to what it was before the block.
+  auto tip_after = get_db_tip();
+  if (tip_before.db_hash != tip_after.db_hash) {
+    throw std::runtime_error(
+        "reject_block: db hash changed after block rejection — "
+        "DAO was mutated before prepare failure");
+  }
+
+  close_event_block(block_number_);
+  // dbtip_block_id_ unchanged — block was not committed.
+  block_number_++;
+
+  {
+    auto r =
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
+                                                         block_number_, mode);
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("reject_block: dbsched_create_snapshot failed");
+    }
+  }
+  open_event_block(block_number_);
+
+  storage_snapshot_cache_ =
+      std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
+}
+
+void
 NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 {
   {
