@@ -16,10 +16,9 @@ Procedure:
 7. If the change is correct and faster:
    - write a short entry to CHANGES.md describing what you changed and why
    - commit all relevant changes with a detailed commit message
-   - push to HEAD
    - stop immediately
-8. If the change is not correct or not faster, revert it and stop without committing. Do not push.
+8. If the change is not correct or not faster, revert it and stop without committing.
 
-Do not make more than one optimization in this run.
+Do not push any commits. Do not make more than one optimization in this run.
 "
 done
