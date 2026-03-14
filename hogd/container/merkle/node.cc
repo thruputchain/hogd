@@ -8,6 +8,7 @@
 #include <format>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -159,10 +160,8 @@ get_path_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   if (idx + path_size_in_bytes > encodings.size()) {
     return false;
   }
-  const std::vector<std::byte> path(encodings.begin() + idx,
-                                    encodings.begin() + idx +
-                                        path_size_in_bytes);
-  node.path = HexArray(path);
+  node.path = HexArray(
+      std::span(encodings).subspan(idx, path_size_in_bytes));
   if (path_size % 2 == 1) {
     node.path.remove_from_back(1);
   }
@@ -312,10 +311,8 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     break;
   }
   if (ret) {
-    const std::vector<std::byte> node_encodings(encodings.begin() +
-                                                    original_idx,
-                                                encodings.begin() + idx);
-    node.hash = sha256(node_encodings);
+    node.hash = sha256(std::span(encodings).subspan(original_idx,
+                                                    idx - original_idx));
   }
   return ret;
 }
