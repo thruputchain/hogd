@@ -84,7 +84,7 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
 InvokeStatus<void>
 NativeRuntime::invoke_internal(std::string_view method_name)
 {
-  auto method_id = Runtime::method_id_from_name(std::string(method_name));
+  auto method_id = Runtime::method_id_from_name(method_name);
   if (!method_id) {
     error("Unrecoverable: NativeRuntime::invoke_internal failed to parse "
           "method name '{}'",

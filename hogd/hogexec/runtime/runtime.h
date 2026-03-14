@@ -167,7 +167,7 @@ public:
   }
   // WASM name -> Method ID (inverse of invoke_name)
   constexpr static std::optional<MethodID>
-  method_id_from_name(std::string const &name)
+  method_id_from_name(std::string_view name)
   {
     MethodID id;
     auto result =

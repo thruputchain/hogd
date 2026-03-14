@@ -131,3 +131,20 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+add_executable(
+  native_runtime_bench
+  native_runtime_bench.cc
+)
+target_link_libraries(
+  native_runtime_bench
+  runtime
+  benchmark::benchmark
+)
+
+target_include_directories(
+  native_runtime_bench
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+set_property(TARGET native_runtime_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
