@@ -173,3 +173,36 @@ add_dependencies(
   runtime_test
   all_wasm_contracts
 )
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    resolve_contract_bench
+    resolve_contract_bench.cc
+  )
+
+  target_link_libraries(
+    resolve_contract_bench
+    runtime
+    runtime_test_lib
+    runtime_test_util
+    db_interface
+    hogdb
+    storage_cost
+    model_checker
+    contract_loader
+    genesis
+    benchmark::benchmark
+    GTest::gtest
+  )
+
+  target_include_directories(
+    resolve_contract_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET resolve_contract_bench
+                 PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

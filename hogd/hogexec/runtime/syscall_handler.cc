@@ -96,6 +96,20 @@ validate_flags(FlagSet flags)
   constexpr FlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
   return (flags & kAllowedFlags) == flags;
 }
+
+const Contract *
+lookup_newly_created_contract(
+    std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> const
+        &contracts,
+    SHA256Hash const &hash)
+{
+  auto it = contracts.find(hash);
+  if (it == contracts.end()) {
+    return nullptr;
+  }
+  assert(it->second != nullptr);
+  return it->second.get();
+}
 } // namespace
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -688,6 +702,11 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
 SystemStatus<const Contract *>
 SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
+  if (auto *local_contract =
+          lookup_newly_created_contract(newly_created_contracts_, hash)) {
+    return local_contract;
+  }
+
   auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
   if (!snapshot_res.has_value()) {
     return snapshot_res.error();
@@ -695,12 +714,6 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   auto &snapshot_contract = *snapshot_res;
   if (snapshot_contract != nullptr) {
     return snapshot_contract;
-  }
-
-  auto it = newly_created_contracts_.find(hash);
-  if (it != newly_created_contracts_.end()) {
-    assert(it->second != nullptr);
-    return it->second.get();
   }
   return nullptr;
 }
