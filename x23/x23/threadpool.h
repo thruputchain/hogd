@@ -216,19 +216,19 @@ public:
   {
     if (CoroHandle h =
             cb->set_result_without_resuming(std::forward<decltype(r)>(r)))
-      go({h, cb.cpuhint});
+      enqueue_one({h, cb.cpuhint});
   }
   void make_callback(CpuHinted<CoroCB<void>> cb)
   {
     if (CoroHandle h = cb->set_result_without_resuming())
-      go({h, cb.cpuhint});
+      enqueue_one({h, cb.cpuhint});
   }
 
 private:
   struct [[nodiscard]] AwaitBackground {
     ThreadPool &pool;
     bool await_ready() const noexcept { return false; }
-    void await_suspend(auto h) const noexcept { pool.go({h, cpuid()}); }
+    void await_suspend(auto h) const noexcept { pool.enqueue_one({h, cpuid()}); }
     void await_resume() const noexcept {}
   };
 
@@ -389,6 +389,8 @@ private:
 
   std::unique_ptr<RunQueue[]> runqueues_;
   AutoSignalCbHandle sigcb_;
+
+  void enqueue_one(Job item);
 
   // Return which queue a QPtr references, or -1 if none
   int qno(const QPtr &ptr) const

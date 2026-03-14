@@ -125,6 +125,23 @@ ThreadPool::go(std::vector<Job> &&jobs)
 }
 
 void
+ThreadPool::enqueue_one(Job item)
+{
+  x23assert(!ss_.stop_requested());
+
+  const uint64_t now = fastclock::get_ns();
+  QPtr lq;
+  qselect(&lq, item.cpuhint);
+  const bool wasempty = lq->q.empty();
+  lq->q.emplace_back(std::move(item), now);
+  if (wasempty) {
+    RunQueue::set_qtime(lq, now);
+    // A single newly queued coroutine only needs one worker wakeup.
+    lq->nonempty.notify_one();
+  }
+}
+
+void
 ThreadPool::quiesce() noexcept
 {
   x23assert(ThreadPool::my_thread_pool != this);
