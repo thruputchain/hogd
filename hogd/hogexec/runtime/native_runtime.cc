@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <string>
@@ -15,19 +16,30 @@
 
 namespace hogd {
 
+const NativeContract::function_t *
+NativeContract::find_function(Runtime::MethodID method) const
+{
+  auto it = std::lower_bound(functions_.begin(), functions_.end(), method,
+                             [](const function_entry_t &entry,
+                                Runtime::MethodID target) {
+                               return entry.first < target;
+                             });
+  if (it == functions_.end() || it->first != method) {
+    return nullptr;
+  }
+  return &it->second;
+}
+
 InvokeStatus<void>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime) const
 {
-  // Note: this doesn't build on gcc 15.1; not clear why, but it works on <=14.3
-  // and on gcc main (so presumably it's been fixed for the next release), and
-  // on clang 20.  https://godbolt.org/z/PnxhrahxP
-  auto it = functions_.find(method);
-  if (it == functions_.end())
+  auto *function = find_function(method);
+  if (function == nullptr)
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   NativeSyscallContext ctx(syscall_handler, runtime);
-  return it->second(ctx);
+  return (*function)(ctx);
 }
 
 SystemStatus<std::unique_ptr<Runtime>>

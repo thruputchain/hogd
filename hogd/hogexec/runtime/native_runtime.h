@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <functional>
@@ -8,6 +9,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -51,22 +53,34 @@ class NativeSyscallContext;
 class NativeContract {
 public:
   using function_t = std::function<InvokeStatus<void>(NativeSyscallContext &)>;
+  using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
-    : functions_(std::move(functions))
-  {}
+    : functions_(functions.size())
+  {
+    size_t i = 0;
+    for (auto &[method, function] : functions) {
+      functions_[i++] = function_entry_t{method, std::move(function)};
+    }
+    std::sort(functions_.begin(), functions_.end(),
+              [](const function_entry_t &lhs, const function_entry_t &rhs) {
+                return lhs.first < rhs.first;
+              });
+  }
 
   NativeContract(NativeContract &&) = delete;
   NativeContract &operator=(NativeContract &&) = delete;
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
+  const function_t *find_function(Runtime::MethodID method) const;
+
   InvokeStatus<void> invoke(Runtime::MethodID method,
                             SystemCallHandler &syscall_handler,
                             NativeRuntime &runtime) const;
 
 private:
-  const std::unordered_map<Runtime::MethodID, function_t> functions_;
+  std::vector<function_entry_t> functions_;
 };
 
 // Context that can instantiate native contracts from a predefined set of
