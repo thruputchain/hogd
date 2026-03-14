@@ -96,6 +96,19 @@ validate_flags(FlagSet flags)
   constexpr FlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
   return (flags & kAllowedFlags) == flags;
 }
+
+template<typename ContractRange>
+std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>>
+make_newly_created_contracts(ContractRange const &contracts_to_deploy)
+{
+  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
+  contracts.reserve(contracts_to_deploy.size());
+  for (auto const &contract : contracts_to_deploy) {
+    contracts.emplace(sha256(contract),
+                      std::make_unique<const Contract>(contract));
+  }
+  return contracts;
+}
 } // namespace
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -113,15 +126,9 @@ SystemCallHandler::SystemCallHandler(
         },
         db_proxy_),
     source_tx_hash_(sha256(tx)), auth_claims_(tx.auth_claims),
-    root_invocation_(tx.invocation), newly_created_contracts_([&] {
-      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
-
-      for (auto const &contract : tx.contracts_to_deploy) {
-        contracts.emplace(sha256(contract),
-                          std::make_unique<const Contract>(contract));
-      }
-      return contracts;
-    }()),
+    root_invocation_(tx.invocation),
+    newly_created_contracts_(
+        make_newly_created_contracts(tx.contracts_to_deploy)),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
