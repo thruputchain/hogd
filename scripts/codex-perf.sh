@@ -37,7 +37,8 @@ for i in {1..100}; do
         OPENAI_API_KEY="${OPENAI_API_KEY-}" \
         OPENAI_BASE_URL="${OPENAI_BASE_URL-}" \
         OPENAI_ORG_ID="${OPENAI_ORG_ID-}" \
-    timeout --kill-after=30s 60m codex exec --dangerously-bypass-approvals-and-sandbox "
+    timeout --kill-after=30s 60m \
+    codex exec --dangerously-bypass-approvals-and-sandbox "
 Goal: improve runtime performance without changing behavior.
 
 Make sure you start in the main branch if you are not there already.
