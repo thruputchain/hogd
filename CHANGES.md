@@ -1,5 +1,13 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::schedule()` runqueue-removal overhead in [hogd/mempool/scheduler.cc] by batching each account's scheduled-prefix erase into a single `std::map::erase()` call and updating `size_` once per account. The previous loop erased every scheduled transaction individually, so deep and medium runqueues paid repeated tree-rebalance cost while walking the same prefix.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_schedule/256` improved from about `0.53 ms` to `0.49 ms` CPU time, while the other mempool benchmarks stayed in the same range (`bench_scheduler_add_txs/256`: `0.48 ms` to `0.38 ms`, `bench_scheduler_process_transfers/256`: `0.48 ms` to `0.48 ms`, `bench_scheduler_schedule_single_account/256`: `0.33 ms` to `0.34 ms`).
+- Additional validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Reduced `hogd::Scheduler::schedule()` inner-loop overhead in [hogd/mempool/scheduler.cc] by caching the current account's hog-group balances in native integers while walking its runqueue, then writing the updated `kHogAgeGroupToSchedule` value back once after scheduling from that account. The previous loop re-decoded and re-encoded the same XDR hog-balance fields for every scheduled transaction.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `bench_scheduler_schedule/256` improved from about `0.55 ms` to `0.48 ms` CPU time, while the focused deep-runqueue case also improved slightly (`bench_scheduler_schedule_single_account/256`: `0.33 ms` to `0.33 ms`, about `335 us` to `328 us`). The enqueue and transfer benchmarks stayed in the same range (`bench_scheduler_add_txs/256`: `0.48 ms` to `0.44 ms`, `bench_scheduler_process_transfers/256`: `0.48 ms` to `0.48 ms`).

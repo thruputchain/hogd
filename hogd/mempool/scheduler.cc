@@ -638,6 +638,9 @@ Scheduler::schedule(size_t num_txs,
     const uint128_t received_hogs =
         from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
     uint128_t hogs_spent_by_account = 0;
+    size_t num_removed_by_account = 0;
+    size_t num_scheduled_by_account = 0;
+    const auto scheduled_begin = it;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       if (it == txs_to_schedule.end()) {
         account_it++;
@@ -652,11 +655,10 @@ Scheduler::schedule(size_t num_txs,
         tx_hashes.push_back(tx_hash);
         txs.push_back(tx);
 
-        // We are deleting [it] here, so do not access [tx_hash] or [tx]
-        // beyond this point!
-        it = txs_to_schedule.erase(it);
+        ++it;
         num_scheduled++;
-        size_.fetch_sub(1, std::memory_order_relaxed);
+        num_removed_by_account++;
+        num_scheduled_by_account++;
       }
       else {
         const uint128_t all_hogs_available =
@@ -681,6 +683,8 @@ Scheduler::schedule(size_t num_txs,
           // accounts above via [cycle_accounts_during_schedule_helper()], we
           // end up adding [account] back into [ready_accounts_].
           accounts_excluded_from_block.insert(account);
+          ++it;
+          num_removed_by_account++;
         }
         else {
           // The account has enough hogs in total to run this tx, but the
@@ -692,6 +696,10 @@ Scheduler::schedule(size_t num_txs,
         CHECK(removed_accounts.insert(account).second);
         break;
       }
+    }
+    if (num_removed_by_account) {
+      txs_to_schedule.erase(scheduled_begin, it);
+      size_.fetch_sub(num_removed_by_account, std::memory_order_relaxed);
     }
     if (hogs_spent_by_account) {
       hog_ages->num_hogs[kHogAgeGroupToSchedule] = to_xdr(hogs_available);
