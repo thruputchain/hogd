@@ -1,13 +1,13 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <optional>
-#include <string_view>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
@@ -17,14 +17,14 @@
 
 namespace hogd {
 
-// TODO(rstutsman): Consider using SipHash with a per-block random seed to
-// defend against adversarial hash collision attacks on consumed_set_balance_.
+// Uses SipHash24 with a random key (generated at construction) to defend
+// against adversarial hash collision attacks on consumed_set_balance_.
 struct QueueEntryHasher {
+  mutable SipHash24 hasher;
+
   size_t operator()(const QueueEntry &entry) const
   {
-    return std::hash<std::string_view>{}(
-        std::string_view(reinterpret_cast<const char *>(entry.data()),
-                         entry.size()));
+    return hasher(std::as_bytes(std::span(entry.data(), entry.size())));
   }
 };
 
