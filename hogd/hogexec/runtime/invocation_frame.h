@@ -155,6 +155,10 @@ public:
   HashBuffers hash_buffers_;
 
 private:
+  friend void
+  collect_storage_deltas_legacy(InvocationFrame const &frame,
+                                x23::Vec<FlaggedStorageDelta, 0xffffffff> &out);
+
   const ContractAddress address_;
   const Calldata calldata_;
 

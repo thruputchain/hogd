@@ -137,6 +137,9 @@ void
 InvocationFrame::collect_storage_deltas(
     x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const
 {
+  out.reserve(out.size() + modified_items_.size() +
+              new_contract_deployments_.size());
+
   for (auto const &[addrkey, item_view] : modified_items_) {
     auto [delta, flags] = item_view.get_delta();
     if (delta) {

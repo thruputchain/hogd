@@ -164,6 +164,17 @@ target_link_libraries(
 )
 gtest_discover_tests(runtime_test)
 
+add_executable(
+  invocation_frame_trace_bench
+  invocation_frame_trace_bench.cc
+)
+
+target_link_libraries(
+  invocation_frame_trace_bench
+  runtime
+  benchmark_main
+)
+
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
