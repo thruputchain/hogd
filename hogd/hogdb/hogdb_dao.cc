@@ -653,9 +653,9 @@ HogDBDAO::remove_item(const ItemKey &key)
 }
 
 ChangeSet
-HogDBDAO::create_changeset()
+HogDBDAO::create_changeset(bool compute_hash)
 {
-  return ChangeSet(this);
+  return ChangeSet(this, compute_hash);
 }
 
 HogDBStatus<void>

@@ -285,11 +285,36 @@ BlockTX::commit(WorkerPool &pool)
   return {};
 }
 
+HogDBStatus<void>
+BlockTX::close()
+{
+  ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
+  if (auto r = stage_locks(changes); !r) {
+    return r;
+  }
+  changeset_ = std::move(changes);
+  return {};
+}
+
 HogDBStatus<DbHash>
 BlockTX::close(const DbHash &base_hash)
 {
-  ChangeSet changes = db_.create_changeset();
+  ChangeSet changes = db_.create_changeset(/*compute_hash=*/true);
+  if (auto r = stage_locks(changes); !r) {
+    return r.error();
+  }
 
+  LtHash16 delta = changes.close();
+  changeset_ = std::move(changes);
+
+  LtHash16 final_hash = lthash16_from_db_hash(base_hash);
+  final_hash += delta;
+  return db_hash_from_lthash16(final_hash);
+}
+
+HogDBStatus<void>
+BlockTX::stage_locks(ChangeSet &changes)
+{
   std::mutex err_lock;
   HogDBStatus<void> status;
 
@@ -320,16 +345,7 @@ BlockTX::close(const DbHash &base_hash)
         }
       });
 
-  if (!status) {
-    return status.error();
-  }
-
-  LtHash16 delta = changes.close();
-  changeset_ = std::move(changes);
-
-  LtHash16 final_hash = lthash16_from_db_hash(base_hash);
-  final_hash += delta;
-  return db_hash_from_lthash16(final_hash);
+  return status;
 }
 
 } // namespace hogd

@@ -12,7 +12,8 @@
 
 namespace hogd {
 
-ChangeSet::ChangeSet(HogDBDAO *dao) : dao_(dao)
+ChangeSet::ChangeSet(HogDBDAO *dao, bool compute_hash)
+  : dao_(dao), compute_hash_(compute_hash)
 {}
 
 void // NOLINTNEXTLINE(misc-include-cleaner)
@@ -30,7 +31,7 @@ ChangeSet::put(std::span<const std::byte> key, uint8_t type,
   change.key_len = key.size();
   change.item = item;
 
-  if (is_state_item(key)) {
+  if (compute_hash_ && is_state_item(key)) {
     auto &hash = *hash_delta_;
     hash.add(key, type, value);
     auto old = dao_->get_ramdb().get(key);
@@ -54,7 +55,7 @@ ChangeSet::remove(std::span<const std::byte> key)
     return;
   }
 
-  if (is_state_item(key)) {
+  if (compute_hash_ && is_state_item(key)) {
     hash_delta_->remove(key, old->type, old->value);
   }
 

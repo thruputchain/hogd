@@ -21,7 +21,7 @@ class HogDBDAO;
 // interact through ChangeSet's public API.
 class ChangeSet {
   friend class HogDBDAO;
-  explicit ChangeSet(HogDBDAO *dao);
+  ChangeSet(HogDBDAO *dao, bool compute_hash);
 
 public:
   // Called by locks during block close to stage changes.
@@ -61,6 +61,7 @@ public:
 
 private:
   HogDBDAO *dao_;
+  bool compute_hash_;
   PerThread<ByteArena> alloc_;
   PerThread<std::vector<MaterializedChange>> changes_;
   PerThread<LtHash16> hash_delta_;

@@ -324,7 +324,9 @@ public:
   RAMDB &get_ramdb() { return db_; }
 
   // Create a ChangeSet for accumulating materialized changes.
-  ChangeSet create_changeset();
+  // When compute_hash is true, put()/remove() accumulate LtHash16 deltas
+  // inline; when false, hashing is skipped entirely.
+  ChangeSet create_changeset(bool compute_hash = true);
 
   // Apply all materialized changes from a ChangeSet to the database.
   HogDBStatus<void> apply(ChangeSet &changes,
