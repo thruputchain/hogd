@@ -5,7 +5,9 @@
 #include <span>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/crypto/lthash16.h"
+#include "hogd/ramdb/db_status.h"
 #include "hogd/hogdb/byte_arena.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/materialized_change.h"
@@ -51,7 +53,7 @@ ChangeSet::remove(std::span<const std::byte> key)
 
   auto old = dao_->get_ramdb().get(key);
   if (!old.has_value()) {
-    // Key doesn't exist in RAMDB — nothing to remove or hash-update.
+    CHECK(old.error() == DBCode::kNotFound);
     return;
   }
 

@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <span>
 
+#include "hogd/base/log.h"
+
 namespace hogd {
 
 // A single materialized DAO mutation. Byte data (keys, values) stored as
@@ -24,7 +26,11 @@ struct MaterializedChange {
 
   std::span<const std::byte> key() const { return item.subspan(0, key_len); }
 
-  std::span<const std::byte> value() const { return item.subspan(key_len + 1); }
+  std::span<const std::byte> value() const
+  {
+    CHECK(op == Op::kPut);
+    return item.subspan(key_len + 1);
+  }
 };
 
 } // namespace hogd

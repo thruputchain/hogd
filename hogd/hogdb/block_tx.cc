@@ -330,6 +330,10 @@ BlockTX::stage_locks(ChangeSet &changes)
     }
   });
 
+  if (!status) {
+    return status;
+  }
+
   addr_balance_locks_.for_each_parallel(
       [&](std::pair<const Address &, ItemLock &> v) {
         if (!v.second.is_finalized()) {
