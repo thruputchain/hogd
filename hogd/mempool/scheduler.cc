@@ -105,28 +105,37 @@ x23::Async<std::unordered_set<ContractAddress>>
 Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 {
   std::unordered_set<ContractAddress> accounts;
+  accounts.reserve(txs.size());
+  x23::XdrVec<ContractAddress> missing_accounts;
+  missing_accounts.reserve(txs.size());
   for (const SignedTransaction &tx : txs) {
-    accounts.insert(tx.tx.invocation.invoked_address);
-  }
-  x23::XdrVec<ContractAddress> accounts_vec;
-  accounts_vec.reserve(accounts.size());
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (!accounts.insert(account).second) {
+      continue;
+    }
 
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
-  for (const ContractAddress &account : accounts) {
-    bool contains = false;
-    {
+    auto [value_ptr, lock] = accounts_.find(account);
+    if (value_ptr == nullptr) {
+      missing_accounts.push_back(account);
+    }
+  }
+
+  if (!missing_accounts.empty()) {
+    x23::XdrVec<ContractAddress> accounts_vec;
+    accounts_vec.reserve(missing_accounts.size());
+
+    x23::CoroGuard cg;
+    co_await cg(global_lock_);
+    for (const ContractAddress &account : missing_accounts) {
       auto [value_ptr, lock] = accounts_.find(account);
-      contains = (value_ptr != nullptr);
+      if (value_ptr == nullptr) {
+        accounts_vec.push_back(account);
+      }
     }
-    if (!contains) {
-      accounts_vec.push_back(account);
+    if (!accounts_vec.empty()) {
+      co_await read_average_hog_ages(accounts_vec);
     }
   }
-  if (!accounts_vec.empty()) {
-    co_await read_average_hog_ages(accounts_vec);
-  }
-  cg.reset();
   co_return accounts;
 }
 
@@ -134,30 +143,37 @@ x23::Async<std::unordered_set<ContractAddress>>
 Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
   std::unordered_set<ContractAddress> accounts;
+  accounts.reserve(transfers.deltas.size());
+  x23::XdrVec<ContractAddress> missing_accounts;
+  missing_accounts.reserve(transfers.deltas.size());
   for (const Delta &delta : transfers.deltas) {
-    accounts.insert(delta.address);
+    if (!accounts.insert(delta.address).second) {
+      continue;
+    }
+
+    auto [value_ptr, lock] = accounts_.find(delta.address);
+    if (value_ptr == nullptr) {
+      missing_accounts.push_back(delta.address);
+    }
   }
 
   // TODO(jhumphri): This is the same as the code above.
-  x23::XdrVec<ContractAddress> accounts_vec;
-  accounts_vec.reserve(accounts.size());
+  if (!missing_accounts.empty()) {
+    x23::XdrVec<ContractAddress> accounts_vec;
+    accounts_vec.reserve(missing_accounts.size());
 
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
-  for (const ContractAddress &account : accounts) {
-    bool contains = false;
-    {
+    x23::CoroGuard cg;
+    co_await cg(global_lock_);
+    for (const ContractAddress &account : missing_accounts) {
       auto [value_ptr, lock] = accounts_.find(account);
-      contains = (value_ptr != nullptr);
+      if (value_ptr == nullptr) {
+        accounts_vec.push_back(account);
+      }
     }
-    if (!contains) {
-      accounts_vec.push_back(account);
+    if (!accounts_vec.empty()) {
+      co_await read_average_hog_ages(accounts_vec);
     }
   }
-  if (!accounts_vec.empty()) {
-    co_await read_average_hog_ages(accounts_vec);
-  }
-  cg.reset();
   co_return accounts;
 }
 

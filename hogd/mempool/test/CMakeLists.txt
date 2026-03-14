@@ -59,3 +59,29 @@ target_link_libraries(
 )
 
 set_property(TARGET coordinator PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    mempool_scheduler_bench
+    scheduler_bench.cc
+    $<TARGET_OBJECTS:mempool_test_infra>
+  )
+  target_include_directories(mempool_scheduler_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+  target_link_libraries(mempool_scheduler_bench
+    auth
+    benchmark::benchmark
+    contract_loader
+    exec_interface
+    hogd
+    hogd_interface
+    mempool
+    runtime
+    runtime_test_util
+  )
+  add_dependencies(mempool_scheduler_bench
+    all_wasm_contracts
+  )
+endif()
