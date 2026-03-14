@@ -1,5 +1,16 @@
 2026-03-13
 
+- Optimized `x23::Vec::append()` in `x23/x23/vec.h` for contiguous ranges of trivially copyable elements by copying directly with `memmove` instead of routing those byte appends through `std::uninitialized_copy`. This keeps the generic iterator path unchanged while trimming steady-state append overhead for `x23::Buf` and other byte vectors.
+- Added a focused `time_append_range_reuse_capacity` benchmark in `x23/tests/bench.cc` to isolate the steady-state append cost without repeated growth and page-fault noise from the older append benchmark.
+- Benchmark result on `/tmp/codex/hogd-build/x23/tests/bench --benchmark_filter='time_append_range_reuse_capacity<x23::Buf>' --benchmark_min_time=2s --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `time_append_range_reuse_capacity<x23::Buf>` improved from about `3.47 ns` to `3.20 ns` CPU time.
+- Validation:
+  `scripts/build.sh -d /tmp/codex/hogd-build`
+  `/tmp/codex/hogd-build/x23/tests/test_str_cstr`
+  `/tmp/codex/hogd-build/x23/tests/test_xdr`
+  `/tmp/codex/hogd-build/x23/tests/test_deserialize`
+  `/tmp/codex/hogd-build/x23/tests/test_uiobuf`
+
 - Optimized coroutine frame allocation in `x23/x23/corotrace.h` by replacing the aligned global `operator new`/`operator delete` path with a small manual cache-line-aligned allocator. `x23::PromiseBase` still returns frames aligned to `hardware_destructive_interference_size`, but avoids the heavier libc aligned-allocation path on every coroutine creation and destruction.
 - Benchmark result on `/tmp/codex/hogd-head-baseline-build/x23/tests/bench` versus `/tmp/codex/hogd-build/x23/tests/bench` with `--benchmark_filter='synchronous_empty_coro|coawait_empty_async|time_async_return|time_maybesync_return_async' --benchmark_min_time=1s --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `synchronous_empty_coro` improved from about `13.6 ns` to `9.03 ns`, `coawait_empty_async` from `13.9 ns` to `8.94 ns`, `time_async_return` from `18.9 ns` to `13.3 ns`, and `time_maybesync_return_async` from `19.5 ns` to `13.5 ns` CPU time.

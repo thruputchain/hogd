@@ -135,6 +135,27 @@ time_append_range(benchmark::State &state)
 BENCHMARK(time_append_range<std::vector<std::uint8_t>>);
 BENCHMARK(time_append_range<x23::Buf>);
 
+template<typename T>
+void
+time_append_range_reuse_capacity(benchmark::State &state)
+{
+  const std::vector<std::uint8_t> bytes(51, 0xc5);
+  T target;
+  target.reserve(bytes.size());
+  for (auto _ : state) {
+    target.clear();
+    if constexpr (requires { target.append_range(bytes); })
+      target.append_range(bytes);
+    else
+      target.insert(target.end(), bytes.begin(), bytes.end());
+    benchmark::DoNotOptimize(target.data());
+    benchmark::DoNotOptimize(target.size());
+    benchmark::ClobberMemory();
+  }
+}
+BENCHMARK(time_append_range_reuse_capacity<std::vector<std::uint8_t>>);
+BENCHMARK(time_append_range_reuse_capacity<x23::Buf>);
+
 template<size_t N>
 void
 serialize_bufview(benchmark::State &state)

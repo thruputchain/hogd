@@ -560,7 +560,15 @@ public:
       if (capacity() - size() < size_type(num))
         reserve(size() + num);
       if !consteval {
-        std::uninitialized_copy(first, last, b_.end);
+        if constexpr (std::contiguous_iterator<IterIn> &&
+                      std::same_as<std::remove_cv_t<std::iter_value_t<IterIn>>,
+                                   value_type> &&
+                      std::is_trivially_copyable_v<value_type>) {
+          std::memmove(b_.end, std::to_address(first),
+                       size_t(num) * sizeof(value_type));
+        }
+        else
+          std::uninitialized_copy(first, last, b_.end);
         b_.end += num;
       }
       else {
