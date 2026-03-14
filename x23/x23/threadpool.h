@@ -205,7 +205,7 @@ public:
   ~ThreadPool();
 
   void go(std::vector<Job> &&jobs);
-  void go(Job item) { go(std::vector{item}); }
+  void go(Job item);
 
   // Make a callback asynchronously in another thread.  This is
   // convenient for one callback, but not as efficient as calling go()

@@ -125,6 +125,22 @@ ThreadPool::go(std::vector<Job> &&jobs)
 }
 
 void
+ThreadPool::go(Job job)
+{
+  x23assert(!ss_.stop_requested());
+
+  uint64_t now = fastclock::get_ns();
+  QPtr lq;
+  qselect(&lq, job.cpuhint);
+  bool wasempty = lq->q.empty();
+  lq->q.emplace_back(job, now);
+  if (wasempty) {
+    RunQueue::set_qtime(lq, now);
+    lq->nonempty.notify_all();
+  }
+}
+
+void
 ThreadPool::quiesce() noexcept
 {
   x23assert(ThreadPool::my_thread_pool != this);
