@@ -227,39 +227,54 @@ Scheduler::add_txs_with_prefetched_accounts(
     const x23::XdrVec<SignedTransaction> &txs,
     const std::unordered_set<ContractAddress> &accounts)
 {
-  // Keep enqueue chunks coarse enough that worker wakeups do not dominate the
-  // per-transaction hashing and map insertion work.
-  constexpr size_t kMaxNumThreads = 32;
-  const size_t num_threads = std::min(txs.size(), kMaxNumThreads);
-  if (num_threads == 0) {
+  if (txs.empty()) {
     co_return;
   }
-  const size_t txs_per_thread = divide_up(txs.size(), num_threads);
 
-  std::vector<x23::Async<void>> handles;
-  handles.reserve(num_threads);
-  for (size_t i = 0; i < num_threads; i++) {
-    handles.push_back([](size_t coro_idx,
-                         const x23::XdrVec<hogd::SignedTransaction> &txs,
-                         size_t txs_per_thread,
-                         Scheduler &scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * txs_per_thread;
-      size_t possible_end = (coro_idx + 1) * txs_per_thread;
-      size_t end = std::min(possible_end, txs.size());
-
-      size_t num_added = 0;
-      for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
-        if (scheduler.add_txs_helper(txs[tx_idx])) {
-          num_added++;
-        }
+  // Small and medium enqueue batches do not have enough per-transaction work
+  // to amortize waking the thread pool, so keep them on the current thread.
+  constexpr size_t kInlineAddBatchLimit = 256;
+  if (txs.size() <= kInlineAddBatchLimit) {
+    size_t num_added = 0;
+    for (const SignedTransaction &tx : txs) {
+      if (add_txs_helper(tx)) {
+        ++num_added;
       }
-      scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
-      co_return;
-    }(/*coro_idx=*/i, txs, txs_per_thread, *this));
+    }
+    size_.fetch_add(num_added, std::memory_order_relaxed);
   }
-  for (x23::Async<void> &handle : handles) {
-    co_await handle;
+  else {
+    // Keep enqueue chunks coarse enough that worker wakeups do not dominate
+    // the per-transaction hashing and map insertion work.
+    constexpr size_t kMaxNumThreads = 32;
+    const size_t num_threads = std::min(txs.size(), kMaxNumThreads);
+    const size_t txs_per_thread = divide_up(txs.size(), num_threads);
+
+    std::vector<x23::Async<void>> handles;
+    handles.reserve(num_threads);
+    for (size_t i = 0; i < num_threads; i++) {
+      handles.push_back(
+          [](size_t coro_idx, const x23::XdrVec<hogd::SignedTransaction> &txs,
+             size_t txs_per_thread,
+             Scheduler &scheduler) noexcept -> x23::Async<void> {
+            co_await default_coropoll().pool_.bg();
+            size_t start = coro_idx * txs_per_thread;
+            size_t possible_end = (coro_idx + 1) * txs_per_thread;
+            size_t end = std::min(possible_end, txs.size());
+
+            size_t num_added = 0;
+            for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
+              if (scheduler.add_txs_helper(txs[tx_idx])) {
+                num_added++;
+              }
+            }
+            scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
+            co_return;
+          }(/*coro_idx=*/i, txs, txs_per_thread, *this));
+    }
+    for (x23::Async<void> &handle : handles) {
+      co_await handle;
+    }
   }
 
   std::vector<AccountKey> account_keys;
