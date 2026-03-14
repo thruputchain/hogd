@@ -1,5 +1,13 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::process_transfers()` cache-prefetch overhead in [hogd/mempool/scheduler.cc] by stopping `read_average_hog_ages(const HogsTransferred&)` from building and returning a full unique-account set that `process_transfers()` never used. The transfer path now deduplicates deltas only while collecting missing cached accounts, which removes one extra pass over the accounts and avoids returning an unnecessary hash table from the coroutine.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_process_transfers/256` improved from about `0.44 ms` to `0.41 ms` CPU time, and `bench_scheduler_process_transfers/64` from about `0.41 ms` to `0.39 ms`, while the smaller transfer cases also improved slightly (`8`: `0.40 ms` to `0.38 ms`, `1`: `0.38 ms` to `0.38 ms`).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Reduced `hogd::Scheduler::add_txs_with_prefetched_accounts()` overhead in [hogd/mempool/scheduler.cc] by adding an inline fast path for batches of up to 256 transactions. Profiling `bench_scheduler_add_txs/256` still showed the enqueue path spending most of its time in coroutine/thread-pool overhead rather than hashing and map insertion, so medium-sized batches were better handled on the calling thread while keeping the existing parallel path for larger batches.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule|bench_scheduler_schedule_single_account' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
   `bench_scheduler_add_txs/256` improved from about `0.42 ms` to `0.34 ms` CPU time, with larger wins for smaller enqueue batches (`bench_scheduler_add_txs/64`: `0.36 ms` to `0.066 ms`, `bench_scheduler_add_txs/8`: `0.093 ms` to `0.0070 ms`, `bench_scheduler_add_txs/1`: `0.016 ms` to `0.0017 ms`). The transfer benchmark stayed in the same range or improved slightly, and the schedule benchmarks also improved because their setup path enqueues transactions before timing resumes (`bench_scheduler_schedule/256`: `0.55 ms` to `0.27 ms`, `bench_scheduler_schedule_single_account/256`: `0.36 ms` to `0.21 ms`).

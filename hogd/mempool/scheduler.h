@@ -114,8 +114,7 @@ public:
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
   x23::Async<std::unordered_set<ContractAddress>>
   read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
-  x23::Async<std::unordered_set<ContractAddress>>
-  read_average_hog_ages(const HogsTransferred &transfers);
+  x23::Async<void> read_average_hog_ages(const HogsTransferred &transfers);
 
   void set_cached_hog_age_for_testing(const HogAge &age)
   {

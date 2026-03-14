@@ -131,21 +131,21 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   co_return accounts;
 }
 
-x23::Async<std::unordered_set<ContractAddress>>
+x23::Async<void>
 Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
-  std::unordered_set<ContractAddress> accounts;
-  for (const Delta &delta : transfers.deltas) {
-    accounts.insert(delta.address);
-  }
-
-  // TODO(jhumphri): This is the same as the code above.
+  std::unordered_set<ContractAddress> seen_accounts;
+  seen_accounts.reserve(transfers.deltas.size());
   x23::XdrVec<ContractAddress> accounts_vec;
-  accounts_vec.reserve(accounts.size());
+  accounts_vec.reserve(transfers.deltas.size());
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-  for (const ContractAddress &account : accounts) {
+  for (const Delta &delta : transfers.deltas) {
+    const ContractAddress &account = delta.address;
+    if (!seen_accounts.insert(account).second) {
+      continue;
+    }
     bool contains = false;
     {
       auto [value_ptr, lock] = accounts_.find(account);
@@ -159,7 +159,6 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
     co_await read_average_hog_ages(accounts_vec);
   }
   cg.reset();
-  co_return accounts;
 }
 
 Scheduler::AccountKey
