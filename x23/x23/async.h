@@ -561,16 +561,37 @@ template<typename R> struct [[nodiscard]] Async {
   // Since Asyncs can be moved, all the state is in the promise object.
   decltype(auto) operator co_await() { return callee_.promise(); }
 
-  // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto /*cb*/
-                      SLOC_DECL) // NOLINT(misc-unused-parameters)
+  static void finish_with_callback(Async self, Callback<R> cb
+                                       SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
-    // To defer destroying callee_, move Async into this coroutine
-    Async self = std::move(*this);
     // If you see a segfault on the line below, it may be because you wrote a
     // function that returns an [x23::Async<T>] and you forgot to include a
     // return/co_return statement at the end of the function.
     co_return co_await self;
+  }
+
+  // Run Async to completion and make a callback with the result.
+  void operator()(detail::is_callback_of<R> auto cb
+                      SLOC_DECL) // NOLINT(misc-unused-parameters)
+  {
+    // If the result is already ready, avoid allocating a wrapper coroutine
+    // just to co_await and immediately invoke the callback.
+    if (callee_.promise().await_ready()) {
+      Async self = std::move(*this);
+      try {
+        if constexpr (std::is_void_v<R>) {
+          self.callee_.promise().await_resume();
+          std::invoke(std::move(cb));
+        }
+        else
+          std::invoke(std::move(cb), self.callee_.promise().await_resume());
+      } catch (...) {
+        trace_unhandled_exception(&self.callee_.promise());
+      }
+      return;
+    }
+
+    finish_with_callback(std::move(*this), std::move(cb) SLOC_COMMA_VAR);
   }
   template<std::convertible_to<Callback<R>> CB>
   requires (!detail::is_callback_of<CB, R>)

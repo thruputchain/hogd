@@ -74,6 +74,13 @@ main()
 {
   setlinebuf(stdout);
 
+  bool immediate = false;
+  async_return(7)([&](int n) {
+    immediate = true;
+    assert(n == 7);
+  });
+  assert(immediate);
+
   coro_function(1, 2)([](int n) {
     std::println("***** {}", n);
     assert(n == 13);
