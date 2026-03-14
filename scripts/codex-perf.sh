@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
+if [[ $# -ne 1 ]]; then
   echo "Error: you must specify the directory to have the agent focus on." >&2
   echo "Usage: $0 <directory>" >&2
   exit 1
@@ -12,9 +12,9 @@ FOCUS_DIR="$1"
 WORKSPACE_PATH="/tmp/codex"
 CHANGES_PATH="$WORKSPACE_PATH/CHANGES.md"
 mkdir -p "$WORKSPACE_PATH"
-# We are passing [-f] so that [rm] fails silently if the CHANGES.md file (or its
-# parent directory) does not exist. We placed [set -euo pipefail] at the top of
-# the script, so the entire script will exit if [rm] does not fail silently.
+# We are passing [-f] so that [rm] fails silently if the CHANGES.md file does
+# not exist. We placed [set -euo pipefail] at the top of the script, so the
+# entire script will exit if [rm] does not fail silently.
 rm -f "$CHANGES_PATH"
 
 for i in {1..100}; do
@@ -23,11 +23,21 @@ for i in {1..100}; do
   git reset --hard
   git clean -fd
 
-  sudo systemd-run --scope \
+  if ! sudo -n /usr/bin/systemd-run --scope --quiet \
     -p MemoryHigh=270G \
     -p MemoryMax=300G \
     -p MemorySwapMax=0 \
-    timeout 60m codex exec --dangerously-bypass-approvals-and-sandbox "
+    sudo -u "$USER" \
+      env \
+        HOME="$HOME" \
+        PATH="$PATH" \
+        XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+        XDG_CONFIG_HOME="${XDG_CONFIG_HOME-}" \
+        XDG_CACHE_HOME="${XDG_CACHE_HOME-}" \
+        OPENAI_API_KEY="${OPENAI_API_KEY-}" \
+        OPENAI_BASE_URL="${OPENAI_BASE_URL-}" \
+        OPENAI_ORG_ID="${OPENAI_ORG_ID-}" \
+    timeout --kill-after=30s 60m codex exec --dangerously-bypass-approvals-and-sandbox "
 Goal: improve runtime performance without changing behavior.
 
 Make sure you start in the main branch if you are not there already.
@@ -66,5 +76,8 @@ Procedure:
 Prioritize making changes to \"${FOCUS_DIR}\".
 Use \"$WORKSPACE_PATH\" as your workspace (make the directory if needed).
 Do not make more than one optimization in this run.
-" || true
+"; then
+  echo "Iteration $i failed or timed out" >&2
+  exit 1
+fi
 done
