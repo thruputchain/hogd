@@ -52,6 +52,41 @@ BENCHMARK(bench_scheduler_add_txs)
     ->Arg(256)
     ->Iterations(200);
 
+void
+bench_scheduler_process_transfers(benchmark::State &state)
+{
+  Scheduler scheduler(/*current_block=*/0, /*db_sched_client=*/nullptr);
+  HogsTransferred transfer;
+  transfer.block = 5;
+  transfer.deltas.reserve(state.range(0));
+
+  for (int i = 0; i < state.range(0); i++) {
+    const ContractAddress account =
+        make_benchmark_account_address(static_cast<uint8_t>(i + 1));
+    scheduler.set_cached_hog_age_for_testing(
+        HogAge{.address = account,
+               .num_hogs = {to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)),
+                            to_xdr(static_cast<uint128_t>(0)),
+                            to_xdr(static_cast<uint128_t>(0))},
+               .average_ages = {0, 0, 0}});
+    transfer.deltas.push_back(
+        Delta{.address = account,
+              .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  }
+
+  for (auto _ : state) {
+    scheduler.process_transfers(transfer)();
+    benchmark::DoNotOptimize(scheduler.tx_cache_size());
+  }
+}
+
+BENCHMARK(bench_scheduler_process_transfers)
+    ->Arg(1)
+    ->Arg(8)
+    ->Arg(64)
+    ->Arg(256)
+    ->Iterations(200);
+
 } // namespace
 
 } // namespace hogd

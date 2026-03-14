@@ -1,5 +1,14 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::process_transfers()` overhead in [hogd/mempool/scheduler.cc] by capping the number of background coroutines to the number of transfer deltas instead of always launching 100 workers. Small transfer batches were paying nearly constant thread-pool wakeup overhead because most workers received empty slices.
+- Added a focused transfer-processing benchmark in `hogd/mempool/test/bench.cc` that preloads cached account ages and measures only the scheduler transfer path, so the fixed worker-launch cost is visible without the RAM DB harness.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
+  `bench_scheduler_process_transfers/1` improved from about `1.43 ms` to `0.49 ms` CPU time, `bench_scheduler_process_transfers/8` from about `1.38 ms` to `0.58 ms`, and `bench_scheduler_process_transfers/64` from about `1.37 ms` to `1.07 ms`, while the large-batch case stayed roughly flat (`256` deltas: `1.42 ms` to `1.46 ms`).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_process_transfers' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+
 - Reduced `hogd::Scheduler::add_txs()` enqueue overhead in [hogd/mempool/scheduler.cc] by capping the number of background coroutines to the amount of real work instead of always launching 128 workers. Small and medium transaction batches were paying nearly constant scheduler overhead because most of those coroutines immediately found empty slices.
 - Added a focused enqueue benchmark in `hogd/mempool/test/bench.cc` that preloads account ages and measures only the post-lookup insertion path, so the scheduler hot path is observable without the RAM DB test harness dominating results.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:
