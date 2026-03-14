@@ -146,6 +146,45 @@ BENCHMARK(bench_scheduler_schedule)
     ->Arg(256)
     ->Iterations(200);
 
+void
+bench_scheduler_schedule_single_account(benchmark::State &state)
+{
+  const ContractAddress account = make_benchmark_account_address(7);
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, state.range(0));
+  for (size_t i = 0; i < txs.size(); ++i) {
+    txs[i].tx.uniquifier.nonce = i;
+  }
+  std::unordered_set<ContractAddress> accounts = {account};
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    Scheduler scheduler(/*current_block=*/0, /*db_sched_client=*/nullptr);
+    scheduler.set_cached_hog_age_for_testing(
+        HogAge{.address = account,
+               .num_hogs = {to_xdr(static_cast<uint128_t>(5'000'000'000 * 500)),
+                            to_xdr(static_cast<uint128_t>(0)),
+                            to_xdr(static_cast<uint128_t>(0))},
+               .average_ages = {0, 0, 0}});
+    scheduler.add_txs_with_prefetched_accounts(txs, accounts)();
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduled_hashes.reserve(txs.size());
+    scheduled.reserve(txs.size());
+    state.ResumeTiming();
+
+    scheduler.schedule(txs.size(), scheduled_hashes, scheduled);
+    benchmark::DoNotOptimize(scheduled_hashes.size());
+    benchmark::DoNotOptimize(scheduled.size());
+  }
+}
+
+BENCHMARK(bench_scheduler_schedule_single_account)
+    ->Arg(8)
+    ->Arg(64)
+    ->Arg(256)
+    ->Iterations(200);
+
 } // namespace
 
 } // namespace hogd

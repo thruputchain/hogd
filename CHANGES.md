@@ -1,5 +1,15 @@
 2026-03-13
 
+- Reduced `hogd::Scheduler::schedule()` overhead in [hogd/mempool/scheduler.cc] by removing a redundant `std::map::lower_bound()` from the per-account inner loop. The scheduler only needs to drop expired transactions once before it starts walking an account's runqueue; previously it restarted the tree search from the beginning after every scheduled transaction.
+- Added a focused `bench_scheduler_schedule_single_account` benchmark in `hogd/mempool/test/bench.cc` to measure the case where one account has a deep runqueue, which exposed the repeated-search hotspot that the existing one-transaction-per-account schedule benchmark did not.
+- Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_schedule_single_account/256'`:
+  the 256-transaction single-account schedule case improved from about `0.57 ms` to `0.45 ms` CPU time across `perf stat -r 5` runs, while the existing aggregate benchmark stayed in the same range (`bench_scheduler_schedule/256`: `0.53 ms` CPU time on the post-change run).
+- Validation:
+  `scripts/build.sh -d /tmp/codex2/build`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_test`
+  `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_schedule_single_account|bench_scheduler_schedule/256' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`
+  `perf stat -r 5 /tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_schedule_single_account/256'`
+
 - Reduced `hogd::Scheduler::add_txs_with_prefetched_accounts()` overhead in [hogd/mempool/scheduler.cc] by lowering the background coroutine cap from 128 to 32 after profiling still showed the 256-transaction enqueue benchmark spending most of its CPU time in thread-pool futex waits and wakeups. The previous cap-to-work-size change removed empty workers, but 128 wakeups were still too expensive for medium and large batches.
 - Added a focused `bench_scheduler_schedule` benchmark in `hogd/mempool/test/bench.cc` so the scheduler path can be measured separately from enqueue and transfer processing when checking for regressions.
 - Benchmark result on `/tmp/codex2/build/hogd/mempool/test/mempool_bench --benchmark_filter='bench_scheduler_add_txs|bench_scheduler_process_transfers|bench_scheduler_schedule' --benchmark_repetitions=5 --benchmark_report_aggregates_only=true`:

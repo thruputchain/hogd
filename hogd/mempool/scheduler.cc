@@ -606,21 +606,21 @@ Scheduler::schedule(size_t num_txs,
     const ContractAddress account = account_key.account;
     auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
     auto [txs_to_schedule, txs_lock] = account_to_tx_[account];
+    auto it = txs_to_schedule.lower_bound(lower_bound);
+    if (it != txs_to_schedule.begin()) {
+      // Remove expired txs once before walking the remaining runqueue entries.
+      for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
+           it_remove++) {
+        const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
+        CHECK_EQ(txs_.remove(tx_hash), 1UL);
+      }
+      size_t to_remove = std::distance(txs_to_schedule.begin(), it);
+      CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
+      size_ -= to_remove;
+      it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
+    }
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
-      auto it = txs_to_schedule.lower_bound(lower_bound);
-      if (it != txs_to_schedule.begin()) {
-        // This removes expired txs.
-        for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
-             it_remove++) {
-          const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
-          CHECK_EQ(txs_.remove(tx_hash), 1UL);
-        }
-        size_t to_remove = std::distance(txs_to_schedule.begin(), it);
-        CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
-        size_ -= to_remove;
-        it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
-      }
       if (it == txs_to_schedule.end()) {
         account_it++;
         CHECK(removed_accounts.insert(account).second);
