@@ -442,10 +442,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // [read_average_hog_ages] on a separate thread.
   co_await read_average_hog_ages(transfers);
 
-  constexpr size_t kNumThreads = 100;
   const std::vector<ChunkRange> chunks =
-      make_chunks(transfers.deltas.size(), kNumThreads);
-
+      make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;

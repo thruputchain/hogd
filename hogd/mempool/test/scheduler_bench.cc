@@ -61,7 +61,13 @@ bm_scheduler_process_transfers(benchmark::State &state)
   }
 }
 
-BENCHMARK(bm_scheduler_process_transfers)->Arg(8)->UseRealTime();
+BENCHMARK(bm_scheduler_process_transfers)
+    ->Arg(1)
+    ->Arg(8)
+    ->Arg(32)
+    ->Arg(128)
+    ->Arg(1'000'000)
+    ->UseRealTime();
 
 void
 bm_scheduler_add_txs(benchmark::State &state)
@@ -90,6 +96,7 @@ BENCHMARK(bm_scheduler_add_txs) // NOLINT
     ->Arg(8)
     ->Arg(32)
     ->Arg(128)
+    ->Arg(1'000'000)
     ->UseManualTime()
     ->Unit(benchmark::kMicrosecond);
 
