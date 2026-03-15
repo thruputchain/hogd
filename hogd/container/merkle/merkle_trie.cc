@@ -1471,14 +1471,28 @@ void
 MerkleTrie::generate_all_hashes_above_frontier(
     Node *root, const std::unordered_set<Node *> &frontier)
 {
-  if (frontier.contains(root)) {
-    return;
-  }
+  std::vector<std::pair<Node *, bool>> stack;
+  stack.emplace_back(root, false);
 
-  for (Node *child : get_children(root)) {
-    generate_all_hashes_above_frontier(child, frontier);
+  while (!stack.empty()) {
+    auto [node, visited] = stack.back();
+    stack.pop_back();
+
+    if (frontier.contains(node)) {
+      continue;
+    }
+
+    if (visited) {
+      node->hash = node->compute_node_hash();
+      continue;
+    }
+
+    stack.emplace_back(node, true);
+    std::vector<Node *> children = get_children(node);
+    for (auto it = children.rbegin(); it != children.rend(); ++it) {
+      stack.emplace_back(*it, false);
+    }
   }
-  root->hash = root->compute_node_hash();
 }
 
 void
