@@ -146,6 +146,7 @@ public:
   std::unordered_set<SHA256Hash> get_committed_contracts() const
   {
     std::unordered_set<SHA256Hash> committed_contracts;
+    committed_contracts.reserve(new_contract_deployments_.size());
     for (auto const &[addr, deployment] : new_contract_deployments_) {
       committed_contracts.insert(deployment.hash);
     }
