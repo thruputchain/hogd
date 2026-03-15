@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <future>
 #include <iostream>
 #include <map>
@@ -65,6 +66,23 @@ for_each_func(std::map<HexArray, SHA256Hash> &seen,
               const std::pair<HexArray, SHA256Hash> &pair)
 {
   seen[pair.first] = pair.second;
+}
+
+template<typename TrieType>
+SHA256Hash
+build_and_hash_trie(TrieType &trie, size_t num_threads)
+{
+  trie.set_should_hash_nodes_on_each_op(false);
+  for (size_t i = 0; i < 512; i++) {
+    HexArray key(std::format("{:032x}", i));
+    std::string value = std::format("value-{}", i);
+    std::span<std::byte> value_span{
+        reinterpret_cast<std::byte *>(value.data()), value.size()};
+    EXPECT_TRUE(trie.insert(key, value_span));
+  }
+  trie.generate_all_hashes(num_threads);
+  EXPECT_TRUE(trie.check());
+  return trie.get_root_hash();
 }
 
 } // namespace
@@ -1653,6 +1671,32 @@ run_multithread(size_t num_threads)
 TEST(MerkleTriePrefix, Multithread128)
 {
   run_multithread(/*num_threads=*/128);
+}
+
+TEST(MerkleTrie, GenerateAllHashesParallelMatchesSerial)
+{
+  MerkleTrie serial_trie;
+  const SHA256Hash serial_hash =
+      build_and_hash_trie(serial_trie, /*num_threads=*/1);
+
+  MerkleTrie parallel_trie;
+  const SHA256Hash parallel_hash =
+      build_and_hash_trie(parallel_trie, available_parallelism());
+
+  EXPECT_EQ(serial_hash, parallel_hash);
+}
+
+TEST(MerkleTriePrefix, GenerateAllHashesParallelMatchesSerial)
+{
+  MerkleTriePrefix serial_trie;
+  const SHA256Hash serial_hash =
+      build_and_hash_trie(serial_trie, /*num_threads=*/1);
+
+  MerkleTriePrefix parallel_trie;
+  const SHA256Hash parallel_hash =
+      build_and_hash_trie(parallel_trie, available_parallelism());
+
+  EXPECT_EQ(serial_hash, parallel_hash);
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

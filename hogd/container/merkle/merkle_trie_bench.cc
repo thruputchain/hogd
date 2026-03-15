@@ -1,6 +1,7 @@
 #include <atomic>
 #include <benchmark/benchmark.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
@@ -26,6 +28,7 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumKVPairs = 2'000'000;
+constexpr size_t kBlockHeaderNumKVPairs = 1'000'000;
 constexpr size_t kLargeNumKVPairs = 20'000'000;
 constexpr size_t kAdditionalPaths = 1'000;
 constexpr size_t kHashBenchNumKVPairs = 200'000;
@@ -74,6 +77,28 @@ build_trie_without_hashing(MerkleTrie &trie, size_t num_paths)
                                   value.size()};
   for (const auto &path : paths) {
     CHECK(trie.insert(path, value_span));
+  }
+}
+
+void
+insert_block_header_style(MerkleTriePrefix &trie,
+                          const std::vector<HexArray> &paths,
+                          size_t num_threads)
+{
+  WorkerPool pool(static_cast<int>(num_threads));
+  std::vector<std::future<void>> futures;
+  const std::vector<ChunkRange> chunks = make_chunks(paths.size(), num_threads);
+  futures.reserve(chunks.size());
+
+  for (const ChunkRange &chunk : chunks) {
+    futures.push_back(pool.submit([chunk, &trie, &paths] {
+      for (size_t j = chunk.start; j < chunk.end; j++) {
+        CHECK(trie.insert(paths[j], std::span<const std::byte>()));
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
   }
 }
 
@@ -170,6 +195,85 @@ generate_all_hashes_prebuilt(benchmark::State &state)
   }
 }
 BENCHMARK(generate_all_hashes_prebuilt)->Unit(benchmark::kMillisecond);
+
+void
+generate_all_hashes_prebuilt_parallel(benchmark::State &state)
+{
+  MerkleTrie trie;
+  build_trie_without_hashing(trie, /*num_paths=*/kHashBenchNumKVPairs);
+  for (auto _ : state) {
+    trie.generate_all_hashes(available_parallelism());
+  }
+}
+BENCHMARK(generate_all_hashes_prebuilt_parallel)->Unit(benchmark::kMillisecond);
+
+void
+block_header_style_insert_then_parallel_generate_all_hashes(
+    benchmark::State &state)
+{
+  const size_t num_threads = available_parallelism();
+  std::vector<HexArray> paths =
+      precompute_paths(/*num_paths=*/kBlockHeaderNumKVPairs);
+  double insert_seconds = 0.0;
+  double hash_seconds = 0.0;
+
+  for (auto _ : state) {
+    MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+    trie.set_should_hash_nodes_on_each_op(false);
+
+    const auto insert_start = std::chrono::steady_clock::now();
+    insert_block_header_style(trie, paths, num_threads);
+    const auto hash_start = std::chrono::steady_clock::now();
+    trie.generate_all_hashes(num_threads);
+    const auto end = std::chrono::steady_clock::now();
+
+    insert_seconds +=
+        std::chrono::duration<double>(hash_start - insert_start).count();
+    hash_seconds += std::chrono::duration<double>(end - hash_start).count();
+    benchmark::DoNotOptimize(trie.get_root_hash());
+  }
+
+  state.counters["insert_s"] =
+      insert_seconds / static_cast<double>(state.iterations());
+  state.counters["hash_s"] =
+      hash_seconds / static_cast<double>(state.iterations());
+}
+BENCHMARK(block_header_style_insert_then_parallel_generate_all_hashes)
+    ->Iterations(1)
+    ->Unit(benchmark::kSecond);
+
+void
+block_header_style_insert_with_incremental_hashing(benchmark::State &state)
+{
+  const size_t num_threads = available_parallelism();
+  std::vector<HexArray> paths =
+      precompute_paths(/*num_paths=*/kBlockHeaderNumKVPairs);
+  double insert_seconds = 0.0;
+  double hash_seconds = 0.0;
+
+  for (auto _ : state) {
+    MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+
+    const auto insert_start = std::chrono::steady_clock::now();
+    insert_block_header_style(trie, paths, num_threads);
+    const auto hash_start = std::chrono::steady_clock::now();
+    trie.generate_top_level_hashes();
+    const auto end = std::chrono::steady_clock::now();
+
+    insert_seconds +=
+        std::chrono::duration<double>(hash_start - insert_start).count();
+    hash_seconds += std::chrono::duration<double>(end - hash_start).count();
+    benchmark::DoNotOptimize(trie.get_root_hash());
+  }
+
+  state.counters["insert_s"] =
+      insert_seconds / static_cast<double>(state.iterations());
+  state.counters["hash_s"] =
+      hash_seconds / static_cast<double>(state.iterations());
+}
+BENCHMARK(block_header_style_insert_with_incremental_hashing)
+    ->Iterations(1)
+    ->Unit(benchmark::kSecond);
 
 // Inserts 2 million KV pairs into a trie. Just measures the overhead of
 // [insert()] operations. Nodes are not hashed at any point--not even at the

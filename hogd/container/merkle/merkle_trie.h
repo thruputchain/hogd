@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stack>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -207,7 +208,7 @@ public:
 
   // Generates a hash for every node in the trie. If the trie is modified while
   // this function runs, the behavior is undefined.
-  void generate_all_hashes();
+  void generate_all_hashes(size_t num_threads = available_parallelism());
 
   // We do compute the hashes for the top two levels of nodes in the trie on
   // each operation that modifies the trie. Rather, to avoid rehashing these
@@ -491,6 +492,17 @@ private:
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root);
 
+  // Computes hashes for the entire subtree rooted at [root].
+  static void generate_all_hashes_serial(Node *root);
+
+  // Collects disjoint subtrees to hash in parallel.
+  static std::vector<Node *> collect_hash_frontier(Node *root,
+                                                   size_t max_subtrees);
+
+  // Computes hashes only for nodes above the already-hashed frontier.
+  static void generate_all_hashes_above_frontier(
+      Node *root, const std::unordered_set<Node *> &frontier);
+
   // Initializes the root node. The root node is always a branch.
   void init_root_node()
   {
@@ -724,10 +736,45 @@ public:
     }
   }
 
-  void generate_all_hashes()
+  void generate_all_hashes(size_t num_threads = available_parallelism())
   {
-    for (std::optional<MerkleTrie> &trie : tries_) {
-      trie->generate_all_hashes();
+    num_threads = std::max<size_t>(1, num_threads);
+    if (num_threads == 1) {
+      for (std::optional<MerkleTrie> &trie : tries_) {
+        trie->generate_all_hashes(/*num_threads=*/1);
+      }
+      return;
+    }
+
+    const size_t base_child_threads = std::max<size_t>(1, num_threads / tries_.size());
+    size_t extra_threads = num_threads % tries_.size();
+    WorkerPool pool(static_cast<int>(num_threads));
+    std::vector<std::future<void>> futures;
+    std::array<std::vector<Node *>, 16> frontiers;
+
+    for (size_t i = 0; i < tries_.size(); i++) {
+      std::optional<MerkleTrie> &trie = tries_[i];
+      const size_t child_threads =
+          base_child_threads + (extra_threads != 0 ? 1 : 0);
+      frontiers[i] =
+          MerkleTrie::collect_hash_frontier(&trie->root_, child_threads);
+      for (Node *subtree_root : frontiers[i]) {
+        futures.push_back(pool.submit([subtree_root] {
+          MerkleTrie::generate_all_hashes_serial(subtree_root);
+        }));
+      }
+      extra_threads -= (extra_threads != 0 ? 1 : 0);
+    }
+
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+
+    for (size_t i = 0; i < tries_.size(); i++) {
+      std::unordered_set<Node *> frontier(frontiers[i].begin(),
+                                          frontiers[i].end());
+      MerkleTrie::generate_all_hashes_above_frontier(&tries_[i]->root_,
+                                                     frontier);
     }
   }
 
