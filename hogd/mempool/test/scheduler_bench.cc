@@ -96,7 +96,8 @@ BENCHMARK(bm_scheduler_process_transfers)
     ->Arg(4)
     ->Arg(16)
     ->Arg(64)
-    ->UseRealTime();
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
 
 void
 bm_scheduler_add_txs(benchmark::State &state)
