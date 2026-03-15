@@ -1,12 +1,9 @@
 #include "hogd/container/merkle/node.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
-
 #include <format>
-#include <iterator>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -24,18 +21,30 @@ namespace hogd {
 
 namespace {
 
-std::byte
-cast_char_to_byte(unsigned char ch)
+template<typename Sink>
+void
+emit_bytes(Sink &sink, std::span<const std::byte> bytes)
 {
-  return std::byte(ch);
+  if (!bytes.empty()) {
+    sink(bytes);
+  }
 }
 
+template<size_t N, typename Sink>
 void
-size_to_bytes(uint64_t s, std::vector<std::byte> &append_to)
+emit_bytes(Sink &sink, const std::array<std::byte, N> &bytes)
 {
+  emit_bytes(sink, std::span(bytes));
+}
+
+std::array<std::byte, sizeof(uint64_t)>
+size_to_bytes(uint64_t s)
+{
+  std::array<std::byte, sizeof(uint64_t)> bytes;
   for (size_t i = 0; i < sizeof(uint64_t); i++) {
-    append_to.push_back(std::byte((s >> (8 * i)) & 0xFF));
+    bytes[i] = std::byte((s >> (8 * i)) & 0xFF);
   }
+  return bytes;
 }
 
 void
@@ -74,41 +83,67 @@ get_child_string(std::ostringstream &oss, size_t child_idx,
   }
 }
 
+template<typename Sink>
 void
-get_value_encoding(std::vector<std::byte> &encoding,
-                   const std::optional<SHA256Hash> &value_hash)
+visit_value_encoding(Sink &sink, const std::optional<SHA256Hash> &value_hash)
 {
-  std::byte value_present_byte = value_hash ? std::byte{0x01} : std::byte{0x00};
-  encoding.push_back(value_present_byte);
+  std::array<std::byte, 1> value_present = {value_hash ? std::byte{0x01}
+                                                       : std::byte{0x00}};
+  emit_bytes(sink, value_present);
 
   if (value_hash) {
-    std::ranges::transform(*value_hash, std::back_inserter(encoding),
-                           cast_char_to_byte);
+    emit_bytes(sink, std::as_bytes(
+                         std::span(value_hash->data(), value_hash->size())));
   }
 }
 
+template<typename Sink>
 void
-get_path_encoding(std::vector<std::byte> &encoding, const HexArray &path)
+visit_path_encoding(Sink &sink, const HexArray &path)
 {
-  size_to_bytes(path.size(), encoding);
-
-  path.to_byte_vector(encoding);
+  emit_bytes(sink, size_to_bytes(path.size()));
+  path.visit_encoded_bytes(sink);
 }
 
+template<typename Sink>
 void
-get_child_encoding(std::vector<std::byte> &encoding,
-                   const std::array<Node *, Node::kMaxNumBranches> &children,
-                   size_t num_children)
+visit_child_encoding(Sink &sink,
+                     const std::array<Node *, Node::kMaxNumBranches> &children,
+                     size_t num_children)
 {
-  size_t cur_size = encoding.size();
-  encoding.insert(encoding.end(), num_children * sizeof(SHA256Hash),
-                  std::byte{0x0});
   for (size_t i = 0; i < num_children; i++) {
     Node *child = children[i];
     if (child) {
-      memcpy(&encoding[cur_size], &child->hash, sizeof(SHA256Hash));
+      emit_bytes(sink, std::as_bytes(
+                           std::span(child->hash.data(), child->hash.size())));
     }
-    cur_size += sizeof(SHA256Hash);
+    else {
+      std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};
+      emit_bytes(sink, zero_bytes);
+    }
+  }
+}
+
+template<typename Sink>
+void
+visit_node_encoding(Sink &sink, const Node &node)
+{
+  std::array<std::byte, 1> type_byte = {static_cast<std::byte>(node.type)};
+  emit_bytes(sink, type_byte);
+
+  switch (node.type) {
+  case Node::Type::kBranch:
+    visit_value_encoding(sink, node.value_hash);
+    visit_child_encoding(sink, node.child, Node::kMaxNumBranches);
+    break;
+  case Node::Type::kExtension:
+    visit_path_encoding(sink, node.path);
+    visit_child_encoding(sink, node.child, 1);
+    break;
+  case Node::Type::kLeaf:
+    visit_path_encoding(sink, node.path);
+    visit_value_encoding(sink, node.value_hash);
+    break;
   }
 }
 
@@ -239,19 +274,22 @@ Node::get_node_encoding() const
   static PerThread<std::vector<std::byte>> to_hash;
   to_hash->clear();
 
-  to_hash->push_back(static_cast<std::byte>(type));
-  switch (type) {
-  case Node::Type::kBranch:
-    get_branch_encoding(*to_hash);
-    break;
-  case Node::Type::kExtension:
-    get_extension_encoding(*to_hash);
-    break;
-  case Node::Type::kLeaf:
-    get_leaf_encoding(*to_hash);
-    break;
-  }
+  auto append_to_vector = [&](std::span<const std::byte> bytes) {
+    to_hash->insert(to_hash->end(), bytes.begin(), bytes.end());
+  };
+  visit_node_encoding(append_to_vector, *this);
   return *to_hash;
+}
+
+SHA256Hash
+Node::compute_node_hash() const
+{
+  SHA256Hasher hasher;
+  auto update_hash = [&](std::span<const std::byte> bytes) {
+    hasher.update(bytes);
+  };
+  visit_node_encoding(update_hash, *this);
+  return hasher.finalize();
 }
 
 void
@@ -259,8 +297,12 @@ Node::get_branch_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kBranch);
 
-  get_value_encoding(encoding, value_hash);
-  get_child_encoding(encoding, child, /*num_children=*/kMaxNumBranches);
+  auto append_to_vector = [&](std::span<const std::byte> bytes) {
+    encoding.insert(encoding.end(), bytes.begin(), bytes.end());
+  };
+  visit_value_encoding(append_to_vector, value_hash);
+  visit_child_encoding(append_to_vector, child,
+                       /*num_children=*/kMaxNumBranches);
 }
 
 void
@@ -268,8 +310,11 @@ Node::get_extension_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kExtension);
 
-  get_path_encoding(encoding, path);
-  get_child_encoding(encoding, child, /*num_children=*/1);
+  auto append_to_vector = [&](std::span<const std::byte> bytes) {
+    encoding.insert(encoding.end(), bytes.begin(), bytes.end());
+  };
+  visit_path_encoding(append_to_vector, path);
+  visit_child_encoding(append_to_vector, child, /*num_children=*/1);
 }
 
 void
@@ -277,8 +322,11 @@ Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kLeaf);
 
-  get_path_encoding(encoding, path);
-  get_value_encoding(encoding, value_hash);
+  auto append_to_vector = [&](std::span<const std::byte> bytes) {
+    encoding.insert(encoding.end(), bytes.begin(), bytes.end());
+  };
+  visit_path_encoding(append_to_vector, path);
+  visit_value_encoding(append_to_vector, value_hash);
 }
 
 bool

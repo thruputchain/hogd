@@ -154,7 +154,7 @@ public:
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
-  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
+  SHA256Hash compute_node_hash() const;
 
   void clear()
   {

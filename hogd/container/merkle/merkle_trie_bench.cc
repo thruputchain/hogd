@@ -77,6 +77,45 @@ build_trie_without_hashing(MerkleTrie &trie, size_t num_paths)
   }
 }
 
+void
+init_leaf_hash_bench_node(Node &leaf)
+{
+  leaf.init_leaf(nullptr);
+  leaf.path = HexArray("123456789abcdef");
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  leaf.value_hash = sha256(value_span);
+}
+
+void
+init_extension_hash_bench_node(Node &extension, Node &child)
+{
+  init_leaf_hash_bench_node(child);
+  child.hash = child.compute_node_hash();
+
+  extension.init_extension(nullptr);
+  extension.path = HexArray("abcdef0123456789");
+  extension.child[0] = &child;
+}
+
+void
+init_branch_hash_bench_node(Node &branch,
+                            std::array<Node, Node::kMaxNumBranches> &children)
+{
+  branch.init_branch(nullptr);
+  branch.value_hash = SHA256Hash();
+  branch.value_hash->at(0) = 0x5A;
+  for (size_t i = 0; i < children.size(); i++) {
+    children[i].init_leaf(&branch);
+    children[i].path = HexArray("0123456789abcdef");
+    children[i].value_hash = SHA256Hash();
+    children[i].value_hash->at(0) = static_cast<unsigned char>(i);
+    children[i].hash = children[i].compute_node_hash();
+    branch.child[i] = &children[i];
+  }
+}
+
 // Inserts 2 million KV pairs into a trie. Node hashes are computed on every
 // insert operation.
 void
@@ -462,6 +501,41 @@ prove(benchmark::State &state)
   }
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
+
+void
+hash_leaf_node(benchmark::State &state)
+{
+  Node leaf;
+  init_leaf_hash_bench_node(leaf);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(leaf.compute_node_hash());
+  }
+}
+BENCHMARK(hash_leaf_node)->Unit(benchmark::kNanosecond);
+
+void
+hash_extension_node(benchmark::State &state)
+{
+  Node child;
+  Node extension;
+  init_extension_hash_bench_node(extension, child);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(extension.compute_node_hash());
+  }
+}
+BENCHMARK(hash_extension_node)->Unit(benchmark::kNanosecond);
+
+void
+hash_branch_node(benchmark::State &state)
+{
+  std::array<Node, Node::kMaxNumBranches> children;
+  Node branch;
+  init_branch_hash_bench_node(branch, children);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(branch.compute_node_hash());
+  }
+}
+BENCHMARK(hash_branch_node)->Unit(benchmark::kNanosecond);
 
 void
 decode_leaf_node(benchmark::State &state)
