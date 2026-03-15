@@ -329,8 +329,10 @@ private:
 
     std::stack<CheckInfo> path;
     // Push the root node onto the stack.
-    CheckInfo root_info{
-        .node = root, .parent = nullptr, .next_child_to_visit = 0, .depth = 0};
+    CheckInfo root_info{.node = root,
+                        .parent = nullptr,
+                        .next_child_to_visit = 0,
+                        .depth = 0};
     if constexpr (TrackPath) {
       root_info.path = prefix;
     }
@@ -361,11 +363,10 @@ private:
           }
         }
         else {
-          CheckInfo child{
-              .node = info.node->child[info.next_child_to_visit],
-              .parent = info.node,
-              .next_child_to_visit = 0,
-              .depth = info.depth + 1};
+          CheckInfo child{.node = info.node->child[info.next_child_to_visit],
+                          .parent = info.node,
+                          .next_child_to_visit = 0,
+                          .depth = info.depth + 1};
           if constexpr (TrackPath) {
             // Append the branch path we are taking to [info.path] so that it
             // holds the path to the child. For example, if
