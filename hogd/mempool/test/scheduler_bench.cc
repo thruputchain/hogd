@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <vector>
 
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
@@ -19,9 +20,10 @@ namespace hogd {
 namespace {
 
 void
-reset_cached_hog_ages(Scheduler &scheduler)
+reset_cached_hog_ages(Scheduler &scheduler,
+                      const std::vector<ContractAddress> &accounts)
 {
-  for (const ContractAddress &account : MempoolTestInfra::kAccountAddresses) {
+  for (const ContractAddress &account : accounts) {
     auto [age, lock] = scheduler.get_cached_hog_age(account);
     age->num_hogs[kHogAgeGroupToSchedule] =
         to_xdr(static_cast<uint128_t>(5'000'000'000 * 10));
@@ -34,19 +36,48 @@ reset_cached_hog_ages(Scheduler &scheduler)
   }
 }
 
+std::vector<ContractAddress>
+make_benchmark_accounts(size_t num_accounts)
+{
+  std::vector<ContractAddress> accounts;
+  accounts.reserve(num_accounts);
+  for (size_t i = 0; i < num_accounts; ++i) {
+    ContractAddress address{};
+    static_assert(sizeof(i) <= sizeof(address),
+                  "benchmark account index does not fit in ContractAddress");
+    memcpy(address.data(), &i, sizeof(i));
+    accounts.push_back(address);
+  }
+  return accounts;
+}
+
+void
+seed_benchmark_hog_ages(MempoolTestInfra &server,
+                        const std::vector<ContractAddress> &accounts)
+{
+  for (const ContractAddress &account : accounts) {
+    server.set_hogs(account,
+                    /*group=*/kHogAgeGroupToSchedule,
+                    /*age=*/0,
+                    /*num_hogs=*/5'000'000'000 * 10);
+  }
+}
+
 void
 bm_scheduler_process_transfers(benchmark::State &state)
 {
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  const std::vector<ContractAddress> accounts =
+      make_benchmark_accounts(static_cast<size_t>(state.range(0)));
+  seed_benchmark_hog_ages(server, accounts);
 
   HogsTransferred transfer;
   transfer.block = 5;
   transfer.deltas.reserve(state.range(0));
   for (int i = 0; i < state.range(0); ++i) {
     transfer.deltas.push_back(Delta{
-        .address = MempoolTestInfra::kAccountAddresses
-            [i % MempoolTestInfra::kAccountAddresses.size()],
+        .address = accounts[static_cast<size_t>(i)],
         .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000)),
     });
   }
@@ -55,17 +86,16 @@ bm_scheduler_process_transfers(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    reset_cached_hog_ages(*scheduler);
+    reset_cached_hog_ages(*scheduler, accounts);
     state.ResumeTiming();
     scheduler->process_transfers(transfer)();
   }
 }
 BENCHMARK(bm_scheduler_process_transfers)
     ->Arg(1)
-    ->Arg(8)
-    ->Arg(32)
-    ->Arg(128)
-    ->Arg(1'000'000)
+    ->Arg(4)
+    ->Arg(16)
+    ->Arg(64)
     ->UseRealTime();
 
 void
@@ -94,7 +124,6 @@ BENCHMARK(bm_scheduler_add_txs) // NOLINT
     ->Arg(8)
     ->Arg(32)
     ->Arg(128)
-    ->Arg(1'000'000)
     ->UseManualTime()
     ->Unit(benchmark::kMicrosecond);
 
@@ -105,7 +134,8 @@ BENCHMARK(bm_scheduler_add_txs) // NOLINT
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv);
+  int ret =
+      hogd::hogd_init(argc, argv, /*do_print_version=*/false, LogLevel::kError);
   if (ret != 0) {
     return EXIT_FAILURE;
   }
