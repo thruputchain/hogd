@@ -363,6 +363,7 @@ private:
           }
         }
         else {
+          // Visit the next child.
           CheckInfo child{.node = info.node->child[info.next_child_to_visit],
                           .parent = info.node,
                           .next_child_to_visit = 0,
