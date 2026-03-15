@@ -81,9 +81,8 @@ build_trie_without_hashing(MerkleTrie &trie, size_t num_paths)
 }
 
 void
-insert_block_header_style(MerkleTriePrefix &trie,
-                          const std::vector<HexArray> &paths,
-                          size_t num_threads)
+insert_in_parallel(MerkleTriePrefix &trie, const std::vector<HexArray> &paths,
+                   size_t num_threads)
 {
   WorkerPool pool(static_cast<int>(num_threads));
   std::vector<std::future<void>> futures;
@@ -208,8 +207,7 @@ generate_all_hashes_prebuilt_parallel(benchmark::State &state)
 BENCHMARK(generate_all_hashes_prebuilt_parallel)->Unit(benchmark::kMillisecond);
 
 void
-block_header_style_insert_then_parallel_generate_all_hashes(
-    benchmark::State &state)
+insert_then_parallel_generate_all_hashes(benchmark::State &state)
 {
   const size_t num_threads = available_parallelism();
   std::vector<HexArray> paths =
@@ -222,7 +220,7 @@ block_header_style_insert_then_parallel_generate_all_hashes(
     trie.set_should_hash_nodes_on_each_op(false);
 
     const auto insert_start = std::chrono::steady_clock::now();
-    insert_block_header_style(trie, paths, num_threads);
+    insert_in_parallel(trie, paths, num_threads);
     const auto hash_start = std::chrono::steady_clock::now();
     trie.generate_all_hashes(num_threads);
     const auto end = std::chrono::steady_clock::now();
@@ -238,12 +236,12 @@ block_header_style_insert_then_parallel_generate_all_hashes(
   state.counters["hash_s"] =
       hash_seconds / static_cast<double>(state.iterations());
 }
-BENCHMARK(block_header_style_insert_then_parallel_generate_all_hashes)
+BENCHMARK(insert_then_parallel_generate_all_hashes)
     ->Iterations(1)
     ->Unit(benchmark::kSecond);
 
 void
-block_header_style_insert_with_incremental_hashing(benchmark::State &state)
+insert_with_incremental_hashing(benchmark::State &state)
 {
   const size_t num_threads = available_parallelism();
   std::vector<HexArray> paths =
@@ -255,7 +253,7 @@ block_header_style_insert_with_incremental_hashing(benchmark::State &state)
     MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
 
     const auto insert_start = std::chrono::steady_clock::now();
-    insert_block_header_style(trie, paths, num_threads);
+    insert_in_parallel(trie, paths, num_threads);
     const auto hash_start = std::chrono::steady_clock::now();
     trie.generate_top_level_hashes();
     const auto end = std::chrono::steady_clock::now();
@@ -271,7 +269,7 @@ block_header_style_insert_with_incremental_hashing(benchmark::State &state)
   state.counters["hash_s"] =
       hash_seconds / static_cast<double>(state.iterations());
 }
-BENCHMARK(block_header_style_insert_with_incremental_hashing)
+BENCHMARK(insert_with_incremental_hashing)
     ->Iterations(1)
     ->Unit(benchmark::kSecond);
 
