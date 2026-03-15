@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <span>
 
 #include "db_sched.hh"
 #include "hogd/base/bits.h"
@@ -11,12 +10,13 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogdb/db_hash.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -80,15 +80,17 @@ BalanceLock::build_result(LockContext const &ctx) const
 }
 
 HogDBStatus<void>
-BalanceLock::write_committed_change(LockContext const &ctx) const
+BalanceLock::stage_committed_changes(const LockContext &ctx,
+                                     ChangeSet &changes) const
 {
-  assert(ctx.key.is_address_balance());
-  assert(ctx.dao);
+  CHECK(ctx.key.is_address_balance());
 
   auto value = build_result(ctx);
   CHECK_GE(value, 0);
 
-  // Create the HogAge struct when the balance entry is created
+  // Create the HogAge struct when the balance entry is created for the first
+  // time (not part of blockchain state — ChangeSet will skip hash element
+  // construction because is_state_item returns false for kHogAge).
   if (!snapshot_balance_.snapshot_value().has_value()) {
     uint128_t value_uint128 = value;
     HogAge age = {
@@ -97,26 +99,14 @@ BalanceLock::write_committed_change(LockContext const &ctx) const
                      to_xdr(uint128_t{0})},
         .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
     };
-    auto r = ctx.dao->write_address_average_hog_age(age);
-    if (!r.has_value()) {
-      return r.error();
-    }
+    auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
+    auto age_buf = x23::serialize(age);
+    changes.put(hog_age_key, 0, age_buf);
   }
 
-  return ctx.dao->write_address_balance(ctx.key.get_address(), value);
-}
-
-HogDBStatus<void>
-BalanceLock::apply_db_hash_delta(const LockContext &ctx, LtHash16 &hash) const
-{
-  assert(ctx.key.is_address_balance());
-  assert(ctx.dao);
-
+  int128_t encoded = cpu_to_le(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
-  int128_t after = build_result(ctx);
-  int128_t encoded_after = cpu_to_le(after);
-  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), kNNInt128,
-                     byte_view(encoded_after));
+  changes.put(key, kNNInt128, byte_view(encoded));
   return {};
 }
 

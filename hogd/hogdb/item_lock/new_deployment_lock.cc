@@ -1,10 +1,10 @@
 #include "hogd/hogdb/item_lock/new_deployment_lock.h"
 
 #include <cassert>
-#include <span>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/db_hash.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -32,18 +32,6 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
       deployed_contract_hash_.contract_size);
 }
 
-HogDBStatus<void>
-NewDeploymentLock::write_committed_change(LockContext const &ctx) const
-{
-  assert(ctx.key.is_address_metadata());
-  assert(ctx.dao);
-  HogDBStatus<void> ret =
-      ctx.dao->write_address_metadata(ctx.key.get_address(),
-                                      deployed_contract_hash_);
-
-  return ret;
-}
-
 int128_t
 NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
                                  const DeployedContractData & /*unused*/,
@@ -58,16 +46,15 @@ NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-NewDeploymentLock::apply_db_hash_delta(const LockContext &ctx,
-                                       LtHash16 &hash) const
+NewDeploymentLock::stage_committed_changes(const LockContext &ctx,
+                                           ChangeSet &changes) const
 {
-  assert(ctx.dao);
+  CHECK(ctx.key.is_address_metadata());
+
+  // Write deployed contract metadata (part of blockchain state).
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressMetadata);
-  // The [HogAge] struct is not part of the blockchain state, just the per-node
-  // state. Thus, we only hash the deployed contract metadata row.
   auto serialized = x23::serialize(deployed_contract_hash_);
-  replace_known_item(hash, *ctx.dao, std::as_bytes(std::span(key)), 0,
-                     std::as_bytes(std::span(serialized)));
+  changes.put(key, 0, serialized);
   return {};
 }
 
