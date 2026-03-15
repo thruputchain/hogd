@@ -216,10 +216,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
-  constexpr size_t kMaxNumThreads = available_parallelism();
   const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), kMaxNumThreads);
-
+      make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
