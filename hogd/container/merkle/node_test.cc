@@ -56,6 +56,13 @@ expect_children_are_clear(const Node &node)
   }
 }
 
+void
+expect_hash_matches_materialized_encoding(const Node &node)
+{
+  const std::vector<std::byte> &encoding = node.get_node_encoding();
+  EXPECT_EQ(node.compute_node_hash(), sha256(encoding));
+}
+
 } // namespace
 
 TEST(Node, Clear)
@@ -190,6 +197,7 @@ TEST(Node, HashBranch)
   SHA256Hash expected = hash_from_string(
       "b817711d9a331bc95daf80ed68be9056c1d186b2a312b39312b4e0eccf43111c");
   EXPECT_EQ(hash, expected);
+  expect_hash_matches_materialized_encoding(branch);
 }
 
 // This test hashes a branch node. Some child pointers are NULL and the rest are
@@ -218,6 +226,7 @@ TEST(Node, HashBranchSomeNullptr)
   SHA256Hash expected = hash_from_string(
       "2d18826abe1140d6765485d7e1fb6ffd36d5806f4c8d30005a2a72fffa603553");
   EXPECT_EQ(hash, expected);
+  expect_hash_matches_materialized_encoding(branch);
 }
 
 // This test hashes a branch node. All child pointers are NULL.
@@ -236,6 +245,7 @@ TEST(Node, HashBranchAllNullptr)
   SHA256Hash expected = hash_from_string(
       "5584b1de3f5cf388c00a706619518b443a5cb6199cd0207b8b983068a584d89c");
   EXPECT_EQ(hash, expected);
+  expect_hash_matches_materialized_encoding(branch);
 }
 
 // This test hashes an extension node. Its child pointer is non-NULL.
@@ -256,6 +266,7 @@ TEST(Node, HashExtension)
   SHA256Hash expected = hash_from_string(
       "d2af4c9af613a07327407c683265444011144af1e1b1658a9ff4bf14acbe930a");
   EXPECT_EQ(hash, expected);
+  expect_hash_matches_materialized_encoding(extension);
 }
 
 // This test hashes a leaf node.
@@ -272,6 +283,19 @@ TEST(Node, HashLeaf)
   SHA256Hash expected = hash_from_string(
       "7e7dac6030735a4abea721534ce38b97f63cf230bfef391e4328099d3bc24e3d");
   EXPECT_EQ(hash, expected);
+  expect_hash_matches_materialized_encoding(leaf);
+}
+
+TEST(Node, HashLeafOddPathMatchesMaterializedEncoding)
+{
+  Node leaf;
+  leaf.type = Node::Type::kLeaf;
+  memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
+  leaf.path = HexArray("123");
+  leaf.value_hash = SHA256Hash();
+  leaf.value_hash->at(0) = 0xAB;
+
+  expect_hash_matches_materialized_encoding(leaf);
 }
 
 } // namespace hogd

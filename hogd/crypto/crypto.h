@@ -32,6 +32,38 @@ extern "C" {
 
 namespace hogd {
 
+class SHA256Hasher {
+public:
+  SHA256Hasher()
+  {
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    SHA256_Init(&ctx_);
+  }
+
+  void update(std::span<const std::byte> buf)
+  {
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    SHA256_Update(&ctx_, buf.data(), buf.size());
+  }
+
+  void update(x23::BufView buf)
+  {
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    SHA256_Update(&ctx_, buf.data(), buf.size());
+  }
+
+  SHA256Hash finalize()
+  {
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    SHA256Hash out;
+    SHA256_Final(out.data(), &ctx_);
+    return out;
+  }
+
+private:
+  SHA256_CTX ctx_;
+};
+
 // read_random fills buf with high-quality random bytes (e.g., /dev/urandom)
 // suitable for creating secret keys.
 inline void
@@ -47,17 +79,9 @@ read_random(std::span<std::byte> buf)
 inline SHA256Hash
 sha256(x23::BufView buf)
 {
-  // We need to directly use lower-level functions in OpenSSL even though they
-  // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
-  // counting and acquire locks, which limits parallelism and also harms
-  // single-thread performance.
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  SHA256Hash out;
-  SHA256_CTX ctx;
-  SHA256_Init(&ctx);
-  SHA256_Update(&ctx, buf.data(), buf.size());
-  SHA256_Final(out.data(), &ctx);
-  return out;
+  SHA256Hasher hasher;
+  hasher.update(buf);
+  return hasher.finalize();
 }
 
 template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
