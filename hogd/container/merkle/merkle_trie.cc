@@ -1,8 +1,10 @@
 #include "hogd/container/merkle/merkle_trie.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <future>
 #include <optional>
 #include <print>
 #include <span>
@@ -15,6 +17,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
