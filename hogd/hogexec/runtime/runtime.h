@@ -167,7 +167,7 @@ public:
   }
   // WASM name -> Method ID (inverse of invoke_name)
   constexpr static std::optional<MethodID>
-  method_id_from_name(std::string const &name)
+  method_id_from_name(std::string_view name)
   {
     MethodID id;
     auto result =
@@ -184,7 +184,9 @@ public:
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
   InvokeResult invoke(MethodID entrypoint, uint64_t gas_limit)
   {
-    return invoke(invoke_name(entrypoint), gas_limit);
+    char buf[16];
+    std::format_to(buf, "{:016X}", entrypoint);
+    return invoke(std::string_view(buf, 16), gas_limit);
   }
 
   // Returns FALSE if gas consumption failed.

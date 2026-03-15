@@ -688,6 +688,14 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
 SystemStatus<const Contract *>
 SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
+  // Check cheap in-memory map first before hitting the snapshot cache
+  // (which involves a shared_mutex and potentially a database round-trip).
+  auto it = newly_created_contracts_.find(hash);
+  if (it != newly_created_contracts_.end()) {
+    assert(it->second != nullptr);
+    return it->second.get();
+  }
+
   auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
   if (!snapshot_res.has_value()) {
     return snapshot_res.error();
@@ -695,12 +703,6 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   auto &snapshot_contract = *snapshot_res;
   if (snapshot_contract != nullptr) {
     return snapshot_contract;
-  }
-
-  auto it = newly_created_contracts_.find(hash);
-  if (it != newly_created_contracts_.end()) {
-    assert(it->second != nullptr);
-    return it->second.get();
   }
   return nullptr;
 }

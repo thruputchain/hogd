@@ -291,8 +291,8 @@ std::optional<DeployedContractHash>
 InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {
-  for (auto const &frame : frame_stack_) {
-    if (auto out = frame.lookup_locally_deployed_contract(addr)) {
+  for (auto it = frame_stack_.rbegin(); it != frame_stack_.rend(); ++it) {
+    if (auto out = it->lookup_locally_deployed_contract(addr)) {
       assert(out.has_value());
       return out;
     }
