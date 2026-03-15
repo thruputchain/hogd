@@ -17,6 +17,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -461,6 +462,27 @@ prove(benchmark::State &state)
   }
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
+
+void
+decode_leaf_node(benchmark::State &state)
+{
+  Node leaf;
+  leaf.init_leaf(nullptr);
+  leaf.path = generate_64_byte_path();
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  leaf.value_hash = sha256(value_span);
+
+  const std::vector<std::byte> encoding = leaf.get_node_encoding();
+  for (auto _ : state) {
+    Node::Raw raw;
+    size_t idx = 0;
+    CHECK(Node::get_node_from_encoding(encoding, idx, raw));
+    benchmark::DoNotOptimize(raw);
+  }
+}
+BENCHMARK(decode_leaf_node)->Unit(benchmark::kNanosecond);
 
 void
 hash_parallel(benchmark::State &state, size_t num_threads)

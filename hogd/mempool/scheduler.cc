@@ -15,6 +15,7 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
@@ -205,10 +206,6 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   return insert_tx_into_runqueue(tx_hash, *value);
 }
 
-// TODO(jhumphri): Use [make_chunks()] below. Remember that there may be fewer
-// chunks than [kNumThreads], so only [co_await] awaitables for coroutines that
-// have a chunk. If we [co_await] awaitables for coroutines that do not have a
-// chunk, we will deadlock.
 x23::Async<void>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
@@ -219,43 +216,25 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
-  constexpr size_t kNumThreads = 128;
-  size_t txs_per_thread = txs.size() / kNumThreads;
-  if (txs.size() % kNumThreads) {
-    // Have each thread handle an extra tx so that there are no txs leftover.
-    // Note that some of the threads may end up doing more work than other
-    // threads.
-    //
-    // e.g.,
-    // If there are 1,000 txs and 128 threads:
-    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
-    // [txs_per_thread] = 8.
-    // Threads 0-124 will handle 8 txs.
-    // Threads 125, 126, and 127 will handle *no* txs.
-    txs_per_thread++;
-  }
-
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
-  handles.reserve(kNumThreads);
-  for (size_t i = 0; i < kNumThreads; i++) {
-    handles.push_back([](size_t coro_idx,
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back([](const ChunkRange *chunk,
                          const x23::XdrVec<hogd::SignedTransaction> &txs,
-                         size_t txs_per_thread,
                          Scheduler &scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * txs_per_thread;
-      size_t possible_end = (coro_idx + 1) * txs_per_thread;
-      size_t end = std::min(possible_end, txs.size());
 
       size_t num_added = 0;
-      for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
+      for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
         if (scheduler.add_txs_helper(txs[tx_idx])) {
           num_added++;
         }
       }
       scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
       co_return;
-    }(/*coro_idx=*/i, txs, txs_per_thread, *this));
+    }(&chunk, txs, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -463,40 +442,22 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // [read_average_hog_ages] on a separate thread.
   co_await read_average_hog_ages(transfers);
 
-  constexpr size_t kNumThreads = 100;
-  size_t deltas_per_thread = transfers.deltas.size() / kNumThreads;
-  if (transfers.deltas.size() % kNumThreads) {
-    // Have each thread handle an extra delta so that there are no deltas
-    // leftover. Note that some of the threads may end up doing more work than
-    // other threads.
-    //
-    // e.g.,
-    // If there are 1,000 deltas and 128 threads:
-    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
-    // [deltas_per_thread] = 8.
-    // Threads 0-124 will handle 8 detlas.
-    // Threads 125, 126, and 127 will handle *no* deltas.
-    deltas_per_thread++;
-  }
-
+  const std::vector<ChunkRange> chunks =
+      make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
-  handles.reserve(kNumThreads);
-  for (size_t i = 0; i < kNumThreads; i++) {
-    handles.push_back([](size_t coro_idx, const HogsTransferred *transfers,
-                         size_t deltas_per_thread,
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
                          Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * deltas_per_thread;
-      size_t possible_end = (coro_idx + 1) * deltas_per_thread;
-      size_t end = std::min(possible_end, transfers->deltas.size());
-      for (size_t delta_idx = start; delta_idx < end; delta_idx++) {
+      for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
         scheduler->process_transfers_helper(transfers->deltas[delta_idx],
                                             transfers->block);
       }
       co_return;
-    }(/*coro_idx=*/i, &transfers, deltas_per_thread, this));
+    }(chunk, &transfers, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

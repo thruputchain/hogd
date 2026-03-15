@@ -35,9 +35,8 @@ public:
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<ReplayCacheIt> &after,
                          const StorageCostModel *cost_model);
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
 private:
   HogDBStatus<ReplayCacheData>

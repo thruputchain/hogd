@@ -151,7 +151,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();
 
-  // Commit BlockTX (writes to database and publishes auth changes)
+  // Close and commit BlockTX (writes to database and publishes auth changes)
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -232,7 +233,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();
 
-  // Commit BlockTX (writes to database and publishes auth changes)
+  // Close and commit BlockTX (writes to database and publishes auth changes)
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
@@ -316,8 +318,9 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   // This simulates the server going down before auth changes are sent
   mock_auth_server_.reset();
 
-  // Commit BlockTX (should succeed even though auth server is down)
+  // Close and commit BlockTX (should succeed even though auth server is down)
   // The subscription manager should handle the error gracefully
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result)
       << "BlockTX commit should succeed even if auth server is down";
@@ -387,7 +390,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();
 
-  // Commit BlockTX (writes to database and publishes auth changes)
+  // Close and commit BlockTX (writes to database and publishes auth changes)
+  ASSERT_TRUE(block_tx.get().close(DbHash{}));
   HogDBStatus<void> commit_result = block_tx.get().commit();
   ASSERT_TRUE(commit_result);
 
