@@ -68,6 +68,28 @@ TEST(HexArray, CreateFromByteVector)
   EXPECT_FALSE(h.empty());
 }
 
+TEST(HexArray, VisitEncodedBytesMatchesToByteVectorEven)
+{
+  HexArray even("0123456789abcdef");
+  std::vector<std::byte> even_encoded;
+  even.visit_encoded_bytes([&](std::span<const std::byte> bytes) {
+    even_encoded.insert(even_encoded.end(), bytes.begin(), bytes.end());
+  });
+  EXPECT_EQ(even_encoded, even.to_byte_vector());
+}
+
+TEST(HexArray, VisitEncodedBytesMatchesToByteVectorOdd)
+{
+  HexArray odd("0123456789abcde");
+  std::vector<std::byte> odd_encoded;
+  odd.visit_encoded_bytes([&](std::span<const std::byte> bytes) {
+    odd_encoded.insert(odd_encoded.end(), bytes.begin(), bytes.end());
+  });
+  EXPECT_EQ(odd_encoded, odd.to_byte_vector());
+  ASSERT_FALSE(odd_encoded.empty());
+  EXPECT_EQ(odd_encoded.back(), std::byte{0xE0});
+}
+
 TEST(HexArray, CreateFromSHA256Hash)
 {
   SHA256Hash hash;
