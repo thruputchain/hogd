@@ -422,9 +422,8 @@ private:
   }
 
   template<typename NodeType, typename Fn>
-  static void
-  walk_without_path(NodeType *root, Fn &&f,
-                    std::optional<size_t> max_depth = std::nullopt)
+  static void walk_without_path(NodeType *root, Fn &&f,
+                                std::optional<size_t> max_depth = std::nullopt)
   {
     static_assert(std::is_same_v<NodeType, Node> ||
                       std::is_same_v<NodeType, const Node>,
@@ -438,10 +437,8 @@ private:
     };
 
     std::stack<CheckInfo> path;
-    path.push(CheckInfo{.node = root,
-                        .parent = nullptr,
-                        .next_child_to_visit = 0,
-                        .depth = 0});
+    path.push(CheckInfo{
+        .node = root, .parent = nullptr, .next_child_to_visit = 0, .depth = 0});
 
     while (!path.empty()) {
       CheckInfo &info = path.top();
