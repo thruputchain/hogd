@@ -23,6 +23,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
