@@ -70,7 +70,9 @@ if(BUILD_BENCHMARKS)
     PRIVATE
     ${CMAKE_BINARY_DIR}
   )
-  target_link_libraries(mempool_scheduler_bench
+  target_link_libraries(
+    mempool_scheduler_bench
+    benchmark::benchmark
     auth
     hogd
     mempool
@@ -78,7 +80,11 @@ if(BUILD_BENCHMARKS)
     runtime
     runtime_test_util
     contract_loader
-    benchmark::benchmark
+    GTest::gtest
+  )
+  add_dependencies(
+    mempool_scheduler_bench
+    all_wasm_contracts
   )
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set_property(TARGET mempool_scheduler_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

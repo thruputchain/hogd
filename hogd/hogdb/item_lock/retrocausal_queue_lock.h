@@ -2,9 +2,12 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <unordered_map>
 #include <vector>
 
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
@@ -13,6 +16,17 @@
 #include "x23/testlock.h"
 
 namespace hogd {
+
+// Uses SipHash24 with a random key (generated at construction) to defend
+// against adversarial hash collision attacks on consumed_set_balance_.
+struct QueueEntryHasher {
+  mutable SipHash24 hasher;
+
+  size_t operator()(const QueueEntry &entry) const
+  {
+    return hasher(std::as_bytes(std::span(entry.data(), entry.size())));
+  }
+};
 
 class RetrocausalQueueLock {
 public:
@@ -28,9 +42,8 @@ public:
                          const change_type &change,
                          const StorageCostModel *cost_model);
 
-  HogDBStatus<void> write_committed_change(LockContext const &ctx) const;
-  HogDBStatus<void> apply_db_hash_delta(const LockContext &ctx,
-                                        LtHash16 &hash) const;
+  HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
+                                            ChangeSet &changes) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
@@ -44,9 +57,9 @@ public:
   }
 
   // Cleanup all RCQ-specific storage (blocks and metadata) when an RCQ is
-  // deleted. This mutates DAO state only; db hash updates are handled in
-  // apply_db_hash_delta paths.
-  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx);
+  // deleted. Stages removals into the given ChangeSet.
+  static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx,
+                                               ChangeSet &changes);
 
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.
@@ -57,8 +70,8 @@ private:
 
   // Set to true when get_meta() encounters a kTypeMismatch error, indicating
   // the key exists in the DAO as a different type (e.g. bytestring). Used by
-  // write_committed_change to know it must remove the old item even when no
-  // RCQ metadata existed in the snapshot.
+  // stage_committed_changes to know it must remove the old item even when
+  // no RCQ metadata existed in the snapshot.
   mutable bool base_was_different_type_{false};
 
   // Used in try_atomic_change_lock to ensure MPSC semantics;
@@ -72,13 +85,26 @@ private:
 
   // Used in commit_change to calculate the cost of the change and
   // stage all changes for writing. Not accessed concurrently, since
-  // access is limited to commit_change and write_committed_change.
+  // access is limited to commit_change and stage_committed_changes.
   std::vector<QueueEntry> added_entries_;
   std::optional<RetrocausalQueueConsumeDelta> consume_delta_;
   // Change in entry count in the whole queue over the set of committed deltas.
   // This is used when calculating marginal storage costs for a committing delta
   // in commit_change.
   ssize_t committed_element_count_delta_{0};
+
+  // Tracks the balance between inserted and consumed current-block entries
+  // across all committed TXs. Incremented for each inserted entry, decremented
+  // for each consumed entry in current_block_consumed. At block close, any
+  // entry with a negative count was consumed but never inserted — indicating
+  // a malicious proposer.
+  std::unordered_map<QueueEntry, int64_t, QueueEntryHasher>
+      consumed_set_balance_;
+
+  // Returns true if any consumed current-block entry was not matched by an
+  // insert across all committed TXs. Called by stage_committed_changes()
+  // at block close time to detect malicious proposer fabrication.
+  bool has_unmatched_consumes() const;
 
   mutable std::mutex mtx_;
 };
