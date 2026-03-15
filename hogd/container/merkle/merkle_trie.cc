@@ -1,19 +1,23 @@
 #include "hogd/container/merkle/merkle_trie.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <future>
 #include <optional>
 #include <print>
 #include <span>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
@@ -77,6 +81,30 @@ get_num_children(const Node &node)
     }
   }
   return num_children;
+}
+
+std::vector<Node *>
+get_children(Node *node)
+{
+  std::vector<Node *> children;
+  switch (node->type) {
+  case Node::Type::kBranch:
+    children.reserve(Node::kMaxNumBranches);
+    for (Node *child : node->child) {
+      if (child) {
+        children.push_back(child);
+      }
+    }
+    break;
+  case Node::Type::kExtension:
+    if (node->child[0]) {
+      children.push_back(node->child[0]);
+    }
+    break;
+  case Node::Type::kLeaf:
+    break;
+  }
+  return children;
 }
 
 bool
@@ -1406,12 +1434,114 @@ MerkleTrie::compute_node_hash(Node &node) const
 }
 
 void
-MerkleTrie::generate_all_hashes()
+MerkleTrie::generate_all_hashes_serial(Node *root)
 {
   auto f = [&](Node &node, Node * /*parent*/) {
     node.hash = node.compute_node_hash();
   };
-  walk<Node>(&root_, f);
+  walk<Node>(root, f);
+}
+
+std::vector<Node *>
+MerkleTrie::collect_hash_frontier(Node *root, size_t max_subtrees)
+{
+  std::vector<Node *> frontier = {root};
+  if (max_subtrees <= 1) {
+    return frontier;
+  }
+
+  for (size_t i = 0; i < frontier.size() && frontier.size() < max_subtrees;) {
+    std::vector<Node *> children = get_children(frontier[i]);
+    if (children.size() <= 1) {
+      i++;
+      continue;
+    }
+    frontier.erase(frontier.begin() + i);
+    frontier.insert(frontier.end(), children.begin(), children.end());
+    // If the split only replaced a node with its one child, we would keep
+    // revisiting equivalent work. The [children.size() <= 1] branch above
+    // prevents that, so we intentionally stay at the same index here.
+  }
+  return frontier;
+}
+
+void
+MerkleTrie::generate_all_hashes_above_frontier(
+    Node *root, const std::unordered_set<Node *> &frontier)
+{
+  struct HashInfo {
+    Node *node;
+    size_t next_child_to_visit;
+  };
+
+  std::vector<HashInfo> stack;
+  stack.push_back({root, 0});
+
+  while (!stack.empty()) {
+    HashInfo &info = stack.back();
+    if (frontier.contains(info.node)) {
+      stack.pop_back();
+      continue;
+    }
+
+    bool pushed_child = false;
+    switch (info.node->type) {
+    case Node::Type::kBranch:
+      while (info.next_child_to_visit < info.node->child.size()) {
+        Node *child = info.node->child[info.next_child_to_visit++];
+        if (child) {
+          stack.push_back({child, 0});
+          pushed_child = true;
+          break;
+        }
+      }
+      break;
+    case Node::Type::kExtension:
+      if (info.next_child_to_visit == 0 && info.node->child[0]) {
+        info.next_child_to_visit = 1;
+        stack.push_back({info.node->child[0], 0});
+        pushed_child = true;
+      }
+      break;
+    case Node::Type::kLeaf:
+      break;
+    }
+
+    if (pushed_child) {
+      continue;
+    }
+    info.node->hash = info.node->compute_node_hash();
+    stack.pop_back();
+  }
+}
+
+void
+MerkleTrie::generate_all_hashes(size_t num_threads)
+{
+  num_threads = std::max<size_t>(1, num_threads);
+  if (num_threads == 1) {
+    generate_all_hashes_serial(&root_);
+    return;
+  }
+
+  std::vector<Node *> frontier = collect_hash_frontier(&root_, num_threads);
+  if (frontier.size() <= 1) {
+    generate_all_hashes_serial(&root_);
+    return;
+  }
+
+  std::vector<std::future<void>> futures;
+  futures.reserve(frontier.size());
+  for (Node *subtree_root : frontier) {
+    futures.push_back(WorkerPool::get_default_pool().submit(
+        [subtree_root] { generate_all_hashes_serial(subtree_root); }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
+
+  std::unordered_set<Node *> frontier_set(frontier.begin(), frontier.end());
+  generate_all_hashes_above_frontier(&root_, frontier_set);
 }
 
 void
