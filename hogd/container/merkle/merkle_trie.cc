@@ -1469,26 +1469,51 @@ void
 MerkleTrie::generate_all_hashes_above_frontier(
     Node *root, const std::unordered_set<Node *> &frontier)
 {
-  std::vector<std::pair<Node *, bool>> stack;
-  stack.emplace_back(root, false);
+  struct HashInfo {
+    Node *node;
+    size_t next_child_to_visit;
+  };
+
+  std::vector<HashInfo> stack;
+  stack.push_back({root, 0});
 
   while (!stack.empty()) {
-    auto [node, visited] = stack.back();
+    HashInfo &info = stack.back();
+
+    if (frontier.contains(info.node)) {
+      stack.pop_back();
+      continue;
+    }
+
+    bool pushed_child = false;
+    switch (info.node->type) {
+    case Node::Type::kBranch:
+      while (info.next_child_to_visit < info.node->child.size()) {
+        Node *child = info.node->child[info.next_child_to_visit++];
+        if (child) {
+          stack.push_back({child, 0});
+          pushed_child = true;
+          break;
+        }
+      }
+      break;
+    case Node::Type::kExtension:
+      if (info.next_child_to_visit == 0 && info.node->child[0]) {
+        info.next_child_to_visit = 1;
+        stack.push_back({info.node->child[0], 0});
+        pushed_child = true;
+      }
+      break;
+    case Node::Type::kLeaf:
+      break;
+    }
+
+    if (pushed_child) {
+      continue;
+    }
+
+    info.node->hash = info.node->compute_node_hash();
     stack.pop_back();
-
-    if (frontier.contains(node)) {
-      continue;
-    }
-    if (visited) {
-      node->hash = node->compute_node_hash();
-      continue;
-    }
-
-    stack.emplace_back(node, true);
-    std::vector<Node *> children = get_children(node);
-    for (auto it = children.rbegin(); it != children.rend(); ++it) {
-      stack.emplace_back(*it, false);
-    }
   }
 }
 
