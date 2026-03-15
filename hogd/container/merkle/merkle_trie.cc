@@ -1456,10 +1456,8 @@ MerkleTrie::collect_hash_frontier(Node *root, size_t max_subtrees)
       i++;
       continue;
     }
-
     frontier.erase(frontier.begin() + i);
     frontier.insert(frontier.end(), children.begin(), children.end());
-
     // If the split only replaced a node with its one child, we would keep
     // revisiting equivalent work. The [children.size() <= 1] branch above
     // prevents that, so we intentionally stay at the same index here.
@@ -1481,7 +1479,6 @@ MerkleTrie::generate_all_hashes_above_frontier(
     if (frontier.contains(node)) {
       continue;
     }
-
     if (visited) {
       node->hash = node->compute_node_hash();
       continue;
@@ -1510,11 +1507,10 @@ MerkleTrie::generate_all_hashes(size_t num_threads)
     return;
   }
 
-  WorkerPool pool(static_cast<int>(num_threads));
   std::vector<std::future<void>> futures;
   futures.reserve(frontier.size());
   for (Node *subtree_root : frontier) {
-    futures.push_back(pool.submit(
+    futures.push_back(WorkerPool::get_default_pool().submit(
         [subtree_root] { generate_all_hashes_serial(subtree_root); }));
   }
   for (std::future<void> &future : futures) {
