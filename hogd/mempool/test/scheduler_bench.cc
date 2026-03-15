@@ -22,7 +22,8 @@ bm_scheduler_add_txs(benchmark::State &state)
   for (auto _ : state) {
     MempoolTestInfra server;
     auto scheduler = server.mempool_coord_rpc().scheduler();
-    const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, num_txs);
+    const SignedTransactionBatch txs =
+        generate_unsigned_txs(fib_client, num_txs);
 
     ElapsedTimer timer;
     scheduler->add_txs(txs)();

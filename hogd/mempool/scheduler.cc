@@ -15,6 +15,7 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
@@ -215,8 +216,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
-  constexpr size_t kMaxNumThreads = 128;
-  const std::vector<ChunkRange> chunks = make_chunks(txs.size(), kMaxNumThreads);
+  constexpr size_t kMaxNumThreads = available_parallelism();
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), kMaxNumThreads);
 
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
