@@ -60,7 +60,6 @@ bm_scheduler_process_transfers(benchmark::State &state)
     scheduler->process_transfers(transfer)();
   }
 }
-
 BENCHMARK(bm_scheduler_process_transfers)
     ->Arg(1)
     ->Arg(8)
@@ -90,7 +89,6 @@ bm_scheduler_add_txs(benchmark::State &state)
   state.SetItemsProcessed(static_cast<int64_t>(state.iterations()) *
                           static_cast<int64_t>(num_txs));
 }
-
 BENCHMARK(bm_scheduler_add_txs) // NOLINT
     ->Arg(1)
     ->Arg(8)
