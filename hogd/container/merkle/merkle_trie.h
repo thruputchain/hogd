@@ -452,15 +452,16 @@ private:
   static void walk(NodeType *root, const HexArray &prefix, Fn &&f,
                    std::optional<size_t> max_depth = std::nullopt)
   {
-    walk_impl<NodeType, true>(root, prefix, std::forward<Fn>(f), max_depth);
+    walk_impl<NodeType, /*TrackPath=*/true>(root, prefix, std::forward<Fn>(f),
+                                            max_depth);
   }
 
   template<typename NodeType, typename Fn>
   static void walk(NodeType *root, Fn &&f,
                    std::optional<size_t> max_depth = std::nullopt)
   {
-    walk_impl<NodeType, false>(root, HexArray(), std::forward<Fn>(f),
-                               max_depth);
+    walk_impl<NodeType, /*TrackPath=*/false>(root, HexArray(),
+                                             std::forward<Fn>(f), max_depth);
   }
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
