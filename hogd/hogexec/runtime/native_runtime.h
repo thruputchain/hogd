@@ -60,10 +60,9 @@ public:
         std::vector<function_entry_t> v(
             std::make_move_iterator(functions.begin()),
             std::make_move_iterator(functions.end()));
-        std::sort(v.begin(), v.end(),
-                  [](auto const &a, auto const &b) {
-                    return a.first < b.first;
-                  });
+        std::sort(v.begin(), v.end(), [](auto const &a, auto const &b) {
+          return a.first < b.first;
+        });
         return v;
       }())
   {}
