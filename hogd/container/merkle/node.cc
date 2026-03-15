@@ -90,14 +90,13 @@ template<typename Sink>
 void
 visit_value_encoding(Sink &sink, const std::optional<SHA256Hash> &value_hash)
 {
-  std::array<std::byte, 1> value_present = {
-      value_hash ? std::byte{0x01} : std::byte{0x00}};
+  std::array<std::byte, 1> value_present = {value_hash ? std::byte{0x01}
+                                                       : std::byte{0x00}};
   emit_bytes(sink, value_present);
 
   if (value_hash) {
-    emit_bytes(
-        sink,
-        std::as_bytes(std::span(value_hash->data(), value_hash->size())));
+    emit_bytes(sink, std::as_bytes(
+                         std::span(value_hash->data(), value_hash->size())));
   }
 }
 
@@ -118,8 +117,8 @@ visit_child_encoding(Sink &sink,
   for (size_t i = 0; i < num_children; i++) {
     Node *child = children[i];
     if (child) {
-      emit_bytes(sink,
-                 std::as_bytes(std::span(child->hash.data(), child->hash.size())));
+      emit_bytes(sink, std::as_bytes(
+                           std::span(child->hash.data(), child->hash.size())));
     }
     else {
       std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};

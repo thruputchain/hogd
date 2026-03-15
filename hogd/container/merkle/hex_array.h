@@ -209,8 +209,7 @@ public:
     return ret;
   }
 
-  template<typename Sink>
-  void visit_encoded_bytes(Sink &&sink) const
+  template<typename Sink> void visit_encoded_bytes(Sink &&sink) const
   {
     const size_t full_bytes = size_ / 2;
     if (full_bytes != 0) {
