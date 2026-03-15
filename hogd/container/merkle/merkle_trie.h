@@ -20,8 +20,8 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/allocator.h"
@@ -767,7 +767,6 @@ public:
     for (std::future<void> &future : futures) {
       future.get();
     }
-
     for (size_t i = 0; i < tries_.size(); i++) {
       std::unordered_set<Node *> frontier(frontiers[i].begin(),
                                           frontiers[i].end());
