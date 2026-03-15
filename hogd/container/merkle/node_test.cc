@@ -4,14 +4,15 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
-
 #include <string>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {

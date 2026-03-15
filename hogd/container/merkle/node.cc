@@ -1,12 +1,9 @@
 #include "hogd/container/merkle/node.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
-
 #include <format>
-#include <iterator>
 #include <optional>
 #include <span>
 #include <sstream>
