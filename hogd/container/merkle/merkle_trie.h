@@ -746,7 +746,8 @@ public:
       return;
     }
 
-    const size_t base_child_threads = std::max<size_t>(1, num_threads / tries_.size());
+    const size_t base_child_threads =
+        std::max<size_t>(1, num_threads / tries_.size());
     size_t extra_threads = num_threads % tries_.size();
     WorkerPool pool(static_cast<int>(num_threads));
     std::vector<std::future<void>> futures;

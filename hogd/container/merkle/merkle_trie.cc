@@ -1497,8 +1497,8 @@ MerkleTrie::generate_all_hashes(size_t num_threads)
   std::vector<std::future<void>> futures;
   futures.reserve(frontier.size());
   for (Node *subtree_root : frontier) {
-    futures.push_back(
-        pool.submit([subtree_root] { generate_all_hashes_serial(subtree_root); }));
+    futures.push_back(pool.submit(
+        [subtree_root] { generate_all_hashes_serial(subtree_root); }));
   }
   for (std::future<void> &future : futures) {
     future.get();

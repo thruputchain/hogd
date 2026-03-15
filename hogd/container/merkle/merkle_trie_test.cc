@@ -76,8 +76,8 @@ build_and_hash_trie(TrieType &trie, size_t num_threads)
   for (size_t i = 0; i < 512; i++) {
     HexArray key(std::format("{:032x}", i));
     std::string value = std::format("value-{}", i);
-    std::span<std::byte> value_span{
-        reinterpret_cast<std::byte *>(value.data()), value.size()};
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
     EXPECT_TRUE(trie.insert(key, value_span));
   }
   trie.generate_all_hashes(num_threads);
