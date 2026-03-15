@@ -1479,7 +1479,6 @@ MerkleTrie::generate_all_hashes_above_frontier(
 
   while (!stack.empty()) {
     HashInfo &info = stack.back();
-
     if (frontier.contains(info.node)) {
       stack.pop_back();
       continue;
@@ -1511,7 +1510,6 @@ MerkleTrie::generate_all_hashes_above_frontier(
     if (pushed_child) {
       continue;
     }
-
     info.node->hash = info.node->compute_node_hash();
     stack.pop_back();
   }
