@@ -249,15 +249,12 @@ MempoolCoordinatorRpc::get_block_header(
     const BlockHash &prev_block_hash)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+  trie.set_should_hash_nodes_on_each_op(false);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
-  // The optimal number of threads to use varies with the number of hashes we
-  // are adding to the trie. For example, if we are adding 50 hashes to the
-  // trie, it is probably slower to use 128 threads rather than 1-2 threads due
-  // to lock contention.
-  constexpr size_t kNumThreads = 108;
+  const size_t num_threads = available_parallelism();
   std::vector<std::future<void>> futures;
   const std::vector<ChunkRange> chunks =
-      make_chunks(hashes.size(), kNumThreads);
+      make_chunks(hashes.size(), num_threads);
   futures.reserve(chunks.size());
 
   for (const ChunkRange &chunk : chunks) {
@@ -272,9 +269,8 @@ MempoolCoordinatorRpc::get_block_header(
   for (std::future<void> &future : futures) {
     future.get();
   }
-  trie.generate_top_level_hashes();
+  trie.generate_all_hashes(num_threads);
   SHA256Hash root_hash = trie.get_root_hash();
-  // TODO(jhumphri): Fill in all of the fields correctly.
   BlockHeader header{.network_id = network_id_,
                      .block_height = block_height,
                      .txset_hash = root_hash,
