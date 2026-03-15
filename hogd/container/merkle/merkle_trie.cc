@@ -1411,7 +1411,7 @@ MerkleTrie::generate_all_hashes()
   auto f = [&](Node &node, Node * /*parent*/) {
     node.hash = node.compute_node_hash();
   };
-  walk_without_path<Node>(&root_, f);
+  walk<Node>(&root_, f);
 }
 
 void
@@ -1423,7 +1423,7 @@ MerkleTrie::generate_top_level_hashes()
   auto f = [&](Node &node, Node * /*parent*/) {
     node.hash = node.compute_node_hash();
   };
-  walk_without_path<Node>(&root_, f, /*max_depth=*/no_hash_depth_);
+  walk<Node>(&root_, f, /*max_depth=*/no_hash_depth_);
 }
 
 void
@@ -1439,7 +1439,7 @@ MerkleTrie::free_all_nodes(Node *root)
       allocator_.free(&node);
     }
   };
-  walk_without_path<Node>(root, f);
+  walk<Node>(root, f);
 }
 
 } // namespace hogd
