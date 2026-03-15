@@ -63,6 +63,7 @@ bm_scheduler_process_transfers(benchmark::State &state)
 
 BENCHMARK(bm_scheduler_process_transfers)->Arg(8)->UseRealTime();
 
+void
 bm_scheduler_add_txs(benchmark::State &state)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
