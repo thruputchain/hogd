@@ -21,6 +21,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/allocator.h"
@@ -745,16 +746,15 @@ public:
       return;
     }
 
-    const size_t base_child_threads =
-        std::max<size_t>(1, num_threads / tries_.size());
-    size_t extra_threads = num_threads % tries_.size();
+    const std::vector<ChunkRange> thread_allocations =
+        make_chunks(std::max(num_threads, tries_.size()), tries_.size());
     std::vector<std::future<void>> futures;
     std::array<std::vector<Node *>, 16> frontiers;
 
     for (size_t i = 0; i < tries_.size(); i++) {
       std::optional<MerkleTrie> &trie = tries_[i];
-      const size_t child_threads =
-          base_child_threads + (extra_threads != 0 ? 1 : 0);
+      const ChunkRange &allocation = thread_allocations[i];
+      const size_t child_threads = allocation.end - allocation.start;
       frontiers[i] =
           MerkleTrie::collect_hash_frontier(&trie->root_, child_threads);
       for (Node *subtree_root : frontiers[i]) {
@@ -762,7 +762,6 @@ public:
           MerkleTrie::generate_all_hashes_serial(subtree_root);
         }));
       }
-      extra_threads -= (extra_threads != 0 ? 1 : 0);
     }
 
     for (std::future<void> &future : futures) {
