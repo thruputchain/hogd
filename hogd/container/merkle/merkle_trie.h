@@ -720,16 +720,15 @@ public:
     }
   }
 
-  void
-  generate_top_level_hashes(WorkerPool &pool = WorkerPool::get_default_pool())
+  void generate_top_level_hashes()
   {
     std::vector<std::future<void>> futures;
     futures.reserve(tries_.size());
 
     // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < tries_.size(); i++) {
-      futures.push_back(
-          pool.submit([this, i] { tries_[i]->generate_top_level_hashes(); }));
+      futures.push_back(WorkerPool::get_default_pool().submit(
+          [this, i] { tries_[i]->generate_top_level_hashes(); }));
     }
     for (std::future<void> &future : futures) {
       future.get();
@@ -749,7 +748,6 @@ public:
     const size_t base_child_threads =
         std::max<size_t>(1, num_threads / tries_.size());
     size_t extra_threads = num_threads % tries_.size();
-    WorkerPool pool(static_cast<int>(num_threads));
     std::vector<std::future<void>> futures;
     std::array<std::vector<Node *>, 16> frontiers;
 
@@ -760,7 +758,7 @@ public:
       frontiers[i] =
           MerkleTrie::collect_hash_frontier(&trie->root_, child_threads);
       for (Node *subtree_root : frontiers[i]) {
-        futures.push_back(pool.submit([subtree_root] {
+        futures.push_back(WorkerPool::get_default_pool().submit([subtree_root] {
           MerkleTrie::generate_all_hashes_serial(subtree_root);
         }));
       }
