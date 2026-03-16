@@ -62,11 +62,12 @@ Scheduler::write_all_average_hog_ages_helper()
   co_await default_coropoll().pool_.bg();
 
   PerThread<HogAgeBatch> ages_by_thread;
-  accounts_.for_each_parallel([&](const std::pair<ContractAddress, HogAge> &p) {
-    const HogAge &age = p.second;
-    CHECK_EQ(p.first, age.address);
-    ages_by_thread->push_back(age);
-  });
+  accounts_.for_each_parallel(
+      [&](const std::pair<ContractAddress, AccountState> &p) {
+        const HogAge &age = p.second.hog_age;
+        CHECK_EQ(p.first, age.address);
+        ages_by_thread->push_back(age);
+      });
 
   HogAgeBatch ages;
   ages.reserve(accounts_.size());
@@ -86,6 +87,14 @@ Scheduler::write_all_average_hog_ages_helper()
 std::pair<HogAge *, std::unique_lock<std::mutex>>
 Scheduler::get_cached_hog_age(const ContractAddress &address)
 {
+  auto [account_state, lock] = get_account_state(address);
+  CHECK_EQ(account_state->hog_age.address, address);
+  return {&account_state->hog_age, std::move(lock)};
+}
+
+std::pair<Scheduler::AccountState *, std::unique_lock<std::mutex>>
+Scheduler::get_account_state(const ContractAddress &address)
+{
   auto [value_ptr, lock] = accounts_.find(address);
   CHECK_PTR(value_ptr);
   return {value_ptr, std::move(lock)};
@@ -96,9 +105,11 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 {
   auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  for (const HogAge &age : res.hog_age_batch()) {
-    auto [value_in_map, lock] = accounts_[age.address];
-    value_in_map = age;
+  for (size_t i = 0; i < res.hog_age_batch().size(); i++) {
+    const HogAge &age = res.hog_age_batch()[i];
+    CHECK_EQ(age.address, accounts[i]);
+    auto [account_state, lock] = accounts_[age.address];
+    account_state.hog_age = age;
   }
 }
 
@@ -179,10 +190,10 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
   const TxKey key{.expiry_block_height =
                       tx_value.tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
-  auto [account_txs, lock] = account_to_tx_[account];
-  // Check if the tx is already present in [account_to_tx_[account]]. If it
-  // is, we are adding a duplicate tx, so we do not want to increment [size_].
-  return account_txs.insert({key, &tx_value}).second;
+  auto [account_state, lock] = get_account_state(account);
+  // Check if the tx is already present in [account_state->txs]. If it is, we
+  // are adding a duplicate tx, so we do not want to increment [size_].
+  return account_state->txs.insert({key, &tx_value}).second;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec below
@@ -363,10 +374,10 @@ void
 Scheduler::dump_runqueue()
 {
   size_t actual_size = 0;
-  account_to_tx_.for_each(
-      [&actual_size](
-          const std::pair<ContractAddress, const std::map<TxKey, TxValue *>>
-              &kv) { actual_size += kv.second.size(); });
+  accounts_.for_each(
+      [&actual_size](const std::pair<ContractAddress, const AccountState> &kv) {
+        actual_size += kv.second.txs.size();
+      });
   info("dump_runqueue(), size() = {}, actual size = {}", size(), actual_size);
 }
 
@@ -468,7 +479,8 @@ bool
 Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
-  auto [txs, lock] = account_to_tx_[account];
+  auto [account_state, lock] = get_account_state(account);
+  std::map<TxKey, TxValue *> &txs = account_state->txs;
   const TxKey lower_bound{.expiry_block_height = current_block(),
                           .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
@@ -524,9 +536,9 @@ Scheduler::cycle_accounts_during_schedule_helper(
     // we have it here because we need the iterator. Clean this up.
     GasAmount gas_limit;
     {
-      const auto [txs, lock] = account_to_tx_[account];
-      auto it = txs.lower_bound(lower_bound);
-      if (it == txs.end()) {
+      const auto [account_state, lock] = get_account_state(account);
+      auto it = account_state->txs.lower_bound(lower_bound);
+      if (it == account_state->txs.end()) {
         continue;
       }
       const SignedTransaction &tx = it->second->tx;
@@ -570,8 +582,9 @@ Scheduler::schedule(size_t num_txs,
     // handle its own chunk of accounts from [ready_accounts_].
     const AccountKey account_key = *account_it;
     const ContractAddress account = account_key.account;
-    auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
-    auto [txs_to_schedule, txs_lock] = account_to_tx_[account];
+    auto [account_state, account_lock] = get_account_state(account);
+    HogAge *hog_ages = &account_state->hog_age;
+    std::map<TxKey, TxValue *> &txs_to_schedule = account_state->txs;
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       auto it = txs_to_schedule.lower_bound(lower_bound);
@@ -713,7 +726,9 @@ Scheduler::remove_from_scheduler(
                                  tx.tx.uniquifier.block_expiry_height,
                              .tx_hash = tx_hash};
           {
-            auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
+            auto [account_state, account_lock] =
+                scheduler.get_account_state(account);
+            std::map<TxKey, TxValue *> &txs = account_state->txs;
             // The tx may or may not be on the runqueue. If the tx is included
             // in a block we are *nominating*, then it has already been taken
             // off of the runqueue. If the tx is included in a block we are

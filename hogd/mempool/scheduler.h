@@ -72,10 +72,17 @@ public:
                            SignedTransactionHashBatch &tx_hashes,
                            SignedTransactionBatch &txs)
   {
-    auto [address_txs, lock] = account_to_tx_[address];
-    tx_hashes.reserve(address_txs.size());
-    txs.reserve(address_txs.size());
-    for (const auto &[tx_key, tx_value] : address_txs) {
+    // The method is called by [MempoolCoordinatorRpc], which may try to find
+    // txs associated with an account that the scheduler does not know about. In
+    // that case, just return.
+    auto [account_state, lock] = accounts_.find(address);
+    if (!account_state) {
+      return;
+    }
+
+    tx_hashes.reserve(account_state->txs.size());
+    txs.reserve(account_state->txs.size());
+    for (const auto &[tx_key, tx_value] : account_state->txs) {
       tx_hashes.push_back(tx_key.tx_hash);
       txs.push_back(tx_value->tx);
     }
@@ -170,6 +177,11 @@ private:
     SignedTransaction tx;
   };
 
+  struct AccountState {
+    HogAge hog_age{};
+    std::map<TxKey, TxValue *> txs;
+  };
+
   struct AccountKey {
     BlockHeight average_hog_age;
     ContractAddress account;
@@ -215,6 +227,9 @@ private:
 
   x23::Detached write_all_average_hog_ages_helper();
 
+  std::pair<AccountState *, std::unique_lock<std::mutex>>
+  get_account_state(const ContractAddress &address);
+
   void wait_for_pending_detached_coroutines()
   {
     while (pending_detached_coroutines_.load(std::memory_order_acquire) > 0) {
@@ -230,11 +245,6 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
-  // Maps an account to the txs it has submitted.
-  // TODO(jhumphri): Is [account_to_tx_] mostly only read rather than written
-  // (i.e., are we inserting new accounts into it rarely)? Would it be better to
-  // make it an [std::unordered_map<>] and protect it with an rw lock?
-  SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
   std::set<AccountKey> ready_accounts_;
 
   // Tx cache.
@@ -242,10 +252,8 @@ private:
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
   SynchronizedMap<SignedTransactionHash, TxValue> txs_;
-  // Account cache.
-  // TODO(jhumphri): Similarly, is this read heavy? Would it be better to make
-  // it an [std::unordered_map] and protect it with an rw lock?
-  SynchronizedMap<ContractAddress, HogAge> accounts_;
+  // Per-account scheduler state, including hog ages and the account runqueue.
+  SynchronizedMap<ContractAddress, AccountState> accounts_;
 
   // The number of txs on the runqueue.
   std::atomic<size_t> size_ = 0;
