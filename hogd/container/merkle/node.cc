@@ -107,11 +107,10 @@ visit_path_encoding(Sink &sink, const HexArray &path)
 
 template<typename Sink>
 void
-visit_child_encoding(Sink &sink,
-                     const std::array<Node *, Node::kMaxNumBranches> &children,
-                     size_t num_children)
+visit_children_encoding(
+    Sink &sink, const std::array<Node *, Node::kMaxNumBranches> &children)
 {
-  for (size_t i = 0; i < num_children; i++) {
+  for (size_t i = 0; i < children.size(); i++) {
     Node *child = children[i];
     if (child) {
       emit_bytes(sink, std::as_bytes(
@@ -126,6 +125,20 @@ visit_child_encoding(Sink &sink,
 
 template<typename Sink>
 void
+visit_child_encoding(Sink &sink, Node *child)
+{
+  if (child) {
+    emit_bytes(sink, std::as_bytes(
+                         std::span(child->hash.data(), child->hash.size())));
+  }
+  else {
+    std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};
+    emit_bytes(sink, zero_bytes);
+  }
+}
+
+template<typename Sink>
+void
 visit_node_encoding(Sink &sink, const Node &node)
 {
   std::array<std::byte, 1> type_byte = {static_cast<std::byte>(node.type)};
@@ -134,14 +147,11 @@ visit_node_encoding(Sink &sink, const Node &node)
   switch (node.type) {
   case Node::Type::kBranch:
     visit_value_encoding(sink, node.value_hash());
-    visit_child_encoding(sink, node.branch_children(), Node::kMaxNumBranches);
+    visit_children_encoding(sink, node.branch_children());
     break;
   case Node::Type::kExtension:
     visit_path_encoding(sink, node.path());
-    visit_child_encoding(sink,
-                         std::array<Node *, Node::kMaxNumBranches>{
-                             node.extension_child()},
-                         1);
+    visit_child_encoding(sink, node.extension_child());
     break;
   case Node::Type::kLeaf:
     visit_path_encoding(sink, node.path());
@@ -304,8 +314,7 @@ Node::get_branch_encoding(std::vector<std::byte> &encoding) const
     encoding.insert(encoding.end(), bytes.begin(), bytes.end());
   };
   visit_value_encoding(append_to_vector, value_hash());
-  visit_child_encoding(append_to_vector, branch_children(),
-                       /*num_children=*/kMaxNumBranches);
+  visit_children_encoding(append_to_vector, branch_children());
 }
 
 void
@@ -317,10 +326,7 @@ Node::get_extension_encoding(std::vector<std::byte> &encoding) const
     encoding.insert(encoding.end(), bytes.begin(), bytes.end());
   };
   visit_path_encoding(append_to_vector, path());
-  visit_child_encoding(append_to_vector,
-                       std::array<Node *, Node::kMaxNumBranches>{
-                           extension_child()},
-                       /*num_children=*/1);
+  visit_child_encoding(append_to_vector, extension_child());
 }
 
 void

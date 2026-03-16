@@ -87,6 +87,7 @@ public:
     ~Payload() {}
   };
 
+  // A node is default constructed as a branch.
   Node() : type(Type::kBranch)
   {
     std::construct_at(&payload_.branch);
@@ -155,6 +156,8 @@ public:
     CHECK_PTR(node);
 
     if (allocator.type() == Allocator<Node>::Type::kBump) {
+      // The bump allocator does not construct the node, whereas [new Node]
+      // does. Thus, we need to manually construct the node.
       std::construct_at(node);
     }
     node->clear();
@@ -170,6 +173,8 @@ public:
     CHECK_PTR(node);
 
     if (allocator.type() == Allocator<Node>::Type::kBump) {
+      // The bump allocator does not construct the node, whereas [new Node]
+      // does. Thus, we need to manually construct the node.
       std::construct_at(node);
     }
     node->clear();
@@ -185,6 +190,8 @@ public:
     CHECK_PTR(node);
 
     if (allocator.type() == Allocator<Node>::Type::kBump) {
+      // The bump allocator does not construct the node, whereas [new Node]
+      // does. Thus, we need to manually construct the node.
       std::construct_at(node);
     }
     node->clear();

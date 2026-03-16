@@ -50,7 +50,7 @@ expect_hash_is_clear(const Node &node)
 }
 
 void
-expect_children_are_clear(const Node &node)
+expect_branch_children_are_clear(const Node &node)
 {
   for (Node *child : node.branch_children()) {
     EXPECT_EQ(child, nullptr);
@@ -69,9 +69,7 @@ expect_hash_matches_materialized_encoding(const Node &node)
 TEST(Node, Clear)
 {
   Node node;
-  // We do not set or check [node.type] because [node.type] is an enum class.
-  // Setting it to a value of 0 is equivalent to setting it to [Node::kBranch],
-  // which is an implementation detail.
+  node.init_branch(nullptr);
   node.hash[0] = 0x01;
   node.parent = &node; // We just want the [parent] pointer to be non-NULL.
   node.value_hash() = SHA256Hash();
@@ -82,12 +80,13 @@ TEST(Node, Clear)
 
   node.clear();
 
-  // As mentioned above, we do not check [node.type].
+  // We do not check [node.type] because [node.clear()] keeps the node type
+  // rather than clearing it.
   expect_hash_is_clear(node);
   EXPECT_EQ(node.parent, nullptr);
   EXPECT_EQ(node.type, Node::Type::kBranch);
   EXPECT_EQ(node.value_hash(), std::nullopt);
-  expect_children_are_clear(node);
+  expect_branch_children_are_clear(node);
 }
 
 TEST(Node, CreateBranch)
@@ -101,7 +100,7 @@ TEST(Node, CreateBranch)
 
   expect_hash_is_clear(*branch);
   EXPECT_EQ(branch->value_hash(), std::nullopt);
-  expect_children_are_clear(*branch);
+  expect_branch_children_are_clear(*branch);
 
   delete branch;
 }
@@ -307,7 +306,7 @@ TEST(Node, ReinitAcrossNodeTypes)
   EXPECT_EQ(node.type, Node::Type::kBranch);
   EXPECT_EQ(node.parent, &parent);
   EXPECT_EQ(node.value_hash(), std::nullopt);
-  expect_children_are_clear(node);
+  expect_branch_children_are_clear(node);
 
   node.init_leaf(&parent);
   node.path() = HexArray("12");
