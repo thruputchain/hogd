@@ -1,12 +1,16 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <set>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
@@ -73,10 +77,26 @@ public:
                            SignedTransactionBatch &txs)
   {
     auto [address_txs, lock] = account_to_tx_[address];
-    tx_hashes.reserve(address_txs.size());
-    txs.reserve(address_txs.size());
-    for (const auto &[tx_key, tx_value] : address_txs) {
-      tx_hashes.push_back(tx_key.tx_hash);
+    std::vector<TxKey> ordered;
+    ordered.reserve(address_txs.queued_count);
+    for (const TxKey &key : address_txs.txs) {
+      const auto [tx_value, tx_lock] = txs_.find(key.tx_hash);
+      if (tx_value == nullptr ||
+          !tx_value->in_runqueue.load(std::memory_order_relaxed)) {
+        continue;
+      }
+      ordered.push_back(key);
+    }
+    std::sort(ordered.begin(), ordered.end());
+    tx_hashes.reserve(tx_hashes.size() + ordered.size());
+    txs.reserve(txs.size() + ordered.size());
+    for (const TxKey &key : ordered) {
+      const auto [tx_value, tx_lock] = txs_.find(key.tx_hash);
+      if (tx_value == nullptr ||
+          !tx_value->in_runqueue.load(std::memory_order_relaxed)) {
+        continue;
+      }
+      tx_hashes.push_back(key.tx_hash);
       txs.push_back(tx_value->tx);
     }
   }
@@ -168,6 +188,29 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    ContractAddress account;
+    SignedTransactionHash tx_hash;
+    BlockHeight expiry_block_height = 0;
+    std::atomic<bool> in_runqueue = false;
+
+    TxValue() = default;
+    TxValue(const TxValue &other)
+      : tx(other.tx), account(other.account), tx_hash(other.tx_hash),
+        expiry_block_height(other.expiry_block_height),
+        in_runqueue(other.in_runqueue.load(std::memory_order_relaxed))
+    {}
+    TxValue &operator=(const TxValue &other)
+    {
+      if (this != &other) {
+        tx = other.tx;
+        account = other.account;
+        tx_hash = other.tx_hash;
+        expiry_block_height = other.expiry_block_height;
+        in_runqueue.store(other.in_runqueue.load(std::memory_order_relaxed),
+                          std::memory_order_relaxed);
+      }
+      return *this;
+    }
   };
 
   struct AccountKey {
@@ -184,7 +227,30 @@ private:
     }
   };
 
+  struct TxKeyGreater {
+    bool operator()(const TxKey &lhs, const TxKey &rhs) const noexcept
+    {
+      return rhs < lhs;
+    }
+  };
+
+  struct AccountKeyGreater {
+    bool operator()(const AccountKey &lhs, const AccountKey &rhs) const noexcept
+    {
+      return rhs < lhs;
+    }
+  };
+
+  struct AccountQueue {
+    std::vector<TxKey> txs;
+    size_t queued_count = 0;
+  };
+
   AccountKey get_account_key(const ContractAddress &account);
+  void push_ready_account(const ContractAddress &account);
+  bool ready_account_entry_is_current(const AccountKey &key);
+  bool cleanup_account_queue(AccountQueue &queue, bool remove_expired_txs,
+                             TxValue **next_tx = nullptr);
 
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
@@ -231,11 +297,9 @@ private:
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
   // Maps an account to the txs it has submitted.
-  // TODO(jhumphri): Is [account_to_tx_] mostly only read rather than written
-  // (i.e., are we inserting new accounts into it rarely)? Would it be better to
-  // make it an [std::unordered_map<>] and protect it with an rw lock?
-  SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
-  std::set<AccountKey> ready_accounts_;
+  SynchronizedMap<ContractAddress, AccountQueue> account_to_tx_;
+  std::priority_queue<AccountKey, std::vector<AccountKey>, AccountKeyGreater>
+      ready_accounts_;
 
   // Tx cache.
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can

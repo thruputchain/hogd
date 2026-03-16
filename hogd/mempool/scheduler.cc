@@ -171,18 +171,88 @@ Scheduler::get_account_key(const ContractAddress &account)
   return {.average_hog_age = average_hog_age, .account = account};
 }
 
+void
+Scheduler::push_ready_account(const ContractAddress &account)
+{
+  ready_accounts_.push(get_account_key(account));
+}
+
+bool
+Scheduler::ready_account_entry_is_current(const AccountKey &key)
+{
+  if (!account_is_ready(key.account, /*remove_expired_txs=*/false)) {
+    return false;
+  }
+  const AccountKey current = get_account_key(key.account);
+  return current.average_hog_age == key.average_hog_age &&
+         current.account == key.account;
+}
+
+bool
+Scheduler::cleanup_account_queue(AccountQueue &queue, bool remove_expired_txs,
+                                 TxValue **next_tx)
+{
+  (void)remove_expired_txs;
+  while (!queue.txs.empty()) {
+    const TxKey key = queue.txs.front();
+    TxValue *tx_value = nullptr;
+    bool pop_entry = false;
+
+    auto [candidate, tx_lock] = txs_.find(key.tx_hash);
+    tx_value = candidate;
+    if (tx_value == nullptr) {
+      pop_entry = true;
+    }
+    else if (!tx_value->in_runqueue.load(std::memory_order_relaxed)) {
+      pop_entry = true;
+    }
+    else if (key.expiry_block_height < current_block()) {
+      tx_value->in_runqueue.store(false, std::memory_order_relaxed);
+      CHECK_EQ(txs_.remove(key.tx_hash, tx_lock), 1UL);
+      CHECK_GT(queue.queued_count, 0UL);
+      queue.queued_count--;
+      CHECK_LE(1UL, size_.load(std::memory_order_relaxed));
+      size_.fetch_sub(1, std::memory_order_relaxed);
+      pop_entry = true;
+    }
+
+    if (!pop_entry) {
+      if (next_tx != nullptr) {
+        *next_tx = tx_value;
+      }
+      return true;
+    }
+
+    std::pop_heap(queue.txs.begin(), queue.txs.end(), TxKeyGreater{});
+    queue.txs.pop_back();
+  }
+
+  if (next_tx != nullptr) {
+    *next_tx = nullptr;
+  }
+  return false;
+}
+
 bool
 Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
                                    TxValue &tx_value)
 {
-  const ContractAddress &account = tx_value.tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height =
-                      tx_value.tx.tx.uniquifier.block_expiry_height,
+  if (tx_value.in_runqueue.exchange(true, std::memory_order_relaxed)) {
+    return false;
+  }
+
+  tx_value.account = tx_value.tx.tx.invocation.invoked_address;
+  tx_value.tx_hash = tx_hash;
+  tx_value.expiry_block_height = tx_value.tx.tx.uniquifier.block_expiry_height;
+
+  const TxKey key{.expiry_block_height = tx_value.expiry_block_height,
                   .tx_hash = tx_hash};
-  auto [account_txs, lock] = account_to_tx_[account];
-  // Check if the tx is already present in [account_to_tx_[account]]. If it
-  // is, we are adding a duplicate tx, so we do not want to increment [size_].
-  return account_txs.insert({key, &tx_value}).second;
+  auto [account_queue, lock] = account_to_tx_[tx_value.account];
+  account_queue.txs.push_back(key);
+  std::push_heap(account_queue.txs.begin(), account_queue.txs.end(),
+                 TxKeyGreater{});
+  account_queue.queued_count++;
+  return true;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec below
@@ -190,7 +260,7 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
-  const SignedTransactionHash &tx_hash = sha256(tx.tx);
+  const SignedTransactionHash tx_hash = sha256(tx.tx);
   TxValue *value = nullptr;
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
@@ -198,9 +268,17 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
     // added to the scheduler, then the tx was removed during nomination by
     // [schedule()], then a validated block was committed rather than the
     // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
+    TxValue new_value;
+    new_value.tx = tx;
+    new_value.account = tx.tx.invocation.invoked_address;
+    new_value.tx_hash = tx_hash;
+    new_value.expiry_block_height = tx.tx.uniquifier.block_expiry_height;
+    const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, new_value);
     CHECK_PTR(tx_ptr);
     value = tx_ptr;
+    tx_ptr->account = tx.tx.invocation.invoked_address;
+    tx_ptr->tx_hash = tx_hash;
+    tx_ptr->expiry_block_height = tx.tx.uniquifier.block_expiry_height;
   }
 
   return insert_tx_into_runqueue(tx_hash, *value);
@@ -247,7 +325,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
-    ready_accounts_.insert(get_account_key(account));
+    push_ready_account(account);
   }
 }
 
@@ -364,9 +442,9 @@ Scheduler::dump_runqueue()
 {
   size_t actual_size = 0;
   account_to_tx_.for_each(
-      [&actual_size](
-          const std::pair<ContractAddress, const std::map<TxKey, TxValue *>>
-              &kv) { actual_size += kv.second.size(); });
+      [&actual_size](const std::pair<ContractAddress, const AccountQueue> &kv) {
+        actual_size += kv.second.queued_count;
+      });
   info("dump_runqueue(), size() = {}, actual size = {}", size(), actual_size);
 }
 
@@ -468,24 +546,8 @@ bool
 Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
-  auto [txs, lock] = account_to_tx_[account];
-  const TxKey lower_bound{.expiry_block_height = current_block(),
-                          .tx_hash = {}};
-  auto lower_it = txs.lower_bound(lower_bound);
-  // We just check if there is a tx to run for this account. We do not check if
-  // the account has enough gas units to run the tx.
-  bool ret = (lower_it != txs.end());
-  if (remove_expired_txs) {
-    for (auto it = txs.begin(); it != lower_it; it++) {
-      const SignedTransactionHash &tx_hash = it->first.tx_hash;
-      CHECK_EQ(txs_.remove(tx_hash), 1UL);
-    }
-    size_t to_remove = std::distance(txs.begin(), lower_it);
-    CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
-    size_ -= to_remove;
-    txs.erase(txs.begin(), lower_it);
-  }
-  return ret;
+  auto [queue, lock] = account_to_tx_[account];
+  return cleanup_account_queue(queue, remove_expired_txs);
 }
 
 void
@@ -519,23 +581,21 @@ Scheduler::cycle_accounts_during_schedule_helper(
     const std::unordered_set<ContractAddress> &accounts,
     const TxKey &lower_bound)
 {
+  (void)lower_bound;
   for (const ContractAddress &account : accounts) {
-    // TODO(jhumphri): This is the same code as in [account_is_ready], but
-    // we have it here because we need the iterator. Clean this up.
-    GasAmount gas_limit;
+    TxValue *tx_value = nullptr;
     {
-      const auto [txs, lock] = account_to_tx_[account];
-      auto it = txs.lower_bound(lower_bound);
-      if (it == txs.end()) {
+      auto [queue, lock] = account_to_tx_[account];
+      if (!cleanup_account_queue(queue, /*remove_expired_txs=*/false,
+                                 &tx_value)) {
         continue;
       }
-      const SignedTransaction &tx = it->second->tx;
-      gas_limit = tx.tx.invocation.gas_limit;
     }
 
+    const GasAmount gas_limit = tx_value->tx.tx.invocation.gas_limit;
     cycle_if_needed(account, gas_limit);
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
-      CHECK(ready_accounts_.insert(get_account_key(account)).second);
+      push_ready_account(account);
     }
   }
 }
@@ -553,47 +613,44 @@ Scheduler::schedule(size_t num_txs,
 
   const TxKey lower_bound = {.expiry_block_height = current_block(),
                              .tx_hash = {}};
-  auto account_it = ready_accounts_.begin();
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
-    if (account_it == ready_accounts_.end()) {
-      ready_accounts_.clear();
+    if (ready_accounts_.empty()) {
       cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
       removed_accounts.clear();
-      account_it = ready_accounts_.begin();
       if (ready_accounts_.empty()) {
-        // If there are still no ready accounts, then break.
         break;
       }
     }
 
-    // TODO(jhumphri): This is a good place to parallelize. Each thread can
-    // handle its own chunk of accounts from [ready_accounts_].
-    const AccountKey account_key = *account_it;
+    AccountKey account_key{};
+    bool found_account = false;
+    while (!ready_accounts_.empty()) {
+      account_key = ready_accounts_.top();
+      ready_accounts_.pop();
+      if (ready_account_entry_is_current(account_key)) {
+        found_account = true;
+        break;
+      }
+    }
+    if (!found_account) {
+      continue;
+    }
+
     const ContractAddress account = account_key.account;
     auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
-    auto [txs_to_schedule, txs_lock] = account_to_tx_[account];
+    auto [queue, txs_lock] = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
+    bool excluded_from_block = false;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
-      auto it = txs_to_schedule.lower_bound(lower_bound);
-      if (it != txs_to_schedule.begin()) {
-        // This removes expired txs.
-        for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
-             it_remove++) {
-          const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
-          CHECK_EQ(txs_.remove(tx_hash), 1UL);
-        }
-        size_t to_remove = std::distance(txs_to_schedule.begin(), it);
-        CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
-        size_ -= to_remove;
-        it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
-      }
-      if (it == txs_to_schedule.end()) {
-        account_it++;
+      TxValue *tx_value = nullptr;
+      if (!cleanup_account_queue(queue, /*remove_expired_txs=*/false,
+                                 &tx_value)) {
         CHECK(removed_accounts.insert(account).second);
         break;
       }
-      const SignedTransactionHash &tx_hash = it->first.tx_hash;
-      SignedTransaction &tx = it->second->tx;
+
+      const SignedTransactionHash &tx_hash = tx_value->tx_hash;
+      SignedTransaction &tx = tx_value->tx;
       const uint128_t hogs_available =
           from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
       if (tx.tx.invocation.gas_limit <= hogs_available) {
@@ -604,9 +661,11 @@ Scheduler::schedule(size_t num_txs,
         tx_hashes.push_back(tx_hash);
         txs.push_back(tx);
 
-        // We are deleting [it] here, so do not access [tx_hash] or [tx]
-        // beyond this point!
-        it = txs_to_schedule.erase(it);
+        tx_value->in_runqueue.store(false, std::memory_order_relaxed);
+        std::pop_heap(queue.txs.begin(), queue.txs.end(), TxKeyGreater{});
+        queue.txs.pop_back();
+        CHECK_GT(queue.queued_count, 0UL);
+        queue.queued_count--;
         num_scheduled++;
         size_.fetch_sub(1, std::memory_order_relaxed);
       }
@@ -625,24 +684,17 @@ Scheduler::schedule(size_t num_txs,
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
-          it = txs_to_schedule.erase(it);
+          tx_value->in_runqueue.store(false, std::memory_order_relaxed);
+          std::pop_heap(queue.txs.begin(), queue.txs.end(), TxKeyGreater{});
+          queue.txs.pop_back();
+          CHECK_GT(queue.queued_count, 0UL);
+          queue.queued_count--;
           size_.fetch_sub(1, std::memory_order_relaxed);
-          // It is possible that the account is already in
-          // [accounts_excluded_from_block], so we do not CHECK that the
-          // insert was successful. This happens when [add_txs()] above is
-          // called in parallel with [schedule()]. [add_txs()] can enqueue
-          // another tx for [account], and then if [schedule()] cycles the
-          // accounts above via [cycle_accounts_during_schedule_helper()], we
-          // end up adding [account] back into [ready_accounts_].
           accounts_excluded_from_block.insert(account);
+          excluded_from_block = true;
         }
         else {
-          // The account has enough hogs in total to run this tx, but the
-          // account is going to have to be cycled once or twice. For now, we
-          // just skip over this account and revisit it once it has been
-          // cycled.
         }
-        account_it++;
         CHECK(removed_accounts.insert(account).second);
         break;
       }
@@ -653,15 +705,17 @@ Scheduler::schedule(size_t num_txs,
       move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
                                            current_block() + 1);
     }
+
+    if (num_scheduled >= num_txs && !excluded_from_block &&
+        account_is_ready(account, /*remove_expired_txs=*/false)) {
+      push_ready_account(account);
+    }
   }
-  // Add [removed_accounts] back to [ready_accounts_] for each account that is
-  // still ready.
-  ready_accounts_.erase(ready_accounts_.begin(), account_it);
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
   for (const ContractAddress &account : accounts_excluded_from_block) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
-      CHECK(ready_accounts_.insert(get_account_key(account)).second);
+      push_ready_account(account);
     }
   }
 }
@@ -699,38 +753,21 @@ Scheduler::remove_from_scheduler(
           tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
       size_t num_removed_from_runqueue = 0;
       for (const SignedTransactionHash &tx_hash : hash_chunk) {
+        auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
         if (validated_block) {
           // We only need to remove txs from the runqueue when committing a
           // validated block. Txs in a nominated block were already removed from
           // the runqueue in [schedule()]. Thus, we can skip this for nominated
           // blocks to save on overhead.
-          auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-          CHECK_PTR(tx_value_ptr);
-
-          const SignedTransaction &tx = tx_value_ptr->tx;
-          const ContractAddress &account = tx.tx.invocation.invoked_address;
-          const TxKey key = {.expiry_block_height =
-                                 tx.tx.uniquifier.block_expiry_height,
-                             .tx_hash = tx_hash};
-          {
-            auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
-            // The tx may or may not be on the runqueue. If the tx is included
-            // in a block we are *nominating*, then it has already been taken
-            // off of the runqueue. If the tx is included in a block we are
-            // *validating*, then it is still on the runqueue.
-            if (txs.erase(key)) {
-              num_removed_from_runqueue++;
-              accounts.insert(account, 0);
-            }
+          const ContractAddress &account = tx_value_ptr->account;
+          if (tx_value_ptr->in_runqueue.exchange(false,
+                                                 std::memory_order_relaxed)) {
+            num_removed_from_runqueue++;
+            accounts.insert(account, 0);
           }
-
-          // Careful! We remove the tx from [txs_] at the bottom here because
-          // once we remove it, the references above become invalidated.
-          CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
         }
-        else {
-          CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
-        }
+        CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
       }
 
       co_return num_removed_from_runqueue;
@@ -749,8 +786,8 @@ Scheduler::remove_from_scheduler(
 
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
-    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+    if (account_is_ready(account, /*remove_expired_txs=*/true)) {
+      push_ready_account(account);
     }
   });
   double b = timer.elapsed();
