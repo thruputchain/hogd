@@ -75,6 +75,24 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     cargo install --force cbindgen
     ~~~~
 
+1. Configure cargo to authenticate with the groundhog crate registry.
+   First, ensure `~/.cargo/config.toml` includes:
+
+    ~~~~ .toml
+    [registry]
+    global-credential-providers = ["env", "cargo:token"]
+    ~~~~
+
+   Then add your token to `~/.cargo/credentials.toml`:
+
+    ~~~~ .toml
+    [registries.groundhog]
+    token = "Bearer <your-token>"
+    ~~~~
+
+   You can get an access token by logging in at
+   [groundhog.dev/crates](https://groundhog.dev/crates).
+
 1. Fetch rust crate dependencies.
     ~~~~ .sh
     ./scripts/fetch.sh
