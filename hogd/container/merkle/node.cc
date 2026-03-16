@@ -110,8 +110,7 @@ void
 visit_children_encoding(
     Sink &sink, const std::array<Node *, Node::kMaxNumBranches> &children)
 {
-  for (size_t i = 0; i < children.size(); i++) {
-    Node *child = children[i];
+  for (Node *child : children) {
     if (child) {
       emit_bytes(sink, std::as_bytes(
                            std::span(child->hash.data(), child->hash.size())));

@@ -63,9 +63,7 @@ public:
 
   struct BranchPayload {
     std::optional<SHA256Hash> value_hash;
-    std::array<Node *, kMaxNumBranches> child;
-
-    BranchPayload() : child{} {}
+    std::array<Node *, kMaxNumBranches> child{};
   };
 
   struct ExtensionPayload {
@@ -87,8 +85,9 @@ public:
     ~Payload() {}
   };
 
-  // A node is default constructed as a branch.
-  Node() : type(Type::kBranch)
+  // A node is default constructed as a branch (see [Type type{Type::kBranch}]
+  // below).
+  Node()
   {
     std::construct_at(&payload_.branch);
     rw_lock.reset();
@@ -104,7 +103,7 @@ public:
   Node &operator=(Node &&) noexcept = delete;
 
   RwLock rw_lock;
-  Type type;
+  Type type{Type::kBranch};
   RwLock hash_lock;
   SHA256Hash hash;
   Node *parent;

@@ -73,6 +73,7 @@ TEST(Node, Clear)
   node.hash[0] = 0x01;
   node.parent = &node; // We just want the [parent] pointer to be non-NULL.
   node.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   node.value_hash()->at(0) = 0xFF;
   // Similarly, we just want a couple of the child pointers to be non-NULL.
   node.branch_children()[0] = &node;
@@ -180,6 +181,7 @@ TEST(Node, HashBranch)
   branch.init_branch(nullptr);
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   branch.value_hash()->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
@@ -204,6 +206,7 @@ TEST(Node, HashBranchSomeNullptr)
   branch.init_branch(nullptr);
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   branch.value_hash()->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
@@ -232,6 +235,7 @@ TEST(Node, HashBranchAllNullptr)
   branch.init_branch(nullptr);
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   branch.value_hash()->at(0) = 0xFF;
   branch.branch_children().fill(nullptr);
 
@@ -271,6 +275,7 @@ TEST(Node, HashLeaf)
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.path() = HexArray("00010203");
   leaf.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   leaf.value_hash()->at(0) = 0xFF;
 
   SHA256Hash hash = leaf.compute_node_hash();
@@ -287,6 +292,7 @@ TEST(Node, HashLeafOddPathMatchesMaterializedEncoding)
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.path() = HexArray("123");
   leaf.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   leaf.value_hash()->at(0) = 0xAB;
 
   expect_hash_matches_materialized_encoding(leaf);
@@ -311,6 +317,7 @@ TEST(Node, ReinitAcrossNodeTypes)
   node.init_leaf(&parent);
   node.path() = HexArray("12");
   node.value_hash() = SHA256Hash();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   node.value_hash()->at(0) = 0x5A;
 
   node.init_extension(&parent);

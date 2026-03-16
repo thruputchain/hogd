@@ -418,6 +418,7 @@ MerkleTrie::find_begin(const Key &k, SHA256Hash *&value_hash, void *&cookie)
     if (node->value_hash()) {
       // Get the hash out of the [std::optional<T>] with the dereference
       // operator.
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       SHA256Hash &hash_ptr = *node->value_hash();
       value_hash = &hash_ptr;
     }
