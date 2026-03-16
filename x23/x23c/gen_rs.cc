@@ -744,6 +744,13 @@ pub struct {}(pub i32);
     }
   }
   prtop("\n");
+
+  // generate a From<i32> implementation for the newtype struct
+  prtop("impl From<i32> for {} {{\n", tname);
+  prtop("    fn from(v: i32) -> Self {{\n");
+  prtop("        Self(v)\n");
+  prtop("    }}\n");
+  prtop("}}\n");
 }
 
 void
