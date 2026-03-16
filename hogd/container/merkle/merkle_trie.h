@@ -287,9 +287,6 @@ private:
   // a trie or freeing all of the nodes.
   //
   // [NodeType] must either be [Node] or [const Node].
-  template<typename T, bool Enabled>
-  using Maybe = std::conditional_t<Enabled, T, std::monostate>;
-
   template<typename NodeType, bool TrackPath, typename Fn>
   static void walk_impl(NodeType *root, const HexArray &prefix, Fn &&f,
                         std::optional<size_t> max_depth = std::nullopt)
@@ -309,8 +306,8 @@ private:
       NodeType *node;
       // The parent of this node.
       NodeType *parent;
-      // The path that maps to this node when the caller needs it.
-      Maybe<HexArray, TrackPath> path;
+      // The size of the current traversal path when it maps to this node.
+      size_t path_size;
       // This is only relevant for branch and extension nodes. When we first
       // encounter these nodes in an iterative loop, we cannot *immediately*
       // "visit" them (i.e., execute [f] on them)--we need to visit all of their
@@ -330,13 +327,16 @@ private:
     };
 
     std::stack<CheckInfo> path;
+    HexArray current_path;
     // Push the root node onto the stack.
     CheckInfo root_info{.node = root,
                         .parent = nullptr,
+                        .path_size = 0,
                         .next_child_to_visit = 0,
                         .depth = 0};
     if constexpr (TrackPath) {
-      root_info.path = prefix;
+      current_path = prefix;
+      root_info.path_size = prefix.size();
     }
     path.push(root_info);
 
@@ -346,6 +346,11 @@ private:
       if (!info.node) {
         path.pop();
         continue;
+      }
+
+      if constexpr (TrackPath) {
+        CHECK_GE(current_path.size(), info.path_size);
+        current_path.remove_from_back(current_path.size() - info.path_size);
       }
 
       switch (info.node->type) {
@@ -358,7 +363,7 @@ private:
           // depth we want to visit of the trie, so we now visit the extension
           // node because we do not want to visit its children.
           if constexpr (TrackPath) {
-            f(info.path, *info.node, info.parent);
+            f(current_path, *info.node, info.parent);
           }
           else {
             f(*info.node, info.parent);
@@ -368,18 +373,16 @@ private:
           // Visit the next child.
           CheckInfo child{.node = info.node->child[info.next_child_to_visit],
                           .parent = info.node,
+                          .path_size = 0,
                           .next_child_to_visit = 0,
                           .depth = info.depth + 1};
           if constexpr (TrackPath) {
-            // Append the branch path we are taking to [info.path] so that it
+            // Append the branch path we are taking to [current_path] so that it
             // holds the path to the child. For example, if
             // [info.next_child_to_visit] is 0x3, then we know we will next
-            // visit the child at index 0x3, so we append 0x3 to [info.path].
-            info.path.append(std::byte(info.next_child_to_visit));
-            child.path = info.path;
-            // Now change [info.path] back to holding the path to the branch
-            // node.
-            info.path.remove_from_back(1);
+            // visit the child at index 0x3, so we append 0x3 to [current_path].
+            current_path.append(std::byte(info.next_child_to_visit));
+            child.path_size = current_path.size();
           }
           path.push(child);
           info.next_child_to_visit++;
@@ -397,7 +400,7 @@ private:
           // to visit of the trie, so we now visit the extension node because we
           // do not want to visit its children.
           if constexpr (TrackPath) {
-            f(info.path, *info.node, info.parent);
+            f(current_path, *info.node, info.parent);
           }
           else {
             f(*info.node, info.parent);
@@ -406,16 +409,15 @@ private:
         else {
           CheckInfo child{.node = info.node->child[0],
                           .parent = info.node,
+                          .path_size = 0,
                           .next_child_to_visit = 0,
                           .depth = info.depth + 1};
           if constexpr (TrackPath) {
-            // Append the extension node's path to [info.path] so that
-            // [info.path] holds the path to the child when we push the child.
-            info.path.append(info.node->path);
-            child.path = info.path;
-            // Now change [info.path] back to holding the path to the extension
-            // node.
-            info.path.remove_from_back(info.node->path.size());
+            // Append the extension node's path to [current_path] so that
+            // [current_path] holds the path to the child when we push the
+            // child.
+            current_path.append(info.node->path);
+            child.path_size = current_path.size();
           }
           path.push(child);
           info.next_child_to_visit++;
@@ -432,10 +434,10 @@ private:
 
         NodeType &n = *info.node;
         if constexpr (TrackPath) {
-          // Append the leaf's path to [info.path] so that the full path is
+          // Append the leaf's path to [current_path] so that the full path is
           // passed to [f].
-          info.path.append(info.node->path);
-          f(info.path, n, info.parent);
+          current_path.append(info.node->path);
+          f(current_path, n, info.parent);
           // No need to remove the portion of the path we just appended above
           // because we pop the leaf anyway below, so we do not access the leaf
           // after this point.

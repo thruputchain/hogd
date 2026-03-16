@@ -175,6 +175,24 @@ public:
     append_helper(*this, to_append, /*start=*/0, /*end=*/to_append.size());
   }
 
+  void append(const HexArray &to_append, size_t start, size_t end)
+  {
+    CHECK_LE(start, to_append.size());
+    CHECK_LE(end, to_append.size());
+    append_helper(*this, to_append, start, end);
+  }
+
+  void assign(const HexArray &other, size_t start, size_t end)
+  {
+    if (this == &other) {
+      HexArray copy = other.get_subarray(start, end);
+      *this = copy;
+      return;
+    }
+    clear();
+    append(other, start, end);
+  }
+
   void remove_from_back(size_t to_remove)
   {
     CHECK_LE(to_remove, size_);
@@ -234,6 +252,42 @@ public:
 
   size_t size() const { return size_; }
   bool empty() const { return size_ == 0U; }
+
+  bool equals(size_t start, size_t end, const HexArray &other,
+              size_t other_start = 0) const
+  {
+    CHECK_LE(start, size_);
+    CHECK_LE(end, size_);
+    CHECK_LE(other_start, other.size());
+
+    const size_t range_size = end - start;
+    if (range_size != other.size() - other_start) {
+      return false;
+    }
+
+    for (size_t i = 0; i < range_size; i++) {
+      if (get(start + i) != other.get(other_start + i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  size_t common_prefix_length(size_t start, const HexArray &other,
+                              size_t other_start = 0) const
+  {
+    CHECK_LE(start, size_);
+    CHECK_LE(other_start, other.size());
+
+    const size_t max_length =
+        std::min(size_ - start, other.size() - other_start);
+    size_t length = 0;
+    while (length < max_length &&
+           get(start + length) == other.get(other_start + length)) {
+      length++;
+    }
+    return length;
+  }
 
 private:
   // [kMaxNumHexDigits] is always even (see the static_assert() above).

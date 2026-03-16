@@ -168,6 +168,15 @@ TEST(HexArray, AppendHexArrayOddLength)
   EXPECT_EQ(h.str(), expected);
 }
 
+TEST(HexArray, AppendHexArrayRange)
+{
+  HexArray h("ab");
+  HexArray to_append("012345");
+  h.append(to_append, 1, 5);
+
+  EXPECT_EQ(h.str(), "ab1234");
+}
+
 TEST(HexArray, RemoveFromBack)
 {
   std::string init = "0123456789abcdef";
@@ -324,6 +333,41 @@ TEST(HexArray, GetSubarrayClipEnd)
   EXPECT_EQ(subarray, expected);
   EXPECT_EQ(subarray.size(), expected.size());
   EXPECT_FALSE(subarray.empty());
+}
+
+TEST(HexArray, AssignRange)
+{
+  HexArray a("0123456789abcdef");
+  HexArray assigned;
+  assigned.assign(a, 5, 12);
+
+  EXPECT_EQ(assigned.str(), "56789ab");
+}
+
+TEST(HexArray, AssignRangeSelf)
+{
+  HexArray a("0123456789abcdef");
+  a.assign(a, 5, 12);
+
+  EXPECT_EQ(a.str(), "56789ab");
+}
+
+TEST(HexArray, EqualsRange)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("34567");
+
+  EXPECT_TRUE(a.equals(3, 8, b));
+  EXPECT_FALSE(a.equals(2, 7, b));
+}
+
+TEST(HexArray, CommonPrefixLength)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("6789abff");
+
+  EXPECT_EQ(a.common_prefix_length(6, b), 6);
+  EXPECT_EQ(b.common_prefix_length(0, a, 7), 0);
 }
 
 TEST(HexArray, ToByteVector)
