@@ -88,6 +88,7 @@ std::pair<HogAge *, std::unique_lock<std::mutex>>
 Scheduler::get_cached_hog_age(const ContractAddress &address)
 {
   auto [account_state, lock] = get_account_state(address);
+  CHECK_EQ(account_state->hog_age.address, address);
   return {&account_state->hog_age, std::move(lock)};
 }
 
@@ -104,7 +105,9 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 {
   auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  for (const HogAge &age : res.hog_age_batch()) {
+  for (size_t i = 0; i < res.hog_age_batch().size(); i++) {
+    const HogAge &age = res.hog_age_batch()[i];
+    CHECK_EQ(age.address, accounts[i]);
     auto [account_state, lock] = accounts_[age.address];
     account_state.hog_age = age;
   }
@@ -187,10 +190,10 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
   const TxKey key{.expiry_block_height =
                       tx_value.tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
-  auto [account_state, lock] = accounts_[account];
-  // Check if the tx is already present in [accounts_[account].txs]. If it
-  // is, we are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state.txs.insert({key, &tx_value}).second;
+  auto [account_state, lock] = get_account_state(account);
+  // Check if the tx is already present in [account_state->txs]. If it is, we
+  // are adding a duplicate tx, so we do not want to increment [size_].
+  return account_state->txs.insert({key, &tx_value}).second;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec below
@@ -476,8 +479,8 @@ bool
 Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
-  auto [account_state, lock] = accounts_[account];
-  auto &txs = account_state.txs;
+  auto [account_state, lock] = get_account_state(account);
+  std::map<TxKey, TxValue *> &txs = account_state->txs;
   const TxKey lower_bound{.expiry_block_height = current_block(),
                           .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
@@ -533,9 +536,9 @@ Scheduler::cycle_accounts_during_schedule_helper(
     // we have it here because we need the iterator. Clean this up.
     GasAmount gas_limit;
     {
-      const auto [account_state, lock] = accounts_[account];
-      auto it = account_state.txs.lower_bound(lower_bound);
-      if (it == account_state.txs.end()) {
+      const auto [account_state, lock] = get_account_state(account);
+      auto it = account_state->txs.lower_bound(lower_bound);
+      if (it == account_state->txs.end()) {
         continue;
       }
       const SignedTransaction &tx = it->second->tx;
@@ -579,9 +582,9 @@ Scheduler::schedule(size_t num_txs,
     // handle its own chunk of accounts from [ready_accounts_].
     const AccountKey account_key = *account_it;
     const ContractAddress account = account_key.account;
-    auto [account_state, account_lock] = accounts_[account];
-    HogAge *hog_ages = &account_state.hog_age;
-    auto &txs_to_schedule = account_state.txs;
+    auto [account_state, account_lock] = get_account_state(account);
+    HogAge *hog_ages = &account_state->hog_age;
+    std::map<TxKey, TxValue *> &txs_to_schedule = account_state->txs;
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       auto it = txs_to_schedule.lower_bound(lower_bound);
@@ -723,8 +726,9 @@ Scheduler::remove_from_scheduler(
                                  tx.tx.uniquifier.block_expiry_height,
                              .tx_hash = tx_hash};
           {
-            auto [account_state, account_lock] = scheduler.accounts_[account];
-            auto &txs = account_state.txs;
+            auto [account_state, account_lock] =
+                scheduler.get_account_state(account);
+            std::map<TxKey, TxValue *> &txs = account_state->txs;
             // The tx may or may not be on the runqueue. If the tx is included
             // in a block we are *nominating*, then it has already been taken
             // off of the runqueue. If the tx is included in a block we are
