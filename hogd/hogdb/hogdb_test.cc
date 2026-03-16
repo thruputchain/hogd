@@ -1192,7 +1192,7 @@ TEST_F(HogDBTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
 TEST_F(HogDBTest,
        RCQBlockIntegrityTypeChangeBytestringRemovesAllBlocksFromDbHash)
 {
-  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  // RCQ type-change cleanup handled by ItemLock::stage_committed_changes.
   // Test that type change from RCQ to Bytestring properly removes all RCQ
   // blocks from both DAO and db hash.
 
@@ -1286,7 +1286,7 @@ TEST_F(HogDBTest,
 
 TEST_F(HogDBTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
 {
-  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
+  // RCQ type-change cleanup handled by ItemLock::stage_committed_changes.
   // Test that type change from RCQ to NNInt properly removes all RCQ blocks
   // from both DAO and db hash.
 

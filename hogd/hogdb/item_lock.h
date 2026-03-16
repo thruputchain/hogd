@@ -54,14 +54,17 @@ public:
     snapshot_cost_ = status->first;
 
     if (status->second.is_cached_nnint128_base()) {
-      padding_type_ = kItemLockCacheDataNNInt128BaseValue;
+      snapshot_type_ = kItemLockCacheDataNNInt128BaseValue;
       nnint_base_ = status->second.get_cached_nnint128_base();
     }
     else if (status->second.is_cached_balance()) {
-      padding_type_ = kItemLockCacheDataBalance;
+      snapshot_type_ = kItemLockCacheDataBalance;
       auto balance = status->second.get_cached_balance();
       balance_base_ =
           balance.has_value() ? *balance : std::numeric_limits<int128_t>::min();
+    }
+    else if (status->second.is_rcq()) {
+      snapshot_type_ = kItemLockCacheDataRCQ;
     }
     else {
       CHECK(status->second.is_none());
@@ -98,7 +101,7 @@ public:
 
   std::optional<int128_t> get_cached_nnint128_base() const
   {
-    if (padding_type_ != kItemLockCacheDataNNInt128BaseValue) {
+    if (snapshot_type_ != kItemLockCacheDataNNInt128BaseValue) {
       return std::nullopt;
     }
     return nnint_base_;
@@ -150,14 +153,23 @@ private:
                PointerLock<AuthLock>, PointerLock<ReplayCacheLock>,
                PointerLock<RetrocausalQueueLock>>
       lock_contents_ = std::monostate{};
-  // padding_ and snapshot_cost_ are readonly fields: set during the
+  // Returns true if the snapshot type has auxiliary keys that need cleanup
+  // when the committed type differs. Currently only RCQ qualifies (it has
+  // block entries at Prefix::kRetrocausalQueueBlock).
+  bool snapshot_has_auxiliary_keys() const
+  {
+    return snapshot_type_ == kItemLockCacheDataRCQ;
+  }
+
+  // snapshot_cost_ and snapshot_type_ are readonly fields: set during the
   // constructor.
   // TODO(geoff): These are only modified during the constructor;
   // some more clever work could make them const.
   //
-  // Padding is the extra data we use to cache type-specific info,
-  // like the nnint base value, so we don't have to load that on each
-  // request_nnint128.
+  // snapshot_type_ records the item's type at block start. It serves two
+  // purposes: (1) cache type-specific data (e.g. nnint base value) so we
+  // don't have to reload it on each request, and (2) detect type changes
+  // that require cleanup of auxiliary keys (e.g. RCQ block entries).
 
   int128_t snapshot_cost_;
 
@@ -165,6 +177,7 @@ private:
     kItemLockCacheDataTypeNone = 0,
     kItemLockCacheDataNNInt128BaseValue = 1,
     kItemLockCacheDataBalance = 2,
+    kItemLockCacheDataRCQ = 3,
   };
 
   union {
@@ -172,7 +185,7 @@ private:
     int128_t nnint_base_;
     int128_t balance_base_;
   };
-  uint8_t padding_type_ = kItemLockCacheDataTypeNone;
+  uint8_t snapshot_type_ = kItemLockCacheDataTypeNone;
 
   // This version of the implementation uses the mutex up until the first
   // transaction commits. After that point, lock_contents_ no longer changes

@@ -595,7 +595,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       }
       return std::make_pair(cost_model->get_retrocausal_queue_cost(
                                 meta.live_entries),
-                            ItemLockCacheData::from_none());
+                            ItemLockCacheData::from_rcq());
     }
     default:
       error("unknown item type loaded from db: key={} type={}", key,

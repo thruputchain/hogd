@@ -1981,6 +1981,80 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
                 // hogdb and mockdb, so I guess so?
 }
 
+// Verifies that when an RCQ with entries in past blocks is deleted and
+// recreated as a new RCQ in the same transaction (Case 1: snapshot RCQ →
+// committed RCQ), the old block records are removed from RAMDB.
+//
+// This is the case where hogexec's make_fully_consumed_item must fold a
+// consume-all into the new RCQ delta. If hogexec ever regressed and stopped
+// doing this, the old block records would be orphaned as ghost entries.
+// DeleteAndRecreateRemovesPastBlocks verifies the metadata is correct but
+// doesn't check the block records directly.
+TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "Block record check requires HogDB DAO access";
+  }
+
+  // Block 1: insert entries that become a past block
+  insert(10);
+  insert(20);
+
+  advance_block();
+
+  // Block 2: insert another entry (creates a second past block)
+  insert(30);
+
+  advance_block();
+
+  // Sanity: the RCQ exists with 3 entries across 2 blocks.
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 3);
+
+  // Get DAO access to check block records directly.
+  auto &dao = get_hogdb_dao();
+  auto item_key = make_item_key(get_queue_addrkey());
+
+  // Verify blocks exist before delete-and-recreate.
+  auto block1 = dao.read_retrocausal_queue_block(item_key, 1);
+  ASSERT_TRUE(block1.has_value()) << "Block 1 should exist before delete";
+  auto block2 = dao.read_retrocausal_queue_block(item_key, 2);
+  ASSERT_TRUE(block2.has_value()) << "Block 2 should exist before delete";
+
+  // Block 3: delete -> insert (same tx). This is the RCQ->delete->RCQ path.
+  // hogexec should fold a consume-all via make_fully_consumed_item so that
+  // RetrocausalQueueLock::stage_committed_changes prunes old blocks.
+  invoke_method(13, uint32_t{99});
+
+  advance_block();
+
+  // New queue should have exactly 1 entry.
+  auto after = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(after.has_value());
+  ASSERT_EQ(after->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(after->metadata().live_entries, 1);
+
+  // Old block records must be gone. If hogexec forgets to issue the
+  // consume-all, these would still exist as ghost entries.
+  auto block1_after = dao.read_retrocausal_queue_block(item_key, 1);
+  EXPECT_FALSE(block1_after.has_value())
+      << "Block 1 should be removed after delete-and-recreate (hogexec "
+         "consume-all regression)";
+  auto block2_after = dao.read_retrocausal_queue_block(item_key, 2);
+  EXPECT_FALSE(block2_after.has_value())
+      << "Block 2 should be removed after delete-and-recreate (hogexec "
+         "consume-all regression)";
+
+  // Consume the new entry to verify it's the new one (99).
+  invoke_method(1, uint32_t{99});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
 // Consume 1 of 3 concurrent entries, delete, consume remaining 2.
 // Exposes the bug where current_block_consumed lost entries across delete.
 TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)

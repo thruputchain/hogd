@@ -517,7 +517,8 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 
 HogDBStatus<void>
 RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
-                                          ChangeSet &changes)
+                                          ChangeSet &changes,
+                                          bool keep_metadata)
 {
   CHECK(ctx.dao != nullptr);
 
@@ -540,9 +541,11 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
     changes.remove(block_key);
   }
 
-  // Remove the metadata.
-  auto meta_key = make_contract_data_key(ctx.key.as_bytes());
-  changes.remove(meta_key);
+  // Remove the metadata unless the caller will overwrite it (type change).
+  if (!keep_metadata) {
+    auto meta_key = make_contract_data_key(ctx.key.as_bytes());
+    changes.remove(meta_key);
+  }
 
   return {};
 }
