@@ -1,9 +1,9 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <memory>
-#include <ranges>
 #include <string_view>
 #include <utility>
 
