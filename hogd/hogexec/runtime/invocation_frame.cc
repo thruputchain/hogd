@@ -299,7 +299,7 @@ std::optional<DeployedContractHash>
 InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {
-  for (auto const &frame : frame_stack_) {
+  for (auto const &frame : std::ranges::reverse_view(frame_stack_)) {
     if (auto out = frame.lookup_locally_deployed_contract(addr)) {
       assert(out.has_value());
       return out;

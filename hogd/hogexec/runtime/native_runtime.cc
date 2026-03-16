@@ -1,8 +1,9 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
+#include <algorithm>
 #include <cassert>
+#include <functional>
 #include <memory>
-#include <string>
 #include <string_view>
 #include <utility>
 
@@ -15,19 +16,27 @@
 
 namespace hogd {
 
+const NativeContract::function_t *
+NativeContract::find_function(Runtime::MethodID method) const
+{
+  auto it = std::ranges::lower_bound(functions_, method, std::ranges::less{},
+                                     &function_entry_t::first);
+  if (it == functions_.end() || it->first != method) {
+    return nullptr;
+  }
+  return &it->second;
+}
+
 InvokeStatus<void>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime) const
 {
-  // Note: this doesn't build on gcc 15.1; not clear why, but it works on <=14.3
-  // and on gcc main (so presumably it's been fixed for the next release), and
-  // on clang 20.  https://godbolt.org/z/PnxhrahxP
-  auto it = functions_.find(method);
-  if (it == functions_.end())
+  const auto *fn = find_function(method);
+  if (fn == nullptr)
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   NativeSyscallContext ctx(syscall_handler, runtime);
-  return it->second(ctx);
+  return (*fn)(ctx);
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
@@ -84,7 +93,7 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
 InvokeStatus<void>
 NativeRuntime::invoke_internal(std::string_view method_name)
 {
-  auto method_id = Runtime::method_id_from_name(std::string(method_name));
+  auto method_id = Runtime::method_id_from_name(method_name);
   if (!method_id) {
     error("Unrecoverable: NativeRuntime::invoke_internal failed to parse "
           "method name '{}'",

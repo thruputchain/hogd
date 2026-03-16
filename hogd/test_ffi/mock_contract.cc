@@ -12,7 +12,7 @@ namespace hogd {
 InvokeStatus<void>
 MockContract::invoke(std::string_view method)
 {
-  auto id = Runtime::method_id_from_name(std::string(method));
+  auto id = Runtime::method_id_from_name(method);
   if (!id.has_value()) {
     error("Unrecoverable: MockContract::invoke failed to parse method name "
           "'{}'",
