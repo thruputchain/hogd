@@ -1,8 +1,9 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
-#include <algorithm>
 #include <cassert>
+#include <functional>
 #include <memory>
+#include <ranges>
 #include <string_view>
 #include <utility>
 
@@ -18,11 +19,8 @@ namespace hogd {
 const NativeContract::function_t *
 NativeContract::find_function(Runtime::MethodID method) const
 {
-  auto it = std::lower_bound(functions_.begin(), functions_.end(), method,
-                             [](const function_entry_t &entry,
-                                Runtime::MethodID target) {
-                               return entry.first < target;
-                             });
+  auto it = std::ranges::lower_bound(functions_, method, std::ranges::less{},
+                                     &function_entry_t::first);
   if (it == functions_.end() || it->first != method) {
     return nullptr;
   }
