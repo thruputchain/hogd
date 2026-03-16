@@ -40,10 +40,14 @@ void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
   child_return_output_ = std::move(frame.to_return_output_);
+
+  events_.reserve(events_.size() + frame.events_.size());
   events_.append_range(
       std::ranges::subrange(std::make_move_iterator(frame.events_.begin()),
                             std::make_move_iterator(frame.events_.end())));
 
+  new_contract_deployments_.reserve(new_contract_deployments_.size() +
+                                    frame.new_contract_deployments_.size());
   for (auto const &[addr, hash] : frame.new_contract_deployments_) {
     [[maybe_unused]] auto [_, inserted_new] =
         new_contract_deployments_.emplace(addr, hash);
@@ -51,6 +55,8 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   }
 
   // transfer modified items from child frame to current frame
+  modified_items_.reserve(modified_items_.size() +
+                          frame.modified_items_.size());
   for (auto &[addr, item] : frame.modified_items_) {
     modified_items_.insert_or_assign(addr, std::move(item));
   }
@@ -137,6 +143,8 @@ void
 InvocationFrame::collect_storage_deltas(
     x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const
 {
+  out.reserve(out.size() + modified_items_.size() +
+              new_contract_deployments_.size());
   for (auto const &[addrkey, item_view] : modified_items_) {
     auto [delta, flags] = item_view.get_delta();
     if (delta) {
