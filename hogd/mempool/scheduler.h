@@ -72,7 +72,11 @@ public:
                            SignedTransactionHashBatch &tx_hashes,
                            SignedTransactionBatch &txs)
   {
-    auto [account_state, lock] = get_account_state(address);
+    auto [account_state, lock] = accounts_.find(address);
+    if (!account_state) {
+      return;
+    }
+
     tx_hashes.reserve(account_state->txs.size());
     txs.reserve(account_state->txs.size());
     for (const auto &[tx_key, tx_value] : account_state->txs) {
