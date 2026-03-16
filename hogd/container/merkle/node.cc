@@ -71,7 +71,7 @@ get_path_string(std::ostringstream &oss, const HexArray &path)
 
 void
 get_child_string(std::ostringstream &oss, size_t child_idx,
-                 const std::array<Node *, Node::kMaxNumBranches> children)
+                 const std::array<Node *, Node::kMaxNumBranches> &children)
 {
   oss << std::format("Child {:#x}: ", static_cast<uint8_t>(child_idx));
   if (children[child_idx]) {
@@ -133,16 +133,19 @@ visit_node_encoding(Sink &sink, const Node &node)
 
   switch (node.type) {
   case Node::Type::kBranch:
-    visit_value_encoding(sink, node.value_hash);
-    visit_child_encoding(sink, node.child, Node::kMaxNumBranches);
+    visit_value_encoding(sink, node.value_hash());
+    visit_child_encoding(sink, node.branch_children(), Node::kMaxNumBranches);
     break;
   case Node::Type::kExtension:
-    visit_path_encoding(sink, node.path);
-    visit_child_encoding(sink, node.child, 1);
+    visit_path_encoding(sink, node.path());
+    visit_child_encoding(sink,
+                         std::array<Node *, Node::kMaxNumBranches>{
+                             node.extension_child()},
+                         1);
     break;
   case Node::Type::kLeaf:
-    visit_path_encoding(sink, node.path);
-    visit_value_encoding(sink, node.value_hash);
+    visit_path_encoding(sink, node.path());
+    visit_value_encoding(sink, node.value_hash());
     break;
   }
 }
@@ -300,8 +303,8 @@ Node::get_branch_encoding(std::vector<std::byte> &encoding) const
   auto append_to_vector = [&](std::span<const std::byte> bytes) {
     encoding.insert(encoding.end(), bytes.begin(), bytes.end());
   };
-  visit_value_encoding(append_to_vector, value_hash);
-  visit_child_encoding(append_to_vector, child,
+  visit_value_encoding(append_to_vector, value_hash());
+  visit_child_encoding(append_to_vector, branch_children(),
                        /*num_children=*/kMaxNumBranches);
 }
 
@@ -313,8 +316,11 @@ Node::get_extension_encoding(std::vector<std::byte> &encoding) const
   auto append_to_vector = [&](std::span<const std::byte> bytes) {
     encoding.insert(encoding.end(), bytes.begin(), bytes.end());
   };
-  visit_path_encoding(append_to_vector, path);
-  visit_child_encoding(append_to_vector, child, /*num_children=*/1);
+  visit_path_encoding(append_to_vector, path());
+  visit_child_encoding(append_to_vector,
+                       std::array<Node *, Node::kMaxNumBranches>{
+                           extension_child()},
+                       /*num_children=*/1);
 }
 
 void
@@ -325,8 +331,8 @@ Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
   auto append_to_vector = [&](std::span<const std::byte> bytes) {
     encoding.insert(encoding.end(), bytes.begin(), bytes.end());
   };
-  visit_path_encoding(append_to_vector, path);
-  visit_value_encoding(append_to_vector, value_hash);
+  visit_path_encoding(append_to_vector, path());
+  visit_value_encoding(append_to_vector, value_hash());
 }
 
 bool
@@ -393,9 +399,9 @@ Node::get_branch_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kBranch);
 
-  get_value_string(oss, value_hash);
-  for (size_t i = 0; i < child.size(); i++) {
-    get_child_string(oss, i, child);
+  get_value_string(oss, value_hash());
+  for (size_t i = 0; i < branch_children().size(); i++) {
+    get_child_string(oss, i, branch_children());
   }
 }
 
@@ -404,7 +410,8 @@ Node::get_extension_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kExtension);
 
-  get_path_string(oss, path);
+  get_path_string(oss, path());
+  std::array<Node *, Node::kMaxNumBranches> child = {extension_child()};
   get_child_string(oss, /*child_idx=*/0, child);
 }
 
@@ -413,8 +420,8 @@ Node::get_leaf_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kLeaf);
 
-  get_path_string(oss, path);
-  get_value_string(oss, value_hash);
+  get_path_string(oss, path());
+  get_value_string(oss, value_hash());
 }
 
 } // namespace hogd

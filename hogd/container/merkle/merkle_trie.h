@@ -185,8 +185,8 @@ public:
       switch (node.type) {
       case Node::Type::kBranch:
       case Node::Type::kLeaf:
-        if (node.value_hash) {
-          func({path, *node.value_hash});
+        if (node.value_hash()) {
+          func({path, *node.value_hash()});
         }
         break;
       default:
@@ -350,8 +350,8 @@ private:
 
       switch (info.node->type) {
       case Node::Type::kBranch:
-        CHECK_LE(info.next_child_to_visit, info.node->child.size());
-        if (info.next_child_to_visit == info.node->child.size() ||
+        CHECK_LE(info.next_child_to_visit, info.node->branch_children().size());
+        if (info.next_child_to_visit == info.node->branch_children().size() ||
             (max_depth && info.depth == max_depth.value())) {
           // We have visited all of the branch's children, so now we can "visit"
           // (i.e., call [f] on) the branch. Or, we have reached the maximum
@@ -366,10 +366,11 @@ private:
         }
         else {
           // Visit the next child.
-          CheckInfo child{.node = info.node->child[info.next_child_to_visit],
-                          .parent = info.node,
-                          .next_child_to_visit = 0,
-                          .depth = info.depth + 1};
+          CheckInfo child{
+              .node = info.node->branch_children()[info.next_child_to_visit],
+              .parent = info.node,
+              .next_child_to_visit = 0,
+              .depth = info.depth + 1};
           if constexpr (TrackPath) {
             // Append the branch path we are taking to [info.path] so that it
             // holds the path to the child. For example, if
@@ -404,18 +405,18 @@ private:
           }
         }
         else {
-          CheckInfo child{.node = info.node->child[0],
+          CheckInfo child{.node = info.node->extension_child(),
                           .parent = info.node,
                           .next_child_to_visit = 0,
                           .depth = info.depth + 1};
           if constexpr (TrackPath) {
             // Append the extension node's path to [info.path] so that
             // [info.path] holds the path to the child when we push the child.
-            info.path.append(info.node->path);
+            info.path.append(info.node->path());
             child.path = info.path;
             // Now change [info.path] back to holding the path to the extension
             // node.
-            info.path.remove_from_back(info.node->path.size());
+            info.path.remove_from_back(info.node->path().size());
           }
           path.push(child);
           info.next_child_to_visit++;
@@ -434,7 +435,7 @@ private:
         if constexpr (TrackPath) {
           // Append the leaf's path to [info.path] so that the full path is
           // passed to [f].
-          info.path.append(info.node->path);
+          info.path.append(info.node->path());
           f(info.path, n, info.parent);
           // No need to remove the portion of the path we just appended above
           // because we pop the leaf anyway below, so we do not access the leaf
@@ -597,7 +598,7 @@ public:
     Node root;
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
-      root.child[i] = &tries_[i]->root_;
+      root.branch_children()[i] = &tries_[i]->root_;
     }
     return root.compute_node_hash();
   }
@@ -629,7 +630,7 @@ public:
     Node root;
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
-      root.child[i] = &tries_[i]->root_;
+      root.branch_children()[i] = &tries_[i]->root_;
       if (i == index) {
         tries_[i]->root_.parent = &root;
       }

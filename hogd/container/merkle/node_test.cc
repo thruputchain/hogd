@@ -52,7 +52,7 @@ expect_hash_is_clear(const Node &node)
 void
 expect_children_are_clear(const Node &node)
 {
-  for (Node *child : node.child) {
+  for (Node *child : node.branch_children()) {
     EXPECT_EQ(child, nullptr);
   }
 }
@@ -74,20 +74,19 @@ TEST(Node, Clear)
   // which is an implementation detail.
   node.hash[0] = 0x01;
   node.parent = &node; // We just want the [parent] pointer to be non-NULL.
-  node.path = HexArray("01");
-  node.value_hash = SHA256Hash();
-  node.value_hash->at(0) = 0xFF;
+  node.value_hash() = SHA256Hash();
+  node.value_hash()->at(0) = 0xFF;
   // Similarly, we just want a couple of the child pointers to be non-NULL.
-  node.child[0] = &node;
-  node.child[Node::kMaxNumBranches - 1] = &node;
+  node.branch_children()[0] = &node;
+  node.branch_children()[Node::kMaxNumBranches - 1] = &node;
 
   node.clear();
 
   // As mentioned above, we do not check [node.type].
   expect_hash_is_clear(node);
   EXPECT_EQ(node.parent, nullptr);
-  EXPECT_TRUE(node.path.empty());
-  EXPECT_EQ(node.value_hash, std::nullopt);
+  EXPECT_EQ(node.type, Node::Type::kBranch);
+  EXPECT_EQ(node.value_hash(), std::nullopt);
   expect_children_are_clear(node);
 }
 
@@ -101,8 +100,7 @@ TEST(Node, CreateBranch)
   EXPECT_EQ(branch->parent, &parent);
 
   expect_hash_is_clear(*branch);
-  EXPECT_TRUE(branch->path.empty());
-  EXPECT_EQ(branch->value_hash, std::nullopt);
+  EXPECT_EQ(branch->value_hash(), std::nullopt);
   expect_children_are_clear(*branch);
 
   delete branch;
@@ -130,9 +128,8 @@ TEST(Node, CreateExtension)
   EXPECT_EQ(extension->parent, &parent);
 
   expect_hash_is_clear(*extension);
-  EXPECT_TRUE(extension->path.empty());
-  EXPECT_EQ(extension->value_hash, std::nullopt);
-  expect_children_are_clear(*extension);
+  EXPECT_TRUE(extension->path().empty());
+  EXPECT_EQ(extension->extension_child(), nullptr);
 
   delete extension;
 }
@@ -159,9 +156,8 @@ TEST(Node, CreateLeaf)
   EXPECT_EQ(leaf->parent, &parent);
 
   expect_hash_is_clear(*leaf);
-  EXPECT_TRUE(leaf->path.empty());
-  EXPECT_EQ(leaf->value_hash, std::nullopt);
-  expect_children_are_clear(*leaf);
+  EXPECT_TRUE(leaf->path().empty());
+  EXPECT_EQ(leaf->value_hash(), std::nullopt);
 
   delete leaf;
 }
@@ -182,16 +178,16 @@ TEST(Node, InitLeaf)
 TEST(Node, HashBranch)
 {
   Node branch;
-  branch.type = Node::Type::kBranch;
+  branch.init_branch(nullptr);
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.value_hash = SHA256Hash();
-  branch.value_hash->at(0) = 0xFF;
+  branch.value_hash() = SHA256Hash();
+  branch.value_hash()->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     Node &child = children[i];
     size_t digit = i % 10;
     child.hash = hash_from_string(std::string(64, '0' + digit));
-    branch.child[i] = &child;
+    branch.branch_children()[i] = &child;
   }
 
   SHA256Hash hash = branch.compute_node_hash();
@@ -206,20 +202,20 @@ TEST(Node, HashBranch)
 TEST(Node, HashBranchSomeNullptr)
 {
   Node branch;
-  branch.type = Node::Type::kBranch;
+  branch.init_branch(nullptr);
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.value_hash = SHA256Hash();
-  branch.value_hash->at(0) = 0xFF;
+  branch.value_hash() = SHA256Hash();
+  branch.value_hash()->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
       Node &child = children[i];
       size_t digit = i % 10;
       child.hash = hash_from_string(std::string(64, '0' + digit));
-      branch.child[i] = &child;
+      branch.branch_children()[i] = &child;
     }
     else {
-      branch.child[i] = nullptr;
+      branch.branch_children()[i] = nullptr;
     }
   }
 
@@ -234,13 +230,11 @@ TEST(Node, HashBranchSomeNullptr)
 TEST(Node, HashBranchAllNullptr)
 {
   Node branch;
-  branch.type = Node::Type::kBranch;
+  branch.init_branch(nullptr);
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.value_hash = SHA256Hash();
-  branch.value_hash->at(0) = 0xFF;
-  memset(static_cast<void *>(branch.child.data()), 0,
-         branch.child.size() *
-             sizeof(branch.child[0])); // NOLINT(bugprone-sizeof-expression)
+  branch.value_hash() = SHA256Hash();
+  branch.value_hash()->at(0) = 0xFF;
+  branch.branch_children().fill(nullptr);
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
@@ -253,15 +247,15 @@ TEST(Node, HashBranchAllNullptr)
 TEST(Node, HashExtension)
 {
   Node extension;
-  extension.type = Node::Type::kExtension;
+  extension.init_extension(nullptr);
   memset(extension.hash.data(), 0,
          extension.hash.size() * sizeof(extension.hash[0]));
-  extension.path = HexArray("00010203");
+  extension.path() = HexArray("00010203");
 
   static Node child;
   child.hash = hash_from_string(
       "1111111111111111111111111111111111111111111111111111111111111111");
-  extension.child[0] = &child;
+  extension.extension_child() = &child;
 
   SHA256Hash hash = extension.compute_node_hash();
   SHA256Hash expected = hash_from_string(
@@ -274,11 +268,11 @@ TEST(Node, HashExtension)
 TEST(Node, HashLeaf)
 {
   Node leaf;
-  leaf.type = Node::Type::kLeaf;
+  leaf.init_leaf(nullptr);
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
-  leaf.path = HexArray("00010203");
-  leaf.value_hash = SHA256Hash();
-  leaf.value_hash->at(0) = 0xFF;
+  leaf.path() = HexArray("00010203");
+  leaf.value_hash() = SHA256Hash();
+  leaf.value_hash()->at(0) = 0xFF;
 
   SHA256Hash hash = leaf.compute_node_hash();
   SHA256Hash expected = hash_from_string(
@@ -290,13 +284,40 @@ TEST(Node, HashLeaf)
 TEST(Node, HashLeafOddPathMatchesMaterializedEncoding)
 {
   Node leaf;
-  leaf.type = Node::Type::kLeaf;
+  leaf.init_leaf(nullptr);
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
-  leaf.path = HexArray("123");
-  leaf.value_hash = SHA256Hash();
-  leaf.value_hash->at(0) = 0xAB;
+  leaf.path() = HexArray("123");
+  leaf.value_hash() = SHA256Hash();
+  leaf.value_hash()->at(0) = 0xAB;
 
   expect_hash_matches_materialized_encoding(leaf);
+}
+
+TEST(Node, ReinitAcrossNodeTypes)
+{
+  Node parent;
+  Node child;
+  Node node;
+
+  node.init_extension(&parent);
+  node.path() = HexArray("abcd");
+  node.extension_child() = &child;
+
+  node.init_branch(&parent);
+  EXPECT_EQ(node.type, Node::Type::kBranch);
+  EXPECT_EQ(node.parent, &parent);
+  EXPECT_EQ(node.value_hash(), std::nullopt);
+  expect_children_are_clear(node);
+
+  node.init_leaf(&parent);
+  node.path() = HexArray("12");
+  node.value_hash() = SHA256Hash();
+  node.value_hash()->at(0) = 0x5A;
+
+  node.init_extension(&parent);
+  EXPECT_EQ(node.type, Node::Type::kExtension);
+  EXPECT_TRUE(node.path().empty());
+  EXPECT_EQ(node.extension_child(), nullptr);
 }
 
 } // namespace hogd

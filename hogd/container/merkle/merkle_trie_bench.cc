@@ -105,11 +105,11 @@ void
 init_leaf_hash_bench_node(Node &leaf)
 {
   leaf.init_leaf(nullptr);
-  leaf.path = HexArray("123456789abcdef");
+  leaf.path() = HexArray("123456789abcdef");
   std::string value = "hello";
   std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
                                   value.size()};
-  leaf.value_hash = sha256(value_span);
+  leaf.value_hash() = sha256(value_span);
 }
 
 void
@@ -119,8 +119,8 @@ init_extension_hash_bench_node(Node &extension, Node &child)
   child.hash = child.compute_node_hash();
 
   extension.init_extension(nullptr);
-  extension.path = HexArray("abcdef0123456789");
-  extension.child[0] = &child;
+  extension.path() = HexArray("abcdef0123456789");
+  extension.extension_child() = &child;
 }
 
 void
@@ -128,15 +128,15 @@ init_branch_hash_bench_node(Node &branch,
                             std::array<Node, Node::kMaxNumBranches> &children)
 {
   branch.init_branch(nullptr);
-  branch.value_hash = SHA256Hash();
-  branch.value_hash->at(0) = 0x5A;
+  branch.value_hash() = SHA256Hash();
+  branch.value_hash()->at(0) = 0x5A;
   for (size_t i = 0; i < children.size(); i++) {
     children[i].init_leaf(&branch);
-    children[i].path = HexArray("0123456789abcdef");
-    children[i].value_hash = SHA256Hash();
-    children[i].value_hash->at(0) = static_cast<unsigned char>(i);
+    children[i].path() = HexArray("0123456789abcdef");
+    children[i].value_hash() = SHA256Hash();
+    children[i].value_hash()->at(0) = static_cast<unsigned char>(i);
     children[i].hash = children[i].compute_node_hash();
-    branch.child[i] = &children[i];
+    branch.branch_children()[i] = &children[i];
   }
 }
 
@@ -644,11 +644,11 @@ decode_leaf_node(benchmark::State &state)
 {
   Node leaf;
   leaf.init_leaf(nullptr);
-  leaf.path = generate_64_byte_path();
+  leaf.path() = generate_64_byte_path();
   std::string value = "hello";
   std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
                                   value.size()};
-  leaf.value_hash = sha256(value_span);
+  leaf.value_hash() = sha256(value_span);
 
   const std::vector<std::byte> encoding = leaf.get_node_encoding();
   for (auto _ : state) {
