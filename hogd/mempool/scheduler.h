@@ -72,6 +72,9 @@ public:
                            SignedTransactionHashBatch &tx_hashes,
                            SignedTransactionBatch &txs)
   {
+    // The method is called by [MempoolCoordinatorRpc], which may try to find
+    // txs associated with an account that the scheduler does not know about. In
+    // that case, just return.
     auto [account_state, lock] = accounts_.find(address);
     if (!account_state) {
       return;
