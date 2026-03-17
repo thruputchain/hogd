@@ -576,10 +576,24 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   info("schedule(), total schedule time is {}", total_schedule_time);
   record_stage(stage_schedule_loop);
 
+  cache.failed_txs.clear();
+  size_t num_tx_outcomes_processed = 0;
   for (size_t i = 0; i < handles.size(); i++) {
     co_await handles[i];
     cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
+
+    for (size_t i = num_tx_outcomes_processed;
+         i < cache.result_tx_nominations.size(); i++) {
+      if (cache.statuses[i]) {
+        cache.result_tx_hashes.push_back(cache.tx_hashes[i]);
+      }
+      else {
+        cache.failed_txs.push_back(cache.txs[i]);
+      }
+    }
+    num_tx_outcomes_processed += cache.result_tx_nominations.size();
   }
+  CHECK_EQ(num_tx_outcomes_processed, cache.result_tx_nominations.size());
   record_stage(stage_await_batches);
 
   info("schedule() stages: lock_wait={:.6f}, schedule_loop={:.6f}, "
@@ -588,21 +602,6 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
        timer.elapsed(), handles.size(), cache.tx_hashes.size());
 
   co_return;
-}
-
-void
-MempoolCoordinatorRpc::process_tx_outcomes(PendingBlock &cache)
-{
-  cache.failed_txs.clear();
-
-  for (size_t i = 0; i < cache.txs.size(); i++) {
-    if (cache.statuses[i]) {
-      cache.result_tx_hashes.push_back(cache.tx_hashes[i]);
-    }
-    else {
-      cache.failed_txs.push_back(cache.txs[i]);
-    }
-  }
 }
 
 x23::Async<void>
@@ -896,8 +895,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
        nominated_block_cache_.tx_hashes.size(), scheduler_->size());
 
   // Process the transaction outcomes.
-  process_tx_outcomes(nominated_block_cache_);
-  record_stage(stage_process_outcomes);
   if (!nominated_block_cache_.failed_txs.empty()) {
     co_await scheduler_->add_txs(nominated_block_cache_.failed_txs);
   }
