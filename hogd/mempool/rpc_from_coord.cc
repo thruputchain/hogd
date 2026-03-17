@@ -578,6 +578,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 
   cache.failed_txs.clear();
   size_t num_tx_outcomes_processed = 0;
+  CHECK(cache.result_tx_nominations.empty());
   for (size_t i = 0; i < handles.size(); i++) {
     co_await handles[i];
     cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
@@ -592,7 +593,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
         cache.failed_txs.push_back(cache.txs[i]);
       }
     }
-    num_tx_outcomes_processed += cache.result_tx_nominations.size();
+    num_tx_outcomes_processed = cache.result_tx_nominations.size();
   }
   CHECK_EQ(num_tx_outcomes_processed, cache.result_tx_nominations.size());
   record_stage(stage_await_batches);
