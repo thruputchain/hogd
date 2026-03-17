@@ -5,6 +5,7 @@
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
+#include "block.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "event_rpc.hh"
