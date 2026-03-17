@@ -731,7 +731,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
 TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
 {
   if (GetParam() != TestDB::kHogDB)
-    GTEST_SKIP() << "write_committed_change check requires kHogDB";
+    GTEST_SKIP() << "consumed_set validation requires kHogDB";
 
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
@@ -778,7 +778,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
 TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 {
   if (GetParam() != TestDB::kHogDB)
-    GTEST_SKIP() << "write_committed_change check requires kHogDB";
+    GTEST_SKIP() << "consumed_set validation requires kHogDB";
 
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
@@ -816,7 +816,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 {
   if (GetParam() != TestDB::kHogDB)
-    GTEST_SKIP() << "write_committed_change check requires kHogDB";
+    GTEST_SKIP() << "consumed_set validation requires kHogDB";
 
   auto ctx = make_rcq_context();
   auto tx_insert_a = make_rcq_insert_tx({10});

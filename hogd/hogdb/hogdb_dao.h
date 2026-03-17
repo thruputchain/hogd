@@ -233,6 +233,7 @@ public:
   }
 
   static ItemLockCacheData from_none() { return ItemLockCacheData(); }
+  static ItemLockCacheData from_rcq() { return ItemLockCacheData(CachedRCQ{}); }
 
   bool is_cached_balance() const
   {
@@ -245,6 +246,7 @@ public:
   }
 
   bool is_none() const { return std::holds_alternative<std::monostate>(data_); }
+  bool is_rcq() const { return std::holds_alternative<CachedRCQ>(data_); }
 
   std::optional<int128_t> get_cached_balance() const
   {
@@ -267,11 +269,18 @@ private:
     int128_t base_value;
   };
 
+  // Tag-only: no cached data. RCQ metadata is loaded lazily by
+  // RetrocausalQueueLock. The tag's purpose is to let ItemLock detect
+  // type changes that require cleanup of RCQ block entries.
+  struct CachedRCQ {};
+
   ItemLockCacheData() : data_(std::monostate{}) {}
   ItemLockCacheData(CachedBalance balance) : data_(balance) {}
   ItemLockCacheData(CachedNNInt128Base nnint128_base) : data_(nnint128_base) {}
+  ItemLockCacheData(CachedRCQ /*tag*/) : data_(CachedRCQ{}) {}
 
-  std::variant<std::monostate, CachedBalance, CachedNNInt128Base> data_;
+  std::variant<std::monostate, CachedBalance, CachedNNInt128Base, CachedRCQ>
+      data_;
 };
 
 // create a key for a replay cache data item that holds nonces for with a
