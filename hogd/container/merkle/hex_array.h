@@ -12,6 +12,7 @@
 #include <ios>
 #include <iterator>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -206,6 +207,19 @@ public:
     std::vector<std::byte> ret;
     to_byte_vector(ret);
     return ret;
+  }
+
+  template<typename Sink> void visit_encoded_bytes(Sink &&sink) const
+  {
+    const size_t full_bytes = size_ / 2;
+    if (full_bytes != 0) {
+      sink(std::span(backing_store_.data(), full_bytes));
+    }
+    if (size_ % 2) {
+      std::array<std::byte, 1> last_byte = {backing_store_[full_bytes] &
+                                            std::byte{0xF0}};
+      sink(std::span(last_byte));
+    }
   }
 
   SHA256Hash to_sha256() const

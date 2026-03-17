@@ -22,6 +22,25 @@ TEST(SHA256, BasicUsage)
   EXPECT_NE(sha256(a), sha256(b));
 }
 
+TEST(SHA256, IncrementalMatchesOneShot)
+{
+  std::string_view msg = "incremental sha256 coverage";
+  auto msg_bytes = std::as_bytes(std::span(msg));
+
+  SHA256Hasher empty_hasher;
+  EXPECT_EQ(empty_hasher.finalize(), sha256(std::span<const std::byte>{}));
+
+  SHA256Hasher single_chunk_hasher;
+  single_chunk_hasher.update(msg_bytes);
+  EXPECT_EQ(single_chunk_hasher.finalize(), sha256(msg_bytes));
+
+  SHA256Hasher multi_chunk_hasher;
+  multi_chunk_hasher.update(msg_bytes.subspan(0, 5));
+  multi_chunk_hasher.update(msg_bytes.subspan(5, 7));
+  multi_chunk_hasher.update(msg_bytes.subspan(12));
+  EXPECT_EQ(multi_chunk_hasher.finalize(), sha256(msg_bytes));
+}
+
 TEST(Blake3, BasicUsage)
 {
   std::vector<uint8_t> a = {0, 1, 2, 3};

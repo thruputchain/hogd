@@ -23,6 +23,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -67,6 +68,7 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
     buffers_(std::move(data.buffers))
 {
   trie_->clear();
+  trie_->set_should_hash_nodes_on_each_op(false);
   {
     auto ul = buffers_.lock_threads();
     buffers_.for_each(ul, [](detail::EventContext &ctx) {
@@ -120,7 +122,7 @@ EventBlockContext::add_event(TxEventLog event)
 SHA256Hash
 EventBlockContext::get_root_hash()
 {
-  trie_->generate_top_level_hashes();
+  trie_->generate_all_hashes(available_parallelism());
   return trie_->get_root_hash();
 }
 

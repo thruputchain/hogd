@@ -10,7 +10,6 @@
 #include <string>
 #include <string_view>
 #include <syncstream>
-#include <vector>
 
 #include "hogd/config.h"
 
@@ -20,7 +19,6 @@
 
 #include "hogd/base/ansi_color.h"
 #include "hogd/base/log.h"
-#include "hogd/base/string.h"
 
 namespace hogd {
 
@@ -68,8 +66,7 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
   const auto now = std::chrono::system_clock::now();
 
   // extract the filename
-  std::vector<std::string_view> tokens = split(loc.file_name(), '/');
-  std::string_view filename = tokens.back();
+  std::string_view filename = detail::source_basename(loc.file_name());
 
   // generate the log message
   std::string buf;

@@ -45,6 +45,8 @@
 
 namespace hogd {
 
+class ChangeSet;
+
 // RAMDB is the low-level interface used by hogdb to access the ramdb.
 class RAMDB {
 public:
@@ -316,6 +318,15 @@ public:
 
   // returns the low-level ramdb (direct access to the DB).
   RAMDB &get_ramdb() { return db_; }
+
+  // Create a ChangeSet for accumulating materialized changes.
+  // When compute_hash is true, put()/remove() accumulate LtHash16 deltas
+  // inline; when false, hashing is skipped entirely.
+  ChangeSet create_changeset(bool compute_hash = true);
+
+  // Apply all materialized changes from a ChangeSet to the database.
+  HogDBStatus<void> apply(ChangeSet &changes,
+                          WorkerPool &pool = WorkerPool::get_default_pool());
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }

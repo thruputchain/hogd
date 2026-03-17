@@ -4,10 +4,12 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -51,9 +53,18 @@ class NativeSyscallContext;
 class NativeContract {
 public:
   using function_t = std::function<InvokeStatus<void>(NativeSyscallContext &)>;
+  using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
-    : functions_(std::move(functions))
+    : functions_([&] {
+        std::vector<function_entry_t> v(
+            std::make_move_iterator(functions.begin()),
+            std::make_move_iterator(functions.end()));
+        std::ranges::sort(v, [](auto const &a, auto const &b) {
+          return a.first < b.first;
+        });
+        return v;
+      }())
   {}
 
   NativeContract(NativeContract &&) = delete;
@@ -66,7 +77,9 @@ public:
                             NativeRuntime &runtime) const;
 
 private:
-  const std::unordered_map<Runtime::MethodID, function_t> functions_;
+  const function_t *find_function(Runtime::MethodID method) const;
+
+  const std::vector<function_entry_t> functions_;
 };
 
 // Context that can instantiate native contracts from a predefined set of

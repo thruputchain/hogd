@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <future>
 #include <iostream>
 #include <map>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/allocator.h"
@@ -65,6 +67,23 @@ for_each_func(std::map<HexArray, SHA256Hash> &seen,
               const std::pair<HexArray, SHA256Hash> &pair)
 {
   seen[pair.first] = pair.second;
+}
+
+template<typename TrieType>
+SHA256Hash
+build_and_hash_trie(TrieType &trie, size_t num_threads)
+{
+  trie.set_should_hash_nodes_on_each_op(false);
+  for (size_t i = 0; i < 512; i++) {
+    HexArray key(std::format("{:032x}", i));
+    std::string value = std::format("value-{}", i);
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+    EXPECT_TRUE(trie.insert(key, value_span));
+  }
+  trie.generate_all_hashes(num_threads);
+  EXPECT_TRUE(trie.check());
+  return trie.get_root_hash();
 }
 
 } // namespace
@@ -1655,6 +1674,32 @@ TEST(MerkleTriePrefix, Multithread128)
   run_multithread(/*num_threads=*/128);
 }
 
+TEST(MerkleTrie, GenerateAllHashesParallelMatchesSerial)
+{
+  MerkleTrie serial_trie;
+  const SHA256Hash serial_hash =
+      build_and_hash_trie(serial_trie, /*num_threads=*/1);
+
+  MerkleTrie parallel_trie;
+  const SHA256Hash parallel_hash =
+      build_and_hash_trie(parallel_trie, available_parallelism());
+
+  EXPECT_EQ(serial_hash, parallel_hash);
+}
+
+TEST(MerkleTriePrefix, GenerateAllHashesParallelMatchesSerial)
+{
+  MerkleTriePrefix serial_trie;
+  const SHA256Hash serial_hash =
+      build_and_hash_trie(serial_trie, /*num_threads=*/1);
+
+  MerkleTriePrefix parallel_trie;
+  const SHA256Hash parallel_hash =
+      build_and_hash_trie(parallel_trie, available_parallelism());
+
+  EXPECT_EQ(serial_hash, parallel_hash);
+}
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Tests for node encoding/decoding roundtrip.
@@ -1665,9 +1710,9 @@ TEST(MerkleNode, LeafEncodingRoundtrip)
   Allocator<Node> allocator(Allocator<Node>::kDefault);
   Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
 
-  leaf->path = HexArray("1234abcd");
+  leaf->path() = HexArray("1234abcd");
   std::string value = "test_value";
-  leaf->value_hash = sha256(value);
+  leaf->value_hash() = sha256(value);
 
   // Encode the node.
   auto encoding = leaf->get_node_encoding();
@@ -1682,9 +1727,9 @@ TEST(MerkleNode, LeafEncodingRoundtrip)
 
   // Verify roundtrip fidelity.
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
-  EXPECT_EQ(raw.path, leaf->path);
+  EXPECT_EQ(raw.path, leaf->path());
   ASSERT_TRUE(raw.value_hash.has_value());
-  EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
+  EXPECT_EQ(*raw.value_hash, *leaf->value_hash());
 
   // Verify the hash matches.
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
@@ -1698,12 +1743,12 @@ TEST(MerkleNode, ExtensionEncodingRoundtrip)
   Node *extension = Node::create_extension(/*parent=*/nullptr, allocator);
   Node *child_leaf = Node::create_leaf(extension, allocator);
 
-  extension->path = HexArray("abcdef01");
-  child_leaf->path = HexArray("23");
+  extension->path() = HexArray("abcdef01");
+  child_leaf->path() = HexArray("23");
   std::string value = "child_value";
-  child_leaf->value_hash = sha256(value);
+  child_leaf->value_hash() = sha256(value);
   child_leaf->hash = child_leaf->compute_node_hash();
-  extension->child[0] = child_leaf;
+  extension->extension_child() = child_leaf;
   extension->hash = extension->compute_node_hash();
 
   // Encode the extension node.
@@ -1720,7 +1765,7 @@ TEST(MerkleNode, ExtensionEncodingRoundtrip)
 
   // Verify roundtrip fidelity.
   EXPECT_EQ(raw.type, Node::Type::kExtension);
-  EXPECT_EQ(raw.path, extension->path);
+  EXPECT_EQ(raw.path, extension->path());
   EXPECT_EQ(raw.child_hashes[0], child_leaf->hash);
   EXPECT_EQ(raw.hash, extension->compute_node_hash());
 
@@ -1735,9 +1780,9 @@ TEST(MerkleNode, PathSizeEncodingIsExactly8Bytes)
   Allocator<Node> allocator(Allocator<Node>::kDefault);
   Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
 
-  leaf->path = HexArray("ab");
+  leaf->path() = HexArray("ab");
   std::string value = "v";
-  leaf->value_hash = sha256(value);
+  leaf->value_hash() = sha256(value);
 
   const std::vector<std::byte> &encoding = leaf->get_node_encoding();
 
@@ -1768,9 +1813,9 @@ TEST(MerkleNode, LeafEncodingRoundtripOddPath)
   Allocator<Node> allocator(Allocator<Node>::kDefault);
   Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
 
-  leaf->path = HexArray("123"); // odd number of hex digits
+  leaf->path() = HexArray("123"); // odd number of hex digits
   std::string value = "odd_path_value";
-  leaf->value_hash = sha256(value);
+  leaf->value_hash() = sha256(value);
 
   const std::vector<std::byte> &encoding = leaf->get_node_encoding();
   std::vector<std::byte> encoding_copy(encoding.begin(), encoding.end());
@@ -1781,9 +1826,9 @@ TEST(MerkleNode, LeafEncodingRoundtripOddPath)
 
   EXPECT_EQ(idx, encoding_copy.size());
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
-  EXPECT_EQ(raw.path, leaf->path);
+  EXPECT_EQ(raw.path, leaf->path());
   ASSERT_TRUE(raw.value_hash.has_value());
-  EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
+  EXPECT_EQ(*raw.value_hash, *leaf->value_hash());
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
   allocator.free(leaf);
@@ -1795,9 +1840,9 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
   Allocator<Node> allocator(Allocator<Node>::kDefault);
   Node *leaf = Node::create_leaf(/*parent=*/nullptr, allocator);
 
-  leaf->path = HexArray(); // empty path
+  leaf->path() = HexArray(); // empty path
   std::string value = "empty_path_value";
-  leaf->value_hash = sha256(value);
+  leaf->value_hash() = sha256(value);
 
   const std::vector<std::byte> &encoding = leaf->get_node_encoding();
   std::vector<std::byte> encoding_copy(encoding.begin(), encoding.end());
@@ -1808,9 +1853,9 @@ TEST(MerkleNode, LeafEncodingRoundtripEmptyPath)
 
   EXPECT_EQ(idx, encoding_copy.size());
   EXPECT_EQ(raw.type, Node::Type::kLeaf);
-  EXPECT_EQ(raw.path, leaf->path);
+  EXPECT_EQ(raw.path, leaf->path());
   ASSERT_TRUE(raw.value_hash.has_value());
-  EXPECT_EQ(*raw.value_hash, *leaf->value_hash);
+  EXPECT_EQ(*raw.value_hash, *leaf->value_hash());
   EXPECT_EQ(raw.hash, leaf->compute_node_hash());
 
   allocator.free(leaf);

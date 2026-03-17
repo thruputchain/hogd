@@ -293,6 +293,12 @@ public:
       DbSchedResult expected_dbsched_commit_snapshot_result =
           DbSchedResult::DbSchedResultOK);
 
+  // Closes the current block expecting prepare_committed_changes to fail,
+  // then abandons (never commits). Asserts the DAO db hash is unchanged —
+  // proving that block rejection before any DAO mutation is safe.
+  void reject_block(BlockExecutionMode mode =
+                        BlockExecutionMode::kBlockExecutionModeProposal);
+
   // Discards the current block and creates a new one.
   void discard_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);

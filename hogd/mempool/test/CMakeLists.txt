@@ -59,3 +59,34 @@ target_link_libraries(
 )
 
 set_property(TARGET coordinator PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+if(BUILD_BENCHMARKS)
+  add_executable(
+    mempool_scheduler_bench
+    scheduler_bench.cc
+    $<TARGET_OBJECTS:mempool_test_infra>
+  )
+  target_include_directories(mempool_scheduler_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+  target_link_libraries(
+    mempool_scheduler_bench
+    benchmark::benchmark
+    auth
+    hogd
+    mempool
+    exec_interface
+    runtime
+    runtime_test_util
+    contract_loader
+    GTest::gtest
+  )
+  add_dependencies(
+    mempool_scheduler_bench
+    all_wasm_contracts
+  )
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET mempool_scheduler_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

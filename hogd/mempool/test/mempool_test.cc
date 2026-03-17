@@ -5,6 +5,7 @@
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
+#include "block.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "event_rpc.hh"
@@ -306,10 +307,14 @@ TEST(Mempool, Validate)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -363,10 +368,14 @@ TEST(Mempool, ValidateBatch)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -435,10 +444,14 @@ TEST(Mempool, ValidateWrongBlockHeight)
 
     // Compute block_hash with a wrong block_height. This should cause
     // validation to fail because block_height is part of the block hash.
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height + 1, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height + 1,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -492,10 +505,14 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
 
     // Remove a transaction from the nomination.
     tx_hashes.pop_back();
@@ -560,10 +577,14 @@ TEST(Mempool, ValidateBatchMissingTx)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
 
   // Remove a transaction.
@@ -625,10 +646,14 @@ TEST(Mempool, ValidateCommit)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -688,10 +713,14 @@ TEST(Mempool, ValidateTwo)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -738,10 +767,14 @@ TEST(Mempool, ValidateTwo)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 3);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -802,10 +835,14 @@ TEST(Mempool, GetTip)
     db_tip = get_tip.db_tip();
     EXPECT_EQ(db_tip.height, 1);
 
-    nomination.block_hash = sha256(server.mempool_coord_rpc().get_block_header(
-        nomination.block_height, tx_hashes, db_tip.db_hash,
-        event_block_hash.root_hash(),
-        /*prev_block_hash=*/nomination.prev_block_hash));
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = event_block_hash.root_hash(),
+                           .prev_block_hash = nomination.prev_block_hash});
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();

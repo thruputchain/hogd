@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 
 #include <format>
 #include <optional>
@@ -60,7 +61,41 @@ public:
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
-  Node() = default;
+  struct BranchPayload {
+    std::optional<SHA256Hash> value_hash;
+    std::array<Node *, kMaxNumBranches> child{};
+  };
+
+  struct ExtensionPayload {
+    HexArray path;
+    Node *child = nullptr;
+  };
+
+  struct LeafPayload {
+    HexArray path;
+    std::optional<SHA256Hash> value_hash;
+  };
+
+  union Payload {
+    BranchPayload branch;
+    ExtensionPayload extension;
+    LeafPayload leaf;
+
+    Payload() {}
+    ~Payload() {}
+  };
+
+  // A node is default constructed as a branch (see [Type type{Type::kBranch}]
+  // below).
+  Node()
+  {
+    std::construct_at(&payload_.branch);
+    rw_lock.reset();
+    hash_lock.reset();
+    clear_common();
+  }
+
+  ~Node() { destroy_payload(); }
   // Disable copy and move.
   Node(const Node &) = delete;
   Node &operator=(const Node &) = delete;
@@ -68,43 +103,47 @@ public:
   Node &operator=(Node &&) noexcept = delete;
 
   RwLock rw_lock;
-  Type type;
+  Type type{Type::kBranch};
   RwLock hash_lock;
   SHA256Hash hash;
   Node *parent;
-
-  // TODO(jhumphri): Optimize the variables below with a union or different node
-  // types.
-
-  // Used by extensions and leaves.
-  HexArray path;
-
-  // Used by branches and leaves.
-  std::optional<SHA256Hash> value_hash;
-
-  // Used by branches and extensions.
-  //
-  // For branches, we branch on a hex digit and up to all [kMaxNumBranches]
-  // slots may be filled.
-  //
-  // For extensions, only the first slot is filled. The other
-  // [kMaxNumBranches - 1] slots are unused.
-  std::array<Node *, kMaxNumBranches> child;
+  Payload payload_;
 
   void init_branch(Node *parent)
   {
+    if (type != Type::kBranch) {
+      destroy_payload();
+      std::construct_at(&payload_.branch);
+    }
+    clear_common();
+    payload_.branch.value_hash = std::nullopt;
+    payload_.branch.child.fill(nullptr);
     type = Type::kBranch;
     this->parent = parent;
   }
 
   void init_extension(Node *parent)
   {
+    if (type != Type::kExtension) {
+      destroy_payload();
+      std::construct_at(&payload_.extension);
+    }
+    clear_common();
+    payload_.extension.path.clear();
+    payload_.extension.child = nullptr;
     type = Type::kExtension;
     this->parent = parent;
   }
 
   void init_leaf(Node *parent)
   {
+    if (type != Type::kLeaf) {
+      destroy_payload();
+      std::construct_at(&payload_.leaf);
+    }
+    clear_common();
+    payload_.leaf.path.clear();
+    payload_.leaf.value_hash = std::nullopt;
     type = Type::kLeaf;
     this->parent = parent;
   }
@@ -115,6 +154,11 @@ public:
     Node *node = allocator.alloc();
     CHECK_PTR(node);
 
+    if (allocator.type() == Allocator<Node>::Type::kBump) {
+      // The bump allocator does not construct the node, whereas [new Node]
+      // does. Thus, we need to manually construct the node.
+      std::construct_at(node);
+    }
     node->clear();
     node->rw_lock.reset();
     node->hash_lock.reset();
@@ -127,6 +171,11 @@ public:
     Node *node = allocator.alloc();
     CHECK_PTR(node);
 
+    if (allocator.type() == Allocator<Node>::Type::kBump) {
+      // The bump allocator does not construct the node, whereas [new Node]
+      // does. Thus, we need to manually construct the node.
+      std::construct_at(node);
+    }
     node->clear();
     node->rw_lock.reset();
     node->hash_lock.reset();
@@ -139,6 +188,11 @@ public:
     Node *node = allocator.alloc();
     CHECK_PTR(node);
 
+    if (allocator.type() == Allocator<Node>::Type::kBump) {
+      // The bump allocator does not construct the node, whereas [new Node]
+      // does. Thus, we need to manually construct the node.
+      std::construct_at(node);
+    }
     node->clear();
     node->rw_lock.reset();
     node->hash_lock.reset();
@@ -154,17 +208,92 @@ public:
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
-  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
+  SHA256Hash compute_node_hash() const;
 
   void clear()
   {
-    memset(&hash, 0, sizeof(hash));
-    parent = nullptr;
-    path.clear();
-    value_hash = std::nullopt;
-    memset(static_cast<void *>(child.data()), 0,
-           child.size() *
-               sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)
+    destroy_payload();
+    std::construct_at(&payload_.branch);
+    type = Type::kBranch;
+    clear_common();
+    payload_.branch.value_hash = std::nullopt;
+    payload_.branch.child.fill(nullptr);
+  }
+
+  std::optional<SHA256Hash> &value_hash()
+  {
+    switch (type) {
+    case Type::kBranch:
+      return payload_.branch.value_hash;
+    case Type::kLeaf:
+      return payload_.leaf.value_hash;
+    default:
+      CHECK(false);
+      return payload_.branch.value_hash;
+    }
+  }
+
+  const std::optional<SHA256Hash> &value_hash() const
+  {
+    switch (type) {
+    case Type::kBranch:
+      return payload_.branch.value_hash;
+    case Type::kLeaf:
+      return payload_.leaf.value_hash;
+    default:
+      CHECK(false);
+      return payload_.branch.value_hash;
+    }
+  }
+
+  HexArray &path()
+  {
+    switch (type) {
+    case Type::kExtension:
+      return payload_.extension.path;
+    case Type::kLeaf:
+      return payload_.leaf.path;
+    default:
+      CHECK(false);
+      return payload_.extension.path;
+    }
+  }
+
+  const HexArray &path() const
+  {
+    switch (type) {
+    case Type::kExtension:
+      return payload_.extension.path;
+    case Type::kLeaf:
+      return payload_.leaf.path;
+    default:
+      CHECK(false);
+      return payload_.extension.path;
+    }
+  }
+
+  std::array<Node *, kMaxNumBranches> &branch_children()
+  {
+    CHECK(type == Type::kBranch);
+    return payload_.branch.child;
+  }
+
+  const std::array<Node *, kMaxNumBranches> &branch_children() const
+  {
+    CHECK(type == Type::kBranch);
+    return payload_.branch.child;
+  }
+
+  Node *&extension_child()
+  {
+    CHECK(type == Type::kExtension);
+    return payload_.extension.child;
+  }
+
+  Node *extension_child() const
+  {
+    CHECK(type == Type::kExtension);
+    return payload_.extension.child;
   }
 
   std::string str() const;
@@ -193,6 +322,27 @@ public:
   }
 
 private:
+  void clear_common()
+  {
+    memset(&hash, 0, sizeof(hash));
+    parent = nullptr;
+  }
+
+  void destroy_payload()
+  {
+    switch (type) {
+    case Type::kBranch:
+      std::destroy_at(&payload_.branch);
+      break;
+    case Type::kExtension:
+      std::destroy_at(&payload_.extension);
+      break;
+    case Type::kLeaf:
+      std::destroy_at(&payload_.leaf);
+      break;
+    }
+  }
+
   // These encode the node into a byte vector.
   void get_branch_encoding(std::vector<std::byte> &encoding) const;
   void get_extension_encoding(std::vector<std::byte> &encoding) const;
@@ -203,6 +353,8 @@ private:
   void get_extension_string(std::ostringstream &oss) const;
   void get_leaf_string(std::ostringstream &oss) const;
 } __attribute__((aligned(64)));
+
+static_assert(sizeof(Node) < 384);
 
 } // namespace hogd
 

@@ -709,17 +709,20 @@ void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
   prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
+  prtop("{}\n", feature_attr("serde", "serde(transparent)"));
   prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
   prtop("{}\n", feature_attr("spec", "derive(XDR)"));
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
-#[repr(i32)]
-pub enum {} )",
+#[repr(transparent)]
+pub struct {}(pub i32);
+)",
         tname);
+
+  prtop("\nimpl {} ", tname);
   {
     // NOLINTNEXTLINE(readability-identifier-naming)
     auto _close = open_brace();
-    scopes_.push_back(tname);
 
     bool first = true, skip_anyway = false;
     for (const auto &cd : e) {
@@ -734,20 +737,15 @@ pub enum {} )",
         skip_anyway = false;
       }
       first = false;
-      prtop("{} = {} as i32,\n", cd.id, cd.val);
+      prtop("pub const {}: Self = Self({});\n", cd.id, cd.val);
     }
   }
+  prtop("\n");
 
-  // generate a TryFrom implementation for the enum
-  prtop("\nimpl TryFrom<i32> for {} {{\n", tname);
-  prtop("    type Error = ();\n");
-  prtop("    fn try_from(value: i32) -> Result<Self, Self::Error> {{\n");
-  prtop("        match value {{\n");
-  for (const auto &cd : e) {
-    prtop("            {} => Ok(Self::{}),\n", cd.val, cd.id);
-  }
-  prtop("            _ => Err(()),\n");
-  prtop("        }}\n");
+  // generate a From<i32> implementation for the newtype struct
+  prtop("impl From<i32> for {} {{\n", tname);
+  prtop("    fn from(v: i32) -> Self {{\n");
+  prtop("        Self(v)\n");
   prtop("    }}\n");
   prtop("}}\n");
 }
@@ -783,7 +781,9 @@ GenRs::show_type(const UnionBody &b, string const &tname)
       if (is_bool) {
         return bool_map(c);
       }
-      return b.switch_type + "::" + c;
+      // Enum types are newtype structs with associated constants,
+      // so access the inner value with .0
+      return b.switch_type + "::" + c + ".0";
     }
     return c;
   };
