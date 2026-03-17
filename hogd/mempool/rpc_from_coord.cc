@@ -638,6 +638,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
       eventsched_get_block_hash(cache.block_id);
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
+
   SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
   record_stage(stage_generate_txset_hash);
   {
@@ -651,8 +652,8 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                                  nomination.transactions_nondeterministic_data);
     co_await t_to_parallel_batch(cache.txs,
                                  cache.nomination_result.nominated_block().txs);
+    record_stage(stage_serialize_nomination);
   }
-  record_stage(stage_serialize_nomination);
   {
     DbBlockResult result = co_await close_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
