@@ -243,11 +243,9 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
   }
 }
 
-BlockHeader
-MempoolCoordinatorRpc::get_block_header(
-    BlockHeight block_height, const x23::XdrVec<SignedTransactionHash> &hashes,
-    const DbHash &db_hash, const SHA256Hash &events_hash,
-    const BlockHash &prev_block_hash)
+SHA256Hash
+MempoolCoordinatorRpc::get_txset_hash(
+    const x23::XdrVec<SignedTransactionHash> &hashes)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   trie.set_should_hash_nodes_on_each_op(false);
@@ -272,13 +270,7 @@ MempoolCoordinatorRpc::get_block_header(
   }
   trie.generate_all_hashes(num_threads);
   SHA256Hash root_hash = trie.get_root_hash();
-  BlockHeader header{.network_id = network_id_,
-                     .block_height = block_height,
-                     .txset_hash = root_hash,
-                     .db_hash = db_hash,
-                     .events_hash = events_hash,
-                     .prev_block_hash = prev_block_hash};
-  return header;
+  return trie.get_root_hash();
 }
 
 x23::Async<void>
@@ -643,8 +635,25 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
 
   x23::Async<EventBlockResult> event_block_hash_handle =
       eventsched_get_block_hash(cache.block_id);
+  x23::Async<DbBlockResult> close_snapshot_handle =
+      close_snapshot(cache.block_id);
+  SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
+  record_stage(stage_generate_block_hash);
   {
-    DbBlockResult result = co_await close_snapshot(cache.block_id);
+    Nomination &nomination =
+        cache.nomination_result.nominated_block().nomination;
+    nomination.transactions_hash = {};
+    nomination.transactions_nondeterministic_data = {};
+    co_await t_to_parallel_batch(cache.result_tx_hashes,
+                                 nomination.transactions_hash);
+    co_await t_to_parallel_batch(cache.result_tx_nominations,
+                                 nomination.transactions_nondeterministic_data);
+    co_await t_to_parallel_batch(cache.txs,
+                                 cache.nomination_result.nominated_block().txs);
+  }
+  record_stage(stage_serialize_nomination);
+  {
+    DbBlockResult result = co_await close_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
     cache.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
@@ -660,23 +669,16 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     Nomination &nomination =
         cache.nomination_result.nominated_block().nomination;
     nomination.block_height = db_tip.height + 1;
-    nomination.block_hash =
-        sha256(get_block_header(nomination.block_height, cache.tx_hashes,
-                                cache.db_tip.db_hash, events_hash,
-                                /*prev_block_hash=*/db_tip.block_hash));
-    record_stage(stage_generate_block_hash);
 
+    BlockHeader header{.network_id = network_id_,
+                       .block_height = nomination.block_height,
+                       .txset_hash = txset_hash,
+                       .db_hash = cache.db_tip.db_hash,
+                       .events_hash = events_hash,
+                       .prev_block_hash = db_tip.block_hash};
+    nomination.block_hash = sha256(header);
     nomination.prev_block_hash = db_tip.block_hash;
-    nomination.transactions_hash = {};
-    nomination.transactions_nondeterministic_data = {};
-    co_await t_to_parallel_batch(cache.result_tx_hashes,
-                                 nomination.transactions_hash);
-    co_await t_to_parallel_batch(cache.result_tx_nominations,
-                                 nomination.transactions_nondeterministic_data);
-    co_await t_to_parallel_batch(cache.txs,
-                                 cache.nomination_result.nominated_block().txs);
   }
-  record_stage(stage_serialize_nomination);
 
   for (x23::Async<void> &handle : finish_block_handles) {
     co_await handle;
@@ -1089,10 +1091,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
-  SHA256Hash block_hash =
-      sha256(get_block_header(nomination.block_height, cache.tx_hashes,
-                              cache.db_tip.db_hash, events_hash,
-                              /*prev_block_hash=*/nomination.prev_block_hash));
+  SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
+  BlockHeader header{.network_id = network_id_,
+                     .block_height = nomination.block_height,
+                     .txset_hash = txset_hash,
+                     .db_hash = cache.db_tip.db_hash,
+                     .events_hash = events_hash,
+                     .prev_block_hash = nomination.prev_block_hash};
+  SHA256Hash block_hash = sha256(header);
   if (block_hash != nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
 
