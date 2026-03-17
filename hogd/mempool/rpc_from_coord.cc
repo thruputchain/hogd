@@ -618,10 +618,11 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     last_stage_ts = now;
   };
   double stage_spawn_finish_calls = 0.0;
-  double stage_generate_block_hash = 0.0;
+  double stage_generate_txset_hash = 0.0;
+  double stage_serialize_nomination = 0.0;
   double stage_close_snapshot = 0.0;
   double stage_event_block_hash = 0.0;
-  double stage_serialize_nomination = 0.0;
+  double stage_generate_block_hash = 0.0;
   double stage_await_finish_calls = 0.0;
 
   // Gracefully shut down executor work and send the nomination chunks
@@ -638,7 +639,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
   SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
-  record_stage(stage_generate_block_hash);
+  record_stage(stage_generate_txset_hash);
   {
     Nomination &nomination =
         cache.nomination_result.nominated_block().nomination;
@@ -678,6 +679,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                        .prev_block_hash = db_tip.block_hash};
     nomination.block_hash = sha256(header);
     nomination.prev_block_hash = db_tip.block_hash;
+    record_stage(stage_generate_block_hash);
   }
 
   for (x23::Async<void> &handle : finish_block_handles) {
@@ -686,12 +688,16 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   record_stage(stage_await_finish_calls);
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
-       "close_snapshot={:.6f}, event_block_hash={:.6f}, "
-       "generate_block_hash={:.6f}, serialize_nomination={:.6f}, "
-       "await_finish_calls={:.6f}, total={:.6f}, finish_handles={}",
-       stage_spawn_finish_calls, stage_close_snapshot, stage_event_block_hash,
-       stage_generate_block_hash, stage_serialize_nomination,
-       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
+       "generate_txset_hash={:.6f}, "
+       "serialize_nomination={:.6f}, "
+       "close_snapshot={:.6f}, "
+       "event_block_hash={:.6f}, "
+       "generate_block_hash={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
+       "finish_handles={}",
+       stage_spawn_finish_calls, stage_generate_txset_hash,
+       stage_serialize_nomination, stage_close_snapshot, stage_event_block_hash,
+       stage_generate_block_hash, stage_await_finish_calls, timer.elapsed(),
+       finish_block_handles.size());
   co_return;
 }
 
