@@ -225,11 +225,8 @@ public:
     }
   }
 
-  BlockHeader get_block_header(BlockHeight block_height,
-                               const x23::XdrVec<SignedTransactionHash> &hashes,
-                               const DbHash &db_hash,
-                               const SHA256Hash &events_hash,
-                               const BlockHash &prev_block_hash);
+  static SHA256Hash
+  get_txset_hash(const x23::XdrVec<SignedTransactionHash> &hashes);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
