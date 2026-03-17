@@ -205,7 +205,7 @@ public:
   ~ThreadPool();
 
   void go(std::vector<Job> &&jobs);
-  void go(Job item) { go(std::vector{item}); }
+  void go(Job item);
 
   // Make a callback asynchronously in another thread.  This is
   // convenient for one callback, but not as efficient as calling go()
@@ -408,6 +408,17 @@ private:
     if (qno(ptr) != n) {
       ptr.reset();
       ptr = runqueues_[n].take();
+    }
+  }
+
+  void enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
+  {
+    qselect(&lq, job.cpuhint);
+    bool wasempty = lq->q.empty();
+    lq->q.emplace_back(job, now);
+    if (wasempty) {
+      RunQueue::set_qtime(lq, now);
+      lq->nonempty.notify_all();
     }
   }
 
