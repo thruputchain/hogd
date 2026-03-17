@@ -592,7 +592,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
         cache.failed_txs.push_back(cache.txs[i]);
       }
     }
-    num_tx_outcomes_processed += cache.result_tx_nominations.size();
+    num_tx_outcomes_processed = cache.result_tx_nominations.size();
   }
   CHECK_EQ(num_tx_outcomes_processed, cache.result_tx_nominations.size());
   record_stage(stage_await_batches);
