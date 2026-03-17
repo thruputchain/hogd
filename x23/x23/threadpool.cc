@@ -111,16 +111,9 @@ ThreadPool::go(std::vector<Job> &&jobs)
   });
 
   uint64_t now = fastclock::get_ns();
-
   QPtr lq;
   for (auto &j : jobs) {
-    qselect(&lq, j.cpuhint);
-    bool wasempty = lq->q.empty();
-    lq->q.emplace_back(j, now);
-    if (wasempty) {
-      RunQueue::set_qtime(lq, now);
-      lq->nonempty.notify_all();
-    }
+    enqueue_selected(lq, j, now);
   }
 }
 
@@ -131,13 +124,7 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  qselect(&lq, job.cpuhint);
-  bool wasempty = lq->q.empty();
-  lq->q.emplace_back(job, now);
-  if (wasempty) {
-    RunQueue::set_qtime(lq, now);
-    lq->nonempty.notify_all();
-  }
+  enqueue_selected(lq, job, now);
 }
 
 void

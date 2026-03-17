@@ -411,6 +411,17 @@ private:
     }
   }
 
+  void enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
+  {
+    qselect(&lq, job.cpuhint);
+    bool wasempty = lq->q.empty();
+    lq->q.emplace_back(job, now);
+    if (wasempty) {
+      RunQueue::set_qtime(lq, now);
+      lq->nonempty.notify_all();
+    }
+  }
+
   class Worker {
   public:
     Worker(ThreadPool *pool, size_t threadno) noexcept;
