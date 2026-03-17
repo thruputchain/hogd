@@ -269,7 +269,6 @@ MempoolCoordinatorRpc::get_txset_hash(
     future.get();
   }
   trie.generate_all_hashes(num_threads);
-  SHA256Hash root_hash = trie.get_root_hash();
   return trie.get_root_hash();
 }
 
