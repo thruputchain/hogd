@@ -582,6 +582,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
     co_await handles[i];
     cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
 
+    // TODO(jhumphri): Start adding the txs to the merkle trie here.
     for (size_t i = num_tx_outcomes_processed;
          i < cache.result_tx_nominations.size(); i++) {
       if (cache.statuses[i]) {
