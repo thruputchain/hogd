@@ -140,8 +140,9 @@ TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv4Bind)
 
 TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv6Bind)
 {
-  if (!x23::HostPort{"::1", 0}.to_addr().has_value())
+  if (!x23::HostPort{"::1", 0}.to_addr().has_value()) {
     GTEST_SKIP() << "IPv6 loopback is unavailable";
+  }
 
   EventRPCContext ctx(temp_dir());
   RpcServer<EventExecRpc> exec_rpc(ctx);
