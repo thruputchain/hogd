@@ -685,14 +685,17 @@ Scheduler::remove_from_scheduler(
 {
   co_await default_coropoll().pool_.bg();
 
-  PerThread<std::unordered_set<ContractAddress>> accounts_by_thread;
-
   ElapsedTimer timer;
 
   constexpr size_t kNumThreads = 120;
+  struct RemoveChunkResult {
+    size_t num_removed_from_runqueue = 0;
+    std::unordered_set<ContractAddress> accounts;
+  };
+
   const std::vector<ChunkRange> chunks =
       make_chunks(tx_hashes.size(), kNumThreads);
-  std::vector<x23::Async<size_t>> handles;
+  std::vector<x23::Async<RemoveChunkResult>> handles;
   handles.reserve(chunks.size());
 
   x23::CoroGuard cg;
@@ -703,14 +706,13 @@ Scheduler::remove_from_scheduler(
     handles.push_back(
         [](const ChunkRange *chunk,
            x23::span<const SignedTransactionHash> tx_hashes,
-           PerThread<std::unordered_set<ContractAddress>> &accounts_by_thread,
            bool validated_block,
-           Scheduler &scheduler) noexcept -> x23::Async<size_t> {
+           Scheduler &scheduler) noexcept -> x23::Async<RemoveChunkResult> {
           co_await default_coropoll().pool_.bg();
 
           x23::span<const SignedTransactionHash> hash_chunk(
               tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
-          size_t num_removed_from_runqueue = 0;
+          RemoveChunkResult result;
           for (const SignedTransactionHash &tx_hash : hash_chunk) {
             if (validated_block) {
               // We only need to remove txs from the runqueue when committing a
@@ -734,8 +736,8 @@ Scheduler::remove_from_scheduler(
                 // been taken off of the runqueue. If the tx is included in a
                 // block we are *validating*, then it is still on the runqueue.
                 if (txs.erase(key)) {
-                  num_removed_from_runqueue++;
-                  accounts_by_thread->insert(account);
+                  result.num_removed_from_runqueue++;
+                  result.accounts.insert(account);
                 }
               }
 
@@ -749,30 +751,27 @@ Scheduler::remove_from_scheduler(
             }
           }
 
-          co_return num_removed_from_runqueue;
-        }(&chunks[i], tx_hashes, accounts_by_thread, validated_block, *this));
+          co_return result;
+        }(&chunks[i], tx_hashes, validated_block, *this));
   }
   size_t total_removed_from_runqueue = 0;
+  std::unordered_set<ContractAddress> accounts_to_check;
   // There may be fewer chunks that [kNumThreads], so we iterate through the
   // number of chunks. If we were to iterate through all of the awaitables,
   // we would deadlock waiting on awaitables for coroutines that do not have a
   // chunk.
   for (size_t i = 0; i < chunks.size(); i++) {
-    x23::Async<size_t> &handle = handles[i];
-    total_removed_from_runqueue += co_await handle;
+    x23::Async<RemoveChunkResult> &handle = handles[i];
+    RemoveChunkResult result = co_await handle;
+    total_removed_from_runqueue += result.num_removed_from_runqueue;
+    accounts_to_check.insert(result.accounts.begin(), result.accounts.end());
   }
   double a = timer.elapsed();
 
-  {
-    auto ul = accounts_by_thread.lock_threads();
-    accounts_by_thread.for_each(
-        ul, [this](const std::unordered_set<ContractAddress> &accounts) {
-          for (const ContractAddress &account : accounts) {
-            if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-              CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
-            }
-          }
-        });
+  for (const ContractAddress &account : accounts_to_check) {
+    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
+      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+    }
   }
   double b = timer.elapsed();
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
