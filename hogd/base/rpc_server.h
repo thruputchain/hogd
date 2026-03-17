@@ -78,6 +78,24 @@ public:
     return port_ = prt;
   }
 
+  uint16_t start_server(const x23::HostPort &bind_addr)
+  {
+    assert(listen_fd_ == x23::kInvalidFd);
+    x23::HostPort bind_addr_copy = bind_addr;
+    std::expected<sockaddr_storage, x23::GaiError> addr =
+        bind_addr_copy.to_addr(/*dns=*/false);
+    CHECK(addr.has_value());
+    auto [prt, lfd] =
+        tcp_rpc_server(cp_, *addr,
+                       [self = x23::RefPtr(*this),
+                        _d = x23::Defer([this] { eof(); })](auto c) {
+                         c->max_message_size = self->max_message_size_;
+                         new Conn{*self, c};
+                       });
+    listen_fd_ = lfd.get();
+    return port_ = prt;
+  }
+
   Impl *impl() noexcept { return &impl_; }
   uint16_t port() const noexcept { return port_; }
   RpcServer *operator->() noexcept { return this; }

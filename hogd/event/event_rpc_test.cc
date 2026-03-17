@@ -114,6 +114,57 @@ TEST_F(EventRpcTest, TestFromRPC)
             RPCError::kRPCNone);
 }
 
+TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv4Bind)
+{
+  EventRPCContext ctx(temp_dir());
+  RpcServer<EventExecRpc> exec_rpc(ctx);
+  RpcServer<EventMempoolRpc> mempool_rpc(ctx);
+
+  auto exec_port = exec_rpc.start_server(x23::HostPort{"127.0.0.1", 0});
+  auto mempool_port = mempool_rpc.start_server(x23::HostPort{"127.0.0.1", 0});
+
+  auto exec_addr = host_port_to_sockaddr("127.0.0.1", exec_port);
+  auto mempool_addr = host_port_to_sockaddr("127.0.0.1", mempool_port);
+
+  auto exec_client = x23::SRpcMulticlient<x23::RpcLogger>::make(exec_addr)
+                         ->client<EventExecutor1>();
+  auto mempool_client = x23::SRpcMulticlient<x23::RpcLogger>::make(mempool_addr)
+                            ->client<EventSched1>();
+
+  EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
+            RPCError::kRPCNone);
+}
+
+TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv6Bind)
+{
+  if (!x23::HostPort{"::1", 0}.to_addr().has_value())
+    GTEST_SKIP() << "IPv6 loopback is unavailable";
+
+  EventRPCContext ctx(temp_dir());
+  RpcServer<EventExecRpc> exec_rpc(ctx);
+  RpcServer<EventMempoolRpc> mempool_rpc(ctx);
+
+  auto exec_port = exec_rpc.start_server(x23::HostPort{"::1", 0});
+  auto mempool_port = mempool_rpc.start_server(x23::HostPort{"::1", 0});
+
+  auto exec_addr = host_port_to_sockaddr("::1", exec_port);
+  auto mempool_addr = host_port_to_sockaddr("::1", mempool_port);
+
+  auto exec_client = x23::SRpcMulticlient<x23::RpcLogger>::make(exec_addr)
+                         ->client<EventExecutor1>();
+  auto mempool_client = x23::SRpcMulticlient<x23::RpcLogger>::make(mempool_addr)
+                            ->client<EventSched1>();
+
+  EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_client.eventsched_close_block(0, 0).error(),
+            RPCError::kRPCNone);
+}
+
 // Test multiple executors with proper reference counting
 TEST_F(EventRpcTest, MultipleExecutors)
 {
