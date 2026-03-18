@@ -148,6 +148,20 @@ protected:
                }
 
                return {};
+             }},
+            {4, // Insert entire calldata as a single RCQ entry
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &calldata = ctx.handler().get_calldata();
+               auto key = make_storage_key("rcq0");
+               auto res = ctx.handler().retrocausal_queue_insert(
+                   key, std::as_bytes(std::span(calldata)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
              }}});
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -682,6 +696,150 @@ TEST_P(RCQTest, ConcurrentOverflow)
   ASSERT_EQ(handler2.try_commit_transaction(),
             ExecResult::ExecResultTxNonDeterministicError);
 }
+
+// --- Batch 4: Cost model edge cases ---
+
+// CostAccountingMultiBlockPartialConsume
+//
+// Verifies storage cost accounting across multiple blocks with partial
+// consumption.  Inserts entries across 2 blocks, partially consumes from
+// past block, and checks that the balance reflects the correct live_entries
+// count after each step.
+TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
+{
+  auto const hogs = 1'000'000'000;
+  setup_grant_storage_token(contract_address_, hogs);
+  auto const *cm = get_default_cost_model();
+
+  // Block 1: insert 3 entries.
+  ASSERT_TRUE(insert({1, 2, 3}));
+  advance_block();
+
+  // 3 live entries → cost = get_retrocausal_queue_cost(3).
+  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3)));
+
+  // Block 2: insert 2 more entries (5 total).
+  ASSERT_TRUE(insert({4, 5}));
+  advance_block();
+
+  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(5)));
+
+  // Block 3: consume 2 entries from past block 1 (entries 1, 2).
+  // 3 live entries remain.
+  ASSERT_TRUE(consume({1, 2}));
+  advance_block();
+
+  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3)));
+
+  // Block 4: consume remaining 3 (entry 3 from block 1, 4 and 5 from block 2).
+  ASSERT_TRUE(consume({3, 4, 5}));
+  advance_block();
+
+  // Queue empty → full refund.
+  ASSERT_TRUE(check_balance(hogs));
+}
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+// --- Batch 5: Boundary conditions ---
+
+// MaxEntrySizeBoundary
+//
+// Tests the kQueueEntryMaxLen (256 byte) boundary.  A single entry of exactly
+// 256 bytes should succeed; 257 bytes should fail at the syscall layer
+// with kSyscallErrorCodeInvalidSyscallInput.
+TEST_P(RCQTest, MaxEntrySizeBoundary)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  // 256 bytes: exactly at the limit — should succeed.
+  // Use method 4 which inserts the entire calldata as one entry.
+  std::vector<uint8_t> at_limit(256, 0xAA);
+  ASSERT_TRUE(invoke_contract(4, at_limit));
+
+  advance_block();
+
+  // Verify the entry was stored.
+  auto queue = lookup_storage_item_from_db(
+      make_contract_data_addrkey(contract_address_, "rcq0"));
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+
+  // 257 bytes: one past the limit — should fail.
+  std::vector<uint8_t> over_limit(257, 0xBB);
+  ASSERT_FALSE(invoke_contract(4, over_limit));
+}
+
+// ExactBlockEntriesLimit
+//
+// Inserts exactly kRetrocausalQueueBlockEntriesMaxLen entries (1000)
+// in a single TX.  Should succeed without overflow.
+TEST_P(RCQTest, ExactBlockEntriesLimit)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    SUCCEED();
+    return;
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen, 1);
+  ASSERT_TRUE(insert(values));
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(
+      make_contract_data_addrkey(contract_address_, "rcq0"));
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->metadata().live_entries,
+            kRetrocausalQueueBlockEntriesMaxLen);
+}
+
+// ConcurrentFillToExactLimit
+//
+// Two TXs each insert 500 entries (total = 1000 =
+// kRetrocausalQueueBlockEntriesMaxLen). Both should commit successfully since
+// they fill exactly to the limit.
+TEST_P(RCQTest, ConcurrentFillToExactLimit)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    SUCCEED();
+    return;
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen / 2, 1);
+
+  auto handler1 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_address_,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .calldata =
+                                     Calldata(values.begin(), values.end())}}},
+      *context_);
+
+  auto handler2 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_address_,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .calldata =
+                                     Calldata(values.begin(), values.end())}}},
+      *context_);
+
+  ASSERT_TRUE(handler1.root_invoke().is_root_success());
+  ASSERT_TRUE(handler2.root_invoke().is_root_success());
+
+  // Both should commit: 500 + 500 = 1000 = exactly at limit.
+  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,
                          ::testing::Values(TestDB::kMockInMemory,

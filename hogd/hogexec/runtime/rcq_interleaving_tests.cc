@@ -26,6 +26,7 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -86,6 +87,48 @@ protected:
                }
                return {};
              }},
+            // method 2: delete the RCQ key
+            {2,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("rcq0");
+               auto res = ctx.handler().delete_object(
+                   key, std::to_underlying(
+                            StorageDeltaFlags::kStorageDeltaFlagNone));
+               if (!res.has_value())
+                 return res.error().to_invoke_error();
+               return {};
+             }},
+            // method 3: set bytestring (type change from RCQ)
+            {3,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &cd = ctx.handler().get_calldata();
+               auto key = make_storage_key("rcq0");
+               auto res = ctx.handler().set_bytestring(
+                   key, std::as_bytes(std::span(cd)),
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
+               if (!res.has_value())
+                 return res.error().to_invoke_error();
+               return {};
+             }},
+            // method 4: delete + recreate (delete then insert)
+            {4,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &cd = ctx.handler().get_calldata();
+               auto key = make_storage_key("rcq0");
+               auto del = ctx.handler().delete_object(
+                   key, std::to_underlying(
+                            StorageDeltaFlags::kStorageDeltaFlagNone));
+               if (!del.has_value())
+                 return del.error().to_invoke_error();
+               for (uint8_t val : cd) {
+                 auto ins = ctx.handler().retrocausal_queue_insert(
+                     key, std::as_bytes(std::span(&val, 1)));
+                 if (!ins.has_value())
+                   return ins.error().to_invoke_error();
+               }
+               return {};
+             }},
         });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -113,6 +156,19 @@ protected:
   static SignedTransaction make_consume_tx(uint8_t count)
   {
     return make_tx(1, {count});
+  }
+
+  static SignedTransaction make_delete_tx() { return make_tx(2, {}); }
+
+  static SignedTransaction make_bytestring_tx(std::vector<uint8_t> const &value)
+  {
+    return make_tx(3, value);
+  }
+
+  static SignedTransaction
+  make_delete_recreate_tx(std::vector<uint8_t> const &values)
+  {
+    return make_tx(4, values);
   }
 
   // --- Interleaving infrastructure ---
@@ -260,6 +316,59 @@ TEST_F(RCQInterleavingTest, DuplicateEntryValues)
       {make_insert_tx({10})},
       {make_insert_tx({10})},
       {make_consume_tx(2)},
+  });
+}
+
+// Insert + delete.  Tests whether delete always wins and whether
+// insert conflicts with a concurrent delete.  The model checker
+// enumerates all orderings so we verify both insert-before-delete
+// and delete-before-insert commit sets match across proposal/validation.
+TEST_F(RCQInterleavingTest, InsertAndConcurrentDelete)
+{
+  // Seed the RCQ with an entry so delete has something to act on.
+  auto handler = make_new_system_call_handler(make_insert_tx({42}), *context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  advance_block();
+
+  check_interleavings({
+      {make_insert_tx({10})},
+      {make_delete_tx()},
+  });
+}
+
+// Delete+recreate + concurrent insert.  One TX deletes the RCQ and
+// immediately recreates it with new entries.  A concurrent TX inserts
+// independently.  Verifies proposal/validation agreement under all
+// orderings of these two TXs.
+TEST_F(RCQInterleavingTest, DeleteRecreateAndConcurrentInsert)
+{
+  // Seed the RCQ so the delete+recreate has something to delete.
+  auto handler = make_new_system_call_handler(make_insert_tx({42}), *context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  advance_block();
+
+  check_interleavings({
+      {make_delete_recreate_tx({50, 60})},
+      {make_insert_tx({10})},
+  });
+}
+
+// Type-change (bytestring set) + concurrent RCQ insert.  One TX
+// overwrites the RCQ with a bytestring; the other inserts into it.
+// Exercises type-transition conflict detection across all orderings.
+TEST_F(RCQInterleavingTest, TypeChangeAndConcurrentInsert)
+{
+  // Seed the RCQ.
+  auto handler = make_new_system_call_handler(make_insert_tx({42}), *context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  advance_block();
+
+  check_interleavings({
+      {make_bytestring_tx({0xAB, 0xCD})},
+      {make_insert_tx({10})},
   });
 }
 
