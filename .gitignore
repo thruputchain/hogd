@@ -25,6 +25,7 @@ Testing/**
 bcheck/**
 build/**
 build-pkg/**
+hogx-agent
 metrics_history
 perf.data
 perf.data.old
