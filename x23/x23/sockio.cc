@@ -70,7 +70,7 @@ get_send_recv_buf_sizes()
 #endif
 
 void
-set_cloexec(BorrowedFd &fd)
+set_cloexec(BorrowedFd fd)
 {
   if (int flags = fcntl(fd.get(), F_GETFD);
       flags == -1 || fcntl(fd.get(), F_SETFD, flags | FD_CLOEXEC) == -1)
@@ -78,7 +78,7 @@ set_cloexec(BorrowedFd &fd)
 }
 
 void
-enable_reuseaddr_if_needed(BorrowedFd &fd, std::uint16_t port)
+enable_reuseaddr_if_needed(BorrowedFd fd, std::uint16_t port)
 {
   if (!port)
     return;

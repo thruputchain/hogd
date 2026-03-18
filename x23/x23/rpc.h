@@ -576,6 +576,20 @@ rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
   return RpcStream<Logger>::make(cp, UniqueFd{fd}, Logger(fd, logfd));
 }
 
+inline void
+start_listening(CoroPoll &cp, UniqueFd &lfd, auto cb)
+{
+  [&cp, lfd = std::move(lfd),
+   cb = std::move(cb)](this auto /*copy*/) -> Detached {
+    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
+    while (auto c = co_await (cp.accept(lfd))) {
+      server_trace().with_logger(*c, [&](auto logger) {
+        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
+                                                          std::move(logger)));
+      });
+    }
+  }();
+}
 // Listen on a TCP port, and for each incoming connection invoke a
 // callback with a new configurator.  Sets logging based on the
 // X23SERVER_TRACE_progname or X23SERVER_TRACE environment variable.
@@ -605,17 +619,7 @@ tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
   if (port == 0)
     port = get_port(local_addr(lfd));
 
-  [&cp, lfd = std::move(lfd),
-   cb = std::move(cb)](this auto /*copy*/) -> Detached {
-    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
-    while (auto c = co_await (cp.accept(lfd))) {
-      server_trace().with_logger(*c, [&](auto logger) {
-        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
-                                                          std::move(logger)));
-      });
-    }
-  }();
-
+  start_listening(cp, lfd, std::move(cb));
   return std::pair{port, rawfd};
 }
 
@@ -630,17 +634,7 @@ tcp_rpc_server(CoroPoll &cp, const sockaddr_storage &bind_addr, auto cb,
   int rawfd = lfd.get();
   uint16_t port = get_port(local_addr(lfd));
 
-  [&cp, lfd = std::move(lfd),
-   cb = std::move(cb)](this auto /*copy*/) -> Detached {
-    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
-    while (auto c = co_await (cp.accept(lfd))) {
-      server_trace().with_logger(*c, [&](auto logger) {
-        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
-                                                          std::move(logger)));
-      });
-    }
-  }();
-
+  start_listening(cp, lfd, std::move(cb));
   return std::pair{port, rawfd};
 }
 
