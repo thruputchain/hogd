@@ -29,8 +29,8 @@ x23::Async<typename RpcService::template client<
 make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
+  info("make_rpc_client: connecting to {}", x23::HostPort(ss));
   while (true) {
-    info("make_rpc_client: connecting to {}", x23::HostPort(ss));
     std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
     if (!res) {
       if (retry && res.error().error_code() == std::errc::connection_refused) {
