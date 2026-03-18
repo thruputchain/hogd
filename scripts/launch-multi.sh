@@ -225,32 +225,20 @@ check_binaries() {
 #echo "Checking binaries..."
 #check_binaries
 
-# Wait for the port to open on the remote machine.
-wait_port() {
-  local host=$1
-  local port=$2
-  while true; do
-    if nc -z "$host" "$port" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.2
-  done
-}
-
 echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" --port $LOADGEN_PORT
-wait_port "$loadgen_server" $LOADGEN_PORT
+./scripts/wait-port.sh "$loadgen_server" $LOADGEN_PORT
 
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$mempool_server":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port 8040
+  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port 8040
 done
 
 # Start event.
 echo "Start event..."
 remote_launch "$event_server" "$EVENT_BINARY" \
-  --mempool-addr "$mempool_server":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip "$event_server")" --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT
+  --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip "$event_server")" --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT
 
 # Start indexer.
 echo "Start indexer..."
@@ -258,7 +246,7 @@ if $delete_db; then
   ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
 fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  --event-addr "$event_server":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
+  --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -268,13 +256,13 @@ for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   fi
   remote_launch "$s" "$HOGDB_BINARY" \
-    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$mempool_server":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
 done
 
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
-  --mempool-addr "$mempool_server":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip "$auth_server")" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
+  --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip "$auth_server")" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
 
 # Start mempool.
 echo "Start mempool..."
@@ -298,7 +286,7 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
-  --in-addr "$chuckd_server":7888 \
+  --in-addr "$(hog_ip "$chuckd_server")":7888 \
   --debug-port 5500 \
   --num-accts 10000 \
   --txs-per-block 1000000 \
@@ -306,8 +294,8 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --storage-dir "$logdir"/chuckd-storage \
   --out-addr :50000 \
   --wallet-addr :40000 \
-  --loadgen-addr "$loadgen_server":$LOADGEN_PORT \
-  --sched-addr "$mempool_server":$MEMPOOL_COORDINATOR_PORT \
+  --loadgen-addr "$(hog_ip "$loadgen_server")":$LOADGEN_PORT \
+  --sched-addr "$(hog_ip "$mempool_server")":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path "$logdir"/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
   --scp-control-addr 127.0.0.1:4400 \
@@ -315,28 +303,28 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
 
 # Wait for hogexec (port 8040).
 for s in "${hogexec_servers[@]}"; do
-  wait_port "$s" 8040
+  ./scripts/wait-port.sh "$s" 8040
 done
 
 # Wait for event (ports 8090-8092).
-wait_port "$event_server" $EVENT_EXECUTOR_PORT
-wait_port "$event_server" $EVENT_MEMPOOL_PORT
-wait_port "$event_server" $EVENT_INDEXER_PORT
+./scripts/wait-port.sh "$event_server" $EVENT_EXECUTOR_PORT
+./scripts/wait-port.sh "$event_server" $EVENT_MEMPOOL_PORT
+./scripts/wait-port.sh "$event_server" $EVENT_INDEXER_PORT
 
 # Wait for indexer (ports 8060-8061).
-wait_port "$indexer_server" $INDEXER_EVENT_PORT
-wait_port "$indexer_server" $INDEXER_BLOCK_EXPLORER_PORT
+./scripts/wait-port.sh "$indexer_server" $INDEXER_EVENT_PORT
+./scripts/wait-port.sh "$indexer_server" $INDEXER_BLOCK_EXPLORER_PORT
 
 # Wait for hogdb (ports 8080-8082).
 for s in "${hogdb_servers[@]}"; do
-  wait_port "$s" $DB_EXECUTOR_PORT
-  wait_port "$s" $DB_MEMPOOL_PORT
-  wait_port "$s" $DB_AUTH_PORT
+  ./scripts/wait-port.sh "$s" $DB_EXECUTOR_PORT
+  ./scripts/wait-port.sh "$s" $DB_MEMPOOL_PORT
+  ./scripts/wait-port.sh "$s" $DB_AUTH_PORT
 done
 
 # Wait for auth (ports 8050-8051).
-wait_port "$auth_server" $AUTH_DB_PORT
-wait_port "$auth_server" $AUTH_MEMPOOL_PORT
+./scripts/wait-port.sh "$auth_server" $AUTH_DB_PORT
+./scripts/wait-port.sh "$auth_server" $AUTH_MEMPOOL_PORT
 
 # Wait for chuckd (port 7888).
 wait_port "$chuckd_server" 7888
