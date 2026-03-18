@@ -8,6 +8,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
@@ -1029,6 +1030,60 @@ TEST_F(DirectRCQTests, StressConsumeFromNonExistentBlock)
   r = tx2.try_push_current_subtransaction();
   // This is invalid input from the executor
   ASSERT_FALSE(r.has_value());
+}
+
+// StressBackwardFullBlockConsume
+//
+// Targets lines 204-207 of retrocausal_queue_lock.cc:
+//   if (new_consume.max_fully_consumed_block_number <
+//       snapshot_consume.max_fully_consumed_block_number)
+//
+// Sets up a state where the snapshot already has max_fully_consumed > 0,
+// then crafts a consume that attempts to move the pointer backward.
+// This exercises the "unconsuming" guard: once a block is marked fully
+// consumed, a new transaction in the same block cannot regress that state.
+TEST_F(DirectRCQTests, StressBackwardFullBlockConsume)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_backward_consume");
+
+  // Block 1: Insert entry.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: Insert another entry so we have blocks 1 and 2.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({2})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: Consume block 1 fully. After this block, the snapshot's
+  // max_fully_consumed_block_number will be 1.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 4: Attempt to consume with max_fully_consumed=0 (backward).
+  // The snapshot has max_fully_consumed=1, so setting it to 0 regresses.
+  auto tx4 = make_new_per_tx_db_proxy();
+  tx4.add_delta(key, make_rcq_consume_delta(0, 0, {}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx4.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value());
+  ASSERT_EQ(r.error().code(), SystemErrorCode::kSystemUnrecoverable);
 }
 
 TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)

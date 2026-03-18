@@ -1822,6 +1822,33 @@ protected:
           return {};
         });
 
+    // ConsumeAll: drain the queue until empty (single TX).
+    builder.add<SerializationFormat::kTxs>(
+        50, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          while (true) {
+            uint32_t out = 0;
+            RuntimeMemoryLength written_len = 0;
+            auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+                written_len);
+            if (!res.has_value()) {
+              ADD_FAILURE() << "System error consuming entry";
+              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            }
+            if (res.value() == SyscallErrorCode::
+                                   kSyscallErrorCodeNoRetrocausalQueueEntry ||
+                res.value() ==
+                    SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+              break;
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              ADD_FAILURE() << "Unexpected error consuming entry";
+              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            }
+          }
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -2843,6 +2870,114 @@ TEST_P(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
   advance_block();
 
   ASSERT_TRUE(check_rcq_empty());
+}
+
+// MultiBlockConsumeRemovesOldBlocks
+//
+// Verifies that when a consumer drains an RCQ spanning multiple past blocks,
+// the consumed block records are actually pruned from RAMDB.  Existing tests
+// check metadata (live_entries) but not block-level RAMDB state for pure
+// consume (no delete involved).
+TEST_P(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "Block record check requires HogDB DAO access";
+  }
+
+  // Block 1: insert 2 entries → creates block 1.
+  insert(10);
+  insert(20);
+  advance_block();
+
+  // Block 2: insert 1 entry → creates block 2.
+  insert(30);
+  advance_block();
+
+  // Sanity: 3 entries across 2 blocks.
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->metadata().live_entries, 3);
+
+  auto &dao = get_hogdb_dao();
+  auto item_key = make_item_key(get_queue_addrkey());
+
+  auto block1 = dao.read_retrocausal_queue_block(item_key, 1);
+  ASSERT_TRUE(block1.has_value()) << "Block 1 should exist before consume";
+  auto block2 = dao.read_retrocausal_queue_block(item_key, 2);
+  ASSERT_TRUE(block2.has_value()) << "Block 2 should exist before consume";
+
+  // Block 3: consume all 3 entries in a single TX.
+  invoke_method(50);
+  advance_block();
+
+  // Queue should be empty now.
+  ASSERT_TRUE(check_rcq_empty());
+
+  // Both old block records must be pruned from RAMDB.
+  auto block1_after = dao.read_retrocausal_queue_block(item_key, 1);
+  EXPECT_FALSE(block1_after.has_value())
+      << "Block 1 should be removed after consuming all entries";
+  auto block2_after = dao.read_retrocausal_queue_block(item_key, 2);
+  EXPECT_FALSE(block2_after.has_value())
+      << "Block 2 should be removed after consuming all entries";
+}
+
+// DeleteAcrossBlocksCleansOldBlocks
+//
+// Verifies that standalone delete (cross-block, not same-TX as recreate)
+// cleans up old RCQ block records.  After delete, old blocks are gone.
+// After recreate in a later block, the new RCQ creates its own block 1,
+// which should not be confused with the old block 1.
+TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "Block record check requires HogDB DAO access";
+  }
+
+  // Block 1: insert entries → creates block 1.
+  insert(10);
+  insert(20);
+  advance_block();
+
+  // Block 2: insert more → creates block 2.
+  insert(30);
+  advance_block();
+
+  auto &dao = get_hogdb_dao();
+  auto item_key = make_item_key(get_queue_addrkey());
+
+  ASSERT_TRUE(dao.read_retrocausal_queue_block(item_key, 1).has_value());
+  ASSERT_TRUE(dao.read_retrocausal_queue_block(item_key, 2).has_value());
+
+  // Block 3: delete (method 17 = delete + consume_empty).
+  invoke_method(17);
+  advance_block();
+
+  // Metadata is gone.
+  auto after_delete = lookup_storage_item_from_db(get_queue_addrkey());
+  EXPECT_FALSE(after_delete.has_value())
+      << "Queue metadata should be removed after delete";
+
+  // Old block records are cleaned up.
+  EXPECT_FALSE(dao.read_retrocausal_queue_block(item_key, 1).has_value())
+      << "Block 1 should be removed after standalone delete";
+  EXPECT_FALSE(dao.read_retrocausal_queue_block(item_key, 2).has_value())
+      << "Block 2 should be removed after standalone delete";
+
+  // Block 4: recreate with a new entry.
+  insert(99);
+  advance_block();
+
+  // New queue exists with 1 entry.
+  auto after = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(after.has_value());
+  ASSERT_EQ(after->metadata().live_entries, 1);
+
+  // New RCQ created block 1 (fresh numbering). Old block 2 is gone.
+  EXPECT_TRUE(dao.read_retrocausal_queue_block(item_key, 1).has_value())
+      << "New block 1 should exist (fresh RCQ after recreate)";
+  EXPECT_FALSE(dao.read_retrocausal_queue_block(item_key, 2).has_value())
+      << "No block 2 should exist (old ghost or new)";
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
