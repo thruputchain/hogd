@@ -227,7 +227,7 @@ check_binaries() {
 
 echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" --port $LOADGEN_PORT
-./scripts/wait-port.sh "$loadgen_server" $LOADGEN_PORT
+./scripts/wait-port.sh "$(hog_ip "$loadgen_server")" $LOADGEN_PORT
 
 # Start hogexec.
 echo "Start hogexec..."
@@ -303,38 +303,38 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
 
 # Wait for hogexec (port 8040).
 for s in "${hogexec_servers[@]}"; do
-  ./scripts/wait-port.sh "$s" 8040
+  ./scripts/wait-port.sh "$(hog_ip "$s")" 8040
 done
 
 # Wait for event (ports 8090-8092).
-./scripts/wait-port.sh "$event_server" $EVENT_EXECUTOR_PORT
-./scripts/wait-port.sh "$event_server" $EVENT_MEMPOOL_PORT
-./scripts/wait-port.sh "$event_server" $EVENT_INDEXER_PORT
+./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_EXECUTOR_PORT
+./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_MEMPOOL_PORT
+./scripts/wait-port.sh "$(hog_ip "$event_server")" $EVENT_INDEXER_PORT
 
 # Wait for indexer (ports 8060-8061).
-./scripts/wait-port.sh "$indexer_server" $INDEXER_EVENT_PORT
-./scripts/wait-port.sh "$indexer_server" $INDEXER_BLOCK_EXPLORER_PORT
+./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_EVENT_PORT
+./scripts/wait-port.sh "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
 
 # Wait for hogdb (ports 8080-8082).
 for s in "${hogdb_servers[@]}"; do
-  ./scripts/wait-port.sh "$s" $DB_EXECUTOR_PORT
-  ./scripts/wait-port.sh "$s" $DB_MEMPOOL_PORT
-  ./scripts/wait-port.sh "$s" $DB_AUTH_PORT
+  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_EXECUTOR_PORT
+  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_MEMPOOL_PORT
+  ./scripts/wait-port.sh "$(hog_ip "$s")" $DB_AUTH_PORT
 done
 
 # Wait for auth (ports 8050-8051).
-./scripts/wait-port.sh "$auth_server" $AUTH_DB_PORT
-./scripts/wait-port.sh "$auth_server" $AUTH_MEMPOOL_PORT
+./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_DB_PORT
+./scripts/wait-port.sh "$(hog_ip "$auth_server")" $AUTH_MEMPOOL_PORT
 
 # Wait for chuckd (port 7888).
-wait_port "$chuckd_server" 7888
+./scripts/wait-port.sh "$(hog_ip "$chuckd_server")" 7888
 
 # Wait for mempool (ports 8070-8073).
-wait_port "$mempool_server" $MEMPOOL_COORDINATOR_PORT
-wait_port "$mempool_server" $MEMPOOL_EXECUTOR_PORT
-wait_port "$mempool_server" $MEMPOOL_DB_PORT
-wait_port "$mempool_server" $MEMPOOL_EVENT_PORT
-wait_port "$mempool_server" $MEMPOOL_AUTH_PORT
+./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_COORDINATOR_PORT
+./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_EXECUTOR_PORT
+./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_DB_PORT
+./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_EVENT_PORT
+./scripts/wait-port.sh "$(hog_ip "$mempool_server")" $MEMPOOL_AUTH_PORT
 
 echo "Done with launch."
 
