@@ -7,13 +7,13 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 HOGD_ROOT=${SCRIPT_DIR}/..
 
 print_usage() {
-  printf "usage: scripts/build_pkg.sh [OPTION]...\n"
+  printf "usage: scripts/build-pkg.sh [OPTION]...\n"
   printf -- "  -c sets the compiler (e.g., 'gcc', 'clang')\n"
   printf -- "  -d sets the build directory (default is 'build')\n"
   printf -- "  -t sets the build type (can be 'Release' or 'Debug')\n"
 }
 
-while getopts 'c:d:t' flag; do
+while getopts 'c:d:t:' flag; do
   case "${flag}" in
   c)
     COMPILER_FLAG="${OPTARG}"
