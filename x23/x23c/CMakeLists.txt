@@ -47,6 +47,7 @@ add_executable(x23c
   ${CMAKE_CURRENT_BINARY_DIR}/config.cc
   gen_hh.cc
   gen_rs.cc
+  gen_ts.cc
   x23c.cc
 )
 
