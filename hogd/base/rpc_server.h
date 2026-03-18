@@ -62,8 +62,9 @@ public:
 
   uint16_t start_server(uint16_t port)
   {
-    // If this fails you started the same server twice
+    // If this fails, you started the same server twice.
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+
     // NOLINTBEGIN(readability-identifier-naming)
     auto [prt, lfd] =
         tcp_rpc_server(cp_, port,
@@ -79,7 +80,9 @@ public:
 
   uint16_t start_server(x23::HostPort bind_addr)
   {
+    // If this fails, you started the same server twice.
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
