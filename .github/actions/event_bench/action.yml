@@ -26,7 +26,7 @@ runs:
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 clear_work_dir
       shell: bash
     - name: launch event server
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/event/event_exec --bind-ip 10.100.0.111 --mempool-addr hog10:8095 --work-dir ${{ inputs.work-dir }}/
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/event/event_exec --mempool-addr hog10:8095 --work-dir ${{ inputs.work-dir }}/
       shell: bash
     - name: make sure event server is running
       run: |
