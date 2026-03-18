@@ -156,12 +156,9 @@ string
 GenTs::map_type(const string &t)
 {
   static const std::map<string, string> type_map{
-      {"int", "bigint"},
-      {"unsigned int", "bigint"},
-      {"hyper", "bigint"},
-      {"unsigned hyper", "bigint"},
-      {"bool", "boolean"},
-      {"opaque", "Uint8Array"},
+      {"int", "bigint"},    {"unsigned int", "bigint"},
+      {"hyper", "bigint"},  {"unsigned hyper", "bigint"},
+      {"bool", "boolean"},  {"opaque", "Uint8Array"},
       {"string", "string"},
   };
   if (auto it = type_map.find(t); it != type_map.end())
@@ -173,10 +170,8 @@ string
 GenTs::map_write_method(const string &t)
 {
   static const std::map<string, string> write_map{
-      {"int", "writeInt32"},
-      {"unsigned int", "writeUint32"},
-      {"hyper", "writeInt64"},
-      {"unsigned hyper", "writeUint64"},
+      {"int", "writeInt32"},   {"unsigned int", "writeUint32"},
+      {"hyper", "writeInt64"}, {"unsigned hyper", "writeUint64"},
       {"bool", "writeBool"},
   };
   if (auto it = write_map.find(t); it != write_map.end())
@@ -188,10 +183,8 @@ string
 GenTs::map_read_method(const string &t)
 {
   static const std::map<string, string> read_map{
-      {"int", "readInt32"},
-      {"unsigned int", "readUint32"},
-      {"hyper", "readInt64"},
-      {"unsigned hyper", "readUint64"},
+      {"int", "readInt32"},   {"unsigned int", "readUint32"},
+      {"hyper", "readInt64"}, {"unsigned hyper", "readUint64"},
       {"bool", "readBool"},
   };
   if (auto it = read_map.find(t); it != read_map.end())
@@ -235,8 +228,7 @@ GenTs::show_def(const Literal &l)
   string_view lines = l.lines;
   while (!lines.empty()) {
     auto nl = lines.find('\n');
-    string_view line =
-        (nl == string_view::npos) ? lines : lines.substr(0, nl);
+    string_view line = (nl == string_view::npos) ? lines : lines.substr(0, nl);
     lines = (nl == string_view::npos) ? string_view{} : lines.substr(nl + 1);
 
     if (line.find("#include") != string_view::npos) {
@@ -290,7 +282,8 @@ GenTs::show_def(const Typedef &d)
   string base = get<string>(d.type);
 
   switch (d.qual) {
-  case Declaration::kScalar: {
+  case Declaration::kScalar:
+  {
     if (is_primitive_type(base)) {
       // Branded primitive type
       string ts_type = map_type(base);
@@ -304,8 +297,7 @@ GenTs::show_def(const Typedef &d)
 
       // Codec
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{ w.{0}(val); }},\n",
-               map_write_method(base));
+      prbottom("  encode(w, val) {{ w.{0}(val); }},\n", map_write_method(base));
       prbottom("  decode(r) {{ return {0}(r.{1}()); }},\n", factory,
                map_read_method(base));
       prbottom("}};\n");
@@ -319,7 +311,8 @@ GenTs::show_def(const Typedef &d)
     }
     break;
   }
-  case Declaration::kArray: {
+  case Declaration::kArray:
+  {
     if (base == "opaque") {
       // Fixed-size opaque: branded Uint8Array with length check
       string factory = to_camel_case(d.id);
@@ -347,7 +340,8 @@ GenTs::show_def(const Typedef &d)
     }
     break;
   }
-  case Declaration::kVec: {
+  case Declaration::kVec:
+  {
     if (base == "opaque") {
       // Variable-length opaque: branded Uint8Array
       string factory = to_camel_case(d.id);
@@ -406,7 +400,8 @@ GenTs::show_def(const Typedef &d)
     }
     break;
   }
-  case Declaration::kString: {
+  case Declaration::kString:
+  {
     // String typedef: branded string
     string factory = to_camel_case(d.id);
     string bound_str = map_bound(d.bound);
@@ -426,7 +421,8 @@ GenTs::show_def(const Typedef &d)
     prbottom("}};\n");
     break;
   }
-  case Declaration::kPtr: {
+  case Declaration::kPtr:
+  {
     prtop("export type {} = {} | null;\n", d.id, map_type(base));
 
     // Nullable codec
@@ -734,8 +730,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
     if (arm.decl.qual != Declaration::kVoid) {
       decode_field(arm.decl, name, 8);
-      prbottom("        return {{ {0}, {1} }};\n", body.switch_id,
-               arm.decl.id);
+      prbottom("        return {{ {0}, {1} }};\n", body.switch_id, arm.decl.id);
     }
     else {
       prbottom("        return {{ {0} }} as {1};\n", body.switch_id, name);
@@ -811,8 +806,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
                              val_expr);
     }
     else {
-      bottom_ +=
-          std::format("{}{}.encode(w, {});\n", indent, base, val_expr);
+      bottom_ += std::format("{}{}.encode(w, {});\n", indent, base, val_expr);
     }
     break;
 
@@ -863,12 +857,11 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     bottom_ += std::format("{}if ({} !== null) {{\n", indent, val_expr);
     bottom_ += std::format("{}  w.writeUint32(1n);\n", indent);
     if (is_primitive_type(base)) {
-      bottom_ += std::format("{}  w.{}({});\n", indent,
-                             map_write_method(base), val_expr);
+      bottom_ += std::format("{}  w.{}({});\n", indent, map_write_method(base),
+                             val_expr);
     }
     else {
-      bottom_ +=
-          std::format("{}  {}.encode(w, {});\n", indent, base, val_expr);
+      bottom_ += std::format("{}  {}.encode(w, {});\n", indent, base, val_expr);
     }
     bottom_ += std::format("{}}} else {{\n", indent);
     bottom_ += std::format("{}  w.writeUint32(0n);\n", indent);
@@ -881,8 +874,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
 }
 
 string
-GenTs::decode_field(const Declaration &d, const string &parent_name,
-                    int sp)
+GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
 {
   string base = base_type_name(d);
   if (!holds_alternative<string>(d.type))
@@ -897,8 +889,8 @@ GenTs::decode_field(const Declaration &d, const string &parent_name,
                              map_read_method(base));
     }
     else {
-      bottom_ += std::format("{}const {} = {}.decode(r);\n", indent, d.id,
-                             base);
+      bottom_ +=
+          std::format("{}const {} = {}.decode(r);\n", indent, d.id, base);
     }
     return d.id;
 
@@ -950,9 +942,9 @@ GenTs::decode_field(const Declaration &d, const string &parent_name,
 
   case Declaration::kPtr:
     if (is_primitive_type(base)) {
-      bottom_ += std::format(
-          "{}const {} = Number(r.readUint32()) ? r.{}() : null;\n", indent,
-          d.id, map_read_method(base));
+      bottom_ +=
+          std::format("{}const {} = Number(r.readUint32()) ? r.{}() : null;\n",
+                      indent, d.id, map_read_method(base));
     }
     else {
       bottom_ += std::format(
@@ -984,6 +976,6 @@ gen_ts(vector<Definition> *defs)
 
   gs.process(*defs);
 
-  return preamble + gs.top_ +
-         "\n//\n// XDR Codecs below this point\n//\n" + gs.bottom_ + "\n";
+  return preamble + gs.top_ + "\n//\n// XDR Codecs below this point\n//\n" +
+         gs.bottom_ + "\n";
 }
