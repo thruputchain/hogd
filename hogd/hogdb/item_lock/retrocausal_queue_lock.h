@@ -57,9 +57,12 @@ public:
   }
 
   // Cleanup all RCQ-specific storage (blocks and metadata) when an RCQ is
-  // deleted. Stages removals into the given ChangeSet.
+  // deleted. Stages removals into the given ChangeSet. When
+  // keep_metadata is true, only block entries are removed (used during
+  // type changes where the caller overwrites the metadata key).
   static HogDBStatus<void> cleanup_on_deletion(const LockContext &ctx,
-                                               ChangeSet &changes);
+                                               ChangeSet &changes,
+                                               bool keep_metadata = false);
 
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.

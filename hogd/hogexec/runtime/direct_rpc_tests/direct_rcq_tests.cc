@@ -2567,7 +2567,6 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
 // newly inserted entry is visible.
 TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
 {
-  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_recreate");
 
@@ -2680,7 +2679,6 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
 // the same transaction (different subtransactions) within a single block.
 TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
 {
-  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key =
       make_contract_data_addrkey(kContractAddress, "rcq_consume_ow_same");
@@ -2910,7 +2908,6 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
 // across all non-delete lock types.
 TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
 {
-  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_nnint");
 
@@ -3083,7 +3080,6 @@ TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
 TEST_F(DirectRCQTests,
        OverwriteMultiBlockRCQWithBytestringDeleteLeavesGhostBlocks)
 {
-  GTEST_SKIP() << "RCQ blocks not cleaned up on type change";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_ow_bs_del2");
 
@@ -3378,7 +3374,6 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
 // → RCQ) to verify ghost blocks accumulate across cycles.
 TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
 {
-  GTEST_SKIP() << "RCQ entries not cleaned up on type change";
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_double_ow");
 

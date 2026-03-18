@@ -431,7 +431,7 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_balance()) {
-    CHECK(padding_type_ == kItemLockCacheDataBalance);
+    CHECK(snapshot_type_ == kItemLockCacheDataBalance);
     lock_contents_.emplace<BalanceLock>(balance_base_);
     return;
   }
@@ -516,12 +516,40 @@ ItemLock::stage_committed_changes(const LockContext &ctx,
   CHECK(is_finalized());
   CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
   CHECK(!std::holds_alternative<ExclusiveLock>(lock_contents_));
+
+  // Clean up auxiliary keys when the snapshot type had them but the committed
+  // type doesn't. Currently only RCQ has auxiliary keys (block entries at
+  // Prefix::kRetrocausalQueueBlock).
+  //
+  // Case 1 (snapshot RCQ → committed RCQ): handled by
+  //   RetrocausalQueueLock::stage_committed_changes via normal consume pruning.
+  // Case 2 (snapshot RCQ → committed non-RCQ, non-Deletion): handled here.
+  // DeletionLock handles its own cleanup via DAO type read.
+  if (snapshot_has_auxiliary_keys()) {
+    // Currently only RCQ has auxiliary keys. If a new aux-key type is added
+    // to snapshot_has_auxiliary_keys(), its cleanup path must be added here.
+    CHECK(snapshot_type_ == kItemLockCacheDataRCQ);
+
+    auto committed_is_rcq =
+        std::holds_alternative<PointerLock<RetrocausalQueueLock>>(
+            lock_contents_);
+    auto committed_is_deletion =
+        std::holds_alternative<DeletionLock>(lock_contents_);
+    if (!committed_is_rcq && !committed_is_deletion) {
+      if (auto r =
+              RetrocausalQueueLock::cleanup_on_deletion(ctx, changes,
+                                                        /*keep_metadata=*/true);
+          !r) {
+        return r;
+      }
+    }
+  }
+
   return std::visit(
       [&](auto &lock) -> HogDBStatus<void> {
-        if constexpr (std::is_same_v<std::decay_t<decltype(lock)>,
-                                     std::monostate> ||
-                      std::is_same_v<std::decay_t<decltype(lock)>,
-                                     ExclusiveLock>) {
+        using LockType = std::decay_t<decltype(lock)>;
+        if constexpr (std::is_same_v<LockType, std::monostate> ||
+                      std::is_same_v<LockType, ExclusiveLock>) {
           panic("bad finalized state");
         }
         else {
