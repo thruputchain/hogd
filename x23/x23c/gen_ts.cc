@@ -18,6 +18,7 @@ struct GenTs {
   string top_;
   string bottom_;
   std::size_t indent_{};
+  vector<string> codec_names_; // collect codec entries for namespace
 
   static constexpr int kIndentWidth = 2;
 
@@ -72,13 +73,22 @@ struct GenTs {
   static string to_camel_case(const string &name);
 
   // Return "proto.X" for user types, mapped name for primitives.
-  // This is the key helper — all generated references to types/codecs use it.
+  // Used in type positions.
   static string ts_ref(const string &t)
   {
     string mapped = map_type(t);
     if (mapped != t)
       return mapped; // primitive → "bigint", "boolean", etc.
     return "proto." + t;
+  }
+
+  // Return the codec value reference for a type.
+  // All codecs live in proto.codec.X (the codec namespace object).
+  static string codec_ref(const string &t)
+  {
+    if (is_primitive_type(t))
+      return {}; // primitives are serialized inline, no codec object
+    return "proto.codec." + t;
   }
 
   // In XDR, union discriminants are either primitives (int/uint/bool) or
@@ -261,7 +271,8 @@ GenTs::show_def(const Typedef &d)
       prtop("}}\n");
 
       // Codec
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      codec_names_.push_back(d.id);
+      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ w.{0}(val); }},\n", map_write_method(base));
       prbottom("  decode(r) {{ return {0}(r.{1}()); }},\n", factory,
                map_read_method(base));
@@ -269,17 +280,20 @@ GenTs::show_def(const Typedef &d)
     }
     else {
       // Branded alias of user type — intersect with base type, delegate codec
-      string ref = ts_ref(base);
+      string tref = ts_ref(base);
+      string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
       prtop("export type {} = {} & {{ readonly __brand: \"{}\" }};\n", d.id,
-            ref, d.id);
-      prtop("export function {}(val: {}): {} {{\n", factory, ref, d.id);
+            tref, d.id);
+      prtop("export function {}(val: {}): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
 
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{ {0}.encode(w, val); }},\n", ref);
-      prbottom("  decode(r) {{ return {0}({1}.decode(r)); }},\n", factory, ref);
+      codec_names_.push_back(d.id);
+      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
+      prbottom("  encode(w, val) {{ {0}.encode(w, val); }},\n", cref);
+      prbottom("  decode(r) {{ return {0}({1}.decode(r)); }},\n", factory,
+               cref);
       prbottom("}};\n");
     }
     break;
@@ -299,7 +313,8 @@ GenTs::show_def(const Typedef &d)
       prtop("  return data as {};\n", d.id);
       prtop("}}\n");
 
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      codec_names_.push_back(d.id);
+      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ w.writeFixedOpaque(val, {0}); }},\n",
                d.bound);
       prbottom("  decode(r) {{ return {0}(r.readFixedOpaque({1})); }},\n",
@@ -308,22 +323,24 @@ GenTs::show_def(const Typedef &d)
     }
     else {
       // Fixed-size array of user type — branded
-      string ref = ts_ref(base);
+      string tref = ts_ref(base);
+      string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
       prtop("export type {} = {}[] & {{ readonly __brand: \"{}\" }};\n", d.id,
-            ref, d.id);
-      prtop("export function {}(val: {}[]): {} {{\n", factory, ref, d.id);
+            tref, d.id);
+      prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
 
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      codec_names_.push_back(d.id);
+      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{\n");
-      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", ref);
+      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", cref);
       prbottom("  }},\n");
       prbottom("  decode(r) {{\n");
       prbottom("    return {0}(Array.from({{ length: {1} }}, () => "
                "{2}.decode(r)));\n",
-               factory, d.bound, ref);
+               factory, d.bound, cref);
       prbottom("  }},\n");
       prbottom("}};\n");
     }
@@ -347,7 +364,8 @@ GenTs::show_def(const Typedef &d)
       prtop("  return data as {};\n", d.id);
       prtop("}}\n");
 
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      codec_names_.push_back(d.id);
+      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ w.writeVarOpaque(val, Number({0})); }},\n",
                bound_str);
       prbottom("  decode(r) {{ return {0}(r.readVarOpaque(Number({1}))); }},\n",
@@ -356,24 +374,26 @@ GenTs::show_def(const Typedef &d)
     }
     else {
       // Variable-length array of user type — branded
-      string ref = ts_ref(base);
+      string tref = ts_ref(base);
+      string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
       prtop("export type {} = {}[] & {{ readonly __brand: \"{}\" }};\n", d.id,
-            ref, d.id);
-      prtop("export function {}(val: {}[]): {} {{\n", factory, ref, d.id);
+            tref, d.id);
+      prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
 
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      codec_names_.push_back(d.id);
+      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{\n");
       prbottom("    w.writeUint32(BigInt(val.length));\n");
-      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", ref);
+      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", cref);
       prbottom("  }},\n");
       prbottom("  decode(r) {{\n");
       prbottom("    const _len = Number(r.readUint32());\n");
       prbottom("    return {0}(Array.from({{ length: _len }}, () => "
                "{1}.decode(r)));\n",
-               factory, ref);
+               factory, cref);
       prbottom("  }},\n");
       prbottom("}};\n");
     }
@@ -390,7 +410,8 @@ GenTs::show_def(const Typedef &d)
     prtop("  return val as {};\n", d.id);
     prtop("}}\n");
 
-    prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+    codec_names_.push_back(d.id);
+    prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
     prbottom("  encode(w, val) {{ w.writeString(val, Number({0})); }},\n",
              bound_str);
     prbottom("  decode(r) {{ return {0}(r.readString(Number({1}))); }},\n",
@@ -401,26 +422,28 @@ GenTs::show_def(const Typedef &d)
   case Declaration::kPtr:
   {
     // Branded nullable
-    string ref = ts_ref(base);
+    string tref = ts_ref(base);
+    string cref = codec_ref(base);
     string factory = to_camel_case(d.id);
     prtop("export type {} = ({} | null) & {{ readonly __brand: \"{}\" }};\n",
-          d.id, ref, d.id);
-    prtop("export function {}(val: {} | null): {} {{\n", factory, ref, d.id);
+          d.id, tref, d.id);
+    prtop("export function {}(val: {} | null): {} {{\n", factory, tref, d.id);
     prtop("  return val as {};\n", d.id);
     prtop("}}\n");
 
-    prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+    codec_names_.push_back(d.id);
+    prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
     prbottom("  encode(w, val) {{\n");
     prbottom("    if (val !== null) {{\n");
     prbottom("      w.writeUint32(1n);\n");
-    prbottom("      {0}.encode(w, val);\n", ref);
+    prbottom("      {0}.encode(w, val);\n", cref);
     prbottom("    }} else {{\n");
     prbottom("      w.writeUint32(0n);\n");
     prbottom("    }}\n");
     prbottom("  }},\n");
     prbottom("  decode(r) {{\n");
     prbottom("    return {0}(Number(r.readUint32()) ? {1}.decode(r) : null);\n",
-             factory, ref);
+             factory, cref);
     prbottom("  }},\n");
     prbottom("}};\n");
     break;
@@ -585,9 +608,9 @@ GenTs::gen_inline_types_union(const UnionBody &body, const string &prefix)
 void
 GenTs::gen_enum_codec(const string &name)
 {
-  // TS allows a const and an enum with the same name (declaration merging).
   // XDR enums are always serialized as int32 on the wire.
-  prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", name);
+  codec_names_.push_back(name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
   prbottom("  encode(w, val) {{ w.writeInt32(BigInt(val)); }},\n");
   prbottom("  decode(r) {{ return Number(r.readInt32()) as {0}; }},\n", name);
   prbottom("}};\n");
@@ -596,7 +619,8 @@ GenTs::gen_enum_codec(const string &name)
 void
 GenTs::gen_struct_codec(const StructBody &body, const string &name)
 {
-  prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", name);
+  codec_names_.push_back(name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
 
   // encode
   prbottom("  encode(w, val) {{\n");
@@ -642,7 +666,8 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
     return c; // numeric literal
   };
 
-  prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", name);
+  codec_names_.push_back(name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
 
   // encode
   prbottom("  encode(w, val) {{\n");
@@ -656,7 +681,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
   else {
     // Primitive discriminant (int/uint)
     string write = map_write_method(body.switch_type);
-    prbottom("    w.{0}(val.{1});\n", write, body.switch_id);
+    prbottom("    w.{0}(BigInt(val.{1}));\n", write, body.switch_id);
   }
   prbottom("    switch (val.{0}) {{\n", body.switch_id);
 
@@ -761,7 +786,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     base = parent_name + "_" + d.id;
 
   string indent(sp, ' ');
-  string ref = ts_ref(base);
+  string ref = codec_ref(base);
 
   switch (d.qual) {
   case Declaration::kScalar:
@@ -821,7 +846,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     base = parent_name + "_" + d.id;
 
   string indent(sp, ' ');
-  string ref = ts_ref(base);
+  string ref = codec_ref(base);
 
   switch (d.qual) {
   case Declaration::kScalar:
@@ -891,6 +916,12 @@ gen_ts(vector<Definition> *defs)
 
   gs.process(*defs);
 
+  // Emit the codec namespace object
+  string codec_ns = "\nexport const codec = {\n";
+  for (const auto &name : gs.codec_names_)
+    codec_ns += std::format("  {0}: _{0},\n", name);
+  codec_ns += "} as const;\n";
+
   return preamble + gs.top_ + "\n//\n// XDR Codecs below this point\n//\n" +
-         gs.bottom_ + "\n";
+         gs.bottom_ + codec_ns + "\n";
 }
