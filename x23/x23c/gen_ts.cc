@@ -50,6 +50,7 @@ struct GenTs {
   void gen_inline_types_union(const UnionBody &body, const string &prefix);
 
   // Codec generators
+  void gen_enum_codec(const string &name);
   void gen_struct_codec(const StructBody &body, const string &name);
   void gen_union_codec(const UnionBody &body, const string &name);
 
@@ -227,8 +228,8 @@ GenTs::show_def(const Typedef &d)
         [this, &d](const auto &spec) {
           using T = std::decay_t<decltype(spec)>;
           if constexpr (std::is_same_v<T, EnumBody>) {
-
             gen_enum_type(spec, d.id);
+            gen_enum_codec(d.id);
           }
           else if constexpr (std::is_same_v<T, StructBody>) {
             gen_struct_type(spec, d.id);
@@ -432,8 +433,8 @@ GenTs::show_def(const Typedef &d)
 void
 GenTs::show_def(const EnumDecl &e)
 {
-
   gen_enum_type(e.body, e.id);
+  gen_enum_codec(e.id);
 }
 
 void
@@ -546,6 +547,7 @@ GenTs::gen_inline_type(const Declaration &d, const string &prefix)
         using T = std::decay_t<decltype(spec)>;
         if constexpr (std::is_same_v<T, EnumBody>) {
           gen_enum_type(spec, name);
+          gen_enum_codec(name);
           prtop("\n");
         }
         else if constexpr (std::is_same_v<T, StructBody>) {
@@ -579,6 +581,17 @@ GenTs::gen_inline_types_union(const UnionBody &body, const string &prefix)
 }
 
 // ---- Codec generators ----
+
+void
+GenTs::gen_enum_codec(const string &name)
+{
+  // TS allows a const and an enum with the same name (declaration merging).
+  // XDR enums are always serialized as int32 on the wire.
+  prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", name);
+  prbottom("  encode(w, val) {{ w.writeInt32(BigInt(val)); }},\n");
+  prbottom("  decode(r) {{ return Number(r.readInt32()) as {0}; }},\n", name);
+  prbottom("}};\n");
+}
 
 void
 GenTs::gen_struct_codec(const StructBody &body, const string &name)
@@ -618,21 +631,38 @@ void
 GenTs::gen_union_codec(const UnionBody &body, const string &name)
 {
   bool is_enum = is_enum_discriminant(body.switch_type);
+  bool is_bool = (body.switch_type == "bool");
+
+  // Map XDR case values to TS case labels
+  auto case_label = [&](const string &c) -> string {
+    if (is_enum)
+      return std::format("proto.{}.{}", body.switch_type, c);
+    if (is_bool)
+      return (c == "TRUE") ? "true" : "false";
+    return c; // numeric literal
+  };
 
   prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", name);
 
   // encode
   prbottom("  encode(w, val) {{\n");
-  prbottom("    w.writeInt32(BigInt(val.{0}));\n", body.switch_id);
+  if (is_bool) {
+    prbottom("    w.writeBool(val.{0});\n", body.switch_id);
+  }
+  else if (is_enum) {
+    // Enum values are numbers in TS
+    prbottom("    w.writeInt32(BigInt(val.{0}));\n", body.switch_id);
+  }
+  else {
+    // Primitive discriminant (int/uint)
+    string write = map_write_method(body.switch_type);
+    prbottom("    w.{0}(val.{1});\n", write, body.switch_id);
+  }
   prbottom("    switch (val.{0}) {{\n", body.switch_id);
 
   for (const auto &arm : body.arms) {
-    for (const auto &c : arm.cases) {
-      if (is_enum)
-        prbottom("      case proto.{0}.{1}:\n", body.switch_type, c);
-      else
-        prbottom("      case {0}:\n", c);
-    }
+    for (const auto &c : arm.cases)
+      prbottom("      case {0}:\n", case_label(c));
     if (arm.has_default)
       prbottom("      default:\n");
 
@@ -646,17 +676,22 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
   // decode
   prbottom("  decode(r) {{\n");
-  prbottom("    const {0} = Number(r.readInt32());\n", body.switch_id);
+  if (is_bool) {
+    prbottom("    const {0} = r.readBool();\n", body.switch_id);
+  }
+  else if (is_enum) {
+    prbottom("    const {0} = Number(r.readInt32());\n", body.switch_id);
+  }
+  else {
+    string read = map_read_method(body.switch_type);
+    prbottom("    const {0} = Number(r.{1}());\n", body.switch_id, read);
+  }
   prbottom("    switch ({0}) {{\n", body.switch_id);
 
   bool has_default = false;
   for (const auto &arm : body.arms) {
-    for (const auto &c : arm.cases) {
-      if (is_enum)
-        prbottom("      case proto.{0}.{1}:\n", body.switch_type, c);
-      else
-        prbottom("      case {0}:\n", c);
-    }
+    for (const auto &c : arm.cases)
+      prbottom("      case {0}:\n", case_label(c));
     if (arm.has_default) {
       has_default = true;
       prbottom("      default:\n");
