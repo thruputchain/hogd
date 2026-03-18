@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <format>
 #include <map>
-#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -14,14 +13,10 @@
 
 #include "x23c/config.h"
 
-using std::string_view;
-
 struct GenTs {
   string top_;
   string bottom_;
   std::size_t indent_{};
-  std::set<string> local_types_;
-  std::set<string> enum_types_;
 
   static constexpr int kIndentWidth = 2;
 
@@ -38,10 +33,10 @@ struct GenTs {
   void show_def(const EnumDecl &e);
   void show_def(const StructDecl &s);
   void show_def(const UnionDecl &u);
-  void show_def(const OpenNS &) {}
-  void show_def(const CloseNS &) {}
-  void show_def(const Literal &l);
-  void show_def(const ProgDef &) {}
+  void show_def(const OpenNS & /*unused*/) {}
+  void show_def(const CloseNS & /*unused*/) {}
+  void show_def(const Literal & /*unused*/) {}
+  void show_def(const ProgDef & /*unused*/) {}
 
   // Type generators
   void gen_enum_type(const EnumBody &body, const string &name);
@@ -49,24 +44,22 @@ struct GenTs {
   void gen_union_type(const UnionBody &body, const string &name);
 
   // Generate inline types from anonymous struct/enum/union bodies
+  void gen_inline_type(const Declaration &d, const string &prefix);
   void gen_inline_types_struct(const StructBody &body, const string &prefix);
   void gen_inline_types_union(const UnionBody &body, const string &prefix);
 
   // Codec generators
-  void gen_typedef_codec(const Typedef &d);
   void gen_struct_codec(const StructBody &body, const string &name);
   void gen_union_codec(const UnionBody &body, const string &name);
 
   // Encode a single field into bottom_
   void encode_field(const Declaration &d, const string &val_expr,
-                    const string &parent_name, int indent_spaces);
+                    const string &parent_name, int sp);
   // Decode a single field, appending statements to bottom_
-  // Returns the variable name holding the decoded value
-  string decode_field(const Declaration &d, const string &parent_name,
-                      int indent_spaces);
+  void decode_field(const Declaration &d, const string &parent_name, int sp);
 
   // TypeScript type for a struct/union field
-  string ts_field_type(const Declaration &d, const string &parent_name);
+  static string ts_field_type(const Declaration &d, const string &parent_name);
 
   // Helpers
   static string map_type(const string &t);
@@ -76,10 +69,21 @@ struct GenTs {
   static bool is_primitive_type(const string &t);
   static string to_camel_case(const string &name);
 
-  bool is_enum_discriminant(const string &switch_type)
+  // Return "proto.X" for user types, mapped name for primitives.
+  // This is the key helper — all generated references to types/codecs use it.
+  static string ts_ref(const string &t)
   {
-    return enum_types_.contains(switch_type) ||
-           (!is_primitive_type(switch_type) && switch_type != "bool");
+    string mapped = map_type(t);
+    if (mapped != t)
+      return mapped; // primitive → "bigint", "boolean", etc.
+    return "proto." + t;
+  }
+
+  // In XDR, union discriminants are either primitives (int/uint/bool) or
+  // enum type names. Any non-primitive, non-bool name is an enum.
+  static bool is_enum_discriminant(const string &switch_type)
+  {
+    return !is_primitive_type(switch_type) && switch_type != "bool";
   }
 
   // Get the base type name from a Declaration's TypeSpecifier
@@ -103,14 +107,6 @@ struct GenTs {
   {
     bottom_ += std::vformat(fmt.get(), std::make_format_args(args...));
   }
-
-  // Append an indented line to bottom_
-  void bottom_line(int indent_spaces, const string &line)
-  {
-    bottom_ += std::string(indent_spaces, ' ');
-    bottom_ += line;
-    bottom_ += '\n';
-  }
 };
 
 // Convert PascalCase to camelCase
@@ -131,12 +127,10 @@ GenTs::to_camel_case(const string &name)
   string result = name;
   if (upper_run == 1 || upper_run == name.size() ||
       !std::islower(name[upper_run])) {
-    // Lowercase the entire uppercase run
     for (size_t i = 0; i < upper_run; ++i)
       result[i] = static_cast<char>(std::tolower(result[i]));
   }
   else {
-    // Lowercase all but the last (which starts the next word)
     for (size_t i = 0; i < upper_run - 1; ++i)
       result[i] = static_cast<char>(std::tolower(result[i]));
   }
@@ -221,36 +215,8 @@ GenTs::show_def(const ConstDef &c)
 }
 
 void
-GenTs::show_def(const Literal &l)
-{
-  // Parse #include directives and emit as comments
-  // The user will need to add proper TS imports
-  string_view lines = l.lines;
-  while (!lines.empty()) {
-    auto nl = lines.find('\n');
-    string_view line = (nl == string_view::npos) ? lines : lines.substr(0, nl);
-    lines = (nl == string_view::npos) ? string_view{} : lines.substr(nl + 1);
-
-    if (line.find("#include") != string_view::npos) {
-      // Extract filename from #include "foo.hh"
-      auto q1 = line.find('"');
-      auto q2 = line.find('"', q1 + 1);
-      if (q1 != string_view::npos && q2 != string_view::npos) {
-        string filename(line.substr(q1 + 1, q2 - q1 - 1));
-        // Strip .hh extension
-        if (filename.ends_with(".hh"))
-          filename = filename.substr(0, filename.size() - 3);
-        prtop("// import {{ ... }} from \"./{}.js\";\n", filename);
-      }
-    }
-  }
-}
-
-void
 GenTs::show_def(const Typedef &d)
 {
-  local_types_.insert(d.id);
-
   if (d.qual == Declaration::kVoid)
     return;
 
@@ -260,7 +226,7 @@ GenTs::show_def(const Typedef &d)
         [this, &d](const auto &spec) {
           using T = std::decay_t<decltype(spec)>;
           if constexpr (std::is_same_v<T, EnumBody>) {
-            enum_types_.insert(d.id);
+
             gen_enum_type(spec, d.id);
           }
           else if constexpr (std::is_same_v<T, StructBody>) {
@@ -270,9 +236,6 @@ GenTs::show_def(const Typedef &d)
           else if constexpr (std::is_same_v<T, UnionBody>) {
             gen_union_type(spec, d.id);
             gen_union_codec(spec, d.id);
-          }
-          else {
-            // string case handled above
           }
         },
         d.type);
@@ -297,17 +260,27 @@ GenTs::show_def(const Typedef &d)
 
       // Codec
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{ w.{0}(val); }},\n", map_write_method(base));
+      prbottom("  encode(w, val) {{ w.{0}(val); }},\n",
+               map_write_method(base));
       prbottom("  decode(r) {{ return {0}(r.{1}()); }},\n", factory,
                map_read_method(base));
       prbottom("}};\n");
     }
     else {
-      // Alias of user type
-      prtop("export type {} = {};\n", d.id, base);
-      // Delegate codec
-      prbottom("\nexport const {0}: XdrCodec<{0}> = {1} as XdrCodec<{0}>;\n",
-               d.id, base);
+      // Branded alias of user type — intersect with base type, delegate codec
+      string ref = ts_ref(base);
+      string factory = to_camel_case(d.id);
+      prtop("export type {} = {} & {{ readonly __brand: \"{}\" }};\n", d.id,
+            ref, d.id);
+      prtop("export function {}(val: {}): {} {{\n", factory, ref, d.id);
+      prtop("  return val as {};\n", d.id);
+      prtop("}}\n");
+
+      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      prbottom("  encode(w, val) {{ {0}.encode(w, val); }},\n", ref);
+      prbottom("  decode(r) {{ return {0}({1}.decode(r)); }},\n", factory,
+               ref);
+      prbottom("}};\n");
     }
     break;
   }
@@ -326,7 +299,6 @@ GenTs::show_def(const Typedef &d)
       prtop("  return data as {};\n", d.id);
       prtop("}}\n");
 
-      // Codec
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ w.writeFixedOpaque(val, {0}); }},\n",
                d.bound);
@@ -335,8 +307,25 @@ GenTs::show_def(const Typedef &d)
       prbottom("}};\n");
     }
     else {
-      // Fixed-size array of user type
-      prtop("export type {} = {}[];\n", d.id, map_type(base));
+      // Fixed-size array of user type — branded
+      string ref = ts_ref(base);
+      string factory = to_camel_case(d.id);
+      prtop("export type {} = {}[] & {{ readonly __brand: \"{}\" }};\n", d.id,
+            ref, d.id);
+      prtop("export function {}(val: {}[]): {} {{\n", factory, ref, d.id);
+      prtop("  return val as {};\n", d.id);
+      prtop("}}\n");
+
+      prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
+      prbottom("  encode(w, val) {{\n");
+      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", ref);
+      prbottom("  }},\n");
+      prbottom("  decode(r) {{\n");
+      prbottom("    return {0}(Array.from({{ length: {1} }}, () => "
+               "{2}.decode(r)));\n",
+               factory, d.bound, ref);
+      prbottom("  }},\n");
+      prbottom("}};\n");
     }
     break;
   }
@@ -358,7 +347,6 @@ GenTs::show_def(const Typedef &d)
       prtop("  return data as {};\n", d.id);
       prtop("}}\n");
 
-      // Codec
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ w.writeVarOpaque(val, Number({0})); }},\n",
                bound_str);
@@ -367,34 +355,25 @@ GenTs::show_def(const Typedef &d)
       prbottom("}};\n");
     }
     else {
-      // Variable-length array of user type: Type[]
-      prtop("export type {} = {}[];\n", d.id, map_type(base));
+      // Variable-length array of user type — branded
+      string ref = ts_ref(base);
+      string factory = to_camel_case(d.id);
+      prtop("export type {} = {}[] & {{ readonly __brand: \"{}\" }};\n", d.id,
+            ref, d.id);
+      prtop("export function {}(val: {}[]): {} {{\n", factory, ref, d.id);
+      prtop("  return val as {};\n", d.id);
+      prtop("}}\n");
 
-      // Vec codec using inline varArray-style
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{\n");
       prbottom("    w.writeUint32(BigInt(val.length));\n");
-      if (is_primitive_type(base)) {
-        prbottom("    for (const _item of val) w.{0}(_item);\n",
-                 map_write_method(base));
-      }
-      else {
-        prbottom("    for (const _item of val) {0}.encode(w, _item);\n",
-                 map_type(base));
-      }
+      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", ref);
       prbottom("  }},\n");
       prbottom("  decode(r) {{\n");
       prbottom("    const _len = Number(r.readUint32());\n");
-      if (is_primitive_type(base)) {
-        prbottom("    return Array.from({{ length: _len }}, () => "
-                 "r.{0}());\n",
-                 map_read_method(base));
-      }
-      else {
-        prbottom("    return Array.from({{ length: _len }}, () => "
-                 "{0}.decode(r));\n",
-                 map_type(base));
-      }
+      prbottom("    return {0}(Array.from({{ length: _len }}, () => "
+               "{1}.decode(r)));\n",
+               factory, ref);
       prbottom("  }},\n");
       prbottom("}};\n");
     }
@@ -402,7 +381,6 @@ GenTs::show_def(const Typedef &d)
   }
   case Declaration::kString:
   {
-    // String typedef: branded string
     string factory = to_camel_case(d.id);
     string bound_str = map_bound(d.bound);
 
@@ -412,7 +390,6 @@ GenTs::show_def(const Typedef &d)
     prtop("  return val as {};\n", d.id);
     prtop("}}\n");
 
-    // Codec
     prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
     prbottom("  encode(w, val) {{ w.writeString(val, Number({0})); }},\n",
              bound_str);
@@ -423,32 +400,27 @@ GenTs::show_def(const Typedef &d)
   }
   case Declaration::kPtr:
   {
-    prtop("export type {} = {} | null;\n", d.id, map_type(base));
+    // Branded nullable
+    string ref = ts_ref(base);
+    string factory = to_camel_case(d.id);
+    prtop("export type {} = ({} | null) & {{ readonly __brand: \"{}\" }};\n",
+          d.id, ref, d.id);
+    prtop("export function {}(val: {} | null): {} {{\n", factory, ref, d.id);
+    prtop("  return val as {};\n", d.id);
+    prtop("}}\n");
 
-    // Nullable codec
     prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
     prbottom("  encode(w, val) {{\n");
     prbottom("    if (val !== null) {{\n");
     prbottom("      w.writeUint32(1n);\n");
-    if (is_primitive_type(base)) {
-      prbottom("      w.{0}(val);\n", map_write_method(base));
-    }
-    else {
-      prbottom("      {0}.encode(w, val);\n", map_type(base));
-    }
+    prbottom("      {0}.encode(w, val);\n", ref);
     prbottom("    }} else {{\n");
     prbottom("      w.writeUint32(0n);\n");
     prbottom("    }}\n");
     prbottom("  }},\n");
     prbottom("  decode(r) {{\n");
-    if (is_primitive_type(base)) {
-      prbottom("    return Number(r.readUint32()) ? r.{0}() : null;\n",
-               map_read_method(base));
-    }
-    else {
-      prbottom("    return Number(r.readUint32()) ? {0}.decode(r) : null;\n",
-               map_type(base));
-    }
+    prbottom("    return {0}(Number(r.readUint32()) ? {1}.decode(r) : null);\n",
+             factory, ref);
     prbottom("  }},\n");
     prbottom("}};\n");
     break;
@@ -461,15 +433,13 @@ GenTs::show_def(const Typedef &d)
 void
 GenTs::show_def(const EnumDecl &e)
 {
-  local_types_.insert(e.id);
-  enum_types_.insert(e.id);
+
   gen_enum_type(e.body, e.id);
 }
 
 void
 GenTs::show_def(const StructDecl &s)
 {
-  local_types_.insert(s.id);
   gen_inline_types_struct(s.body, s.id);
   gen_struct_type(s.body, s.id);
   gen_struct_codec(s.body, s.id);
@@ -478,7 +448,6 @@ GenTs::show_def(const StructDecl &s)
 void
 GenTs::show_def(const UnionDecl &u)
 {
-  local_types_.insert(u.id);
   gen_inline_types_union(u.body, u.id);
   gen_union_type(u.body, u.id);
   gen_union_codec(u.body, u.id);
@@ -524,7 +493,7 @@ GenTs::gen_union_type(const UnionBody &body, const string &name)
     for (const auto &c : arm.cases) {
       string disc_val;
       if (is_enum) {
-        disc_val = std::format("{}.{}", body.switch_type, c);
+        disc_val = std::format("proto.{}.{}", body.switch_type, c);
       }
       else if (body.switch_type == "bool") {
         disc_val = (c == "TRUE") ? "true" : "false";
@@ -543,7 +512,7 @@ GenTs::gen_union_type(const UnionBody &body, const string &name)
     if (arm.has_default) {
       string disc_type;
       if (is_enum) {
-        disc_type = body.switch_type;
+        disc_type = "proto." + body.switch_type;
       }
       else if (body.switch_type == "bool") {
         disc_type = "boolean";
@@ -567,74 +536,47 @@ GenTs::gen_union_type(const UnionBody &body, const string &name)
 // ---- Inline type generators ----
 
 void
+GenTs::gen_inline_type(const Declaration &d, const string &prefix)
+{
+  if (holds_alternative<string>(d.type) || d.qual == Declaration::kVoid)
+    return;
+
+  string name = prefix + "_" + d.id;
+  visit(
+      [this, &name](const auto &spec) {
+        using T = std::decay_t<decltype(spec)>;
+        if constexpr (std::is_same_v<T, EnumBody>) {
+          gen_enum_type(spec, name);
+          prtop("\n");
+        }
+        else if constexpr (std::is_same_v<T, StructBody>) {
+          gen_inline_types_struct(spec, name);
+          gen_struct_type(spec, name);
+          gen_struct_codec(spec, name);
+          prtop("\n");
+        }
+        else if constexpr (std::is_same_v<T, UnionBody>) {
+          gen_inline_types_union(spec, name);
+          gen_union_type(spec, name);
+          gen_union_codec(spec, name);
+          prtop("\n");
+        }
+      },
+      d.type);
+}
+
+void
 GenTs::gen_inline_types_struct(const StructBody &body, const string &prefix)
 {
-  for (const auto &d : body) {
-    if (holds_alternative<string>(d.type))
-      continue;
-
-    string inline_name = prefix + "_" + d.id;
-    visit(
-        [this, &inline_name](const auto &spec) {
-          using T = std::decay_t<decltype(spec)>;
-          if constexpr (std::is_same_v<T, EnumBody>) {
-            enum_types_.insert(inline_name);
-            gen_enum_type(spec, inline_name);
-            prtop("\n");
-          }
-          else if constexpr (std::is_same_v<T, StructBody>) {
-            gen_inline_types_struct(spec, inline_name);
-            gen_struct_type(spec, inline_name);
-            gen_struct_codec(spec, inline_name);
-            prtop("\n");
-          }
-          else if constexpr (std::is_same_v<T, UnionBody>) {
-            gen_inline_types_union(spec, inline_name);
-            gen_union_type(spec, inline_name);
-            gen_union_codec(spec, inline_name);
-            prtop("\n");
-          }
-        },
-        d.type);
-    local_types_.insert(inline_name);
-  }
+  for (const auto &d : body)
+    gen_inline_type(d, prefix);
 }
 
 void
 GenTs::gen_inline_types_union(const UnionBody &body, const string &prefix)
 {
-  for (const auto &arm : body.arms) {
-    const auto &d = arm.decl;
-    if (holds_alternative<string>(d.type))
-      continue;
-    if (d.qual == Declaration::kVoid)
-      continue;
-
-    string inline_name = prefix + "_" + d.id;
-    visit(
-        [this, &inline_name](const auto &spec) {
-          using T = std::decay_t<decltype(spec)>;
-          if constexpr (std::is_same_v<T, EnumBody>) {
-            enum_types_.insert(inline_name);
-            gen_enum_type(spec, inline_name);
-            prtop("\n");
-          }
-          else if constexpr (std::is_same_v<T, StructBody>) {
-            gen_inline_types_struct(spec, inline_name);
-            gen_struct_type(spec, inline_name);
-            gen_struct_codec(spec, inline_name);
-            prtop("\n");
-          }
-          else if constexpr (std::is_same_v<T, UnionBody>) {
-            gen_inline_types_union(spec, inline_name);
-            gen_union_type(spec, inline_name);
-            gen_union_codec(spec, inline_name);
-            prtop("\n");
-          }
-        },
-        d.type);
-    local_types_.insert(inline_name);
-  }
+  for (const auto &arm : body.arms)
+    gen_inline_type(arm.decl, prefix);
 }
 
 // ---- Codec generators ----
@@ -653,9 +595,8 @@ GenTs::gen_struct_codec(const StructBody &body, const string &name)
   }
   prbottom("  }},\n");
 
-  // decode — always use sequential const declarations
+  // decode
   prbottom("  decode(r) {{\n");
-
   vector<string> field_names;
   for (const auto &d : body) {
     if (d.qual == Declaration::kVoid)
@@ -688,20 +629,16 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
   for (const auto &arm : body.arms) {
     for (const auto &c : arm.cases) {
-      if (is_enum) {
-        prbottom("      case {0}.{1}:\n", body.switch_type, c);
-      }
-      else {
+      if (is_enum)
+        prbottom("      case proto.{0}.{1}:\n", body.switch_type, c);
+      else
         prbottom("      case {0}:\n", c);
-      }
     }
-    if (arm.has_default) {
+    if (arm.has_default)
       prbottom("      default:\n");
-    }
 
-    if (arm.decl.qual != Declaration::kVoid) {
+    if (arm.decl.qual != Declaration::kVoid)
       encode_field(arm.decl, "val." + arm.decl.id, name, 8);
-    }
     prbottom("        break;\n");
   }
 
@@ -716,12 +653,10 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
   bool has_default = false;
   for (const auto &arm : body.arms) {
     for (const auto &c : arm.cases) {
-      if (is_enum) {
-        prbottom("      case {0}.{1}:\n", body.switch_type, c);
-      }
-      else {
+      if (is_enum)
+        prbottom("      case proto.{0}.{1}:\n", body.switch_type, c);
+      else
         prbottom("      case {0}:\n", c);
-      }
     }
     if (arm.has_default) {
       has_default = true;
@@ -730,7 +665,8 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
     if (arm.decl.qual != Declaration::kVoid) {
       decode_field(arm.decl, name, 8);
-      prbottom("        return {{ {0}, {1} }};\n", body.switch_id, arm.decl.id);
+      prbottom("        return {{ {0}, {1} }};\n", body.switch_id,
+               arm.decl.id);
     }
     else {
       prbottom("        return {{ {0} }} as {1};\n", body.switch_id, name);
@@ -748,12 +684,6 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
   prbottom("}};\n");
 }
 
-void
-GenTs::gen_typedef_codec(const Typedef &d)
-{
-  // Handled inline in show_def(Typedef)
-}
-
 // ---- Field type mapping ----
 
 string
@@ -762,29 +692,28 @@ GenTs::ts_field_type(const Declaration &d, const string &parent_name)
   string base = base_type_name(d);
 
   // For inline type bodies, use the generated name
-  if (!holds_alternative<string>(d.type)) {
+  if (!holds_alternative<string>(d.type))
     base = parent_name + "_" + d.id;
-  }
 
   switch (d.qual) {
   case Declaration::kScalar:
-    return map_type(base);
+    return ts_ref(base);
   case Declaration::kArray:
     if (base == "opaque")
       return "Uint8Array";
-    return map_type(base) + "[]";
+    return ts_ref(base) + "[]";
   case Declaration::kVec:
     if (base == "opaque")
       return "Uint8Array";
-    return map_type(base) + "[]";
+    return ts_ref(base) + "[]";
   case Declaration::kString:
     return "string";
   case Declaration::kPtr:
-    return map_type(base) + " | null";
+    return ts_ref(base) + " | null";
   case Declaration::kVoid:
     return "void";
   }
-  return "unknown";
+  __builtin_unreachable();
 }
 
 // ---- Field encode/decode ----
@@ -798,34 +727,25 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     base = parent_name + "_" + d.id;
 
   string indent(sp, ' ');
+  string ref = ts_ref(base);
 
   switch (d.qual) {
   case Declaration::kScalar:
-    if (is_primitive_type(base)) {
+    if (is_primitive_type(base))
       bottom_ += std::format("{}w.{}({});\n", indent, map_write_method(base),
                              val_expr);
-    }
-    else {
-      bottom_ += std::format("{}{}.encode(w, {});\n", indent, base, val_expr);
-    }
+    else
+      bottom_ += std::format("{}{}.encode(w, {});\n", indent, ref, val_expr);
     break;
 
   case Declaration::kArray:
-    if (base == "opaque") {
+    if (base == "opaque")
       bottom_ += std::format("{}w.writeFixedOpaque({}, {});\n", indent,
                              val_expr, d.bound);
-    }
-    else {
-      if (is_primitive_type(base)) {
-        bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n",
-                               indent, val_expr, map_write_method(base));
-      }
-      else {
-        bottom_ +=
-            std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                        indent, val_expr, map_type(base));
-      }
-    }
+    else
+      bottom_ +=
+          std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
+                      indent, val_expr, ref);
     break;
 
   case Declaration::kVec:
@@ -836,15 +756,9 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     else {
       bottom_ += std::format("{}w.writeUint32(BigInt({}.length));\n", indent,
                              val_expr);
-      if (is_primitive_type(base)) {
-        bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n",
-                               indent, val_expr, map_write_method(base));
-      }
-      else {
-        bottom_ +=
-            std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                        indent, val_expr, map_type(base));
-      }
+      bottom_ +=
+          std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
+                      indent, val_expr, ref);
     }
     break;
 
@@ -856,13 +770,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
   case Declaration::kPtr:
     bottom_ += std::format("{}if ({} !== null) {{\n", indent, val_expr);
     bottom_ += std::format("{}  w.writeUint32(1n);\n", indent);
-    if (is_primitive_type(base)) {
-      bottom_ += std::format("{}  w.{}({});\n", indent, map_write_method(base),
-                             val_expr);
-    }
-    else {
-      bottom_ += std::format("{}  {}.encode(w, {});\n", indent, base, val_expr);
-    }
+    bottom_ += std::format("{}  {}.encode(w, {});\n", indent, ref, val_expr);
     bottom_ += std::format("{}}} else {{\n", indent);
     bottom_ += std::format("{}  w.writeUint32(0n);\n", indent);
     bottom_ += std::format("{}}}\n", indent);
@@ -873,7 +781,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
   }
 }
 
-string
+void
 GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
 {
   string base = base_type_name(d);
@@ -881,37 +789,27 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     base = parent_name + "_" + d.id;
 
   string indent(sp, ' ');
+  string ref = ts_ref(base);
 
   switch (d.qual) {
   case Declaration::kScalar:
-    if (is_primitive_type(base)) {
+    if (is_primitive_type(base))
       bottom_ += std::format("{}const {} = r.{}();\n", indent, d.id,
                              map_read_method(base));
-    }
-    else {
+    else
       bottom_ +=
-          std::format("{}const {} = {}.decode(r);\n", indent, d.id, base);
-    }
-    return d.id;
+          std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref);
+    break;
 
   case Declaration::kArray:
-    if (base == "opaque") {
+    if (base == "opaque")
       bottom_ += std::format("{}const {} = r.readFixedOpaque({});\n", indent,
                              d.id, d.bound);
-    }
-    else {
-      if (is_primitive_type(base)) {
-        bottom_ += std::format(
-            "{}const {} = Array.from({{ length: {} }}, () => r.{}());\n",
-            indent, d.id, d.bound, map_read_method(base));
-      }
-      else {
-        bottom_ += std::format(
-            "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
-            indent, d.id, d.bound, map_type(base));
-      }
-    }
-    return d.id;
+    else
+      bottom_ += std::format(
+          "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
+          indent, d.id, d.bound, ref);
+    break;
 
   case Declaration::kVec:
     if (base == "opaque") {
@@ -922,41 +820,26 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       string len_var = "_" + d.id + "_len";
       bottom_ += std::format("{}const {} = Number(r.readUint32());\n", indent,
                              len_var);
-      if (is_primitive_type(base)) {
-        bottom_ += std::format(
-            "{}const {} = Array.from({{ length: {} }}, () => r.{}());\n",
-            indent, d.id, len_var, map_read_method(base));
-      }
-      else {
-        bottom_ += std::format(
-            "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
-            indent, d.id, len_var, map_type(base));
-      }
+      bottom_ += std::format(
+          "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
+          indent, d.id, len_var, ref);
     }
-    return d.id;
+    break;
 
   case Declaration::kString:
     bottom_ += std::format("{}const {} = r.readString(Number({}));\n", indent,
                            d.id, map_bound(d.bound));
-    return d.id;
+    break;
 
   case Declaration::kPtr:
-    if (is_primitive_type(base)) {
-      bottom_ +=
-          std::format("{}const {} = Number(r.readUint32()) ? r.{}() : null;\n",
-                      indent, d.id, map_read_method(base));
-    }
-    else {
-      bottom_ += std::format(
-          "{}const {} = Number(r.readUint32()) ? {}.decode(r) : null;\n",
-          indent, d.id, base);
-    }
-    return d.id;
+    bottom_ += std::format(
+        "{}const {} = Number(r.readUint32()) ? {}.decode(r) : null;\n", indent,
+        d.id, ref);
+    break;
 
   case Declaration::kVoid:
-    return {};
+    break;
   }
-  return {};
 }
 
 // ---- Entry point ----
@@ -966,13 +849,15 @@ gen_ts(vector<Definition> *defs)
 {
   GenTs gs;
 
-  string preamble = "// -*- TypeScript -*-\n"
-                    "// Generated Code: DO NOT CHECK IN\n"
-                    "\n"
-                    "// Generated from x23c commit: " +
-                    x23::git_commit_hash() +
-                    "\n\n"
-                    "import type { XdrCodec } from \"./xdr_codec.js\";\n";
+  string preamble =
+      "// -*- TypeScript -*-\n"
+      "// Generated Code: DO NOT CHECK IN\n"
+      "\n"
+      "// Generated from x23c commit: " +
+      x23::git_commit_hash() +
+      "\n\n"
+      "import type { XdrCodec } from \"../xdr/codec.js\";\n"
+      "import * as proto from \"./index.js\";\n";
 
   gs.process(*defs);
 
