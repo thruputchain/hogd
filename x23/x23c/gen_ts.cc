@@ -4,9 +4,10 @@
 #include <format>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
-#include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 #include "x23c/defs.h"
@@ -713,7 +714,8 @@ GenTs::ts_field_type(const Declaration &d, const string &parent_name)
   case Declaration::kVoid:
     return "void";
   }
-  __builtin_unreachable();
+  throw std::runtime_error(
+      std::format("Unknown declaration qual: {}", std::to_underlying(d.qual)));
 }
 
 // ---- Field encode/decode ----
