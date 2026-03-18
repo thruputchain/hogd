@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "contract.hh"
-#include "hogd/base/log.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
