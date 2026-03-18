@@ -1,6 +1,7 @@
 #include "contract_loader.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -9,17 +10,30 @@
 #include <utility>
 
 #include "contract.hh"
+#include "x23/x23/progname.h"
 
 namespace hogd {
 
 namespace {
+
 ContractBlob
 load_raw_file(std::string_view filename)
 {
-  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + std::string(filename);
-  FILE *f = std::fopen(file.c_str(), "r");
-  if (f == nullptr)
-    throw std::runtime_error("failed to load wasm file: " + file);
+  std::vector<std::filesystem::path> search_directories{
+      std::filesystem::path(CMAKE_ROOT_BINARY_DIR) / "built_contracts",
+      std::filesystem::path(x23::getprogpath()).remove_filename()};
+  FILE *f = nullptr;
+  for (const std::filesystem::path &search_dir : search_directories) {
+    std::filesystem::path path = search_dir / filename;
+    f = std::fopen(path.c_str(), "r");
+    if (f) {
+      break;
+    }
+  }
+  if (!f) {
+    throw std::runtime_error("failed to load wasm file: " +
+                             std::string(filename));
+  }
 
   ContractBlob contents;
   constexpr size_t kBufferSize = 65536;
@@ -36,14 +50,17 @@ load_raw_file(std::string_view filename)
 
   return contents;
 }
-}
 
-ContractBlob load_contract_blob(std::string_view filename)
+} // namespace
+
+ContractBlob
+load_contract_blob(std::string_view filename)
 {
-  return load_raw_file("/built_contracts/" + std::string(filename));
+  return load_raw_file(filename);
 }
 
-std::shared_ptr<Contract> load_contract(std::string_view filename)
+std::shared_ptr<Contract>
+load_contract(std::string_view filename)
 {
   auto wasm = load_contract_blob(filename);
   auto out = std::make_shared<Contract>(ContractType::kWasmi);

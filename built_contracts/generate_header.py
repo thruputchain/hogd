@@ -7,59 +7,66 @@ import os
 import re
 import traceback
 
-def generate_header(json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None):
+
+def generate_header(
+    json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None
+):
     """Generate a C++ header file from a JSON contract spec."""
-    
-    with open(json_file, 'r') as f:
+
+    with open(json_file, "r") as f:
         content = f.read()
-    
+
     # Fix the malformed JSON by properly escaping the typespec values
     # Replace the problematic typespec patterns
     content = re.sub(r'"typespec": "([^"]*)"', r'"typespec": "\1"', content)
-    
+
     try:
         spec = json.loads(content)
     except json.JSONDecodeError as e:
         # Show which file failed and context around the error
-        lines = content.split('\n')
+        lines = content.split("\n")
         error_line = e.lineno - 1  # JSONDecodeError uses 1-based indexing
         start_line = max(0, error_line - 4)
         end_line = min(len(lines), error_line + 5)
-        context = '\n'.join(f"{i+1:4d}: {lines[i]}" for i in range(start_line, end_line))
+        context = "\n".join(
+            f"{i+1:4d}: {lines[i]}" for i in range(start_line, end_line)
+        )
         error_msg = f"Failed to parse {json_file} at line {e.lineno}, column {e.colno}:\n{context}\n\nOriginal error: {e}"
         raise ValueError(error_msg) from e
-    
-    interface_name = spec['interface']
-    version = spec['version']
-    methods = spec['methods']
-    
+
+    interface_name = spec["interface"]
+    version = spec["version"]
+    methods = spec["methods"]
+
     # Generate export names
-    export_names = [method['name'] for method in methods]
-    entrypoints = [method['entrypoint'] for method in methods]
-    export_names_str = ',\n            '.join(f'"{name}"' for name in export_names)
-    entrypoints_str = ',\n            '.join(f"{ep}ULL" for ep in entrypoints)
-    
+    export_names = [method["name"] for method in methods]
+    entrypoints = [method["entrypoint"] for method in methods]
+    export_names_str = ",\n            ".join(f'"{name}"' for name in export_names)
+    entrypoints_str = ",\n            ".join(f"{ep}ULL" for ep in entrypoints)
+
     # Generate function signatures
     function_signatures = []
     forward_decls = []
     for method in methods:
         try:
             # Map JSON types to C++ types
-            return_typespec = method['return']
+            return_typespec = method["return"]
             return_type = map_type_from_typespec(return_typespec)
             err_type = None
             if "err" in method:
-                err_type = method['err'] # Possible TODO(geoff): swap the error type to a typespec, instead of a string
+                err_type = method[
+                    "err"
+                ]  # Possible TODO(geoff): swap the error type to a typespec, instead of a string
                 forward_decls.append(f"class {err_type};")
 
             args = []
-            for arg in method['args']:
-                arg_type = map_type_from_typespec(arg['typespec'])
+            for arg in method["args"]:
+                arg_type = map_type_from_typespec(arg["typespec"])
                 args.append(arg_type)
 
             if err_type:
                 return_type = f"Result<{return_type}, {err_type}>"
-            
+
             if args:
                 signature = f"{return_type}(*)({', '.join(args)})"
             else:
@@ -69,21 +76,27 @@ def generate_header(json_file, output_file=None, namespace=None, extra_includes=
             print(f"Error processing method {method}: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
             raise
-    
-    signatures_str = ',\n             '.join(function_signatures)
+
+    signatures_str = ",\n             ".join(function_signatures)
 
     namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
     namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
 
-    wasm_str = f"constexpr static std::string_view kWasmFile = \"{wasm_file}\";" if wasm_file else ""
-    
+    wasm_str = (
+        f'constexpr static std::string_view kWasmFile = "{wasm_file}";'
+        if wasm_file
+        else ""
+    )
+
     if extra_includes:
-        extra_includes_str = '\n'.join(f"#include \"{include}\"" for include in extra_includes)
+        extra_includes_str = "\n".join(
+            f'#include "{include}"' for include in extra_includes
+        )
     else:
         extra_includes_str = ""
 
     # Generate the header content
-    header_content = f'''#pragma once
+    header_content = f"""#pragma once
 
 #include <array>
 #include <cstddef>
@@ -126,14 +139,15 @@ struct {interface_name} {{
 
 {namespace_close}
 
-'''
-    
+"""
+
     if output_file:
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             f.write(header_content)
         print(f"Generated header file: {output_file}")
     else:
         print(header_content)
+
 
 def map_type_from_typespec(typespec):
     """Map typespec JSON strings to C++ types.
@@ -195,6 +209,7 @@ def map_type_from_typespec(typespec):
     else:
         return t
 
+
 def is_tuple_struct(fields):
     """Check if struct fields match tuple pattern (unnamed_0, unnamed_1, ...) or wrapper patterns (unnamed_optional)."""
     if not fields:
@@ -212,6 +227,7 @@ def is_tuple_struct(fields):
 
     return True
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate a C++ header file from a JSON contract spec.",
@@ -221,49 +237,59 @@ Examples:
   %(prog)s contract.json
   %(prog)s contract.json -o contract.h
   %(prog)s contract.json --output contract.h --namespace mycontract
-        """
-    )
-    
-    parser.add_argument(
-        'json_spec_file',
-        help='Path to the JSON contract specification file'
-    )
-    
-    parser.add_argument(
-        '-o', '--output',
-        dest='output_file',
-        help='Output header file path (if not specified, prints to stdout)'
-    )
-    
-    parser.add_argument(
-        '-n', '--namespace',
-        help='C++ namespace to wrap the generated code'
+        """,
     )
 
     parser.add_argument(
-        '-w', '--wasm',
-        dest='wasm_file',
-        help='WASM file to include in the generated header'
+        "json_spec_file", help="Path to the JSON contract specification file"
     )
 
     parser.add_argument(
-        '-i', '--include',
-        dest='extra_includes',
-        action='append',
-        help='Additional header files to include (can be specified multiple times)'
+        "-o",
+        "--output",
+        dest="output_file",
+        help="Output header file path (if not specified, prints to stdout)",
     )
-    
+
+    parser.add_argument(
+        "-n", "--namespace", help="C++ namespace to wrap the generated code"
+    )
+
+    parser.add_argument(
+        "-w",
+        "--wasm",
+        dest="wasm_file",
+        help="WASM file to include in the generated header",
+    )
+
+    parser.add_argument(
+        "-i",
+        "--include",
+        dest="extra_includes",
+        action="append",
+        help="Additional header files to include (can be specified multiple times)",
+    )
+
     args = parser.parse_args()
-    
+
     if not os.path.exists(args.json_spec_file):
-        print(f"Error: JSON spec file '{args.json_spec_file}' not found", file=sys.stderr)
+        print(
+            f"Error: JSON spec file '{args.json_spec_file}' not found", file=sys.stderr
+        )
         sys.exit(1)
-    
+
     try:
-        generate_header(args.json_spec_file, args.output_file, args.namespace, args.extra_includes, args.wasm_file)
+        generate_header(
+            args.json_spec_file,
+            args.output_file,
+            args.namespace,
+            args.extra_includes,
+            args.wasm_file,
+        )
     except Exception as e:
         print(f"Error generating header: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
