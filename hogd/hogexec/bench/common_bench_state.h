@@ -160,7 +160,7 @@ private:
   {
     std::string hostname;
     CHECK_EQ(get_hostname(hostname), 0);
-    std::string mempool_id = hog_ip(hostname);
+    std::string mempool_ip = hog_ip(hostname);
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
