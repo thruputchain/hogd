@@ -30,6 +30,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/bench/common_bench_state.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/bench/mock_scheduler.h"
 #include "hogd/init.h"
@@ -396,12 +397,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
+  std::string mempool_ip = hog_ip(hostname);
 
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/event/event_exec",
-      {"--bind-ip", "127.0.0.1", "--mempool-addr",
-       std::format("{}:{}", hostname, sched_event_port), "--work-dir",
+      {"--bind-ip", hog_ip(server_addrs[server_idx]), "--mempool-addr",
+       std::format("{}:{}", mempool_ip, sched_event_port), "--work-dir",
        work_dir_str});
   server_idx++;
 
@@ -415,15 +417,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hogdb/hogdb",
       {"--db-path", work_dir_str, "--ram-bytes", "10000000000", "--bind-ip",
-       "127.0.0.1", "--coordinator-addr",
-       std::format("{}:{}", hostname, sched_db_port)});
+       hog_ip(server_addrs[server_idx]), "--coordinator-addr",
+       std::format("{}:{}", mempool_ip, sched_db_port)});
   server_idx++;
 
   for (; server_idx < server_addrs.size(); server_idx++) {
     control_server_handles[server_idx].ci_client.start_server(
         "hogd/hogexec/hogexec",
-        {"--bind-ip", "127.0.0.1", "--coordinator-addr",
-         std::format("{}:{}", hostname, sched_exec_port), "-n", "1024"});
+        {"--bind-ip", hog_ip(server_addrs[server_idx]), "--coordinator-addr",
+         std::format("{}:{}", mempool_ip, sched_exec_port), "-n", "1024"});
   }
 
   auto db_cards = sched_db_test->impl()->await_shard_cards(1);
