@@ -203,7 +203,11 @@ GenTs::map_bound(const string &b)
 {
   if (b.empty())
     return "0xFFFFFFFF";
-  return b;
+  // Numeric literals (e.g. "32", "0xFFFFFFFF") pass through.
+  // Named constants (e.g. "kMaxSigners") need the proto. prefix.
+  if (std::isdigit(b[0]))
+    return b;
+  return "proto." + b;
 }
 
 // ---- Process all definitions ----
@@ -798,13 +802,19 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     break;
 
   case Declaration::kArray:
+  {
+    string bound = map_bound(d.bound);
     if (base == "opaque")
-      bottom_ += std::format("{}w.writeFixedOpaque({}, {});\n", indent,
-                             val_expr, d.bound);
+      bottom_ += std::format("{}w.writeFixedOpaque({}, Number({}));\n", indent,
+                             val_expr, bound);
+    else if (is_primitive_type(base))
+      bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n", indent,
+                             val_expr, map_write_method(base));
     else
       bottom_ += std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
                              indent, val_expr, ref);
     break;
+  }
 
   case Declaration::kVec:
     if (base == "opaque") {
@@ -814,8 +824,13 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     else {
       bottom_ += std::format("{}w.writeUint32(BigInt({}.length));\n", indent,
                              val_expr);
-      bottom_ += std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                             indent, val_expr, ref);
+      if (is_primitive_type(base))
+        bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n",
+                               indent, val_expr, map_write_method(base));
+      else
+        bottom_ +=
+            std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
+                        indent, val_expr, ref);
     }
     break;
 
@@ -858,14 +873,23 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     break;
 
   case Declaration::kArray:
+  {
+    string bound = map_bound(d.bound);
     if (base == "opaque")
-      bottom_ += std::format("{}const {} = r.readFixedOpaque({});\n", indent,
-                             d.id, d.bound);
+      bottom_ += std::format("{}const {} = r.readFixedOpaque(Number({}));\n",
+                             indent, d.id, bound);
+    else if (is_primitive_type(base))
+      bottom_ +=
+          std::format("{}const {} = Array.from({{ length: Number({}) }}, () => "
+                      "r.{}());\n",
+                      indent, d.id, bound, map_read_method(base));
     else
-      bottom_ += std::format(
-          "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
-          indent, d.id, d.bound, ref);
+      bottom_ +=
+          std::format("{}const {} = Array.from({{ length: Number({}) }}, () => "
+                      "{}.decode(r));\n",
+                      indent, d.id, bound, ref);
     break;
+  }
 
   case Declaration::kVec:
     if (base == "opaque") {
@@ -876,9 +900,14 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       string len_var = "_" + d.id + "_len";
       bottom_ += std::format("{}const {} = Number(r.readUint32());\n", indent,
                              len_var);
-      bottom_ += std::format(
-          "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
-          indent, d.id, len_var, ref);
+      if (is_primitive_type(base))
+        bottom_ += std::format(
+            "{}const {} = Array.from({{ length: {} }}, () => r.{}());\n",
+            indent, d.id, len_var, map_read_method(base));
+      else
+        bottom_ += std::format(
+            "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
+            indent, d.id, len_var, ref);
     }
     break;
 
