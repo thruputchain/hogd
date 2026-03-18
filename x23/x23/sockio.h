@@ -52,11 +52,20 @@ void enable_abortive_close(BorrowedFd fd);
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6).
 // stcplisten does not make the socket non-blocking
 UniqueFd stcplisten(std::uint16_t port, int backlog = 5);
+UniqueFd stcplisten(const sockaddr_storage &bind_addr, int backlog = 5);
 
 inline UniqueFd
 tcplisten(uint16_t port, int backlog = 5)
 {
   auto fd = stcplisten(port, backlog);
+  set_nonblock(fd);
+  return fd;
+}
+
+inline UniqueFd
+tcplisten(const sockaddr_storage &bind_addr, int backlog = 5)
+{
+  auto fd = stcplisten(bind_addr, backlog);
   set_nonblock(fd);
   return fd;
 }
@@ -123,6 +132,7 @@ struct HostPort {
   // system to resolve host names and might block.  Otherwise, if dns
   // is false, the host must be numeric.
   std::expected<sockaddr_storage, GaiError> to_addr(bool dns = false);
+  std::expected<sockaddr_storage, GaiError> to_addr(bool dns) const;
 };
 
 Str show_addr(const sockaddr *);

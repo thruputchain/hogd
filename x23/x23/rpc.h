@@ -576,6 +576,20 @@ rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
   return RpcStream<Logger>::make(cp, UniqueFd{fd}, Logger(fd, logfd));
 }
 
+inline void
+start_listening(CoroPoll &cp, UniqueFd &lfd, auto cb)
+{
+  [&cp, lfd = std::move(lfd),
+   cb = std::move(cb)](this auto /*copy*/) -> Detached {
+    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
+    while (auto c = co_await (cp.accept(lfd))) {
+      server_trace().with_logger(*c, [&](auto logger) {
+        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
+                                                          std::move(logger)));
+      });
+    }
+  }();
+}
 // Listen on a TCP port, and for each incoming connection invoke a
 // callback with a new configurator.  Sets logging based on the
 // X23SERVER_TRACE_progname or X23SERVER_TRACE environment variable.
@@ -605,17 +619,22 @@ tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
   if (port == 0)
     port = get_port(local_addr(lfd));
 
-  [&cp, lfd = std::move(lfd),
-   cb = std::move(cb)](this auto /*copy*/) -> Detached {
-    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
-    while (auto c = co_await (cp.accept(lfd))) {
-      server_trace().with_logger(*c, [&](auto logger) {
-        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
-                                                          std::move(logger)));
-      });
-    }
-  }();
+  start_listening(cp, lfd, std::move(cb));
+  return std::pair{port, rawfd};
+}
 
+std::pair<uint16_t, BorrowedFd>
+tcp_rpc_server(CoroPoll &cp, const sockaddr_storage &bind_addr, auto cb,
+               int backlog = -1)
+    requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
+{
+  if (backlog < 0)
+    backlog = 5 + cp.pool_.nthreads_;
+  auto lfd = tcplisten(bind_addr, backlog);
+  int rawfd = lfd.get();
+  uint16_t port = get_port(local_addr(lfd));
+
+  start_listening(cp, lfd, std::move(cb));
   return std::pair{port, rawfd};
 }
 
@@ -628,6 +647,21 @@ tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
   DestroyInhibit di;
   tcp_rpc_server(
       cp, port,
+      [cb = std::move(cb), _di = RefPtr(di)](auto configurator) {
+        std::invoke(cb, std::move(configurator));
+      },
+      backlog);
+  di.destroy_wait();
+}
+
+void
+tcp_rpc_server_wait(CoroPoll &cp, const sockaddr_storage &bind_addr, auto cb,
+                    int backlog = -1)
+    requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
+{
+  DestroyInhibit di;
+  tcp_rpc_server(
+      cp, bind_addr,
       [cb = std::move(cb), _di = RefPtr(di)](auto configurator) {
         std::invoke(cb, std::move(configurator));
       },

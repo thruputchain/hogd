@@ -54,6 +54,35 @@ TEST(SockioRegression, HostPortParseBracketedIpv6)
   EXPECT_EQ(std::string_view(hp.port), "443");
 }
 
+TEST(SockioRegression, ExplicitIpv4BindReportsActualPort)
+{
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+
+  UniqueFd listener = stcplisten(*bind_addr);
+  ASSERT_TRUE(listener);
+
+  sockaddr_storage actual_addr = local_addr(listener);
+  EXPECT_EQ(actual_addr.ss_family, AF_INET);
+  EXPECT_EQ(std::string_view(HostPort(actual_addr).host), "127.0.0.1");
+  EXPECT_NE(get_port(actual_addr), 0);
+}
+
+TEST(SockioRegression, ExplicitIpv6BindReportsActualPort)
+{
+  auto bind_addr = HostPort{"::1", 0}.to_addr();
+  if (!bind_addr.has_value())
+    GTEST_SKIP() << "IPv6 loopback is unavailable";
+
+  UniqueFd listener = stcplisten(*bind_addr);
+  ASSERT_TRUE(listener);
+
+  sockaddr_storage actual_addr = local_addr(listener);
+  EXPECT_EQ(actual_addr.ss_family, AF_INET6);
+  EXPECT_EQ(std::string_view(HostPort(actual_addr).host), "::1");
+  EXPECT_NE(get_port(actual_addr), 0);
+}
+
 TEST(SockioRegression, BoundedStrCStr)
 {
   BoundedStr<12> bs = "Hello, world";

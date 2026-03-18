@@ -69,6 +69,24 @@ get_send_recv_buf_sizes()
 }
 #endif
 
+void
+set_cloexec(BorrowedFd fd)
+{
+  if (int flags = fcntl(fd.get(), F_GETFD);
+      flags == -1 || fcntl(fd.get(), F_SETFD, flags | FD_CLOEXEC) == -1)
+    Errno{}.raise("F_SETFD");
+}
+
+void
+enable_reuseaddr_if_needed(BorrowedFd fd, std::uint16_t port)
+{
+  if (!port)
+    return;
+  int opt = 1;
+  if (setsockopt(fd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    Errno{}.raise("SO_REUSEADDR");
+}
+
 } // namespace
 
 void
@@ -117,18 +135,12 @@ stcplisten(std::uint16_t port, int backlog)
   UniqueFd lfd(socket(AF_INET6, SOCK_STREAM, 0));
   if (!lfd)
     Errno{}.raise("socket");
-  if (int flags = fcntl(lfd.get(), F_GETFD);
-      flags == -1 || fcntl(lfd.get(), F_SETFD, flags | FD_CLOEXEC) == -1)
-    Errno{}.raise("F_SETFD");
+  set_cloexec(lfd);
 
   int opt = 0;
   if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
     Errno{}.raise("IPV6_V6ONLY");
-  if (port) {
-    opt = 1;
-    if (setsockopt(lfd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-      Errno{}.raise("SO_REUSEADDR");
-  }
+  enable_reuseaddr_if_needed(lfd, port);
 
   struct sockaddr_in6 addr;
   memset(&addr, 0, sizeof(addr));
@@ -138,6 +150,40 @@ stcplisten(std::uint16_t port, int backlog)
   if (bind(lfd.get(), reinterpret_cast<struct sockaddr *>(&addr),
            sizeof(addr)) < 0)
     Errno{}.raise("bind in6addr_any");
+
+  if (listen(lfd.get(), backlog) < 0)
+    Errno{}.raise("listen");
+  return lfd;
+}
+
+UniqueFd
+stcplisten(const sockaddr_storage &bind_addr, int backlog)
+{
+  UniqueFd lfd(socket(bind_addr.ss_family, SOCK_STREAM, 0));
+  if (!lfd)
+    Errno{}.raise("socket({}, SOCK_STREAM, 0)", bind_addr.ss_family);
+  set_cloexec(lfd);
+
+  switch (bind_addr.ss_family) {
+  case AF_INET:
+    enable_reuseaddr_if_needed(lfd, get_port(bind_addr));
+    break;
+  case AF_INET6:
+  {
+    int opt = 1;
+    if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
+      Errno{}.raise("IPV6_V6ONLY");
+    enable_reuseaddr_if_needed(lfd, get_port(bind_addr));
+    break;
+  }
+  default:
+    Errno(EINVAL).raise("Invalid address family {} for TCP listener",
+                        bind_addr.ss_family);
+  }
+
+  if (bind(lfd.get(), reinterpret_cast<const sockaddr *>(&bind_addr),
+           sockaddr_len(bind_addr)) < 0)
+    Errno{}.raise("bind({})", HostPort(bind_addr));
 
   if (listen(lfd.get(), backlog) < 0)
     Errno{}.raise("listen");
@@ -302,6 +348,12 @@ HostPort::parse(std::string_view s)
 
 std::expected<sockaddr_storage, GaiError>
 HostPort::to_addr(bool dns)
+{
+  return static_cast<const HostPort &>(*this).to_addr(dns);
+}
+
+std::expected<sockaddr_storage, GaiError>
+HostPort::to_addr(bool dns) const
 {
   addrinfo hints;
   memset(&hints, 0, sizeof(hints));
