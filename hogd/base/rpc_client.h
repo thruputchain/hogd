@@ -30,6 +30,7 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
   while (true) {
+    info("make_rpc_client: connecting to {}", x23::HostPort(ss));
     std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
     if (!res) {
       if (retry && res.error().error_code() == std::errc::connection_refused) {
@@ -66,7 +67,6 @@ auto
 make_rpc_client(x23::HostPort host_port, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
-  info("make_rpc_client: Creating RPC client for {}", host_port.show());
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());

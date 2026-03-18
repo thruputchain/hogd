@@ -1,5 +1,5 @@
 # Returns the IP address for a given hog machine hostname.
-# Example: if "hog12" is the argument, returns "10.10.69.112"
+# Example: if "hog12" is the argument, returns "10.100.0.112"
 hog_ip() {
   local host=$1
   local hog_num=${host#hog}
@@ -7,5 +7,5 @@ hog_ip() {
     echo "invalid hog host: $host" >&2
     return 1
   fi
-  echo "10.10.69.$((100 + hog_num))"
+  echo "10.100.0.$((100 + hog_num))"
 }
