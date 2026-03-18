@@ -250,7 +250,9 @@ SystemCallHandler::root_invoke()
 void
 SystemCallHandler::finalize_after_root_frame()
 {
+  assert(!finalized_);
   assert(invocation_frame_stack_.empty());
+  finalized_ = true;
 
   if (!cumulative_invoke_result_.is_root_success()) {
     return;

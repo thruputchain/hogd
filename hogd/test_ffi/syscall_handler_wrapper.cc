@@ -216,6 +216,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // When the root (last) mock frame finishes, run the same finalization
   // that root_invoke() does so that try_commit_transaction() can proceed.
+  // NOTE: mock path starts with gas_consumed_ == 0, so assignment == +=.
   if (handler_.last_frame_finished()) {
     handler_.mock_set_cumulative_invoke_result(result);
     handler_.finalize_after_root_frame();

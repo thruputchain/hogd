@@ -148,9 +148,10 @@ public:
   void finalize_after_root_frame();
 
   // Allow the mock path to set cumulative_invoke_result_ before calling
-  // finalize_after_root_frame().
+  // finalize_after_root_frame().  Must be called before finalization.
   void mock_set_cumulative_invoke_result(InvokeResult result)
   {
+    assert(!finalized_);
     cumulative_invoke_result_ = result;
   }
 
@@ -344,6 +345,7 @@ private:
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
+  bool finalized_{false};
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
   bool two_phase_commit_failed_{false};
