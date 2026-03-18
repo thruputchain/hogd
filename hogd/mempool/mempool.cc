@@ -7,11 +7,13 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -30,8 +32,9 @@ namespace {
 
 int
 mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
-             uint16_t db_port, uint16_t event_port, uint16_t executor_port,
-             uint16_t auth_port, uint16_t coordinator_port)
+             std::string_view bind_ip, uint16_t db_port, uint16_t event_port,
+             uint16_t executor_port, uint16_t auth_port,
+             uint16_t coordinator_port)
 {
   Registration &registration = Registration::registration();
 
@@ -39,7 +42,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
-  uint16_t actual_db_port = db.start_server(db_port);
+  uint16_t actual_db_port =
+      db.start_server(make_bind_host_port(bind_ip, db_port));
   CHECK(actual_db_port == db_port || db_port == 0);
   info("PORT mempool.db={}", actual_db_port);
   info("Waiting for {} db shards to connect...", num_db_shards);
@@ -49,7 +53,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   // Wait for the event subsystem to connect.
   RpcServer<MempoolEventRpc> event;
-  uint16_t actual_event_port = event.start_server(event_port);
+  uint16_t actual_event_port =
+      event.start_server(make_bind_host_port(bind_ip, event_port));
   CHECK(actual_event_port == event_port || event_port == 0);
   info("PORT mempool.event={}", actual_event_port);
   info("Waiting for event server to connect...");
@@ -59,7 +64,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   // Let the executors connect.
   RpcServer<MempoolExecutorRpc> exec;
-  uint16_t actual_executor_port = exec.start_server(executor_port);
+  uint16_t actual_executor_port =
+      exec.start_server(make_bind_host_port(bind_ip, executor_port));
   CHECK(actual_executor_port == executor_port || executor_port == 0);
   info("PORT mempool.executor={}", actual_executor_port);
   info("Waiting for {} executors to connect...", num_exec_shards);
@@ -70,7 +76,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   RpcServer<MempoolAuthRpc> auth;
   auth->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  uint16_t actual_auth_port = auth.start_server(auth_port);
+  uint16_t actual_auth_port =
+      auth.start_server(make_bind_host_port(bind_ip, auth_port));
   CHECK(actual_auth_port == auth_port || auth_port == 0);
   info("PORT mempool.auth={}", actual_auth_port);
   while (!registration.auth_registered(/*card=*/nullptr)) {
@@ -79,7 +86,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
 
   RpcServer<MempoolCoordinatorRpc> coord(db->impl(), network_id);
   coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  uint16_t actual_coordinator_port = coord.start_server(coordinator_port);
+  uint16_t actual_coordinator_port =
+      coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
   info("PORT mempool.coordinator={}", actual_coordinator_port);
   auth->impl()->register_callback(
@@ -114,9 +122,10 @@ namespace {
 usage(char *argv[])
 {
   std::println(
-      "usage: {} --num-db-shards <n> --num-exec-shards <n> --network-id <hex> "
-      "[--db-port <port>] [--event-port <port>] [--executor-port <port>] "
-      "[--auth-port <port>] [--coordinator-port <port>]",
+      "usage: {} --bind-ip <ip> --num-db-shards <n> --num-exec-shards <n> "
+      "--network-id <hex> [--db-port <port>] [--event-port <port>] "
+      "[--executor-port <port>] [--auth-port <port>] "
+      "[--coordinator-port <port>]",
       argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -142,6 +151,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting mempool!");
 
+  std::string bind_ip;
   std::optional<size_t> num_db_shards;
   std::optional<size_t> num_exec_shards;
   std::optional<uint64_t> network_id;
@@ -153,6 +163,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
+      continue;
+    }
     if (arg == "--num-db-shards" && i + 1 < argc) {
       num_db_shards = std::stoul(argv[++i], nullptr, /*base=*/10);
       continue;
@@ -188,8 +202,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  if (!num_db_shards.has_value() || !num_exec_shards.has_value() ||
-      !network_id.has_value()) {
+  if (bind_ip.empty() || !num_db_shards.has_value() ||
+      !num_exec_shards.has_value() || !network_id.has_value()) {
     usage(argv);
   }
 
@@ -204,6 +218,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   return hogd::mempool_init(*num_db_shards, *num_exec_shards, *network_id,
-                            db_port, event_port, executor_port, auth_port,
-                            coordinator_port);
+                            bind_ip, db_port, event_port, executor_port,
+                            auth_port, coordinator_port);
 }

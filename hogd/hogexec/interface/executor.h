@@ -2,10 +2,10 @@
 
 #include <cassert>
 #include <string>
-#include <string_view>
 #include <sys/socket.h>
 #include <utility>
 
+#include "hogd/base/network.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -21,13 +21,6 @@ public:
   static IntroExecResult
   register_with_coordinator(x23::HostPort const &self_hostport,
                             const sockaddr_storage &coordinator_sockaddr);
-
-private:
-  // Generates the address of this executor, which includes both the hostname
-  // and the port of the executor RPC server. We send this address to the
-  // coordinator when we register this executor with it.
-  static std::string get_executor_address(std::string_view hostname,
-                                          uint16_t executor_port);
 };
 
 // Server that handles RPC communication between the executor and coordinator.
@@ -43,7 +36,7 @@ public:
   {}
   ~Executor() { await_shutdown_request(); }
 
-  uint16_t start(std::string const &self_hostname, uint16_t self_port,
+  uint16_t start(std::string const &bind_ip, uint16_t self_port,
                  const sockaddr_storage &coordinator_sockaddr)
   {
     // When we register with the coordinator, we need to tell the coordinator
@@ -54,13 +47,14 @@ public:
     // coordinator, and finally we start handling incoming RPCs in
     // [start_rpc_service()].
     server_->max_message_size_ = kMessageSize;
-    uint16_t executor_port = server_.start_server(self_port);
+    uint16_t executor_port =
+        server_.start_server(make_bind_host_port(bind_ip, self_port));
     assert(executor_port == self_port || self_port == 0);
 
     // Now register with the coordinator.
     IntroExecResult exec_result =
         MempoolExecutorClient::register_with_coordinator(
-            x23::HostPort(self_hostname, executor_port), coordinator_sockaddr);
+            make_bind_host_port(bind_ip, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
     server_->impl()->init(std::move(exec_result), n_exec_threads_);

@@ -4,8 +4,10 @@
 #include <cassert>
 #include <format>
 #include <memory>
+#include <regex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,6 +43,19 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+inline std::string
+hog_ip(std::string_view host)
+{
+  static const std::regex kHogHostPattern("^hog([0-9]+)$");
+  std::match_results<std::string_view::const_iterator> match;
+  if (!std::regex_match(host.begin(), host.end(), match, kHogHostPattern)) {
+    throw std::runtime_error(std::format("invalid hog host: {}", host));
+  }
+
+  unsigned int hog_num = std::stoul(match[1].str());
+  return std::format("10.100.0.{}", 100 + hog_num);
+}
 
 class CommonBenchState {
 public:
@@ -145,13 +160,14 @@ private:
   {
     std::string hostname;
     CHECK_EQ(get_hostname(hostname), 0);
+    std::string mempool_ip = hog_ip(hostname);
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
     event_server_handle_->ci_client.start_server(
         "hogd/event/event_exec",
-        {"--mempool-addr", std::format("{}:{}", hostname, event_server_port),
-         "--work-dir",
+        {"--mempool-addr", std::format("{}:{}", mempool_ip, event_server_port),
+         "--bind-ip", hog_ip(event_server_addr()), "--work-dir",
          std::string(work_dir.work_dir().begin(), work_dir.work_dir().end())});
 
     return mock_sched_event_server_->impl()->await_event_card();

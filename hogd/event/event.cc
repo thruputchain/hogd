@@ -25,14 +25,6 @@ namespace hogd {
 
 namespace {
 
-std::string
-create_address(uint16_t port)
-{
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
-  return std::format("{}:{}", hostname, port);
-}
-
 auto
 connect_to_event_sched_server(std::string const &address)
 {
@@ -44,7 +36,7 @@ connect_to_event_sched_server(std::string const &address)
 }
 
 int
-event_init(const std::string &mempool_address,
+event_init(const std::string &mempool_address, const std::string &bind_ip,
            const std::string &work_directory, uint16_t exec_port,
            uint16_t indexer_port, uint16_t mempool_port)
 {
@@ -54,9 +46,12 @@ event_init(const std::string &mempool_address,
   EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
 
-  uint16_t actual_exec_port = exec_server.start_server(exec_port);
-  uint16_t actual_indexer_port = indexer_server.start_server(indexer_port);
-  uint16_t actual_mempool_port = mempool_server.start_server(mempool_port);
+  uint16_t actual_exec_port =
+      exec_server.start_server(make_bind_host_port(bind_ip, exec_port));
+  uint16_t actual_indexer_port =
+      indexer_server.start_server(make_bind_host_port(bind_ip, indexer_port));
+  uint16_t actual_mempool_port =
+      mempool_server.start_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_exec_port == exec_port || exec_port == 0);
   CHECK(actual_indexer_port == indexer_port || indexer_port == 0);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
@@ -71,8 +66,10 @@ event_init(const std::string &mempool_address,
         std::format("Invalid mempool address: {}", mempool_address));
   }
   auto client = connect_to_event_sched_server(mempool_address);
-  std::string address_for_exec = create_address(actual_exec_port);
-  std::string address_for_mempool = create_address(actual_mempool_port);
+  std::string address_for_exec =
+      format_advertised_address(bind_ip, actual_exec_port);
+  std::string address_for_mempool =
+      format_advertised_address(bind_ip, actual_mempool_port);
   EventCard card{.protocol = version::kHogdProtocol(),
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
@@ -98,8 +95,8 @@ namespace {
 usage(char *argv[])
 {
   std::println("usage: {} --mempool-addr <host:port> --work-dir <path> "
-               "[--executor-port <port>] [--indexer-port <port>] "
-               "[--mempool-port <port>]",
+               "--bind-ip <ip> [--executor-port <port>] "
+               "[--indexer-port <port>] [--mempool-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -125,6 +122,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
 
   std::string mempool_address;
+  std::string bind_ip;
   std::string work_directory;
   uint16_t exec_port = 0;
   uint16_t indexer_port = 0;
@@ -134,6 +132,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     const std::string arg = argv[i];
     if (arg == "--mempool-addr" && i + 1 < argc) {
       mempool_address = argv[++i];
+      continue;
+    }
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
       continue;
     }
     if (arg == "--work-dir" && i + 1 < argc) {
@@ -155,11 +157,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  if (mempool_address.empty() || work_directory.empty()) {
+  if (mempool_address.empty() || bind_ip.empty() || work_directory.empty()) {
     usage(argv);
   }
 
   hogd::info("starting event server!");
-  return hogd::event_init(mempool_address, work_directory, exec_port,
+  return hogd::event_init(mempool_address, bind_ip, work_directory, exec_port,
                           indexer_port, mempool_port);
 }

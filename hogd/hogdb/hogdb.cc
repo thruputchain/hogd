@@ -46,14 +46,6 @@ namespace hogd {
 
 namespace {
 
-std::string
-create_address(uint16_t port)
-{
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
-  return std::format("{}:{}", hostname, port);
-}
-
 auto
 create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 {
@@ -70,8 +62,8 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
-           const std::string *coordinator_addr, uint16_t exec_port,
-           uint16_t mempool_port, uint16_t auth_port)
+           const std::string *coordinator_addr, std::string_view bind_ip,
+           uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port)
 {
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
@@ -139,7 +131,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
-  const uint16_t actual_exec_port = exec_server.start_server(exec_port);
+  const uint16_t actual_exec_port =
+      exec_server.start_server(make_bind_host_port(bind_ip, exec_port));
   CHECK(actual_exec_port == exec_port || exec_port == 0);
   info("PORT hogdb.exec={}", actual_exec_port);
 
@@ -147,14 +140,15 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   info("starting mempool server.");
   HogDBSchedServer mempool_server(ctx);
   const uint16_t actual_mempool_port =
-      mempool_server.start_server(mempool_port);
+      mempool_server.start_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT hogdb.mempool={}", actual_mempool_port);
 
   // start the auth server.
   info("starting auth server.");
   HogDBAuthServer auth_server(ctx);
-  const uint16_t actual_auth_port = auth_server.start_server(auth_port);
+  const uint16_t actual_auth_port =
+      auth_server.start_server(make_bind_host_port(bind_ip, auth_port));
   CHECK(actual_auth_port == auth_port || auth_port == 0);
   info("PORT hogdb.auth={}", actual_auth_port);
 
@@ -162,9 +156,12 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     auto const &client = ctx.get_sched_db_client();
     assert(client);
 
-    const std::string exec_address = create_address(actual_exec_port);
-    const std::string sched_address = create_address(actual_mempool_port);
-    const std::string auth_address = create_address(actual_auth_port);
+    const std::string exec_address =
+        format_advertised_address(bind_ip, actual_exec_port);
+    const std::string sched_address =
+        format_advertised_address(bind_ip, actual_mempool_port);
+    const std::string auth_address =
+        format_advertised_address(bind_ip, actual_auth_port);
     ShardCard card{.protocol = version::kHogdProtocol(),
                    .upid = {},
                    .block_height = 0,
@@ -192,8 +189,9 @@ namespace {
 usage(char *argv[])
 {
   std::println("usage: {} --db-path <path> --ram-bytes <bytes> "
-               "[--coordinator-addr <host:port>] [--executor-port <port>] "
-               "[--mempool-port <port>] [--auth-port <port>]",
+               "--bind-ip <ip> [--coordinator-addr <host:port>] "
+               "[--executor-port <port>] [--mempool-port <port>] "
+               "[--auth-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -220,6 +218,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting hogdb!");
 
   std::string path;
+  std::string bind_ip;
   std::string coordinator_addr_raw;
   std::optional<size_t> ram_bytes;
   uint16_t exec_port = 0;
@@ -230,6 +229,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     const std::string arg = argv[i];
     if (arg == "--db-path" && i + 1 < argc) {
       path = argv[++i];
+      continue;
+    }
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
       continue;
     }
     if (arg == "--ram-bytes" && i + 1 < argc) {
@@ -255,13 +258,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  if (path.empty() || !ram_bytes.has_value()) {
+  if (path.empty() || bind_ip.empty() || !ram_bytes.has_value()) {
     usage(argv);
   }
 
   const std::string *coordinator_addr =
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
-  return hogd::hogdb_init(path, *ram_bytes, coordinator_addr, exec_port,
-                          mempool_port, auth_port);
+  return hogd::hogdb_init(path, *ram_bytes, coordinator_addr, bind_ip,
+                          exec_port, mempool_port, auth_port);
 };

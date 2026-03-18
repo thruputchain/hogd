@@ -25,18 +25,10 @@ namespace hogd {
 
 namespace {
 
-// TODO(jhumphri): This is the same as in other subsystems.
-std::string
-create_address(uint16_t port)
-{
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
-  return std::format("{}:{}", hostname, port);
-}
-
 int
 indexer_init(const std::string &path, const std::string &event_server_addr,
-             uint16_t event_port, uint16_t block_explorer_port)
+             const std::string &bind_ip, uint16_t event_port,
+             uint16_t block_explorer_port)
 {
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(path);
   if (!db_status) {
@@ -47,7 +39,8 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   // Create the RPC server that the event server talks to.
   RpcServer<IndexerEventRpc> event(db);
   event->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  uint16_t actual_event_port = event.start_server(event_port);
+  uint16_t actual_event_port =
+      event.start_server(make_bind_host_port(bind_ip, event_port));
   CHECK(actual_event_port == event_port || event_port == 0);
   info("PORT indexer.event={}", actual_event_port);
 
@@ -55,7 +48,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   event_indexer_client_t client = make_rpc_client<EventIndexer1>(
       server_address_to_sockaddr(event_server_addr), /*retry=*/true)();
   const std::string indexer_server_addr =
-      create_address(/*port=*/actual_event_port);
+      format_advertised_address(bind_ip, /*port=*/actual_event_port);
   const IndexerCard card{.protocol = version::kHogdProtocol(),
                          .address_for_event = indexer_server_addr.c_str()};
   client.event_indexer_intro(card)();
@@ -63,8 +56,8 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   // Create the RPC server that the block explorers talk to.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db);
   block_explorer->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  uint16_t actual_block_explorer_port =
-      block_explorer.start_server(block_explorer_port);
+  uint16_t actual_block_explorer_port = block_explorer.start_server(
+      make_bind_host_port(bind_ip, block_explorer_port));
   CHECK(actual_block_explorer_port == block_explorer_port ||
         block_explorer_port == 0);
   info("PORT indexer.block_explorer={}", actual_block_explorer_port);
@@ -86,7 +79,8 @@ namespace {
 usage(char *argv[])
 {
   std::println("usage: {} --event-addr <host:port> --db-path <path> "
-               "[--event-port <port>] [--block-explorer-port <port>]",
+               "--bind-ip <ip> [--event-port <port>] "
+               "[--block-explorer-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -116,6 +110,7 @@ main(int argc, char *argv[])
 
   std::string event_server_addr;
   std::string path;
+  std::string bind_ip;
   uint16_t event_port = 0;
   uint16_t block_explorer_port = 0;
 
@@ -129,6 +124,10 @@ main(int argc, char *argv[])
       path = argv[++i];
       continue;
     }
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
+      continue;
+    }
     if (arg == "--event-port" && i + 1 < argc) {
       event_port = parse_port(argv[++i]);
       continue;
@@ -140,10 +139,10 @@ main(int argc, char *argv[])
     usage(argv);
   }
 
-  if (event_server_addr.empty() || path.empty()) {
+  if (event_server_addr.empty() || path.empty() || bind_ip.empty()) {
     usage(argv);
   }
-  return hogd::indexer_init(path, event_server_addr, event_port,
+  return hogd::indexer_init(path, event_server_addr, bind_ip, event_port,
                             block_explorer_port);
 };
 
