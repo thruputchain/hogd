@@ -243,13 +243,13 @@ wait_port "$loadgen_server" $LOADGEN_PORT
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$mempool_server":$MEMPOOL_EXECUTOR_PORT --nthreads 1024 --mempool-port 8040
+  remote_launch "$s" "$HOGEXEC_BINARY" --coordinator-addr "$mempool_server":$MEMPOOL_EXECUTOR_PORT --bind-ip "$s" --nthreads 1024 --mempool-port 8040
 done
 
 # Start event.
 echo "Start event..."
 remote_launch "$event_server" "$EVENT_BINARY" \
-  --mempool-addr "$mempool_server":$MEMPOOL_EVENT_PORT --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT
+  --mempool-addr "$mempool_server":$MEMPOOL_EVENT_PORT --bind-ip "$event_server" --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT
 
 # Start indexer.
 echo "Start indexer..."
@@ -257,7 +257,7 @@ if $delete_db; then
   ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
 fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  --event-addr "$event_server":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
+  --event-addr "$event_server":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$indexer_server" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -267,17 +267,18 @@ for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
   fi
   remote_launch "$s" "$HOGDB_BINARY" \
-    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --coordinator-addr "$mempool_server":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
+    --db-path "$logdir/hogdb.data" --ram-bytes 10000000000 --bind-ip "$s" --coordinator-addr "$mempool_server":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT
 done
 
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
-  --mempool-addr "$mempool_server":$MEMPOOL_AUTH_PORT --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
+  --mempool-addr "$mempool_server":$MEMPOOL_AUTH_PORT --bind-ip "$auth_server" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
 
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
+  --bind-ip "$mempool_server" \
   --network-id 0 \
   --num-db-shards ${#hogdb_servers[@]} --num-exec-shards ${#hogexec_servers[@]} \
   --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT

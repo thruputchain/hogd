@@ -22,8 +22,8 @@ namespace hogd {
 namespace {
 
 int
-hogexec_init(const std::string &coordinator_addr, int nthreads,
-             uint16_t mempool_port)
+hogexec_init(const std::string &coordinator_addr, const std::string &bind_ip,
+             int nthreads, uint16_t mempool_port)
 {
   x23::HostPort host_port;
   if (!host_port.parse(coordinator_addr)) {
@@ -38,10 +38,8 @@ hogexec_init(const std::string &coordinator_addr, int nthreads,
   Executor executor(nthreads);
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(coordinator_host, coordinator_port);
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
   uint16_t actual_mempool_port =
-      executor.start(hostname, mempool_port, coordinator_sockaddr);
+      executor.start(bind_ip, mempool_port, coordinator_sockaddr);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT hogexec.mempool={}", actual_mempool_port);
 
@@ -61,10 +59,9 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println(
-      "usage: {} --coordinator-addr <host:port> [--nthreads <nthreads>] "
-      "[--mempool-port <port>]",
-      argv[0]);
+  std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
+               "[--nthreads <nthreads>] [--mempool-port <port>]",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 
@@ -90,6 +87,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting hogexec!");
 
   std::string coord_address;
+  std::string bind_ip;
   std::optional<int> nthreads;
   uint16_t mempool_port = 0;
 
@@ -97,6 +95,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     const std::string arg = argv[i];
     if (arg == "--coordinator-addr" && i + 1 < argc) {
       coord_address = argv[++i];
+      continue;
+    }
+    if (arg == "--bind-ip" && i + 1 < argc) {
+      bind_ip = argv[++i];
       continue;
     }
     if (arg == "--nthreads" && i + 1 < argc) {
@@ -125,9 +127,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     nthreads = hogd::available_parallelism();
   }
 
-  if (coord_address.empty()) {
+  if (coord_address.empty() || bind_ip.empty()) {
     usage(argv);
   }
 
-  return hogd::hogexec_init(coord_address, *nthreads, mempool_port);
+  return hogd::hogexec_init(coord_address, bind_ip, *nthreads, mempool_port);
 }
