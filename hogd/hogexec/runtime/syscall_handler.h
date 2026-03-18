@@ -142,6 +142,18 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // Called after the root invocation frame finishes (by root_invoke or
+  // the mock path).  Runs final validation on cumulative_invoke_result_
+  // and sets root_invoke_succeeded_ if appropriate.
+  void finalize_after_root_frame();
+
+  // Allow the mock path to set cumulative_invoke_result_ before calling
+  // finalize_after_root_frame().
+  void mock_set_cumulative_invoke_result(InvokeResult result)
+  {
+    cumulative_invoke_result_ = result;
+  }
+
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
     if constexpr (Syscall == kNoTracingSyscall) {
