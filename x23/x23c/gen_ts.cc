@@ -261,8 +261,7 @@ GenTs::show_def(const Typedef &d)
 
       // Codec
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{ w.{0}(val); }},\n",
-               map_write_method(base));
+      prbottom("  encode(w, val) {{ w.{0}(val); }},\n", map_write_method(base));
       prbottom("  decode(r) {{ return {0}(r.{1}()); }},\n", factory,
                map_read_method(base));
       prbottom("}};\n");
@@ -279,8 +278,7 @@ GenTs::show_def(const Typedef &d)
 
       prbottom("\nexport const {0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ {0}.encode(w, val); }},\n", ref);
-      prbottom("  decode(r) {{ return {0}({1}.decode(r)); }},\n", factory,
-               ref);
+      prbottom("  decode(r) {{ return {0}({1}.decode(r)); }},\n", factory, ref);
       prbottom("}};\n");
     }
     break;
@@ -666,8 +664,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
     if (arm.decl.qual != Declaration::kVoid) {
       decode_field(arm.decl, name, 8);
-      prbottom("        return {{ {0}, {1} }};\n", body.switch_id,
-               arm.decl.id);
+      prbottom("        return {{ {0}, {1} }};\n", body.switch_id, arm.decl.id);
     }
     else {
       prbottom("        return {{ {0} }} as {1};\n", body.switch_id, name);
@@ -745,9 +742,8 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
       bottom_ += std::format("{}w.writeFixedOpaque({}, {});\n", indent,
                              val_expr, d.bound);
     else
-      bottom_ +=
-          std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                      indent, val_expr, ref);
+      bottom_ += std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
+                             indent, val_expr, ref);
     break;
 
   case Declaration::kVec:
@@ -758,9 +754,8 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     else {
       bottom_ += std::format("{}w.writeUint32(BigInt({}.length));\n", indent,
                              val_expr);
-      bottom_ +=
-          std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                      indent, val_expr, ref);
+      bottom_ += std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
+                             indent, val_expr, ref);
     }
     break;
 
@@ -799,8 +794,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       bottom_ += std::format("{}const {} = r.{}();\n", indent, d.id,
                              map_read_method(base));
     else
-      bottom_ +=
-          std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref);
+      bottom_ += std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref);
     break;
 
   case Declaration::kArray:
@@ -851,15 +845,14 @@ gen_ts(vector<Definition> *defs)
 {
   GenTs gs;
 
-  string preamble =
-      "// -*- TypeScript -*-\n"
-      "// Generated Code: DO NOT CHECK IN\n"
-      "\n"
-      "// Generated from x23c commit: " +
-      x23::git_commit_hash() +
-      "\n\n"
-      "import type { XdrCodec } from \"../xdr/codec.js\";\n"
-      "import * as proto from \"./index.js\";\n";
+  string preamble = "// -*- TypeScript -*-\n"
+                    "// Generated Code: DO NOT CHECK IN\n"
+                    "\n"
+                    "// Generated from x23c commit: " +
+                    x23::git_commit_hash() +
+                    "\n\n"
+                    "import type { XdrCodec } from \"../xdr/codec.js\";\n"
+                    "import * as proto from \"./index.js\";\n";
 
   gs.process(*defs);
 
