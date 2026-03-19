@@ -23,6 +23,7 @@ struct GenTs {
   bool has_programs_{};
   bool needs_void_codec_{};
   std::set<string> primitive_codecs_; // primitive codecs needed in imports
+  std::set<string> emitted_args_;     // dedup _args structs across all ProgDefs
 
   static constexpr int kIndentWidth = 2;
 
@@ -199,7 +200,10 @@ GenTs::proc_codec_ref(const string &type)
     return it->second;
   }
 
-  // Local codec — reference the private const directly
+  // Local codec — reference the private const directly.
+  // NOTE: This relies on XDR convention that type definitions precede program
+  // definitions.  Types declared after a program block will not yet be in
+  // codec_names_ and will fall through to the external-reference path below.
   if (std::ranges::find(codec_names_, type) != codec_names_.end())
     return "_" + type;
   // External type — reference via proto.codec with cast
@@ -541,7 +545,6 @@ void
 GenTs::show_def(const ProgDef &prog)
 {
   bool multi_ver = prog.versions.size() > 1;
-  std::set<string> emitted_args; // track generated _args structs
 
   for (const VersDef &vers : prog.versions) {
     // Build args struct name, qualified by version for multi-version programs
@@ -562,7 +565,7 @@ GenTs::show_def(const ProgDef &prog)
         continue;
 
       string args_name = args_struct_name(proc.id);
-      if (!emitted_args.insert(args_name).second)
+      if (!emitted_args_.insert(args_name).second)
         continue; // already generated
 
       // Build a StructBody with positional field names (arg0, arg1, ...)
