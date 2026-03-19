@@ -463,7 +463,12 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   // closing the executor.  The bare sleep_for(1ms) was insufficient under
   // ASAN+Release where coroutine scheduling overhead could prevent any
   // producer from completing add_event within the window.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
   while (!any_event_accepted.load(std::memory_order_acquire)) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      FAIL() << "Timed out waiting for any producer to accept an event";
+    }
     std::this_thread::yield();
   }
 
