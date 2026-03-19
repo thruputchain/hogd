@@ -25,9 +25,6 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeDeserializeError = 4,
   // Unrecoverable error of unknown type
   kTestFFIErrorCodeUnrecoverableError = 5,
-  // The queried transaction either does not exist or did not produce any
-  // events.
-  kTestFFIErrorCodeEventLogNotFound = 6,
 };
 
 enum TestFFILogLevel {
