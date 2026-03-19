@@ -79,14 +79,20 @@ SyscallHandlerContext::root_invoke()
       serialized_trace = s.value();
     }
 
-    auto frame_events = handler_.copy_last_frame_events();
+    // Only return events when the invocation succeeded and the root frame
+    // returned normally (not aborted/faulted).
     FFIDataBuffer serialized_events = kNullBuffer;
-    if (!frame_events.empty()) {
-      auto s = serialize_to_ffi_data_buffer(frame_events);
-      if (!s.has_value()) {
-        return kMakeFFIError(s.error());
+    if (res.result_.has_value() &&
+        root_invocation_output.status_code() ==
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn) {
+      auto frame_events = handler_.copy_last_frame_events();
+      if (!frame_events.empty()) {
+        auto s = serialize_to_ffi_data_buffer(frame_events);
+        if (!s.has_value()) {
+          return kMakeFFIError(s.error());
+        }
+        serialized_events = s.value();
       }
-      serialized_events = s.value();
     }
 
     return ForeignTracedInvokeResult{
@@ -254,8 +260,12 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     serialized_trace = s.value();
   }
 
+  // Only return events when the frame succeeded — failed or reverted
+  // frames discard their events.
+  bool frame_succeeded =
+      invoke_error_code == InvokeErrorCode::kInvokeNone && !manually_reverted;
   FFIDataBuffer serialized_events = kNullBuffer;
-  if (!frame_events.empty()) {
+  if (frame_succeeded && !frame_events.empty()) {
     auto s = serialize_to_ffi_data_buffer(frame_events);
     if (!s.has_value()) {
       return kMakeFFIError(s.error());

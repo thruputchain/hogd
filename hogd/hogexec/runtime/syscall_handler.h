@@ -145,18 +145,14 @@ public:
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
   {
-    if (invocation_frame_stack_.empty()) {
-      return {};
-    }
+    CHECK(!invocation_frame_stack_.empty());
     return invocation_frame_stack_.get_active_frame().get_events();
   }
 
   // Copy events from the last (root) frame after it has finished.
   x23::Vec<TxEmittedEvent> copy_last_frame_events() const
   {
-    if (!last_frame_.has_value()) {
-      return {};
-    }
+    CHECK(last_frame_.has_value());
     return last_frame_.value().get_events();
   }
 

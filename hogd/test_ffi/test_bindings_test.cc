@@ -213,6 +213,167 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
+namespace {
+// Mock contract that emits an event then faults
+ForeignInvokeResult
+mock_contract_event_then_fault(void * /*unused*/, uint64_t method_number)
+{
+  if (method_number != 0x1234) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  context->to_handler().log_event(nullptr, nullptr, nullptr,
+                                  std::as_bytes(std::span("test_event")));
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeDeterministic)};
+}
+
+// Mock contract that emits an event then reverts
+ForeignInvokeResult
+mock_contract_event_then_revert(void * /*unused*/, uint64_t method_number)
+{
+  if (method_number != 0x1234) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  auto *context = SyscallHandlerContext::get_context();
+  if (!context) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
+
+  context->to_handler().log_event(nullptr, nullptr, nullptr,
+                                  std::as_bytes(std::span("test_event")));
+  context->to_handler().set_return_buffer(ReturnBuffer{0xAB}, true);
+
+  return ForeignInvokeResult{
+      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+}
+} // namespace
+
+// Verify that root_invoke does NOT return events when the contract faults
+TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(
+      register_new_contract(rc, 1, mock_contract_event_then_fault, nullptr),
+      kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+
+  // Events must NOT be returned on fault
+  EXPECT_EQ(result.serialized_events.data, nullptr);
+  EXPECT_EQ(result.serialized_events.len, 0u);
+}
+
+// Verify that root_invoke does NOT return events when the contract reverts
+TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ASSERT_EQ(
+      register_new_contract(rc, 1, mock_contract_event_then_revert, nullptr),
+      kTestFFIErrorCodeNone);
+
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 1;
+  auto bytes = x23::serialize(contract);
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 }},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto result = root_invoke(syscall_handler, 0);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{result.serialized_output.data,
+                                         result.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+
+  // Events must NOT be returned on revert
+  EXPECT_EQ(result.serialized_events.data, nullptr);
+  EXPECT_EQ(result.serialized_events.len, 0u);
+
+  // Normal workflow: try_commit drains events and handles the abort internally.
+  auto commit_res = try_commit_transaction(syscall_handler);
+  EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
+}
+
 TEST(TestBindingsTest, GrantStorageTokensTest)
 {
   auto *db = make_db();
@@ -1883,6 +2044,173 @@ TEST(TestBindingsTest, MockFrameManualRevertTest)
   EXPECT_EQ(output.abort_buffer()[1], 0xFE);
   EXPECT_EQ(output.abort_buffer()[2], 0xBA);
   EXPECT_EQ(output.abort_buffer()[3], 0xBE);
+}
+
+// Verify that finish_mock_invocation_frame does NOT return events when the
+// frame fails with a deterministic error.
+TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  Invocation invocation = {
+      .invoked_address = ContractAddress{0xEE},
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 1'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+
+  // Emit an event inside the frame
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  SyscallHandlerContext::get_context()->to_handler().log_event(
+      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event")));
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  // Finish with a deterministic error (fault)
+  auto finish_res = finish_mock_invocation_frame(
+      handler.syscall_handler,
+      std::to_underlying(InvokeErrorCode::kInvokeDeterministic));
+  ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                         finish_res.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+
+  // Events must NOT be returned on fault
+  EXPECT_EQ(finish_res.serialized_events.data, nullptr);
+  EXPECT_EQ(finish_res.serialized_events.len, 0u);
+}
+
+// Verify that finish_mock_invocation_frame does NOT return events when the
+// frame is manually reverted via set_return_buffer(_, true).
+TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  Invocation invocation = {
+      .invoked_address = ContractAddress{0xDD},
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 1'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+
+  // Emit an event, then manually revert
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  SyscallHandlerContext::get_context()->to_handler().log_event(
+      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event")));
+  SyscallHandlerContext::get_context()->to_handler().set_return_buffer(
+      ReturnBuffer{0xDE, 0xAD}, /*revert_frame=*/true);
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                         finish_res.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+
+  // Events must NOT be returned on manual revert
+  EXPECT_EQ(finish_res.serialized_events.data, nullptr);
+  EXPECT_EQ(finish_res.serialized_events.len, 0u);
+
+  // Normal workflow: try_commit drains events from last_frame_.
+  auto commit_res = try_commit_transaction(handler.syscall_handler);
+  EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
+}
+
+// Verify that finish_mock_invocation_frame DOES return events on success.
+TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  ContractAddress frame_addr{0xCC};
+  Invocation invocation = {
+      .invoked_address = frame_addr,
+      .entrypoint = entrypoint_from_method_id(0x1234),
+      .gas_limit = 1'000'000,
+      .calldata = {},
+  };
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+
+  // Emit an event inside the frame
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  SyscallHandlerContext::get_context()->to_handler().log_event(
+      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event")));
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_events); });
+
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
+                                         finish_res.serialized_output.len});
+  EXPECT_EQ(output.status_code(),
+            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+
+  // Events MUST be returned on success
+  ASSERT_NE(finish_res.serialized_events.data, nullptr);
+  ASSERT_GT(finish_res.serialized_events.len, 0u);
+
+  x23::Vec<TxEmittedEvent> events;
+  x23::deserialize(&events, x23::BufView{finish_res.serialized_events.data,
+                                         finish_res.serialized_events.len});
+  ASSERT_EQ(events.size(), 1);
+  EXPECT_EQ(events[0].contract_address, frame_addr);
+  EXPECT_EQ(events[0].serialized_event.size(), 12);
+  EXPECT_EQ(
+      std::memcmp(events[0].serialized_event.data(), "frame_event", 12), 0);
+
+  // Normal workflow: try_commit drains events from last_frame_.
+  auto commit_res = try_commit_transaction(handler.syscall_handler);
+  EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 }
 
 // Test nested open_mock_invocation_frame calls: A { B {} C {} }
