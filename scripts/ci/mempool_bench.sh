@@ -117,30 +117,17 @@ echo 'launch hogdb'
 echo 'launch auth'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/auth/auth_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT
 
-echo 'launch coordinator and scp'
+echo 'launch coordinator (chuckd-rs)'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
-  -l info \
-  --skip 20 \
-  --stack \
-  --config ./scripts/config-chuckd.json \
-  --instance 970c9b \
-  --seed 1410441218572558875 \
-  --metrics :2223 \
-  bench coordinator_loadgen \
-  --in-addr "$(hog_ip hog4)":7888 \
-  --debug-port 5500 \
+  --log-level info \
+  bench coordinator-loadgen \
   --num-accts 10000 \
   --txs-per-block 1000000 \
   --num-blocks 1000 \
-  --storage-dir $WORK_DIR/chuckd-storage \
-  --out-addr :50000 \
-  --wallet-addr :40000 \
+  --skip 20 \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
-  --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
-  --scpd-path ./$BUILD_DIR/scpd.dev \
-  --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+  --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT
 
 echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT expect_running
