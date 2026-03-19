@@ -8,6 +8,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "event.hh"
 #include "hogd/base/coropoll.h"
