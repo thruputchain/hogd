@@ -45,7 +45,6 @@ struct GenTs {
   void show_def(const Literal & /*unused*/) {}
   void show_def(const ProgDef &prog);
 
-
   // Codec reference for a type in program metadata context.
   // VoidCodec for void, _TypeName for local types, proto.codec.X for external.
   string proc_codec_ref(const string &type);
@@ -568,8 +567,7 @@ GenTs::show_def(const ProgDef &prog)
     has_programs_ = true;
 
     // Emit RpcProgramMeta export
-    string export_name = multi_ver ? vers.id + "Program"
-                                   : prog.id + "Program";
+    string export_name = multi_ver ? vers.id + "Program" : prog.id + "Program";
     program_meta_ += std::format("\nexport const {0}: RpcProgramMeta = {{\n"
                                  "  programId: {1},\n"
                                  "  version: {2},\n"
