@@ -110,8 +110,14 @@ EventBlockContext::add_event(TxEventLog event)
   auto key = data.subspan(0, 32);
   auto value = data.subspan(32);
 
-  co_await write_event(std::span(*serialize_buf));
+  // WARNING: insert_or_update must happen BEFORE write_event.  write_event may
+  // co_await internally, which can resume the coroutine on a different thread.
+  // key and value are spans into the static PerThread serialize_buf for this
+  // thread — if we co_await first, another coroutine on the original thread
+  // could overwrite serialize_buf, leaving key/value pointing at stale or freed
+  // memory.
   CHECK(trie_->insert_or_update(key, value));
+  co_await write_event(std::span(*serialize_buf));
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
@@ -197,7 +203,13 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
   buffers_->event_count++;
 
   if (buffers_->buf.size() >= kBufferThreshold) {
-    std::decay_t<decltype(buffers_->buf)> buf;
+    // Extract the buffer from the current thread's PerThread slot BEFORE the
+    // co_await.  After co_await, the coroutine may resume on a different thread,
+    // so buffers_-> would resolve to that thread's slot instead of the one that
+    // exceeded the threshold.
+    using buf_t = std::decay_t<decltype(buffers_->buf)>;
+    buf_t buf = std::move(buffers_->buf);
+    buffers_->buf.clear();
     {
       // By the time this coroutine returns, pending_write_count_ will have been
       // incremented or the state_ has already been set as kAbandoned or
@@ -209,8 +221,6 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
                   state_ == BlockState::kFinishing);
         co_return;
       }
-      buf = std::move(buffers_->buf);
-      buffers_->buf.clear();
       pending_write_count_++;
     }
 
