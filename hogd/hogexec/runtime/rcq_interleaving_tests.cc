@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
