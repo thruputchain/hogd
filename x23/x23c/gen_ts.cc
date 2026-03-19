@@ -45,8 +45,6 @@ struct GenTs {
   void show_def(const Literal & /*unused*/) {}
   void show_def(const ProgDef &prog);
 
-  // Convert snake_case to PascalCase (dogwoodapi_send -> DogwoodapiSend)
-  static string to_pascal_case(const string &name);
 
   // Codec reference for a type in program metadata context.
   // VoidCodec for void, _TypeName for local types, proto.codec.X for external.
@@ -157,23 +155,6 @@ GenTs::to_camel_case(const string &name)
   else {
     for (size_t i = 0; i < upper_run - 1; ++i)
       result[i] = static_cast<char>(std::tolower(result[i]));
-  }
-  return result;
-}
-
-string
-GenTs::to_pascal_case(const string &name)
-{
-  string result;
-  bool cap_next = true;
-  for (char c : name) {
-    if (c == '_') {
-      cap_next = true;
-    }
-    else {
-      result += cap_next ? static_cast<char>(std::toupper(c)) : c;
-      cap_next = false;
-    }
   }
   return result;
 }
@@ -587,8 +568,8 @@ GenTs::show_def(const ProgDef &prog)
     has_programs_ = true;
 
     // Emit RpcProgramMeta export
-    string export_name = multi_ver ? to_pascal_case(vers.id) + "Program"
-                                   : to_pascal_case(prog.id) + "Program";
+    string export_name = multi_ver ? vers.id + "Program"
+                                   : prog.id + "Program";
     program_meta_ += std::format("\nexport const {0}: RpcProgramMeta = {{\n"
                                  "  programId: {1},\n"
                                  "  version: {2},\n"
