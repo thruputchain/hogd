@@ -21,6 +21,7 @@ struct GenTs {
   std::size_t indent_{};
   vector<string> codec_names_; // collect codec entries for namespace
   bool has_programs_{};
+  bool needs_void_codec_{};
   std::set<string> primitive_codecs_; // primitive codecs needed in imports
 
   static constexpr int kIndentWidth = 2;
@@ -179,8 +180,10 @@ GenTs::to_pascal_case(const string &name)
 string
 GenTs::proc_codec_ref(const string &type)
 {
-  if (type == "void")
+  if (type == "void") {
+    needs_void_codec_ = true;
     return "VoidCodec";
+  }
 
   // Primitive types → named codecs from @groundhog/xdr
   static const std::map<string, string> primitive_codec_map{
@@ -546,7 +549,10 @@ GenTs::show_def(const ProgDef &prog)
       return multi_ver ? vers.id + "_" + proc_id + "_args" : proc_id + "_args";
     };
 
-    // Generate multi-arg request structs for procedures with >1 arg
+    // Generate multi-arg request structs for procedures with >1 arg.
+    // Save codec_names_ size so args structs don't leak into the public
+    // codec namespace — they are internal to the RpcProgramMeta block.
+    auto codec_names_before = codec_names_.size();
     for (const auto &proc : vers.procs) {
       vector<string> real_args;
       for (const auto &a : proc.arg_types)
@@ -573,6 +579,7 @@ GenTs::show_def(const ProgDef &prog)
       gen_struct_type(args_body, args_name);
       gen_struct_codec(args_body, args_name);
     }
+    codec_names_.resize(codec_names_before);
 
     has_programs_ = true;
 
@@ -594,6 +601,7 @@ GenTs::show_def(const ProgDef &prog)
           real_args.push_back(a);
 
       if (real_args.empty()) {
+        needs_void_codec_ = true;
         req_codec = "VoidCodec";
       }
       else if (real_args.size() == 1) {
@@ -1116,7 +1124,9 @@ gen_ts(vector<Definition> *defs)
                     x23::git_commit_hash() + "\n\n";
 
   if (gs.has_programs_) {
-    string imports = "import { type XdrCodec, type RpcProgramMeta, VoidCodec";
+    string imports = "import { type XdrCodec, type RpcProgramMeta";
+    if (gs.needs_void_codec_)
+      imports += ", VoidCodec";
     for (const auto &pc : gs.primitive_codecs_)
       imports += ", " + pc;
     imports += " } from \"@groundhog/xdr\";\n";
