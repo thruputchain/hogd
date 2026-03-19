@@ -17,8 +17,13 @@
 struct GenTs {
   string top_;
   string bottom_;
+  string program_meta_; // RPC program metadata output
   std::size_t indent_{};
   vector<string> codec_names_; // collect codec entries for namespace
+  bool has_programs_{};
+  bool needs_void_codec_{};
+  std::set<string> primitive_codecs_; // primitive codecs needed in imports
+  std::set<string> emitted_args_;     // dedup _args structs across all ProgDefs
 
   static constexpr int kIndentWidth = 2;
 
@@ -38,7 +43,11 @@ struct GenTs {
   void show_def(const OpenNS & /*unused*/) {}
   void show_def(const CloseNS & /*unused*/) {}
   void show_def(const Literal & /*unused*/) {}
-  void show_def(const ProgDef & /*unused*/) {}
+  void show_def(const ProgDef &prog);
+
+  // Codec reference for a type in program metadata context.
+  // VoidCodec for void, _TypeName for local types, proto.codec.X for external.
+  string proc_codec_ref(const string &type);
 
   // Type generators
   void gen_enum_type(const EnumBody &body, const string &name);
@@ -147,6 +156,38 @@ GenTs::to_camel_case(const string &name)
       result[i] = static_cast<char>(std::tolower(result[i]));
   }
   return result;
+}
+
+string
+GenTs::proc_codec_ref(const string &type)
+{
+  if (type == "void") {
+    needs_void_codec_ = true;
+    return "VoidCodec";
+  }
+
+  // Primitive types → named codecs from @groundhog/xdr
+  static const std::map<string, string> primitive_codec_map{
+      {"bool", "BoolCodec"},
+      {"int", "Int32Codec"},
+      {"unsigned int", "Uint32Codec"},
+      {"hyper", "Int64Codec"},
+      {"unsigned hyper", "Uint64Codec"},
+  };
+  if (auto it = primitive_codec_map.find(type);
+      it != primitive_codec_map.end()) {
+    primitive_codecs_.insert(it->second);
+    return it->second;
+  }
+
+  // Local codec — reference the private const directly.
+  // NOTE: This relies on XDR convention that type definitions precede program
+  // definitions.  Types declared after a program block will not yet be in
+  // codec_names_ and will fall through to the external-reference path below.
+  if (std::ranges::find(codec_names_, type) != codec_names_.end())
+    return "_" + type;
+  // External type — reference via proto.codec with cast
+  return std::format("proto.codec.{0} as XdrCodec<proto.{0}>", type);
 }
 
 bool
@@ -480,6 +521,91 @@ GenTs::show_def(const UnionDecl &u)
   gen_union_codec(u.body, u.id);
 }
 
+void
+GenTs::show_def(const ProgDef &prog)
+{
+  bool multi_ver = prog.versions.size() > 1;
+
+  for (const VersDef &vers : prog.versions) {
+    // Build args struct name, qualified by version for multi-version programs
+    auto args_struct_name = [&](const string &proc_id) -> string {
+      return multi_ver ? vers.id + "_" + proc_id + "_args" : proc_id + "_args";
+    };
+
+    // Generate multi-arg request structs for procedures with >1 arg.
+    // Save codec_names_ size so args structs don't leak into the public
+    // codec namespace — they are internal to the RpcProgramMeta block.
+    auto codec_names_before = codec_names_.size();
+    for (const auto &proc : vers.procs) {
+      vector<string> real_args;
+      for (const auto &a : proc.arg_types)
+        if (a != "void")
+          real_args.push_back(a);
+      if (real_args.size() <= 1)
+        continue;
+
+      string args_name = args_struct_name(proc.id);
+      if (!emitted_args_.insert(args_name).second)
+        continue; // already generated
+
+      // Build a StructBody with positional field names (arg0, arg1, ...)
+      StructBody args_body;
+      for (size_t i = 0; i < real_args.size(); ++i) {
+        Declaration d;
+        d.type = TypeSpecifier{real_args[i]};
+        d.id = "arg" + std::to_string(i);
+        d.qual = Declaration::kScalar;
+        args_body.push_back(d);
+      }
+
+      prtop("\n");
+      gen_struct_type(args_body, args_name);
+      gen_struct_codec(args_body, args_name);
+    }
+    codec_names_.resize(codec_names_before);
+
+    has_programs_ = true;
+
+    // Emit RpcProgramMeta export
+    string export_name = multi_ver ? vers.id + "Program" : prog.id + "Program";
+    program_meta_ += std::format("\nexport const {0}: RpcProgramMeta = {{\n"
+                                 "  programId: {1},\n"
+                                 "  version: {2},\n"
+                                 "  methods: {{\n",
+                                 export_name, prog.val, vers.val);
+
+    for (const auto &proc : vers.procs) {
+      // Request codec
+      string req_codec;
+      vector<string> real_args;
+      for (const auto &a : proc.arg_types)
+        if (a != "void")
+          real_args.push_back(a);
+
+      if (real_args.empty()) {
+        needs_void_codec_ = true;
+        req_codec = "VoidCodec";
+      }
+      else if (real_args.size() == 1) {
+        req_codec = proc_codec_ref(real_args[0]);
+      }
+      else {
+        req_codec = "_" + args_struct_name(proc.id);
+      }
+
+      // Response codec
+      string resp_codec = proc_codec_ref(proc.return_type);
+
+      program_meta_ += std::format(
+          "    {0}: {{ proc: {1}, request: {2}, response: {3} }},\n", proc.id,
+          proc.val, req_codec, resp_codec);
+    }
+
+    program_meta_ += "  },\n"
+                     "};\n";
+  }
+}
+
 // ---- Type generators ----
 
 void
@@ -537,18 +663,9 @@ GenTs::gen_union_type(const UnionBody &body, const string &name)
     }
 
     if (arm.has_default) {
-      string disc_type;
-      if (is_enum) {
-        disc_type = "proto." + body.switch_type;
-      }
-      else if (body.switch_type == "bool") {
-        disc_type = "boolean";
-      }
-      else {
-        disc_type = "number";
-      }
-
-      prtop("| {{ {}: {}", body.switch_id, disc_type);
+      // Default arm: { disc: number } or { disc: number; data: T }
+      // Overlaps with specific variants, but needed for forward compat.
+      prtop("| {{ {}: number", body.switch_id);
       if (arm.decl.qual != Declaration::kVoid) {
         prtop("; {}: {}", arm.decl.id, ts_field_type(arm.decl, name));
       }
@@ -661,77 +778,124 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
   bool is_enum = is_enum_discriminant(body.switch_type);
   bool is_bool = (body.switch_type == "bool");
 
-  // Map XDR case values to TS case labels
   auto case_label = [&](const string &c) -> string {
     if (is_enum)
       return std::format("proto.{}.{}", body.switch_type, c);
     if (is_bool)
       return (c == "TRUE") ? "true" : "false";
-    return c; // numeric literal
+    return c;
   };
+
+  // Check if union has a default arm
+  bool has_default_arm = false;
+  for (const auto &arm : body.arms)
+    if (arm.has_default) {
+      has_default_arm = true;
+      break;
+    }
 
   codec_names_.push_back(name);
   prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
 
-  // encode
+  // ---- encode ----
   prbottom("  encode(w, val) {{\n");
-  if (is_bool) {
+  if (is_bool)
     prbottom("    w.writeBool(val.{0});\n", body.switch_id);
-  }
-  else if (is_enum) {
-    // Enum values are numbers in TS
+  else if (is_enum)
     prbottom("    w.writeInt32(BigInt(val.{0}));\n", body.switch_id);
-  }
-  else {
-    // Primitive discriminant (int/uint)
-    string write = map_write_method(body.switch_type);
-    prbottom("    w.{0}(BigInt(val.{1}));\n", write, body.switch_id);
-  }
+  else
+    prbottom("    w.{0}(BigInt(val.{1}));\n",
+             map_write_method(body.switch_type), body.switch_id);
+
   prbottom("    switch (val.{0}) {{\n", body.switch_id);
 
   for (const auto &arm : body.arms) {
+    if (arm.has_default) {
+      // Default arm: only emit if it has data to encode
+      if (arm.decl.qual != Declaration::kVoid) {
+        string ftype = ts_field_type(arm.decl, name);
+        prbottom("      default: {{\n");
+        prbottom("        const v = val as {{ {0}: number; {1}: {2} }};\n",
+                 body.switch_id, arm.decl.id, ftype);
+        prbottom("        if (v.{0} === undefined) {{\n", arm.decl.id);
+        prbottom("          throw new Error(\"{0} encode: default arm but {1} "
+                 "is undefined\");\n",
+                 name, arm.decl.id);
+        prbottom("        }}\n");
+        encode_field(arm.decl, "v." + arm.decl.id, name, 8);
+        prbottom("        break;\n");
+        prbottom("      }}\n");
+      }
+      // default: void — nothing to encode, omit from switch
+      continue;
+    }
+
     for (const auto &c : arm.cases)
       prbottom("      case {0}:\n", case_label(c));
-    if (arm.has_default)
-      prbottom("      default:\n");
 
-    if (arm.decl.qual != Declaration::kVoid)
-      encode_field(arm.decl, "val." + arm.decl.id, name, 8);
-    prbottom("        break;\n");
+    if (arm.decl.qual != Declaration::kVoid) {
+      if (has_default_arm) {
+        // { disc: number } overlaps — cast to inline variant type
+        string ftype = ts_field_type(arm.decl, name);
+        prbottom("      {{\n");
+        prbottom("        const v = val as {{ {0}: number; {1}: {2} }};\n",
+                 body.switch_id, arm.decl.id, ftype);
+        prbottom("        if (v.{0} === undefined) {{\n", arm.decl.id);
+        prbottom(
+            "          throw new Error(\"{0} encode: {1} is undefined\");\n",
+            name, arm.decl.id);
+        prbottom("        }}\n");
+        encode_field(arm.decl, "v." + arm.decl.id, name, 8);
+        prbottom("        break;\n");
+        prbottom("      }}\n");
+      }
+      else {
+        encode_field(arm.decl, "val." + arm.decl.id, name, 8);
+        prbottom("        break;\n");
+      }
+    }
+    else {
+      prbottom("        break;\n");
+    }
   }
 
   prbottom("    }}\n");
   prbottom("  }},\n");
 
-  // decode
+  // ---- decode ----
   prbottom("  decode(r) {{\n");
-  if (is_bool) {
+  if (is_bool)
     prbottom("    const {0} = r.readBool();\n", body.switch_id);
-  }
-  else if (is_enum) {
+  else if (is_enum)
     prbottom("    const {0} = Number(r.readInt32());\n", body.switch_id);
-  }
-  else {
-    string read = map_read_method(body.switch_type);
-    prbottom("    const {0} = Number(r.{1}());\n", body.switch_id, read);
-  }
+  else
+    prbottom("    const {0} = Number(r.{1}());\n", body.switch_id,
+             map_read_method(body.switch_type));
+
   prbottom("    switch ({0}) {{\n", body.switch_id);
 
   bool has_default = false;
   for (const auto &arm : body.arms) {
-    for (const auto &c : arm.cases)
-      prbottom("      case {0}:\n", case_label(c));
     if (arm.has_default) {
       has_default = true;
       prbottom("      default:\n");
+    }
+    else {
+      for (const auto &c : arm.cases)
+        prbottom("      case {0}:\n", case_label(c));
     }
 
     if (arm.decl.qual != Declaration::kVoid) {
       decode_field(arm.decl, name, 8);
       prbottom("        return {{ {0}, {1} }};\n", body.switch_id, arm.decl.id);
     }
-    else {
+    else if (!has_default_arm) {
+      // No catch-all variant — need cast for void arms
       prbottom("        return {{ {0} }} as {1};\n", body.switch_id, name);
+    }
+    else {
+      // Catch-all { disc: number } absorbs — no cast needed
+      prbottom("        return {{ {0} }};\n", body.switch_id);
     }
   }
 
@@ -933,17 +1097,28 @@ std::string
 gen_ts(vector<Definition> *defs)
 {
   GenTs gs;
+  gs.process(*defs);
 
   string preamble = "// -*- TypeScript -*-\n"
                     "// Generated Code: DO NOT CHECK IN\n"
                     "\n"
                     "// Generated from x23c commit: " +
-                    x23::git_commit_hash() +
-                    "\n\n"
-                    "import type { XdrCodec } from \"../xdr/codec.js\";\n"
-                    "import * as proto from \"./index.js\";\n";
+                    x23::git_commit_hash() + "\n\n";
 
-  gs.process(*defs);
+  if (gs.has_programs_) {
+    string imports = "import { type XdrCodec, type RpcProgramMeta";
+    if (gs.needs_void_codec_)
+      imports += ", VoidCodec";
+    for (const auto &pc : gs.primitive_codecs_)
+      imports += ", " + pc;
+    imports += " } from \"@groundhog/xdr\";\n";
+    preamble += imports;
+  }
+  else {
+    preamble += "import type { XdrCodec } from \"@groundhog/xdr\";\n";
+  }
+
+  preamble += "import * as proto from \"./index.js\";\n";
 
   // Emit the codec namespace object
   string codec_ns = "\nexport const codec = {\n";
@@ -952,5 +1127,5 @@ gen_ts(vector<Definition> *defs)
   codec_ns += "} as const;\n";
 
   return preamble + gs.top_ + "\n//\n// XDR Codecs below this point\n//\n" +
-         gs.bottom_ + codec_ns + "\n";
+         gs.bottom_ + codec_ns + gs.program_meta_ + "\n";
 }
