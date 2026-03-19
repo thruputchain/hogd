@@ -65,14 +65,6 @@ make_syscall_handler(void *db, void *rc, SignedTransaction const &stx)
   return result.syscall_handler;
 }
 
-uint32_t
-get_event_log_len_unwrapped(void *syscall_handler)
-{
-  auto result = get_event_log_len(syscall_handler);
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
-  return result.len;
-}
-
 } // namespace
 
 // Simple tests to make sure that the exported test functions work on at least a
@@ -194,49 +186,31 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_events); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
   EXPECT_EQ(output.status_code(),
             InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
 
-  // Events not available until next block
+  // Events are returned directly from root_invoke
+  ASSERT_NE(result.serialized_events.data, nullptr);
+  ASSERT_GT(result.serialized_events.len, 0u);
+
+  x23::Vec<TxEmittedEvent> events;
+  x23::deserialize(&events, x23::BufView{result.serialized_events.data,
+                                         result.serialized_events.len});
+  ASSERT_EQ(events.size(), 1);
+  EXPECT_EQ(events[0].contract_address, deployment_addr);
+  EXPECT_EQ(events[0].num_topics, 0);
+  EXPECT_EQ(events[0].serialized_event.size(), 11);
+  EXPECT_EQ(std::memcmp(events[0].serialized_event.data(), "test_event", 11),
+            0);
 
   auto commit_res = try_commit_transaction(syscall_handler);
   EXPECT_EQ(commit_res.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
-
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
-
-  auto event_log_len = get_event_log_len_unwrapped(syscall_handler);
-  EXPECT_GT(event_log_len, 0);
-
-  x23::Buf event_log_buffer;
-  // incorrect size to get event data
-  EXPECT_NE(get_event_log(syscall_handler, event_log_buffer.data(),
-                          event_log_buffer.size()),
-            kTestFFIErrorCodeNone);
-
-  event_log_buffer.resize(event_log_len + 1);
-  EXPECT_NE(get_event_log(syscall_handler, event_log_buffer.data(),
-                          event_log_buffer.size()),
-            kTestFFIErrorCodeNone);
-
-  event_log_buffer.resize(event_log_len);
-  EXPECT_EQ(get_event_log(syscall_handler, event_log_buffer.data(),
-                          event_log_buffer.size()),
-            kTestFFIErrorCodeNone);
-
-  TxEventLog event_log;
-  x23::deserialize(&event_log, event_log_buffer);
-  EXPECT_EQ(event_log.events.size(), 1);
-  EXPECT_EQ(event_log.events[0].contract_address, deployment_addr);
-
-  auto const &event = event_log.events[0];
-  EXPECT_EQ(event.num_topics, 0);
-  EXPECT_EQ(event.serialized_event.size(), 11);
-  EXPECT_EQ(std::memcmp(event.serialized_event.data(), "test_event", 11), 0);
 }
 
 TEST(TestBindingsTest, GrantStorageTokensTest)

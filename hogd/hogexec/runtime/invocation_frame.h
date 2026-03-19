@@ -72,6 +72,8 @@ public:
   // current call frame.
   void log_event(TxEmittedEvent event);
 
+  x23::Vec<TxEmittedEvent> const &get_events() const { return events_; }
+
   x23::Vec<TxEmittedEvent> extract_events()
   {
     auto out = std::move(events_);

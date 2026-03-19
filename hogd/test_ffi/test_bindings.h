@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 9
-#define TEST_FFI_VERSION_PATCH 5
+#define TEST_FFI_VERSION_MINOR 10
+#define TEST_FFI_VERSION_PATCH 0
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -56,7 +56,7 @@ struct ForeignInvokeResult {
 };
 
 // FFI-safe type corresponding to the result of an invocation.
-// InvocationFrameOutput, gas consumed, and trace(optional)
+// InvocationFrameOutput, gas consumed, trace(optional), and events emitted
 struct ForeignTracedInvokeResult {
   // Serialization of InvocationFrameOutpput
   struct FFIDataBuffer serialized_output;
@@ -64,6 +64,9 @@ struct ForeignTracedInvokeResult {
   uint64_t gas_consumed;
 
   struct FFIDataBuffer serialized_trace;
+
+  // Serialized events emitted during this frame (Vec<TxEmittedEvent>)
+  struct FFIDataBuffer serialized_events;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
   // of hogexec.
@@ -203,19 +206,6 @@ enum TestFFIErrorCode push_context(void *syscall_handler);
 enum TestFFIErrorCode pop_context();
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
-
-// Get the event log for the current transaction.
-// syscall_handler must have been returned by open_syscall_handler()
-// buffer must be of the proper size for the event log for the tx (query from
-// get_event_log_len)
-enum TestFFIErrorCode get_event_log(void *syscall_handler,
-                                    unsigned char *buffer, uint32_t buffer_len);
-
-struct GetEventLogLenResult {
-  uint32_t len;
-  enum TestFFIErrorCode ffi_error_code;
-};
-struct GetEventLogLenResult get_event_log_len(void *syscall_handler);
 
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg1, uint64_t arg2,

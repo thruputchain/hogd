@@ -79,10 +79,21 @@ SyscallHandlerContext::root_invoke()
       serialized_trace = s.value();
     }
 
+    auto frame_events = handler_.copy_last_frame_events();
+    FFIDataBuffer serialized_events = kNullBuffer;
+    if (!frame_events.empty()) {
+      auto s = serialize_to_ffi_data_buffer(frame_events);
+      if (!s.has_value()) {
+        return kMakeFFIError(s.error());
+      }
+      serialized_events = s.value();
+    }
+
     return ForeignTracedInvokeResult{
         .serialized_output = serialized_output.value(),
         .gas_consumed = res.gas_consumed_,
         .serialized_trace = serialized_trace,
+        .serialized_events = serialized_events,
         .ffi_error_code = kTestFFIErrorCodeNone,
     };
   }
@@ -186,6 +197,10 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   auto result =
       InvokeResult{.result_ = status_code, .gas_consumed_ = consumed_gas};
 
+  // Snapshot events from the frame about to finish — finish_frame will
+  // merge them into the parent (success) or discard them (failure).
+  auto frame_events = handler_.copy_active_frame_events();
+
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (!invocation_frame_trace_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_stack_.back());
@@ -239,10 +254,20 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     serialized_trace = s.value();
   }
 
+  FFIDataBuffer serialized_events = kNullBuffer;
+  if (!frame_events.empty()) {
+    auto s = serialize_to_ffi_data_buffer(frame_events);
+    if (!s.has_value()) {
+      return kMakeFFIError(s.error());
+    }
+    serialized_events = s.value();
+  }
+
   return ForeignTracedInvokeResult{
       .serialized_output = serialized_output.value(),
       .gas_consumed = consumed_gas + res->first.gas_consumed_,
       .serialized_trace = serialized_trace,
+      .serialized_events = serialized_events,
       .ffi_error_code = kTestFFIErrorCodeNone,
   };
 }

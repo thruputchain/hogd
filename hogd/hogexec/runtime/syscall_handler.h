@@ -142,6 +142,24 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // Copy events from the currently active invocation frame.
+  x23::Vec<TxEmittedEvent> copy_active_frame_events() const
+  {
+    if (invocation_frame_stack_.empty()) {
+      return {};
+    }
+    return invocation_frame_stack_.get_active_frame().get_events();
+  }
+
+  // Copy events from the last (root) frame after it has finished.
+  x23::Vec<TxEmittedEvent> copy_last_frame_events() const
+  {
+    if (!last_frame_.has_value()) {
+      return {};
+    }
+    return last_frame_.value().get_events();
+  }
+
   // Called after the root invocation frame finishes (by root_invoke or
   // the mock path).  Runs final validation on cumulative_invoke_result_
   // and sets root_invoke_succeeded_ if appropriate.
