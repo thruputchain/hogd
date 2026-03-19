@@ -299,10 +299,12 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces,
     if (auto ret = bench->db_.write_nnint128(make_key(i, 0), 1); !ret)
       fail(ret.error());
   }
-  // initial storage amount per account should be sufficient for replay cache
-  // entries because each source only needs to record a single entry.
+  // Each TX creates a new dst nnint128 (kBaseItemCost) and, with nonces, a
+  // replay cache entry (kReplayCacheCostPerEntry). The balance must also cover
+  // the existing src key's storage cost (kBaseItemCost) since the balance lock
+  // charges the total absolute storage cost for the address.
   populate_account_balances(bench->db_, n,
-                            bench->cost_model_.kBaseItemCost +
+                            (2 * bench->cost_model_.kBaseItemCost) +
                                 bench->cost_model_.kReplayCacheCostPerEntry);
   if (auto lsn = bench->db_.commit(); !lsn)
     fail(lsn.error());
