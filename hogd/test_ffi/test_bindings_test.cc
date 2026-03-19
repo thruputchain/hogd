@@ -3,6 +3,7 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <span>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -2476,6 +2477,31 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(commit_res.result_code,
             std::to_underlying(ExecResult::ExecResultOK));
+}
+
+// Regression test: concurrent create_db calls from multiple threads used to
+// cause use-after-free in PerThread storage (fixed in #1327).
+TEST(TestBindingsTest, ConcurrentCreateDB)
+{
+  constexpr int kThreadCount = 8;
+  constexpr int kIterations = 4;
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreadCount);
+
+  for (int t = 0; t < kThreadCount; t++) {
+    threads.emplace_back([&] {
+      for (int i = 0; i < kIterations; i++) {
+        auto *db = make_db();
+        ASSERT_NE(db, nullptr);
+        free_db(db);
+      }
+    });
+  }
+
+  for (auto &th : threads) {
+    th.join();
+  }
 }
 
 } // namespace hogd
