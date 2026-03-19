@@ -153,6 +153,7 @@ public:
   x23::Vec<TxEmittedEvent> copy_last_frame_events() const
   {
     CHECK(last_frame_.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return last_frame_.value().get_events();
   }
 
