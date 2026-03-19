@@ -54,6 +54,7 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
     return RPCError::kRPCStorageWriteFailed;
+  case HogDBCode::kInvalidExecutorBehavior:
   case HogDBCode::kInternal:
   case HogDBCode::kCorruption:
   case HogDBCode::kNoMemory:

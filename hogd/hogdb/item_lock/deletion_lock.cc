@@ -26,7 +26,7 @@ DeletionLock::stage_committed_changes(const LockContext &ctx,
   if (!ctx.key.is_contract_data()) {
     error("unhandled item key type in DeletionLock: {}",
           std::to_underlying(ctx.key.key_type()));
-    return HogDBError(HogDBCode::kInternal);
+    return HogDBError(HogDBCode::kInvalidExecutorBehavior);
   }
 
   CHECK(ctx.dao != nullptr);
