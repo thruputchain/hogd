@@ -2490,7 +2490,7 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
   threads.reserve(kThreadCount);
 
   for (int t = 0; t < kThreadCount; t++) {
-    threads.emplace_back([&] {
+    threads.emplace_back([] {
       for (int i = 0; i < kIterations; i++) {
         auto *db = make_db();
         ASSERT_NE(db, nullptr);
