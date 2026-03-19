@@ -242,10 +242,20 @@ SystemCallHandler::root_invoke()
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
 
+  finalize_after_root_frame();
+
+  return cumulative_invoke_result_;
+}
+
+void
+SystemCallHandler::finalize_after_root_frame()
+{
+  assert(!finalized_);
   assert(invocation_frame_stack_.empty());
+  finalized_ = true;
 
   if (!cumulative_invoke_result_.is_root_success()) {
-    return cumulative_invoke_result_;
+    return;
   }
 
   // update cumulative_invoke_result_ with the final validation data
@@ -254,8 +264,6 @@ SystemCallHandler::root_invoke()
   if (cumulative_invoke_result_.is_root_success()) {
     root_invoke_succeeded_ = true;
   }
-
-  return cumulative_invoke_result_;
 }
 
 InvocationFrameOutput

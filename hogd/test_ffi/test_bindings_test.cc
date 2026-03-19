@@ -2436,4 +2436,46 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
   }
 }
 
+// Verify that try_commit_transaction succeeds after the mock invocation path:
+// open_mocked_syscall_handler → open_mock_invocation_frame →
+// finish_mock_invocation_frame → try_commit_transaction.
+TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  Invocation invocation = {
+      .invoked_address = ContractAddress{},
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = 0,
+      .calldata = {},
+  };
+
+  ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
+            kTestFFIErrorCodeNone);
+
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeNone));
+  ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
+
+  auto commit_res = try_commit_transaction(handler.syscall_handler);
+  EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(commit_res.result_code,
+            std::to_underlying(ExecResult::ExecResultOK));
+}
+
 } // namespace hogd

@@ -142,6 +142,19 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // Called after the root invocation frame finishes (by root_invoke or
+  // the mock path).  Runs final validation on cumulative_invoke_result_
+  // and sets root_invoke_succeeded_ if appropriate.
+  void finalize_after_root_frame();
+
+  // Allow the mock path to set cumulative_invoke_result_ before calling
+  // finalize_after_root_frame().  Must be called before finalization.
+  void mock_set_cumulative_invoke_result(InvokeResult result)
+  {
+    assert(!finalized_);
+    cumulative_invoke_result_ = result;
+  }
+
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
     if constexpr (Syscall == kNoTracingSyscall) {
@@ -332,6 +345,7 @@ private:
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
+  bool finalized_{false};
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
   bool two_phase_commit_failed_{false};
