@@ -777,8 +777,7 @@ TEST_P(RCQTest, MaxEntrySizeBoundary)
 TEST_P(RCQTest, ExactBlockEntriesLimit)
 {
   if (GetParam() == TestDB::kMockInMemory) {
-    SUCCEED();
-    return;
+    GTEST_SKIP() << "Requires HogDB for block-level verification";
   }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -802,8 +801,7 @@ TEST_P(RCQTest, ExactBlockEntriesLimit)
 TEST_P(RCQTest, ConcurrentFillToExactLimit)
 {
   if (GetParam() == TestDB::kMockInMemory) {
-    SUCCEED();
-    return;
+    GTEST_SKIP() << "Requires HogDB for block-level verification";
   }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -837,6 +835,15 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
   // Both should commit: 500 + 500 = 1000 = exactly at limit.
   ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
   ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  advance_block();
+
+  // Verify the queue actually contains all 1000 entries (not just 500).
+  auto queue = lookup_storage_item_from_db(
+      make_contract_data_addrkey(contract_address_, "rcq0"));
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->metadata().live_entries,
+            kRetrocausalQueueBlockEntriesMaxLen);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -1,3 +1,4 @@
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -1823,13 +1824,15 @@ protected:
         });
 
     // ConsumeAll: drain the queue until empty (single TX).
+    // Buffer is max entry size (kQueueEntryMaxLen = 256) so this works
+    // regardless of how entries were inserted.
     builder.add<SerializationFormat::kTxs>(
         50, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           while (true) {
-            uint32_t out = 0;
+            std::array<uint8_t, 256> out{};
             RuntimeMemoryLength written_len = 0;
             auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+                kStorageKey, false, std::as_writable_bytes(std::span(out)),
                 written_len);
             if (!res.has_value()) {
               ADD_FAILURE() << "System error consuming entry";
