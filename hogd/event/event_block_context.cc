@@ -204,9 +204,9 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 
   if (buffers_->buf.size() >= kBufferThreshold) {
     // Extract the buffer from the current thread's PerThread slot BEFORE the
-    // co_await.  After co_await, the coroutine may resume on a different thread,
-    // so buffers_-> would resolve to that thread's slot instead of the one that
-    // exceeded the threshold.
+    // co_await.  After co_await, the coroutine may resume on a different
+    // thread, so buffers_-> would resolve to that thread's slot instead of the
+    // one that exceeded the threshold.
     using buf_t = std::decay_t<decltype(buffers_->buf)>;
     buf_t buf = std::move(buffers_->buf);
     buffers_->buf.clear();
