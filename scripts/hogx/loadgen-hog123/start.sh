@@ -19,6 +19,6 @@ for host in hog1 hog2 hog3; do
 done
 
 "$HOGX" -m 3 config together -a loadgen -t 2
-"$HOGX" -m 3 start -a loadgen -c c1
+"$HOGX" -m 3 start -a loadgen --network-id 1
 
 echo "using: export HOGX_HOME=${HOGX_HOME}"
