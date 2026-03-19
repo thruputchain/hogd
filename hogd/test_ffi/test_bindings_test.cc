@@ -271,9 +271,9 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
-  ASSERT_EQ(
-      register_new_contract(rc, 1, mock_contract_event_then_fault, nullptr),
-      kTestFFIErrorCodeNone);
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_event_then_fault,
+                                  nullptr),
+            kTestFFIErrorCodeNone);
 
   Contract contract(ContractType::kMockTest);
   contract.mock_contract_id() = 1;
@@ -326,9 +326,9 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
-  ASSERT_EQ(
-      register_new_contract(rc, 1, mock_contract_event_then_revert, nullptr),
-      kTestFFIErrorCodeNone);
+  ASSERT_EQ(register_new_contract(rc, 1, mock_contract_event_then_revert,
+                                  nullptr),
+            kTestFFIErrorCodeNone);
 
   Contract contract(ContractType::kMockTest);
   contract.mock_contract_id() = 1;
@@ -2078,9 +2078,10 @@ TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
 
   // Finish with a deterministic error (fault)
-  auto finish_res = finish_mock_invocation_frame(
-      handler.syscall_handler,
-      std::to_underlying(InvokeErrorCode::kInvokeDeterministic));
+  auto finish_res =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::kInvokeDeterministic));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
@@ -2205,8 +2206,8 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
   ASSERT_EQ(events.size(), 1);
   EXPECT_EQ(events[0].contract_address, frame_addr);
   EXPECT_EQ(events[0].serialized_event.size(), 12);
-  EXPECT_EQ(
-      std::memcmp(events[0].serialized_event.data(), "frame_event", 12), 0);
+  EXPECT_EQ(std::memcmp(events[0].serialized_event.data(), "frame_event", 12),
+            0);
 
   // Normal workflow: try_commit drains events from last_frame_.
   auto commit_res = try_commit_transaction(handler.syscall_handler);
