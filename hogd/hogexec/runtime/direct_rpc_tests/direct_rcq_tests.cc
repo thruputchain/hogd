@@ -1083,7 +1083,7 @@ TEST_F(DirectRCQTests, StressBackwardFullBlockConsume)
                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
   r = tx4.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value());
-  ASSERT_EQ(r.error().code(), SystemErrorCode::kSystemUnrecoverable);
+  ASSERT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
 }
 
 TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)

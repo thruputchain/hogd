@@ -1783,7 +1783,7 @@ protected:
                 written_len);
             if (!res.has_value()) {
               ADD_FAILURE() << "System error consuming entry";
-              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              return InvokeError{InvokeErrorCode::Deterministic};
             }
             if (res.value() == SyscallErrorCode::
                                    kSyscallErrorCodeNoRetrocausalQueueEntry ||
@@ -1793,7 +1793,7 @@ protected:
             }
             if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "Unexpected error consuming entry";
-              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
           return {};

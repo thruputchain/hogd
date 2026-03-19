@@ -159,7 +159,7 @@ protected:
                  return res.error().to_invoke_error();
                }
                if (!res.value().has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }}});
