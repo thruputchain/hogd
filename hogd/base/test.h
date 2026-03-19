@@ -21,9 +21,14 @@ private:
   {
     std::string dir;
     std::error_code ec;
+    bool created;
     do {
       dir = "/tmp/" + time_string_with_ns();
-    } while (!std::filesystem::create_directory(dir, ec));
+      created = std::filesystem::create_directory(dir, ec);
+      if (ec) {
+        panic("failed to create tmp directory {}: {}", dir, ec.message());
+      }
+    } while (!created);
     return dir;
   }
 
