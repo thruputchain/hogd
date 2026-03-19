@@ -205,6 +205,41 @@ public:
     }
   }
 
+  // Work-stealing variant of for_each_parallel. Submits only worker_count()
+  // jobs instead of size/width jobs — each worker claims width-sized chunks
+  // via an atomic counter. Use this when the range is large relative to width
+  // (e.g. 1M elements / 1024 width would submit 1024 jobs with
+  // for_each_parallel but only worker_count() with this).
+  template<std::ranges::random_access_range R,
+           std::invocable<std::ranges::range_reference_t<R>> Func>
+  void for_each_parallel_ws(R &&r, Func f,
+                            size_t width = kDefaultParallelRangeWidth)
+  {
+    auto total = std::ranges::size(r);
+    if (total == 0)
+      return;
+    std::atomic<size_t> next_chunk = 0;
+    std::vector<std::future<void>> futures;
+    futures.reserve(worker_count());
+    for (size_t i = 0; i < worker_count(); i++) {
+      futures.push_back(submit([&] {
+        while (true) {
+          size_t start = next_chunk.fetch_add(width, std::memory_order_relaxed);
+          if (start >= total)
+            return;
+          size_t end = std::min<size_t>(start + width, total);
+          for (size_t j = start; j < end; j++) {
+            f(r[j]);
+          }
+        }
+      }));
+    }
+    for (auto &future : futures) {
+      future.wait();
+      future.get();
+    }
+  }
+
   // adjust_workers changes the number of active worker threads. By setting it
   // low or to zero, one can reduce background activity during periods of
   // high-priority work. Setting n to INT_MAX will re-enable all available
