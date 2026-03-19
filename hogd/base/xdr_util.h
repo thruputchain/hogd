@@ -296,14 +296,14 @@ template<> struct std::hash<hogd::AddressAndKey> {
     auto key_disc = addrkey.key.key_type();
     std::string_view key_view = [&] {
       switch (key_disc) {
-      case hogd::StorageKeyType::kStorageKeyTypeContractData:
+      case hogd::StorageKeyType::ContractData:
         return std::string_view(reinterpret_cast<const char *>(
                                     addrkey.key.contract_data_key().data()),
                                 addrkey.key.contract_data_key().size());
-      case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-      case hogd::StorageKeyType::kStorageKeyTypeAddressAuthData:
-      case hogd::StorageKeyType::kStorageKeyTypeAddressMetadata:
-      case hogd::StorageKeyType::kStorageKeyTypeReplayCache:
+      case hogd::StorageKeyType::FreeNativeTokenBalance:
+      case hogd::StorageKeyType::AuthData:
+      case hogd::StorageKeyType::Metadata:
+      case hogd::StorageKeyType::ReplayCache:
         return std::string_view();
       }
       hogd::panic("unhandled StorageKeyType: {}", key_disc);

@@ -86,7 +86,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call Contract B (which will revert)
@@ -97,27 +97,27 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                    Calldata{}, 0, output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract A should receive Contract B's return data
              auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Verify return data matches expected
              auto expected_data = make_bytestring("contract_b_error");
              if ((**status)->size() != expected_data.size()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (std::memcmp((**status)->data(), expected_data.data(),
                              expected_data.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -137,7 +137,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract B manually reverts with return data
@@ -238,7 +238,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call Contract B
@@ -249,27 +249,27 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                    Calldata{}, 0, output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract A should receive Contract B's processed return data
              auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Verify return data matches expected
              auto expected_data = make_bytestring("contract_b_processed");
              if ((**status)->size() != expected_data.size()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (std::memcmp((**status)->data(), expected_data.data(),
                              expected_data.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -290,7 +290,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call Contract C (which will revert)
@@ -301,27 +301,27 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                    Calldata{}, 0, output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract B receives Contract C's return data
              auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Verify C's return data
              auto expected_c_data = make_bytestring("contract_c_error");
              if ((**status)->size() != expected_c_data.size()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (std::memcmp((**status)->data(), expected_c_data.data(),
                              expected_c_data.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract B returns processed data
@@ -347,7 +347,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract C manually reverts with return data
@@ -448,7 +448,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call Contract B (which will revert)
@@ -459,27 +459,27 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                    Calldata{}, 0, output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Contract A should receive Contract B's return data
              auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Verify return data matches expected
              auto expected_data = make_bytestring("contract_b_error");
              if ((**status)->size() != expected_data.size()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (std::memcmp((**status)->data(), expected_data.data(),
                              expected_data.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};

@@ -97,18 +97,16 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
   case StorageDeltaType::kDeltaTypeDelete:
     return to_rpc_error(tx.request_deletion(make_item_key(addrkey), flags));
   case StorageDeltaType::kDeltaTypeDeployContract:
-    assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeAddressMetadata);
+    assert(addrkey.key.key_type() == StorageKeyType::Metadata);
     return to_rpc_error(
         tx.request_deploy_contract(addrkey.address,
                                    delta.deployed_contract_hash()));
   case StorageDeltaType::kDeltaTypeAuthDataChange:
-    assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeAddressAuthData);
+    assert(addrkey.key.key_type() == StorageKeyType::AuthData);
     return to_rpc_error(
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
-    CHECK(addrkey.key.key_type() == StorageKeyType::kStorageKeyTypeReplayCache);
+    CHECK(addrkey.key.key_type() == StorageKeyType::ReplayCache);
     return to_rpc_error(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:

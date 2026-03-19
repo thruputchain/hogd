@@ -84,7 +84,7 @@ load_allocation(NativeSyscallContext &ctx,
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   if (!output_set_opt) {
@@ -95,7 +95,7 @@ load_allocation(NativeSyscallContext &ctx,
   if (of || total < 0) {
     trace("overflowing_add failed in load_allocation; we must have configured "
           "genesis incorrectly");
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   return total;
 }
@@ -111,7 +111,7 @@ delete_storage_key(NativeSyscallContext &ctx,
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   return {};
 }
@@ -165,11 +165,11 @@ make_native_initial_token_claim_contract()
         if (!transfer_result.has_value() ||
             !transfer_result.value().has_value() ||
             !transfer_result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto transfer_ok = transfer_result.value().value().value();
         if (!transfer_ok.is_ok()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Deploy the contract using hash and nonce
@@ -181,7 +181,7 @@ make_native_initial_token_claim_contract()
               deploy_res.error());
         }
         if (*deploy_res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Call the initialize entrypoint with provided calldata
@@ -191,15 +191,14 @@ make_native_initial_token_claim_contract()
         auto invoke_result = ctx.syscall<SyscallNo::kInvoke>(
             deployed_addr, method_id, UINT64_MAX,
             std::as_bytes(std::span(calldata)),
-            std::to_underlying(InvokeFlag::kInvokeFlagNone),
-            output_return_buffer_len);
+            std::to_underlying(InvokeFlag::None), output_return_buffer_len);
 
         if (!invoke_result.has_value()) {
           return NativeContractBuilder::host_fn_error_conversion(
               invoke_result.error());
         }
         if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });

@@ -272,7 +272,7 @@ TEST(MockSyscallTest, NoReturnTest)
   context.pop_mock_runtime();
   context.pop_context();
 
-  ASSERT_EQ(res.panic, std::to_underlying(HostFnErrorCode::kHostExit));
+  ASSERT_EQ(res.panic, std::to_underlying(HostFnErrorCode::Exit));
   ASSERT_EQ(res.result_code, 0);
 }
 

@@ -60,6 +60,17 @@ list(APPEND TEST_EXECUTABLES test_rpc_dispatch_race)
 add_test(NAME rpc_dispatch_race COMMAND test_rpc_dispatch_race -d 5 -t 8)
 set_tests_properties(rpc_dispatch_race PROPERTIES TIMEOUT 60)
 
+add_executable(test_dwrite_flush_race ${EXCLUDE_TOKEN} dwrite_flush_race.cc)
+target_link_libraries(test_dwrite_flush_race x23 xdrtest)
+use_x23(test_dwrite_flush_race)
+list(APPEND TEST_EXECUTABLES test_dwrite_flush_race)
+foreach(scenario oneshot serialstop)
+  add_test(NAME dwrite_flush_race_${scenario}
+    COMMAND test_dwrite_flush_race -s ${scenario} -d 5 -t 8)
+  set_tests_properties(dwrite_flush_race_${scenario} PROPERTIES
+    TIMEOUT 30 RESOURCE_LOCK dwrite_flush_race)
+endforeach()
+
 add_executable(test_shutdown_race ${EXCLUDE_TOKEN} shutdown_race.cc)
 target_link_libraries(test_shutdown_race x23 xdrtest)
 use_x23(test_shutdown_race)

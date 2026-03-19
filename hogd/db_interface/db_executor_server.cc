@@ -33,8 +33,7 @@ DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
     return false;
   }
   // Reject exclusive locks on balance keys (match HogDB behavior).
-  if (addrkey.key.key_type() ==
-          StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance &&
+  if (addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance &&
       (flags &
        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock))) {
     return false;

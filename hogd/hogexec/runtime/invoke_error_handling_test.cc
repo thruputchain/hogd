@@ -43,18 +43,18 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
     // Using a switch, so that the compiler will warn when an enum value is
     // missing
     switch (enum_code) {
-    case InvokeErrorCode::kInvokeNone:
+    case InvokeErrorCode::None:
       return {};
-    case InvokeErrorCode::kInvokeDeterministic:
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    case InvokeErrorCode::kInvokeOutOfGas:
-      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-    case InvokeErrorCode::kInvokeAbortTransaction:
-      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-    case InvokeErrorCode::kInvokeValidationFailure:
-      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-    case InvokeErrorCode::kInvokeUnrecoverable:
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case InvokeErrorCode::Deterministic:
+      return InvokeError{InvokeErrorCode::Deterministic};
+    case InvokeErrorCode::OutOfGas:
+      return InvokeError{InvokeErrorCode::OutOfGas};
+    case InvokeErrorCode::Abandon:
+      return InvokeError{InvokeErrorCode::Abandon};
+    case InvokeErrorCode::ValidationFailure:
+      return InvokeError{InvokeErrorCode::ValidationFailure};
+    case InvokeErrorCode::Unrecoverable:
+      return InvokeError{InvokeErrorCode::Unrecoverable};
     }
 
     // GCC with -Werror in CI doesn't recognize the above switch as exhaustive,
@@ -70,27 +70,27 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::kInvokeNone);
+             return inner_func(InvokeErrorCode::None);
            }},
           {1,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::kInvokeDeterministic);
+             return inner_func(InvokeErrorCode::Deterministic);
            }},
           {2,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::kInvokeOutOfGas);
+             return inner_func(InvokeErrorCode::OutOfGas);
            }},
           {3,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::kInvokeAbortTransaction);
+             return inner_func(InvokeErrorCode::Abandon);
            }},
           {4,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::kInvokeValidationFailure);
+             return inner_func(InvokeErrorCode::ValidationFailure);
            }},
           {5,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return inner_func(InvokeErrorCode::kInvokeUnrecoverable);
+             return inner_func(InvokeErrorCode::Unrecoverable);
            }},
           {6,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -104,7 +104,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Invoke 0 did not return success";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto r2 = [&]() {
@@ -118,7 +118,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                  r2.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                ADD_FAILURE() << "Invoke 1 did not return kDeterministicWasm";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Out of gas in child becomes deterministic (handleable) error in
@@ -134,7 +134,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                  r3.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                ADD_FAILURE() << "Invoke 2 did not return out of gas";
-               return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+               return InvokeError{InvokeErrorCode::OutOfGas};
              }
 
              auto r4 = [&]() {
@@ -145,10 +145,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                                                       output_return_buffer_len);
              }();
              if (r4.has_value() ||
-                 r4.error() !=
-                     HostFnError{HostFnErrorCode::kHostAbortTransaction}) {
+                 r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
                ADD_FAILURE() << "Invoke 3 did not return abort transaction";
-               return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+               return InvokeError{InvokeErrorCode::Abandon};
              }
 
              auto r5 = [&]() {
@@ -160,9 +159,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }();
              if (r5.has_value() ||
                  r5.error() !=
-                     HostFnError{HostFnErrorCode::kHostValidationFailure}) {
+                     HostFnError{HostFnErrorCode::ValidationFailure}) {
                ADD_FAILURE() << "Invoke 4 did not return validation failure";
-               return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+               return InvokeError{InvokeErrorCode::ValidationFailure};
              }
 
              auto r6 = [&]() {
@@ -173,10 +172,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                                                       output_return_buffer_len);
              }();
              if (r6.has_value() ||
-                 r6.error() !=
-                     HostFnError{HostFnErrorCode::kHostUnrecoverable}) {
+                 r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
                ADD_FAILURE() << "Invoke 5 did not return unrecoverable";
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               return InvokeError{InvokeErrorCode::Unrecoverable};
              }
 
              return {};
@@ -236,26 +234,27 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    target_address, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Valid flag TryInvoke should succeed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto r2 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   target_address, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagReadOnly),
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(target_address, 0,
+                                                      UINT64_MAX, Calldata{},
+                                                      std::to_underlying(
+                                                          InvokeFlag::ReadOnly),
+                                                      output_return_buffer_len);
              }();
              if (!r2.has_value() ||
                  r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Valid flag ReadOnly should succeed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Combined valid flags should succeed
@@ -263,15 +262,15 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    target_address, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke) |
-                       std::to_underlying(InvokeFlag::kInvokeFlagReadOnly),
+                   std::to_underlying(InvokeFlag::TryInvoke) |
+                       std::to_underlying(InvokeFlag::ReadOnly),
                    output_return_buffer_len);
              }();
              if (!r3.has_value() ||
                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
                    << "Combined valid flags TryInvoke|ReadOnly should succeed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
@@ -286,7 +285,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                  r4.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "Flag 0x4 should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Arbitrary garbage bits
@@ -301,7 +300,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                  r5.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "Garbage flag bits 0xFF should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // High bits set
@@ -316,7 +315,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                  r6.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "High flag bits should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};

@@ -122,13 +122,13 @@ mock_contract_create_event(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto r =
@@ -136,11 +136,11 @@ mock_contract_create_event(void * /*unused*/, uint64_t method_number)
                                       std::as_bytes(std::span("test_event")));
   if (!r.has_value()) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 } // namespace
 
@@ -191,8 +191,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 
   // Events are returned directly from root_invoke
   ASSERT_NE(result.serialized_events.data, nullptr);
@@ -221,20 +220,20 @@ mock_contract_event_then_fault(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   context->to_handler().log_event(nullptr, nullptr, nullptr,
                                   std::as_bytes(std::span("test_event")));
 
   return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeDeterministic)};
+      .panic = std::to_underlying(InvokeErrorCode::Deterministic)};
 }
 
 // Mock contract that emits an event then reverts
@@ -243,21 +242,21 @@ mock_contract_event_then_revert(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   context->to_handler().log_event(nullptr, nullptr, nullptr,
                                   std::as_bytes(std::span("test_event")));
   context->to_handler().set_return_buffer(ReturnBuffer{0xAB}, true);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 } // namespace
 
@@ -308,8 +307,7 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
 
   // Events must NOT be returned on fault
   EXPECT_EQ(result.serialized_events.data, nullptr);
@@ -363,8 +361,7 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
 
   // Events must NOT be returned on revert
   EXPECT_EQ(result.serialized_events.data, nullptr);
@@ -710,20 +707,20 @@ mock_contract_revert(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   ReturnBuffer return_buffer = {0, 1, 2, 3};
   context->to_handler().set_return_buffer(std::move(return_buffer), true);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 } // namespace
 
@@ -773,8 +770,7 @@ TEST(TestBindingsTest, MockContractRevertTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
   EXPECT_EQ(output.abort_buffer().size(), 4);
   EXPECT_EQ(output.abort_buffer()[0], 0);
   EXPECT_EQ(output.abort_buffer()[1], 1);
@@ -790,20 +786,20 @@ mock_contract_return(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   ReturnBuffer return_buffer = {0, 1, 2, 3};
   context->to_handler().set_return_buffer(std::move(return_buffer), false);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 } // namespace
 
@@ -853,8 +849,7 @@ TEST(TestBindingsTest, MockContractReturnTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_EQ(output.return_buffer().size(), 4);
   EXPECT_EQ(output.return_buffer()[0], 0);
   EXPECT_EQ(output.return_buffer()[1], 1);
@@ -870,17 +865,17 @@ mock_contract_fault(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeDeterministic)};
+      .panic = std::to_underlying(InvokeErrorCode::Deterministic)};
 }
 } // namespace
 
@@ -930,8 +925,7 @@ TEST(TestBindingsTest, MockContractFaultTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
 }
 
 namespace {
@@ -942,17 +936,17 @@ mock_contract_out_of_gas(void * /*unused*/, uint64_t method_number)
 {
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeOutOfGas)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::OutOfGas)};
 }
 } // namespace
 
@@ -1002,8 +996,7 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
 }
 
 TEST(TestBindingsTest, ManualOpenCloseFrameTest)
@@ -1053,16 +1046,14 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(finish_res.serialized_output.data, nullptr);
   x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_EQ(output.return_buffer().size(), 0);
   EXPECT_EQ(finish_res.gas_consumed, 0);
   EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
@@ -1096,8 +1087,7 @@ test_ffi_invoke(const ContractAddress &input_address,
       input_calldata.size(), input_flags,
       reinterpret_cast<uint64_t>(&output_return_buffer_len));
 
-  if (result.panic !=
-      std::to_underlying(HostFnErrorCode::kHostNoneOrRecoverable))
+  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
 
   return static_cast<SyscallErrorCode>(result.result_code);
@@ -1111,8 +1101,7 @@ test_ffi_get_msg_sender(ContractAddress &output_sender)
                               reinterpret_cast<uint64_t>(output_sender.data()),
                               0, 0, 0, 0, 0, 0);
 
-  if (result.panic !=
-      std::to_underlying(HostFnErrorCode::kHostNoneOrRecoverable))
+  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
 
   return static_cast<SyscallErrorCode>(result.result_code);
@@ -1126,8 +1115,7 @@ test_ffi_get_current_address(ContractAddress &output_address)
                               reinterpret_cast<uint64_t>(output_address.data()),
                               0, 0, 0, 0, 0, 0);
 
-  if (result.panic !=
-      std::to_underlying(HostFnErrorCode::kHostNoneOrRecoverable))
+  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
 
   return static_cast<SyscallErrorCode>(result.result_code);
@@ -1198,7 +1186,7 @@ mock_contract_check_caller(void *ctx, uint64_t /*method_number*/)
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto sender = context->to_handler().get_msg_sender();
@@ -1208,8 +1196,8 @@ mock_contract_check_caller(void *ctx, uint64_t /*method_number*/)
   auto self_addr = context->to_handler().get_current_address();
   data->self_check_passed = (self_addr == data->expected_self);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 // Mock contract that just checks get_current_address()
@@ -1225,14 +1213,14 @@ mock_contract_check_self(void *ctx, uint64_t /*method_number*/)
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto self_addr = context->to_handler().get_current_address();
   data->check_passed = (self_addr == data->expected_self);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 // Mock contract that reads calldata and stores it
@@ -1248,14 +1236,14 @@ mock_contract_check_calldata(void *ctx, uint64_t /*method_number*/)
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   auto const &calldata = context->to_handler().get_calldata();
   data->received_calldata.assign(calldata.begin(), calldata.end());
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 // Mock contract that sets a return buffer
@@ -1265,14 +1253,14 @@ mock_contract_set_return(void * /*unused*/, uint64_t /*method_number*/)
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   ReturnBuffer buf = {10, 20, 30, 40};
   context->to_handler().set_return_buffer(std::move(buf), false);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 // Mock contract that reverts with an abort buffer
@@ -1282,14 +1270,14 @@ mock_contract_revert_with_buffer(void * /*unused*/, uint64_t /*method_number*/)
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   ReturnBuffer buf = {0xDE, 0xAD, 0xBE, 0xEF};
   context->to_handler().set_return_buffer(std::move(buf), true);
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 // Mock contract that invokes another contract (for nested invoke tests)
@@ -1307,7 +1295,7 @@ mock_contract_nested_invoke(void *ctx, uint64_t /*method_number*/)
   auto *context = SyscallHandlerContext::get_context();
   if (!context) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
   Calldata calldata;
@@ -1317,10 +1305,10 @@ mock_contract_nested_invoke(void *ctx, uint64_t /*method_number*/)
   if (!res.has_value() ||
       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+        .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 } // namespace
@@ -1382,15 +1370,13 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 }
 
 // Verify that a contract invoked from a mock frame sees get_current_address()
@@ -1438,8 +1424,7 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
 }
@@ -1488,8 +1473,7 @@ TEST(TestBindingsTest, MockFrameGetMsgSenderAtRootTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
 }
@@ -1523,13 +1507,12 @@ TEST(TestBindingsTest, MockFrameSyscallWithoutContextTest)
   ContractAddress addr;
   auto sender_res = test_ffi_get_current_address(addr);
   ASSERT_FALSE(sender_res.has_value());
-  ASSERT_EQ(sender_res.error().code(), HostFnErrorCode::kHostUnrecoverable);
+  ASSERT_EQ(sender_res.error().code(), HostFnErrorCode::Unrecoverable);
 
   ASSERT_NE(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
 }
@@ -1593,8 +1576,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
 }
@@ -1649,8 +1631,7 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
 }
@@ -1708,8 +1689,7 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
 }
@@ -1768,8 +1748,7 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
@@ -1777,8 +1756,7 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 }
 
 // Verify that tracing works with nested invokes in mock frames.
@@ -1839,8 +1817,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
@@ -1891,8 +1868,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   EXPECT_EQ(c_trace.invocation.invoked_address, addr_c);
 
   // The frame output should be Return
-  EXPECT_EQ(trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
 }
 
 // Test opening and closing mock frames with different error codes
@@ -1907,7 +1883,7 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
-  // Test kInvokeNone -> Return with empty return buffer
+  // Test None -> Return with empty return buffer
   {
     auto handler = make_mocked_handler(db, rc);
     ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
@@ -1924,20 +1900,18 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
 
     auto finish_res =
         finish_mock_invocation_frame(handler.syscall_handler,
-                                     std::to_underlying(
-                                         InvokeErrorCode::kInvokeNone));
+                                     std::to_underlying(InvokeErrorCode::None));
     ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
     x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
     InvocationFrameOutput output;
     x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                            finish_res.serialized_output.len});
-    EXPECT_EQ(output.status_code(),
-              InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
     EXPECT_EQ(output.return_buffer().size(), 0);
   }
 
-  // Test kInvokeDeterministic -> Fault
+  // Test Deterministic -> Fault
   {
     auto handler = make_mocked_handler(db, rc);
     ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
@@ -1952,20 +1926,20 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
     ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
               kTestFFIErrorCodeNone);
 
-    auto finish_res = finish_mock_invocation_frame(
-        handler.syscall_handler,
-        std::to_underlying(InvokeErrorCode::kInvokeDeterministic));
+    auto finish_res =
+        finish_mock_invocation_frame(handler.syscall_handler,
+                                     std::to_underlying(
+                                         InvokeErrorCode::Deterministic));
     ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
     x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
     InvocationFrameOutput output;
     x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                            finish_res.serialized_output.len});
-    EXPECT_EQ(output.status_code(),
-              InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+    EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
   }
 
-  // Test kInvokeOutOfGas -> Fault
+  // Test OutOfGas -> Fault
   {
     auto handler = make_mocked_handler(db, rc);
     ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
@@ -1980,18 +1954,15 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
     ASSERT_EQ(open_frame(handler.syscall_handler, invocation),
               kTestFFIErrorCodeNone);
 
-    auto finish_res =
-        finish_mock_invocation_frame(handler.syscall_handler,
-                                     std::to_underlying(
-                                         InvokeErrorCode::kInvokeOutOfGas));
+    auto finish_res = finish_mock_invocation_frame(
+        handler.syscall_handler, std::to_underlying(InvokeErrorCode::OutOfGas));
     ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
     x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
     InvocationFrameOutput output;
     x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                            finish_res.serialized_output.len});
-    EXPECT_EQ(output.status_code(),
-              InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+    EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
   }
 }
 
@@ -2030,16 +2001,14 @@ TEST(TestBindingsTest, MockFrameManualRevertTest)
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
   ASSERT_EQ(output.abort_buffer().size(), 4);
   EXPECT_EQ(output.abort_buffer()[0], 0xCA);
   EXPECT_EQ(output.abort_buffer()[1], 0xFE);
@@ -2082,15 +2051,14 @@ TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
-                                       InvokeErrorCode::kInvokeDeterministic));
+                                       InvokeErrorCode::Deterministic));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Fault);
 
   // Events must NOT be returned on fault
   EXPECT_EQ(finish_res.serialized_events.data, nullptr);
@@ -2132,16 +2100,14 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
 
   // Events must NOT be returned on manual revert
   EXPECT_EQ(finish_res.serialized_events.data, nullptr);
@@ -2185,8 +2151,7 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
   x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_events); });
@@ -2194,8 +2159,7 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
-  EXPECT_EQ(output.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 
   // Events MUST be returned on success
   ASSERT_NE(finish_res.serialized_events.data, nullptr);
@@ -2280,8 +2244,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   // Close frame B with success
   auto finish_b =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer db_out([&] { free_ffi_data_buffer(finish_b.serialized_output); });
   x23::Defer db_trace([&] { free_ffi_data_buffer(finish_b.serialized_trace); });
@@ -2290,8 +2253,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
     InvocationFrameOutput b_output;
     x23::deserialize(&b_output, x23::BufView{finish_b.serialized_output.data,
                                              finish_b.serialized_output.len});
-    EXPECT_EQ(b_output.status_code(),
-              InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    EXPECT_EQ(b_output.status_code(), InvocationFrameStatusCode::Return);
   }
 
   // Open frame C (another child of A, after B)
@@ -2316,7 +2278,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   auto finish_c =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
-                                       InvokeErrorCode::kInvokeDeterministic));
+                                       InvokeErrorCode::Deterministic));
   ASSERT_EQ(finish_c.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer dc_out([&] { free_ffi_data_buffer(finish_c.serialized_output); });
   x23::Defer dc_trace([&] { free_ffi_data_buffer(finish_c.serialized_trace); });
@@ -2325,8 +2287,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
     InvocationFrameOutput c_output;
     x23::deserialize(&c_output, x23::BufView{finish_c.serialized_output.data,
                                              finish_c.serialized_output.len});
-    EXPECT_EQ(c_output.status_code(),
-              InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+    EXPECT_EQ(c_output.status_code(), InvocationFrameStatusCode::Fault);
   }
 
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
@@ -2334,8 +2295,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   // Close frame A with success
   auto finish_a =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_a.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer da_out([&] { free_ffi_data_buffer(finish_a.serialized_output); });
 
@@ -2343,8 +2303,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
     InvocationFrameOutput a_output;
     x23::deserialize(&a_output, x23::BufView{finish_a.serialized_output.data,
                                              finish_a.serialized_output.len});
-    EXPECT_EQ(a_output.status_code(),
-              InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    EXPECT_EQ(a_output.status_code(), InvocationFrameStatusCode::Return);
   }
 
   // Verify the trace
@@ -2358,8 +2317,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 
   // A's trace
   EXPECT_EQ(trace.invocation.invoked_address, addr_a);
-  EXPECT_EQ(trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
 
   // A should have 2 syscall entries: one for B and one for C
   ASSERT_EQ(trace.system_calls.size(), 2U);
@@ -2374,8 +2332,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 
   auto const &b_trace = *sc_b_invoke.outputs->child_trace;
   EXPECT_EQ(b_trace.invocation.invoked_address, addr_b);
-  EXPECT_EQ(b_trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  EXPECT_EQ(b_trace.status.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_EQ(b_trace.system_calls.size(), 0U);
 
   // Second syscall: invoke C
@@ -2388,8 +2345,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 
   auto const &c_trace = *sc_c_invoke.outputs->child_trace;
   EXPECT_EQ(c_trace.invocation.invoked_address, addr_c);
-  EXPECT_EQ(c_trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  EXPECT_EQ(c_trace.status.status_code(), InvocationFrameStatusCode::Fault);
   EXPECT_EQ(c_trace.system_calls.size(), 0U);
 }
 
@@ -2403,7 +2359,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
 //   push_context
 //   open_mock_invocation_frame  (frame B, nested inside A)
 //   pop_context
-//   finish_mock_invocation_frame (finishes B, kInvokeDeterministic)
+//   finish_mock_invocation_frame (finishes B, Deterministic)
 //   close_syscall_handler        → CHECK(mock_runtime_stack_.empty()) fails
 TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
 {
@@ -2447,7 +2403,7 @@ TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
   auto finish_b =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(
-                                       InvokeErrorCode::kInvokeDeterministic));
+                                       InvokeErrorCode::Deterministic));
   ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_b.serialized_output);
   free_ffi_data_buffer(finish_b.serialized_trace);
@@ -2459,8 +2415,7 @@ TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
   // Now properly close frame A, and tear down the test setup
   auto finish_a =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_a.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_a.serialized_output);
   free_ffi_data_buffer(finish_a.serialized_trace);
@@ -2514,14 +2469,14 @@ trace_contract_fibonacci(void * /*unused*/, uint64_t /*method_number*/)
                               sizeof(sha_output), 0, 0, 0);
 
   // If SHA256 ran out of gas, panic propagates:
-  // trace shows panic=1 (kHostOutOfGas) here
+  // trace shows panic=1 (OutOfGas) here
   if (sha_res.panic != 0) {
     return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeOutOfGas)};
+        .panic = std::to_underlying(InvokeErrorCode::OutOfGas)};
   }
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 // Contract 1: fibonacci_call analogue.
@@ -2533,9 +2488,9 @@ trace_contract_fibonacci_call(void *foreign_context, uint64_t method_number)
   auto *contract_2_addr = static_cast<ContractAddress *>(foreign_context);
 
   if (method_number == kTraceMethodFirst) {
-    // First call: return normally (matches trace kReturn with kHostReturn)
-    return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+    // First call: return normally (matches trace kReturn with Return)
+    return ForeignInvokeResult{.panic =
+                                   std::to_underlying(InvokeErrorCode::None)};
   }
 
   if (method_number == kTraceMethodSecond) {
@@ -2558,12 +2513,12 @@ trace_contract_fibonacci_call(void *foreign_context, uint64_t method_number)
     }
 
     // Even if panic==0, a nonzero result_code indicates error
-    return ForeignInvokeResult{
-        .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+    return ForeignInvokeResult{.panic =
+                                   std::to_underlying(InvokeErrorCode::None)};
   }
 
   return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+      .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
 }
 
 // Contract 0: root test-script mock contract (deployed).
@@ -2625,8 +2580,8 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
     }
   }
 
-  return ForeignInvokeResult{
-      .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
+  return ForeignInvokeResult{.panic =
+                                 std::to_underlying(InvokeErrorCode::None)};
 }
 
 } // namespace
@@ -2770,8 +2725,7 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
-                                   std::to_underlying(
-                                       InvokeErrorCode::kInvokeNone));
+                                   std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
   EXPECT_EQ(finish_res.serialized_trace.data, nullptr);

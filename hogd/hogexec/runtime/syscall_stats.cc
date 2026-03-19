@@ -23,7 +23,7 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
                                        uint64_t &output_result) noexcept
 {
   switch (input_statistic) {
-  case TransactionStatistic::kTxStatGasRemaining:
+  case TransactionStatistic::GasRemaining:
     output_result = remaining_gas.get();
     if (auto *trace_data = syscall_handler.get_syscall_trace_data<
                            SyscallNo::kGetTransactionStatistics>()) {

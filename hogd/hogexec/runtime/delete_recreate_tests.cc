@@ -72,13 +72,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                if (!status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to get bytestring: " << status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
                  ADD_FAILURE() << "Expected storage key to be empty, but got: "
                                << x23::show(status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Write a bytestring to the storage key
@@ -90,13 +90,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write bytestring: " << write_status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (write_status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Expected write to succeed, but got: "
                                << x23::show(write_status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                return {};
@@ -110,13 +110,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (delete_status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Expected delete to succeed, but got: "
                                << x23::show(delete_status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                return {};
@@ -129,12 +129,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Call method 1 (delete)
@@ -143,12 +143,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Call method 0 again (read empty, then write)
@@ -157,12 +157,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r2.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -235,13 +235,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                    key, true, current_set, current_set_opt, current_add);
                if (!status.has_value()) {
                  ADD_FAILURE() << "Failed to get nnint: " << status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
                  ADD_FAILURE() << "Expected storage key to be empty, but got: "
                                << x23::show(status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Write a nonnegative integer to the storage key
@@ -253,13 +253,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write nnint: " << write_status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (write_status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Expected write to succeed, but got: "
                                << x23::show(write_status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                return {};
@@ -273,13 +273,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (delete_status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Expected delete to succeed, but got: "
                                << x23::show(delete_status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                return {};
@@ -292,12 +292,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Call method 1 (delete)
@@ -306,12 +306,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Call method 0 again (read empty, then write)
@@ -320,12 +320,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r2.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -400,13 +400,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                if (!status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to consume from queue: " << status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
                  ADD_FAILURE() << "Expected queue to be empty, but got: "
                                << x23::show(status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Insert an item into the queue
@@ -416,13 +416,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                if (!insert_status.has_value()) {
                  ADD_FAILURE() << "Failed to insert into queue: "
                                << insert_status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (insert_status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Expected insert to succeed, but got: "
                                << x23::show(insert_status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                return {};
@@ -436,13 +436,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                if (!delete_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to delete object: " << delete_status.error();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
                if (delete_status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Expected delete to succeed, but got: "
                                << x23::show(delete_status.value());
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                return {};
@@ -455,12 +455,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Call method 1 (delete)
@@ -469,12 +469,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Call method 0 again (consume empty, then insert)
@@ -483,12 +483,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
                if (!r2.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -555,7 +555,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                    std::as_writable_bytes(std::span(buf)), written_len);
                if (!status1.has_value() ||
                    status1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                // Second consume should fail (queue empty)
                auto [status2, _g2] = syscall_RetrocausalQueueConsume_inner(
@@ -565,7 +565,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                    status2.value() !=
                        SyscallErrorCode::
                            kSyscallErrorCodeNoRetrocausalQueueEntry) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }}});

@@ -103,13 +103,13 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
              if (!result.is_err()) {
                ADD_FAILURE()
                    << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto const &err = result.err();
              if (err !=
                  manual_revert_test::ManualRevertTestError::BasicRevert) {
                ADD_FAILURE() << "Expected BasicRevert error";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // The manual revert should have succeeded (no error)
@@ -123,12 +123,12 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                  !storage_check.value().value().has_value() ||
                  !storage_check.value().value().value().is_ok()) {
                ADD_FAILURE() << "Function call encountered unexpected error";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (storage_check.value().value().value().ok()) {
                ADD_FAILURE() << "Storage check should have returned false "
                                 "(revert should wipe changes)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -199,7 +199,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
                  !res.value().value().has_value() ||
                  !res.value().value().value().is_ok()) {
                ADD_FAILURE() << "Function call should have succeeded";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Storage should exist because no revert occurred
@@ -208,12 +208,12 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
              if (!storage_check.has_value() ||
                  !storage_check.value().has_value() ||
                  !storage_check.value().value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Storage should exist (no revert)
              if (!storage_check.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -282,7 +282,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
              if (!result.is_err()) {
                ADD_FAILURE()
                    << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -355,7 +355,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
                if (!result.is_err()) {
                  ADD_FAILURE()
                      << "Function call should have returned a contract error";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // All error types should succeed via manual revert
@@ -429,7 +429,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
              if (!result.is_ok()) {
                ADD_FAILURE()
                    << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Should succeed normally without manual revert
@@ -501,7 +501,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                if (!result.is_err()) {
                  ADD_FAILURE()
                      << "Function call should have returned a contract error";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Should succeed via manual revert
@@ -558,7 +558,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                auto result = check_result(res);
                if (!result.is_ok()) {
                  ADD_FAILURE() << "Function call should have succeeded";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Should succeed normally

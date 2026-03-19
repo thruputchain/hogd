@@ -52,8 +52,7 @@ protected:
 TEST_F(SnapshotStorageItemTest, AuthDataMakeVariant)
 {
   AddressAndKey addrkey{.address = {},
-                        .key = StorageKey(
-                            StorageKeyType::kStorageKeyTypeAddressAuthData)};
+                        .key = StorageKey(StorageKeyType::AuthData)};
 
   WireStorageItem wire_item(StorageItemType::kItemTypeAuthData);
   wire_item.auth_data().last_written_height = 42;
@@ -67,8 +66,7 @@ TEST_F(SnapshotStorageItemTest, AuthDataMakeVariant)
 TEST_F(SnapshotStorageItemTest, AuthDataDeletedMakeVariant)
 {
   AddressAndKey addrkey{.address = {},
-                        .key = StorageKey(
-                            StorageKeyType::kStorageKeyTypeAddressAuthData)};
+                        .key = StorageKey(StorageKeyType::AuthData)};
 
   WireStorageItem wire_item(StorageItemType::kItemTypeDeleted);
 
@@ -191,8 +189,7 @@ TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
   auto check_concurrent_entry_bad = [&](uint32_t index) {
     auto entry = test_item.get_concurrent_rcq_entry(index);
     ASSERT_FALSE(entry.has_value());
-    EXPECT_EQ(entry.error().error_code(),
-              SystemErrorCode::kSystemUnrecoverable);
+    EXPECT_EQ(entry.error().error_code(), SystemErrorCode::Unrecoverable);
   };
 
   check_concurrent_entry_bad(1);

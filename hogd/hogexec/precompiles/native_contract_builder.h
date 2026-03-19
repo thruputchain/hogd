@@ -74,9 +74,9 @@ struct AlwaysErrorMethod {
                 std::tuple_element_t<Is, args_t>... /*unused*/)
                  -> InvokeStatus<return_t> {
         if (!runtime.consume_gas(Gas)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+          return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        return InvokeError{InvokeErrorCode::Deterministic};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
   }
@@ -149,7 +149,7 @@ public:
       auto args = Serializer<Format>::template deserialize<args_t>(
           std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
-        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        return InvokeError{InvokeErrorCode::Deterministic};
       }
 
       // invoke the lambda, and return the error if there is one
@@ -171,7 +171,7 @@ public:
       auto do_return = [&ctx](auto const &r) -> InvokeStatus<void> {
         auto return_buffer = Serializer<Format>::serialize(r);
         if (!return_buffer.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         ctx.handler().set_return_buffer(std::move(return_buffer.value()),
                                         false);
@@ -183,7 +183,7 @@ public:
       auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
         auto body = Serializer<Format>::serialize(err_value);
         if (!body.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+          return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         x23::Buf buf;
         x23::store_cxs_int<int32_t>(buf, kCrossExnContractDiscriminant);
@@ -248,29 +248,29 @@ public:
   static InvokeError host_fn_error_conversion(HostFnError const &err)
   {
     switch (err.code()) {
-    case HostFnErrorCode::kHostOutOfGas:
-      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-    case HostFnErrorCode::kHostUnrecoverable:
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-    case HostFnErrorCode::kHostAbortTransaction:
-      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-    case HostFnErrorCode::kHostValidationFailure:
-      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-    case HostFnErrorCode::kHostExit:
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    case HostFnErrorCode::kHostReturn:
+    case HostFnErrorCode::OutOfGas:
+      return InvokeError{InvokeErrorCode::OutOfGas};
+    case HostFnErrorCode::Unrecoverable:
+      return InvokeError{InvokeErrorCode::Unrecoverable};
+    case HostFnErrorCode::Abandon:
+      return InvokeError{InvokeErrorCode::Abandon};
+    case HostFnErrorCode::ValidationFailure:
+      return InvokeError{InvokeErrorCode::ValidationFailure};
+    case HostFnErrorCode::Exit:
+      return InvokeError{InvokeErrorCode::Deterministic};
+    case HostFnErrorCode::Return:
       error("unrecoverable: contracts using the NativeContractBuilder should "
             "not call the Return syscall directly");
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-    case HostFnErrorCode::kHostNoneOrRecoverable:
-      error("unrecoverable: host_fn_error_conversion: kHostNoneOrRecoverable "
+      return InvokeError{InvokeErrorCode::Unrecoverable};
+    case HostFnErrorCode::NoneOrRecoverable:
+      error("unrecoverable: host_fn_error_conversion: NoneOrRecoverable "
             "when error expected");
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+      return InvokeError{InvokeErrorCode::Unrecoverable};
     }
     error(
         "unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}",
         err.code());
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    return InvokeError{InvokeErrorCode::Unrecoverable};
   }
 
 private:

@@ -83,7 +83,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
              ADD_FAILURE()
                  << "ReadWriteBytestring: Failed to set bytestring in method 0";
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            return {};
@@ -96,7 +96,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
              return res.error().to_invoke_error();
            }
            if (!res.value().has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            ReturnBuffer out;
@@ -118,12 +118,12 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                  ctx.handler().get_current_address(), 0,
                  ctx.runtime().get_available_gas(),
                  ctx.handler().get_calldata(),
-                 std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                 std::to_underlying(InvokeFlag::None),
                  output_return_buffer_len);
            }();
 
            if (!r0.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            auto r1 = [&]() {
@@ -131,30 +131,30 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
              return ctx.syscall<SyscallNo::kInvoke>(
                  ctx.handler().get_current_address(), 1,
                  ctx.runtime().get_available_gas(), Calldata{},
-                 std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                 std::to_underlying(InvokeFlag::None),
                  output_return_buffer_len);
            }();
 
            if (!r1.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            auto returned_buffer = ctx.handler().get_return_buffer();
            if (!returned_buffer.has_value() ||
                !returned_buffer.value().has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            auto const &returned_buffer_data = returned_buffer.value().value();
 
            if (returned_buffer_data->size() != calldata.size()) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            if (!returned_buffer_data->empty()) {
              if (std::memcmp(returned_buffer_data->data(), calldata.data(),
                              calldata.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
            }
 
@@ -233,16 +233,16 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -258,7 +258,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
                                   "bytestring in method 1";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -333,7 +333,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
                                   "bytestring in method 0";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -348,7 +348,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
                                   "bytestring in method 1";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -360,11 +360,11 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                // Try invoke method 1
                auto r1 = [&]() {
@@ -372,11 +372,11 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -388,14 +388,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                // Return an error
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }},
             {4,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -405,11 +405,11 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 3,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                // Try invoke method 1
                auto r1 = [&]() {
@@ -417,11 +417,11 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -565,7 +565,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                auto const &calldata = ctx.handler().get_calldata();
                if (calldata.size() != 1) {
                  ADD_FAILURE() << "calldata should have size 1";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                auto key = make_storage_key("test");
                // Interpret calldata bytes as int8_t for set_value and add_value
@@ -587,7 +587,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                  ADD_FAILURE() << "set_nnint should have succeeded";
                  // Syscall itself reported an error (e.g., invalid arguments
                  // for set_nnint)
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {}; // Success
@@ -600,24 +600,24 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
                  ADD_FAILURE() << "try_invoke should have failed";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Check that the try_invoke failed (should fail because 5+ -10
                // is negative)
                if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "try_invoke should have failed";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Return a deterministic error to make the transaction fail
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -707,7 +707,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring in method 0";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -720,12 +720,12 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_hello,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value() ||
                    r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Try invoke method 0 with "world"
@@ -735,12 +735,12 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_world,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r1.has_value() ||
                    r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -754,22 +754,22 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_foo,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
                  ADD_FAILURE() << "shoudl not have system error";
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Check that the try_invoke failed (due to exclusive lock)
                if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "try_invoke should have failed";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Return a deterministic error to make the transaction fail
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -858,7 +858,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring in method 0";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -871,12 +871,12 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_hello,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value() ||
                    r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Try invoke method 0 with "world"
@@ -886,12 +886,12 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_world,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r1.has_value() ||
                    r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -905,22 +905,22 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_foo,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
                  ADD_FAILURE() << "shoudl not have system error";
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Check that the try_invoke failed (due to exclusive lock)
                if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "try_invoke should have failed";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Return a deterministic error to make the transaction fail
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1023,7 +1023,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
                if (calldata.size() != 1) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                auto key = make_storage_key("test");
                // Interpret calldata bytes as int8_t for add_value
@@ -1043,7 +1043,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                if (!syscall_res.has_value()) {
                  // Syscall itself reported an error (e.g., invalid arguments
                  // for set_nnint)
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {}; // Success
@@ -1057,22 +1057,22 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Check that the try_invoke failed (should fail because -5 is
                // negative)
                if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                // Return a deterministic error to make the transaction fail
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }},
             {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Invoke method 0 with arguments [1]
@@ -1082,17 +1082,17 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Check that the invocation succeeds
                if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -1188,7 +1188,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
                if (calldata.size() != 2) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                auto key = make_storage_key("test");
                // Interpret calldata bytes as int8_t for set_value and add_value
@@ -1209,7 +1209,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                if (!syscall_res.has_value()) {
                  // Syscall itself reported an error (e.g., invalid arguments
                  // for set_nnint)
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {}; // Success
@@ -1218,7 +1218,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
                if (calldata.size() != 2) { // Expecting two booleans
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                bool expect_first_succeeds = static_cast<bool>(calldata[0]);
                bool expect_second_succeeds = static_cast<bool>(calldata[1]);
@@ -1229,17 +1229,17 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_first_invoke,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                bool first_succeeded =
                    (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
                if (first_succeeded != expect_first_succeeds) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                Calldata args_second_invoke = {5, 10};
@@ -1248,17 +1248,17 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_second_invoke,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                bool second_succeeded =
                    (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone);
                if (second_succeeded != expect_second_succeeds) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -1266,7 +1266,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
             {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
                if (calldata.size() != 1) { // Expecting one boolean
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
 
@@ -1276,18 +1276,18 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), args_invoke,
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                bool invoke_succeeded =
                    (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
                if (invoke_succeeded != expect_invoke_succeeds) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }}});
@@ -1475,7 +1475,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
                << "StorageCostAccounting: Failed to set bytestring in method 0";
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }},
@@ -1490,7 +1490,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
              res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
                             "in method 1 (key0)";
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          auto [res1, _gas1] = syscall_BytestringSet_inner(
              ctx.handler(), key1, std::as_bytes(std::span(str_def)),
@@ -1499,7 +1499,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
              res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
                             "in method 1 (key1)";
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }},
@@ -1510,15 +1510,15 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
            return ctx.syscall<SyscallNo::kInvoke>(
                ctx.handler().get_current_address(), 1,
                ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+               std::to_underlying(InvokeFlag::TryInvoke),
                output_return_buffer_len);
          }();
          if (!r1.has_value()) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          // Should fail (not enough tokens for two writes)
          if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          // Then, try_invoke method 0 (should succeed)
          auto r0 = [&]() {
@@ -1526,12 +1526,12 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
            return ctx.syscall<SyscallNo::kInvoke>(
                ctx.handler().get_current_address(), 0,
                ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+               std::to_underlying(InvokeFlag::TryInvoke),
                output_return_buffer_len);
          }();
          if (!r0.has_value() ||
              r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }}});
@@ -1626,7 +1626,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
                                 "bytestring in method 0";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -1640,7 +1640,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
                                 "bytestring in method 1";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -1654,7 +1654,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
                                 "bytestring in method 2";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -1665,12 +1665,12 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Try invoke method 1
              auto r1 = [&]() {
@@ -1678,12 +1678,12 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Try invoke method 2 (should fail)
              auto r2 = [&]() {
@@ -1691,15 +1691,15 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 2,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Should fail (not enough tokens for third write)
              if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -1734,9 +1734,9 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   advance_block();
 
   // Check storage token balance is half a write
-  AddressAndKey token_addrkey = {
-      .address = contract_addr,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey token_addrkey = {.address = contract_addr,
+                                 .key = StorageKey(
+                                     StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   ASSERT_TRUE(token_item_opt.has_value());
   ASSERT_EQ(token_item_opt.value().type(),
@@ -1811,7 +1811,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
                << "CostChangeAccounting: Failed to set bytestring in method 0";
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }},
@@ -1825,7 +1825,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
                << "CostChangeAccounting: Failed to set bytestring in method 1";
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }},
@@ -1839,7 +1839,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
            ADD_FAILURE()
                << "CostChangeAccounting: Failed to set bytestring in method 2";
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }},
@@ -1850,12 +1850,12 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
            return ctx.syscall<SyscallNo::kInvoke>(
                ctx.handler().get_current_address(), 0,
                ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+               std::to_underlying(InvokeFlag::TryInvoke),
                output_return_buffer_len);
          }();
          if (!r0.has_value() ||
              r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          // Try invoke method 1 (medium)
          auto r1 = [&]() {
@@ -1863,12 +1863,12 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
            return ctx.syscall<SyscallNo::kInvoke>(
                ctx.handler().get_current_address(), 1,
                ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+               std::to_underlying(InvokeFlag::TryInvoke),
                output_return_buffer_len);
          }();
          if (!r1.has_value() ||
              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          // Try invoke method 2 (long) -- should fail
          auto r2 = [&]() {
@@ -1876,15 +1876,15 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
            return ctx.syscall<SyscallNo::kInvoke>(
                ctx.handler().get_current_address(), 2,
                ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+               std::to_underlying(InvokeFlag::TryInvoke),
                output_return_buffer_len);
          }();
          if (!r2.has_value()) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          // expects an error
          if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           return InvokeError{InvokeErrorCode::Deterministic};
          }
          return {};
        }}});
@@ -1919,9 +1919,9 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   advance_block();
 
   // Check storage token balance is zero
-  AddressAndKey token_addrkey = {
-      .address = contract_addr,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey token_addrkey = {.address = contract_addr,
+                                 .key = StorageKey(
+                                     StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   ASSERT_TRUE(token_item_opt.has_value());
   ASSERT_EQ(token_item_opt.value().type(),
@@ -1976,7 +1976,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
                                 "bytestring in method 0";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -1990,7 +1990,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
                                 "bytestring in method 1";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -2001,12 +2001,12 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Try invoke method 1 (short)
              auto r1 = [&]() {
@@ -2014,12 +2014,12 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -2053,9 +2053,9 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   advance_block();
 
   // Check storage token balance
-  AddressAndKey token_addrkey = {
-      .address = contract_addr,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey token_addrkey = {.address = contract_addr,
+                                 .key = StorageKey(
+                                     StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   ASSERT_TRUE(token_item_opt.has_value());
   ASSERT_EQ(token_item_opt.value().type(),
@@ -2116,7 +2116,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
                                 "bytestring in method 0";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -2130,7 +2130,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
                                 "bytestring in method 1";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -2142,16 +2142,16 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Now, return an error. This will cause this frame's effects to
              // be rolled back.
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }},
           {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke method 0 (long write)
@@ -2160,12 +2160,12 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Regular invoke on method 2
@@ -2174,15 +2174,15 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 2,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // We expect method 2 to fail.
              if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -2216,9 +2216,9 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   advance_block();
 
   // Check storage token balance
-  AddressAndKey token_addrkey = {
-      .address = contract_addr,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey token_addrkey = {.address = contract_addr,
+                                 .key = StorageKey(
+                                     StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   ASSERT_TRUE(token_item_opt.has_value());
   ASSERT_EQ(token_item_opt.value().type(),
@@ -2296,7 +2296,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto transfer_result = check_result(r_transfer);
              if (!transfer_result.is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Invoke receiver contract to use the tokens
@@ -2304,21 +2304,21 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    receiver_addr, 0, ctx.runtime().get_available_gas(),
-                   Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   Calldata{}, std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              [[maybe_unused]] auto g_receive = GasAmount{0};
 
              if (!r_receive.has_value() ||
                  r_receive.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto [r_balance, g_balance] =
                  native_token_client.invoke_opt<"get_balance">(ctx.handler());
              auto balance_result = check_result(r_balance);
              if (!balance_result.is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto res = balance_result.ok();
@@ -2327,7 +2327,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                                               uint128_t{std::get<1>(res)};
 
              if (balance_unsigned_int != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -2346,7 +2346,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                ADD_FAILURE()
                    << "TransferAndUseStorageWithinTransaction: Failed to set "
                       "bytestring in receiver contract method 0";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -2401,8 +2401,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   // Check sender token balance
   auto sender_token_addrkey =
       AddressAndKey{.address = sender_addr,
-                    .key = StorageKey(
-                        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+                    .key = StorageKey(StorageKeyType::FreeNativeTokenBalance)};
   auto sender_token_item_opt =
       lookup_storage_item_from_db(sender_token_addrkey);
   ASSERT_TRUE(sender_token_item_opt.has_value());
@@ -2411,8 +2410,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   // Check receiver token balance
   auto receiver_token_addrkey =
       AddressAndKey{.address = receiver_addr,
-                    .key = StorageKey(
-                        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+                    .key = StorageKey(StorageKeyType::FreeNativeTokenBalance)};
   auto receiver_token_item_opt =
       lookup_storage_item_from_db(receiver_token_addrkey);
   ASSERT_TRUE(receiver_token_item_opt.has_value());
@@ -2454,7 +2452,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -2469,7 +2467,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -2488,11 +2486,11 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
             return ctx.syscall<SyscallNo::kInvoke>(
                 ctx.handler().get_current_address(), 1,
                 ctx.runtime().get_available_gas(), calldata0,
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           // tolerate try_invoke failure
 
@@ -2506,11 +2504,11 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
             return ctx.syscall<SyscallNo::kInvoke>(
                 ctx.handler().get_current_address(), 0,
                 ctx.runtime().get_available_gas(), calldata1,
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           // tolerate try_invoke failure
 
@@ -2527,7 +2525,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           // if (!r.has_value() || !r.value().has_value()) {
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -2550,7 +2548,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
 
   // write an initial int128 value
-  StorageKey wrapped_key(StorageKeyType::kStorageKeyTypeContractData);
+  StorageKey wrapped_key(StorageKeyType::ContractData);
   wrapped_key.contract_data_key() = kKey;
 
   // too much state here to parallelize the experiment
@@ -2706,9 +2704,9 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              if (!ctx.runtime().consume_gas(100)) {
-               return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+               return InvokeError{InvokeErrorCode::OutOfGas};
              }
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }},
           {1,
            [](NativeSyscallContext &) -> InvokeStatus<void> { return {}; }}});
@@ -2724,13 +2722,13 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                auto res = ctx.syscall<SyscallNo::kInvoke>(
                    missing_contract_addr, 0, 1000,
                    std::as_bytes(std::span(calldata)),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
 
                if (!res.has_value() ||
                    res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
              // 2. try_invoke on error_contract, but with a method that does not
@@ -2739,12 +2737,12 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                auto res = ctx.syscall<SyscallNo::kInvoke>(
                    error_contract_addr, 999, 1000,
                    std::as_bytes(std::span(calldata)),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
                if (!res.has_value() ||
                    res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
              // 3. try_invoke on error_contract, correct method, but with gas
@@ -2754,7 +2752,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                auto res = ctx.syscall<SyscallNo::kInvoke>(
                    error_contract_addr, 0, 50,
                    std::as_bytes(std::span(calldata)),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
                auto gas_used = gas_before - ctx.runtime().get_available_gas();
                // This should return as a deterministic error (handleable), with
@@ -2762,10 +2760,10 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                if (!res.has_value() ||
                    res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                if (gas_used != 50) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
              // 4. try_invoke on error_contract, correct method, with gas limit
@@ -2774,12 +2772,12 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                auto res = ctx.syscall<SyscallNo::kInvoke>(
                    error_contract_addr, 0, 1000,
                    std::as_bytes(std::span(calldata)),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
                if (!res.has_value() ||
                    res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
              // 5. try_invoke on error_contract, valid method, with gas limit
@@ -2788,11 +2786,11 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                auto res = ctx.syscall<SyscallNo::kInvoke>(
                    error_contract_addr, 1, 1000,
                    std::as_bytes(std::span(calldata)),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
 
@@ -2868,37 +2866,37 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Method 1 should succeed, but state changes are gone because of
              // the manual revert
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto res = ctx.handler().get_bytestring(key);
              if (!res.has_value()) {
                // assert no system error
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (res.value().has_value()) {
                // assert no bytestring returned
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // assert that we can actually get a ReturnBuffer back
              auto return_buf = ctx.handler().get_return_buffer();
              if (!return_buf.has_value() || !return_buf.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              assert(**return_buf);
              if (!return_buf.value().value()->empty()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -2911,15 +2909,15 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 2,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Method 2 should succeed in the try_invoke frame
              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Now manually revert this frame, which should undo the locks
              // acquired by method 2
@@ -2935,7 +2933,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "ManualRevertUndoesTryInvokeLocks: Failed to "
                                 "set bytestring in method 2";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});

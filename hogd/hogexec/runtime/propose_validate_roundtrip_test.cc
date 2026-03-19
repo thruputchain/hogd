@@ -93,7 +93,7 @@ protected:
           std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        return InvokeError{InvokeErrorCode::Deterministic};
       }
       return {};
     };
@@ -158,8 +158,7 @@ protected:
     RuntimeMemoryLength output_return_buffer_len = 0;
     return ctx.syscall<SyscallNo::kInvoke>(
         kAddrB, method, ctx.runtime().get_available_gas(), Calldata{},
-        std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
-        output_return_buffer_len);
+        std::to_underlying(InvokeFlag::TryInvoke), output_return_buffer_len);
   }
 
   // Build a NativeContext with a single no-op contract (for structural
@@ -284,9 +283,9 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
   auto contract_a =
       make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         if (auto r = try_invoke_b(ctx, kWriteWorld); !r.has_value())
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
 
         // Write something to prove we survived both try_invokes
         auto key = make_storage_key("result");
@@ -296,7 +295,7 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         return {};
       }});
 
@@ -328,7 +327,7 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
   auto contract_a =
       make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         return {};
       }});
 
@@ -367,11 +366,11 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
       make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         auto r0 = try_invoke_b(ctx, kWriteHello);
         if (!r0.has_value())
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
 
         if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
           if (auto r1 = try_invoke_b(ctx, kWriteWorld); !r1.has_value())
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       }});

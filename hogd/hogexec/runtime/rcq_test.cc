@@ -57,7 +57,7 @@ protected:
                    return res.error().to_invoke_error();
                  }
                  if (!res.value().has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
                }
                return {};
@@ -80,7 +80,7 @@ protected:
                  auto const &entry = res.value().value();
 
                  if (entry.size() != 1) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
                  last_consumed_values_.push_back(entry[0]);
                }
@@ -92,7 +92,7 @@ protected:
                    if (!status.has_value()) {
                      return status.error().to_invoke_error();
                    }
-                   return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+                   return InvokeError{InvokeErrorCode::Abandon};
                  }
                }
 
@@ -115,7 +115,7 @@ protected:
                    return res.error().to_invoke_error();
                  }
                  if (!res.value().has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
                }
 
@@ -131,7 +131,7 @@ protected:
                  }
                  auto const &entry = res.value().value();
                  if (entry.size() != 1) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
                  last_consumed_values_.push_back(entry[0]);
                }

@@ -96,7 +96,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
                return {};
              }},
             {1, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }}});
 
     // Invokes another contract, returns the error code of the other contract
@@ -107,7 +107,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
                if (calldata.size() !=
                    sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                Runtime::MethodID invoked_id =
                    *reinterpret_cast<const Runtime::MethodID *>(
@@ -121,17 +121,16 @@ TEST_F(NativeContractTest, BasicInstantiate)
                auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
                    invoked_addr, invoked_id,
                    std::numeric_limits<GasAmount>::max(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
 
                if (invoke_res) {
                  return (invoke_res.value() ==
                          SyscallErrorCode::kSyscallErrorCodeNone)
                             ? InvokeStatus<void>{}
-                            : InvokeError{
-                                  InvokeErrorCode::kInvokeDeterministic};
+                            : InvokeError{InvokeErrorCode::Deterministic};
                }
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -165,7 +164,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   res = runtime->invoke(1, UINT64_MAX);
 
   ASSERT_FALSE(res.result_);
-  ASSERT_EQ(res.result_.error(), InvokeErrorCode::kInvokeDeterministic);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
 }
 
 TEST_F(NativeContractTest, GasCostsAccumulate)
@@ -178,7 +177,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       [](NativeRuntime &runtime,
          uint32_t test_amount) -> InvokeStatus<int32_t> {
         if (!runtime.consume_gas(test_amount)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+          return InvokeError{InvokeErrorCode::OutOfGas};
         }
         return 0;
       });
@@ -193,16 +192,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(100)
                       .value(),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone),
-              output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[r1_status, g1] = r1;
         if (!r1_status.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (g1 != 100) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto r2 = [&]() {
@@ -213,16 +211,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(200)
                       .value(),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone),
-              output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[r2_status, g2] = r2;
         if (!r2_status.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (g2 != 200) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto r3 = [&]() {
@@ -233,16 +230,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(150)
                       .value(),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone),
-              output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[r3_status, g3] = r3;
         if (!r3_status.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (g3 != 150) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         return 0;
@@ -255,17 +251,16 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           RuntimeMemoryLength output_return_buffer_len = 0;
           auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
               kAddress, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::kInvokeFlagNone),
-              output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           return std::pair{invoke_status,
                            gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[invoke_status, g] = r;
         if (!invoke_status.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (g != 100 + 200 + 150) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         return 0;
@@ -326,7 +321,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   NativeContractBuilder builder;
   ContractAddress address{};
   constexpr static StorageKeyContractData kBadKey{};
-  StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
+  StorageKey bad_full_key(StorageKeyType::ContractData);
   bad_full_key.contract_data_key() = kBadKey;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
@@ -339,18 +334,18 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
         auto r2 = ctx.handler().get_bytestring(kBadKey);
         if (!r2.has_value() || !r2.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         assert(r2.value().value());
         if (*r2.value().value() != bstring) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -363,8 +358,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         // This test should fail because it accesses the bytestring the server
         // is configured to return an unrecoverable error on
         if (res.has_value() ||
-            res.error().code() != HostFnErrorCode::kHostUnrecoverable) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            res.error().code() != HostFnErrorCode::Unrecoverable) {
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -428,7 +423,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   ContractAddress address{};
   constexpr static StorageKeyContractData kBadKey{};
 
-  StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
+  StorageKey bad_full_key(StorageKeyType::ContractData);
   bad_full_key.contract_data_key() = kBadKey;
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
@@ -441,7 +436,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           auto r0 = ctx.handler().get_nnint(kBadKey, false);
           if (!r0.has_value() || !r0.value().has_value() ||
               r0.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // add ops shouldn't query db
@@ -450,7 +445,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
@@ -458,16 +453,16 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // assert that get_nnint() without a load doesn't query db
           auto r3 = ctx.handler().get_nnint(kBadKey, false);
           if (!r3.has_value() || !r3.value().has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r3.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -480,27 +475,27 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
           auto r2 = ctx.handler().get_nnint(kBadKey, true);
           if (!r2.has_value() || !r2.value().has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (!r2.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // get_nnint() after a set with force_load_from_snapshot=false should
           // return the set value if it exists
           auto r3 = ctx.handler().get_nnint(kBadKey, false);
           if (!r3.has_value() || !r3.value().has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (!r3.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};

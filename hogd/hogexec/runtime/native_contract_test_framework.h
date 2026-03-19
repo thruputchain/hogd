@@ -104,8 +104,7 @@ public:
   {
     in_memory_db_.write_item(
         AddressAndKey{.address = addr,
-                      .key = StorageKey(
-                          StorageKeyType::kStorageKeyTypeAddressMetadata)},
+                      .key = StorageKey(StorageKeyType::Metadata)},
         std::make_shared<const StorageItemWrapper>(deployment, cost_model));
   }
 
@@ -114,10 +113,9 @@ public:
     assert(amount >= 0);
     assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
-    AddressAndKey addrkey = {
-        .address = address,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+    AddressAndKey addrkey = {.address = address,
+                             .key = StorageKey(
+                                 StorageKeyType::FreeNativeTokenBalance)};
 
     write_item(addrkey, std::make_shared<const StorageItemWrapper>(
                             amount, get_default_cost_model()));
@@ -412,7 +410,7 @@ public:
   make_contract_data_addrkey_matching_static_key_sdk_macro(
       ContractAddress const &address, std::string_view str)
   {
-    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() =
         make_storage_key_matching_static_key_sdk_macro(str);
     return AddressAndKey{.address = address, .key = std::move(key)};
@@ -421,7 +419,7 @@ public:
   make_contract_data_addrkey(ContractAddress const &address,
                              std::string_view str)
   {
-    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = make_storage_key(str);
     return AddressAndKey{.address = address, .key = std::move(key)};
   }
@@ -430,25 +428,22 @@ public:
   make_address_auth_data_addrkey(ContractAddress const &address)
   {
     return AddressAndKey{.address = address,
-                         .key = StorageKey(
-                             StorageKeyType::kStorageKeyTypeAddressAuthData)};
+                         .key = StorageKey(StorageKeyType::AuthData)};
   }
 
   constexpr static AddressAndKey
   make_replay_cache_addrkey(ContractAddress const &address)
   {
     return AddressAndKey{.address = address,
-                         .key = StorageKey(
-                             StorageKeyType::kStorageKeyTypeReplayCache)};
+                         .key = StorageKey(StorageKeyType::ReplayCache)};
   }
 
   constexpr static AddressAndKey
   make_free_native_token_balance_addrkey(ContractAddress const &address)
   {
-    return AddressAndKey{
-        .address = address,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+    return AddressAndKey{.address = address,
+                         .key = StorageKey(
+                             StorageKeyType::FreeNativeTokenBalance)};
   }
 
   static Bytestring make_bytestring(std::string_view str)

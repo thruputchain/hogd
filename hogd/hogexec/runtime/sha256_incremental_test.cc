@@ -54,27 +54,27 @@ TEST_F(Sha256IncrementalTest, BasicUpdateAndFinalize)
             0, std::as_bytes(std::span(first_chunk)), true);
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto r2 = ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(second_chunk)), false);
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash digest{};
         auto r3 = ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
         if (!r3.has_value() ||
             r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         const auto expected_hash =
             sha256(std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
         if (digest != expected_hash) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -121,39 +121,38 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
             0, std::as_bytes(std::span(parent_prefix)), true);
         if (!p1.has_value() ||
             p1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto invoke_status = [&]() {
           RuntimeMemoryLength output_return_buffer_len = 0;
           return ctx.syscall<SyscallNo::kInvoke>(
               kAddress, 1, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::kInvokeFlagNone),
-              output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
         }();
         if (!invoke_status.has_value() ||
             invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto p2 = ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(parent_suffix)), false);
         if (!p2.has_value() ||
             p2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash digest{};
         auto p3 = ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
         if (!p3.has_value() ||
             p3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         const auto expected_parent_hash =
             sha256(std::vector<uint8_t>{'p', 'a', 'r', 'e', 'n', 't'});
         if (digest != expected_parent_hash) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -167,27 +166,27 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
             0, std::as_bytes(std::span(child_prefix)), true);
         if (!c1.has_value() ||
             c1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto c2 = ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(child_suffix)), false);
         if (!c2.has_value() ||
             c2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash digest{};
         auto c3 = ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
         if (!c3.has_value() ||
             c3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         const auto expected_child_hash =
             sha256(std::vector<uint8_t>{'c', 'h', 'i', 'l', 'd', '1'});
         if (digest != expected_child_hash) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });

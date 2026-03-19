@@ -165,7 +165,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 
 // Test Auth Data reference leak: when try_reserve_change_signer() fails,
 // reference should be released.
-// AuthData is only allowed for kStorageKeyTypeAddressAuthData.
+// AuthData is only allowed for AddressAuthData.
 // We check that the reference is released by committing the block
 // and making sure the item does not exist in the next block.
 TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)

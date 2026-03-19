@@ -94,8 +94,7 @@ syscall_ChangePublicKeyRegistration_inner(
     }();
   } catch (std::bad_alloc &e) {
     error("unrecoverable: failed to allocate public key config: {}", e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
-            WrappedGasAmount{0}};
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
   if (!new_key) {
@@ -181,8 +180,7 @@ syscall_WriteAddressGasPermissionConfigs_inner(
     error("unrecoverable: failed to add bounded number of gas permission "
           "configs to vector of bounded size: {}",
           e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
-            WrappedGasAmount{0}};
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
   if (found_gap || invalid_bitmap) {

@@ -61,11 +61,10 @@ public:
                         DeployedContractHash const &deployment,
                         StorageCostModel const *cost_model)
   {
-    write_item(
-        AddressAndKey{.address = addr,
-                      .key = StorageKey(
-                          StorageKeyType::kStorageKeyTypeAddressMetadata)},
-        std::make_shared<const StorageItemWrapper>(deployment, cost_model));
+    write_item(AddressAndKey{.address = addr,
+                             .key = StorageKey(StorageKeyType::Metadata)},
+               std::make_shared<const StorageItemWrapper>(deployment,
+                                                          cost_model));
   }
 
   void write_deployment(ContractAddress const &addr,

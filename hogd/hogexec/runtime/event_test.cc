@@ -75,11 +75,11 @@ TEST_F(EventTest, EventSuccess)
                  static_cast<SHA256Hash const *>(nullptr),
                  std::as_bytes(std::span(event_data)));
              if (!status.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               return InvokeError{InvokeErrorCode::Unrecoverable};
              }
 
              if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -95,11 +95,11 @@ TEST_F(EventTest, EventSuccess)
                  static_cast<SHA256Hash const *>(nullptr),
                  std::as_bytes(std::span(event_data)));
              if (!status.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               return InvokeError{InvokeErrorCode::Unrecoverable};
              }
 
              if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -110,16 +110,16 @@ TEST_F(EventTest, EventSuccess)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              [[maybe_unused]] auto gas = GasAmount{0};
              if (!status.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               return InvokeError{InvokeErrorCode::Unrecoverable};
              }
 
              if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto status2 = [&]() {
@@ -127,20 +127,20 @@ TEST_F(EventTest, EventSuccess)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              [[maybe_unused]] auto gas2 = GasAmount{0};
              if (!status2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               return InvokeError{InvokeErrorCode::Unrecoverable};
              }
 
              if (status2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              if (!ctx.runtime().consume_gas(gas + gas2)) {
-               return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+               return InvokeError{InvokeErrorCode::OutOfGas};
              }
 
              return {};
@@ -222,12 +222,12 @@ TEST_F(EventTest, BadEventInputs)
                    ctx.handler(), nullptr, &topic1, nullptr,
                    std::as_bytes(std::span("test bad topic organization")));
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
 
@@ -236,12 +236,12 @@ TEST_F(EventTest, BadEventInputs)
                    ctx.handler(), &topic0, nullptr, &topic2,
                    std::as_bytes(std::span("test bad topic organization")));
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
 
@@ -250,12 +250,12 @@ TEST_F(EventTest, BadEventInputs)
                    ctx.handler(), nullptr, nullptr, nullptr,
                    std::as_bytes(std::span(too_long_event)));
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
 
@@ -317,11 +317,11 @@ TEST_F(EventTest, EventLengthIncludesTopics)
                    ctx.handler(), &topic, nullptr, nullptr,
                    std::as_bytes(std::span(max_event_data)));
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
 
@@ -332,12 +332,12 @@ TEST_F(EventTest, EventLengthIncludesTopics)
                    ctx.handler(), &topic, nullptr, nullptr,
                    std::as_bytes(std::span(too_long_event_data)));
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() !=
                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
 
@@ -416,11 +416,11 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    static_cast<SHA256Hash const *>(nullptr),
                    std::as_bytes(std::span(calldata)));
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -437,20 +437,20 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), calldata,
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
                [[maybe_unused]] auto gas = GasAmount{0};
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                if (!ctx.runtime().consume_gas(gas)) {
-                 return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 return InvokeError{InvokeErrorCode::OutOfGas};
                }
 
                // Manually revert the frame - this should revert the event
@@ -469,24 +469,24 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return ctx.syscall<SyscallNo::kInvoke>(
                      ctx.handler().get_current_address(), 0,
                      ctx.runtime().get_available_gas(), calldata,
-                     std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                     std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
                [[maybe_unused]] auto gas = GasAmount{0};
                if (!status.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
                if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                if (!ctx.runtime().consume_gas(gas)) {
-                 return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 return InvokeError{InvokeErrorCode::OutOfGas};
                }
 
                // Return a deterministic error - this should revert the event
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }},
             // Method 3: Calls method 0, then 1, then 0, then 2, then 0
             {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -500,21 +500,21 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return ctx.syscall<SyscallNo::kInvoke>(
                        ctx.handler().get_current_address(), 0,
                        ctx.runtime().get_available_gas(), calldata,
-                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                   return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeNone) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
 
                  if (!ctx.runtime().consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                   return InvokeError{InvokeErrorCode::OutOfGas};
                  }
                }
 
@@ -525,22 +525,22 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return ctx.syscall<SyscallNo::kInvoke>(
                        ctx.handler().get_current_address(), 1,
                        ctx.runtime().get_available_gas(), Calldata{},
-                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                   return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
                  // Method 1 should have manually reverted
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
 
                  if (!ctx.runtime().consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                   return InvokeError{InvokeErrorCode::OutOfGas};
                  }
                }
 
@@ -554,21 +554,21 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return ctx.syscall<SyscallNo::kInvoke>(
                        ctx.handler().get_current_address(), 0,
                        ctx.runtime().get_available_gas(), calldata,
-                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                   return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeNone) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
 
                  if (!ctx.runtime().consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                   return InvokeError{InvokeErrorCode::OutOfGas};
                  }
                }
 
@@ -580,22 +580,22 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return ctx.syscall<SyscallNo::kInvoke>(
                        ctx.handler().get_current_address(), 2,
                        ctx.runtime().get_available_gas(), Calldata{},
-                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                   return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
                  // Method 2 should have failed with deterministic error
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
 
                  if (!ctx.runtime().consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                   return InvokeError{InvokeErrorCode::OutOfGas};
                  }
                }
 
@@ -609,21 +609,21 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return ctx.syscall<SyscallNo::kInvoke>(
                        ctx.handler().get_current_address(), 0,
                        ctx.runtime().get_available_gas(), calldata,
-                       std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                       std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
-                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                   return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeNone) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   return InvokeError{InvokeErrorCode::Deterministic};
                  }
 
                  if (!ctx.runtime().consume_gas(gas)) {
-                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                   return InvokeError{InvokeErrorCode::OutOfGas};
                  }
                }
 

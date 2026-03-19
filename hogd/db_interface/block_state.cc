@@ -63,16 +63,14 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
     tx.add_delta(addrkey, std::move(delta), std::move(*res));
   }
 
-  if (addrkey.key.key_type() ==
-      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+  if (addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance) {
     // no storage cost paid for this key
     return true;
   }
 
   AddressAndKey cost_addrkey =
       AddressAndKey{.address = addrkey.address,
-                    .key = StorageKey(
-                        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+                    .key = StorageKey(StorageKeyType::FreeNativeTokenBalance)};
 
   auto prev_delta = tx.get_delta(cost_addrkey);
   auto storage_lock = tx.get_lock(cost_addrkey);
@@ -137,17 +135,16 @@ BlockState::commit_transaction(TransactionID txid,
       storage_view_.revert_storage_lock(addr, lock.lock_);
       released_amount = lock.locked_tokens_;
     }
-    if (addr.key.key_type() ==
-        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+    if (addr.key.key_type() == StorageKeyType::FreeNativeTokenBalance) {
       // no storage cost paid for this key
       continue;
     }
 
     assert(released_amount >= 0);
-    auto cost_addrkey = AddressAndKey{
-        .address = addr.address,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+    auto cost_addrkey =
+        AddressAndKey{.address = addr.address,
+                      .key =
+                          StorageKey(StorageKeyType::FreeNativeTokenBalance)};
     StorageDelta cost_release_delta(
         StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
     cost_release_delta.nnint_add() = to_xdr(released_amount);

@@ -323,8 +323,8 @@ public:
                       .calldata = calldata};
   }
 
-  template<StringLiteral Name, InvokeFlagSet Flags = std::to_underlying(
-                                   InvokeFlag::kInvokeFlagNone)>
+  template<StringLiteral Name,
+           InvokeFlagSet Flags = std::to_underlying(InvokeFlag::None)>
   auto invoke_opt(SystemCallHandler &handler, auto &&...args)
       -> std::pair<HostFnStatus<SyscallStatus<std::optional<
                        typename trait_meta_t::template return_t<Name>>>>,

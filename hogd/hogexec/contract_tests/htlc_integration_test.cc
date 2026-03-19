@@ -384,16 +384,16 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
                   ctx.handler(), kReceiverAddress);
           if (!result.has_value() || !result.value().has_value() ||
               !result.value().value().has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (!result.value().value().value().is_ok()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto balance = result.value().value().value().ok();
           uint128_t balance_unsigned_int =
               uint128_t{std::get<0>(balance)} << 64 | std::get<1>(balance);
           if (balance_unsigned_int != from_xdr(expected_balance)) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
