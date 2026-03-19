@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <concepts>
+#include <coroutine>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -110,8 +112,21 @@ EventBlockContext::add_event(TxEventLog event)
   auto key = data.subspan(0, 32);
   auto value = data.subspan(32);
 
-  co_await write_event(std::span(*serialize_buf));
+  // WARNING: insert_or_update must happen BEFORE write_event.  write_event may
+  // co_await internally, which can resume the coroutine on a different thread.
+  // key and value are spans into the static PerThread serialize_buf for this
+  // thread — if we co_await first, another coroutine on the original thread
+  // could overwrite serialize_buf, leaving key/value pointing at stale or freed
+  // memory.
   CHECK(trie_->insert_or_update(key, value));
+  using write_event_result_t =
+      decltype(std::declval<EventBlockContext &>().write_event(
+          std::declval<std::span<const uint8_t>>()));
+  static_assert(
+      std::same_as<decltype(std::declval<write_event_result_t::promise_type &>()
+                                .initial_suspend()),
+                   std::suspend_never>);
+  co_await write_event(std::span(*serialize_buf));
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
   // without holding a lock.
@@ -189,6 +204,8 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
 x23::Async<void>
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
+  // DO NOT SUSPEND while still using the data paramter!  That would hold a
+  // reference to PerThread data across a coroutine suspend point!
 #if __cpp_lib_containers_ranges >= 202202L
   buffers_->buf.append_range(data);
 #else
@@ -196,8 +213,18 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 #endif
   buffers_->event_count++;
 
+  // data is no longer used; clear the reference to the span just to be
+  // defensive.
+  data = {};
+
   if (buffers_->buf.size() >= kBufferThreshold) {
-    std::decay_t<decltype(buffers_->buf)> buf;
+    // Extract the buffer from the current thread's PerThread slot BEFORE the
+    // co_await.  After co_await, the coroutine may resume on a different
+    // thread, so buffers_-> would resolve to that thread's slot instead of the
+    // one that exceeded the threshold.
+    using buf_t = std::decay_t<decltype(buffers_->buf)>;
+    buf_t buf = std::move(buffers_->buf);
+    buffers_->buf.clear();
     {
       // By the time this coroutine returns, pending_write_count_ will have been
       // incremented or the state_ has already been set as kAbandoned or
@@ -207,10 +234,16 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
       if (state_ != BlockState::kActive) {
         x23assert(state_ == BlockState::kAbandoned ||
                   state_ == BlockState::kFinishing);
+        if (state_ == BlockState::kFinishing) {
+          // Insert into the current thread's PerThread slot (which may differ
+          // from the slot we extracted from before co_await).
+          // finish_file_write() drains every slot via for_each(), so the data
+          // will be captured regardless of which slot holds it.  We hold lock_,
+          // so finish_file_write() cannot iterate until we release.
+          buffers_->buf.insert(buffers_->buf.end(), buf.begin(), buf.end());
+        }
         co_return;
       }
-      buf = std::move(buffers_->buf);
-      buffers_->buf.clear();
       pending_write_count_++;
     }
 

@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstring>
 #include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "event.hh"
 #include "hogd/base/coropoll.h"
@@ -403,6 +405,83 @@ TEST_F(EventBlockContextTest, MultipleConcurrentAwaits)
   EXPECT_EQ(completed_awaits.load(), 3);
 
   finish_file(context);
+}
+
+// Stress test: blast events from 128 threads to exercise the concurrent buffer
+// flush path in write_event (buffers_->buf >= 500 KiB).  This validates the
+// fix for extracting the PerThread buffer before co_await — without the fix,
+// write_event would resolve buffers_-> on the wrong thread after resuming.
+//
+// Note: the kFinishing data-preservation path (where write_event puts extracted
+// data back into buffers_->buf) cannot be targeted here.  In valid usage,
+// finish_file_write requires open_executor_handles_ == 0, so all add_event
+// calls have completed before kFinishing is set.  The kFinishing guard in
+// write_event is purely defensive.
+TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
+{
+  // Use large payloads so each thread's PerThread buffer crosses
+  // kBufferThreshold (500 KiB) quickly, forcing the flush code path.
+  constexpr size_t kNumThreads = 128;
+  constexpr size_t kEventsPerThread = 20;
+  constexpr size_t kPayloadSize = 512;
+
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+
+  std::atomic<size_t> events_accepted{0};
+
+  // Each thread adds events with unique hashes and large payloads.
+  std::vector<x23::Async<void>> producers;
+  producers.reserve(kNumThreads);
+  for (size_t t = 0; t < kNumThreads; t++) {
+    producers.push_back([](EventBlockContext &context,
+                           std::atomic<size_t> &events_accepted,
+                           size_t t) -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      for (size_t i = 0; i < kEventsPerThread; i++) {
+        uint64_t idx = (t * kEventsPerThread) + i;
+        auto hash = sha256(std::as_bytes(std::span(&idx, 1)));
+        x23::Vec<uint8_t, kMaxEventLength> payload;
+        payload.resize(kPayloadSize);
+        std::memcpy(payload.data(), &idx, sizeof(idx));
+
+        TxEventLog event{
+            .proposed_tx_hash = hash,
+            .events = {TxEmittedEvent{
+                .contract_address = {},
+                .num_topics = 0,
+                .serialized_event = payload,
+            }},
+        };
+        if (co_await context.add_event(std::move(event))) {
+          events_accepted.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    }(context, events_accepted, t));
+  }
+
+  // Let producers run for a bit, then close the executor to trigger the
+  // finish path concurrently with in-flight write_event flushes.
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(1ms); // NOLINT(misc-include-cleaner)
+
+  context.executor_close_block();
+
+  // Drain all producers.
+  for (auto &p : producers) {
+    p();
+  }
+
+  finish_file(context);
+  auto hash = context.get_root_hash();
+
+  // Parse the output and verify that every accepted event is present.
+  auto event_logs = parse_event_logs(
+      EventBlockContext::final_events_filename(temp_dir_, hash));
+
+  size_t accepted = events_accepted.load(std::memory_order_relaxed);
+  EXPECT_GT(accepted, 0UL);
+  EXPECT_EQ(event_logs.size(), accepted);
 }
 
 } // namespace hogd
