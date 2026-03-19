@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <system_error>
 
 #include "hogd/base/log.h"
 
@@ -19,9 +20,10 @@ private:
   static std::string create_tmp_directory()
   {
     std::string dir;
+    std::error_code ec;
     do {
       dir = "/tmp/" + time_string_with_ns();
-    } while (!std::filesystem::create_directory(dir));
+    } while (!std::filesystem::create_directory(dir, ec));
     return dir;
   }
 

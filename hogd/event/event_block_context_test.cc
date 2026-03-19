@@ -31,12 +31,6 @@ namespace hogd {
 
 class EventBlockContextTest : public ::testing::Test {
 public:
-  EventBlockContextTest() = default;
-
-  void SetUp() override { temp_dir_ = TmpDir().directory(); }
-
-  void TearDown() override { std::filesystem::remove_all(temp_dir_); }
-
   static std::unordered_map<SHA256Hash, TxEventLog>
   parse_event_logs(std::string_view filename)
   {
@@ -66,7 +60,8 @@ public:
     return event_logs;
   }
 
-  std::string temp_dir_;
+  TmpDir tmp_dir_;
+  std::string temp_dir_ = tmp_dir_.directory();
 };
 
 namespace {
