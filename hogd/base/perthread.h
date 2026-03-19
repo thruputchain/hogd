@@ -99,6 +99,14 @@ public:
 
   // get retrieves a thread-local value for a given index. It creates the item
   // if it hasn't yet been initialized.
+  //
+  // WARNING: The returned pointer is invalidated if items_ is resized on the
+  // same thread (e.g., by a concurrent PerThread<T> instance at a higher slot
+  // index calling populate() -> expand() -> items_.resize()). Do not store the
+  // pointer across any boundary where another PerThread<T> of the same type
+  // might be dereferenced on this thread. In particular, do not capture the
+  // pointer in for_each results and use it after releasing lock_threads().
+  // Use std::move to take ownership of the value instead.
   static T *get(size_t idx)
   {
     populate(idx);

@@ -664,16 +664,18 @@ HogDBDAO::create_changeset(bool compute_hash)
 HogDBStatus<void>
 HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
 {
-  // Collect per-thread vector pointers under the PerThread lock, then release
-  // the lock and apply each vector in parallel. RAMDB's per-bucket locking
-  // handles concurrency for puts/removes to different keys.
-  std::vector<std::vector<MaterializedChange> *> vecs;
+  // Move per-thread change vectors out of PerThread storage so we own the data.
+  // We must not hold raw pointers into PerThread's internal std::vector<T>
+  // (TLStorage::items_) after releasing the lock, because a concurrent
+  // PerThread<T>::get() on the same thread can trigger items_.resize(), which
+  // reallocates the buffer and invalidates all prior pointers/references.
+  std::vector<std::vector<MaterializedChange>> vecs;
   {
     auto ul = changes.changes_.lock_threads();
     changes.changes_.for_each(ul,
                               [&vecs](std::vector<MaterializedChange> &vec) {
                                 if (!vec.empty()) {
-                                  vecs.push_back(&vec);
+                                  vecs.push_back(std::move(vec));
                                 }
                               });
   }
@@ -681,8 +683,8 @@ HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
   std::atomic<bool> had_error{false};
   pool.for_each_parallel(
       vecs,
-      [this, &had_error](std::vector<MaterializedChange> *vec) {
-        for (const auto &change : *vec) {
+      [this, &had_error](std::vector<MaterializedChange> &vec) {
+        for (const auto &change : vec) {
           if (had_error.load(std::memory_order_relaxed)) {
             return;
           }
@@ -702,7 +704,6 @@ HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
             break;
           }
         }
-        vec->clear();
       },
       1);
 
