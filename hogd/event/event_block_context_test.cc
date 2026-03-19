@@ -432,35 +432,33 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   std::vector<x23::Async<void>> producers;
   producers.reserve(kNumThreads);
   for (size_t t = 0; t < kNumThreads; t++) {
-    producers.push_back(
-        [&context, &events_accepted, t]() -> x23::Async<void> {
-          co_await default_threadpool().bg();
-          for (size_t i = 0; i < kEventsPerThread; i++) {
-            size_t idx = (t * kEventsPerThread) + i;
-            // Unique hash per event.
-            auto hash = sha256(
-                std::as_bytes(std::span(reinterpret_cast<const uint8_t *>(&idx),
-                                        sizeof(idx))));
-            x23::Vec<uint8_t, kMaxEventLength> payload;
-            payload.resize(kPayloadSize);
-            // Fill with a recognizable pattern derived from idx.
-            for (size_t b = 0; b < kPayloadSize; b++) {
-              payload[b] = static_cast<uint8_t>((idx + b) & 0xFF);
-            }
+    producers.push_back([&context, &events_accepted, t]() -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      for (size_t i = 0; i < kEventsPerThread; i++) {
+        size_t idx = (t * kEventsPerThread) + i;
+        // Unique hash per event.
+        auto hash = sha256(std::as_bytes(
+            std::span(reinterpret_cast<const uint8_t *>(&idx), sizeof(idx))));
+        x23::Vec<uint8_t, kMaxEventLength> payload;
+        payload.resize(kPayloadSize);
+        // Fill with a recognizable pattern derived from idx.
+        for (size_t b = 0; b < kPayloadSize; b++) {
+          payload[b] = static_cast<uint8_t>((idx + b) & 0xFF);
+        }
 
-            TxEventLog event{
-                .proposed_tx_hash = hash,
-                .events = {TxEmittedEvent{
-                    .contract_address = {},
-                    .num_topics = 0,
-                    .serialized_event = payload,
-                }},
-            };
-            if (co_await context.add_event(std::move(event))) {
-              events_accepted.fetch_add(1, std::memory_order_relaxed);
-            }
-          }
-        }());
+        TxEventLog event{
+            .proposed_tx_hash = hash,
+            .events = {TxEmittedEvent{
+                .contract_address = {},
+                .num_topics = 0,
+                .serialized_event = payload,
+            }},
+        };
+        if (co_await context.add_event(std::move(event))) {
+          events_accepted.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    }());
   }
 
   // Let producers run for a bit, then close the executor to trigger the
