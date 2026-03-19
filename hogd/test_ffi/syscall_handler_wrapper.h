@@ -141,6 +141,7 @@ private:
         .serialized_output = kNullBuffer,
         .gas_consumed = 0,
         .serialized_trace = kNullBuffer,
+        .serialized_events = kNullBuffer,
         .ffi_error_code = code,
     };
   };

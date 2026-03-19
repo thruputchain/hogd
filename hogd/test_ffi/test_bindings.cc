@@ -384,6 +384,7 @@ constexpr ForeignTracedInvokeResult kUnrecoverableError = {
     .serialized_output = kNullBuffer,
     .gas_consumed = 0,
     .serialized_trace = kNullBuffer,
+    .serialized_events = kNullBuffer,
     .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
 
 ForeignTracedInvokeResult
@@ -557,76 +558,6 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   }
 
   return kTestFFIErrorCodeNone;
-}
-
-TestFFIErrorCode
-get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
-{
-  if (!syscall_handler) {
-    error("get_event_log error: no syscall handler!");
-    return kTestFFIErrorCodeInvalidPointer;
-  }
-  if (!buffer) {
-    error("get_event_log error: no buffer!");
-    return kTestFFIErrorCodeInvalidPointer;
-  }
-
-  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  auto event_log = context->get_tx_event_log();
-  if (!event_log) {
-    debug("No events for current tx");
-    if (buffer_len > 0) {
-      return kTestFFIErrorCodeEventLogNotFound;
-    }
-    return kTestFFIErrorCodeNone;
-  }
-
-  try {
-    auto serialized_event_log = x23::serialize(event_log.value());
-    if (serialized_event_log.size() != buffer_len) {
-      error("get_event_log error: buffer too small!");
-      return kTestFFIErrorCodeInvalidPointer;
-    }
-    std::memcpy(buffer, serialized_event_log.data(),
-                serialized_event_log.size());
-    return kTestFFIErrorCodeNone;
-  } catch (x23::XdrException &e) {
-    log_error("error serializing event log: {}", e);
-    return kTestFFIErrorCodeUnrecoverableError;
-  } catch (std::exception const &e) {
-    log_error("error during get_event_log: {}", e);
-    return kTestFFIErrorCodeUnrecoverableError;
-  }
-}
-
-GetEventLogLenResult
-get_event_log_len(void *syscall_handler)
-{
-  if (!syscall_handler) {
-    error("get_event_log_len error: no syscall handler!");
-    return make_ffi_result_type<GetEventLogLenResult>(
-        kTestFFIErrorCodeInvalidPointer);
-  }
-  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  auto event_log = context->get_tx_event_log();
-  if (!event_log) {
-    return make_ffi_result_type<GetEventLogLenResult>(
-        kTestFFIErrorCodeEventLogNotFound);
-  }
-
-  try {
-    auto serialized_event_log = x23::serialize(event_log.value());
-    uint32_t len = serialized_event_log.size();
-    return {.len = len, .ffi_error_code = kTestFFIErrorCodeNone};
-  } catch (x23::XdrException &e) {
-    log_error("error serializing event log: {}", e);
-    return make_ffi_result_type<GetEventLogLenResult>(
-        kTestFFIErrorCodeUnrecoverableError);
-  } catch (std::exception const &e) {
-    log_error("error during get_event_log_len: {}", e);
-    return make_ffi_result_type<GetEventLogLenResult>(
-        kTestFFIErrorCodeUnrecoverableError);
-  }
 }
 
 TestFFIErrorCode
@@ -1145,31 +1076,6 @@ enable_syscall_logging(int32_t level)
   hogd::do_ffi_trace("FFI (start): enable_syscall_logging(level={})", level);
   hogd::enable_syscall_logging(level);
   hogd::do_ffi_trace("FFI (end): enable_syscall_logging(level={})", level);
-}
-
-TestFFIErrorCode
-get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
-{
-  hogd::do_ffi_trace("FFI (start): get_event_log(syscall_handler={}, "
-                     "buffer={}, buffer_len={})",
-                     syscall_handler, static_cast<void *>(buffer), buffer_len);
-  auto result = hogd::get_event_log(syscall_handler, buffer, buffer_len);
-  hogd::do_ffi_trace("FFI (end): get_event_log(syscall_handler={}, buffer={}, "
-                     "buffer_len={}) -> {}",
-                     syscall_handler, static_cast<void *>(buffer), buffer_len,
-                     result);
-  return result;
-}
-
-GetEventLogLenResult
-get_event_log_len(void *syscall_handler)
-{
-  hogd::do_ffi_trace("FFI (start): get_event_log_len(syscall_handler={})",
-                     syscall_handler);
-  auto result = hogd::get_event_log_len(syscall_handler);
-  hogd::do_ffi_trace("FFI (end): get_event_log_len(syscall_handler={}) -> {}",
-                     syscall_handler, result);
-  return result;
 }
 
 VerifyAuthResult

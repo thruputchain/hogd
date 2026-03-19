@@ -44,9 +44,10 @@ template<> struct formatter<ForeignTracedInvokeResult> {
   {
     return format_to(ctx.out(),
                      "serialized_output=[{}], gas_consumed={}, "
-                     "serialized_trace=[{}], ffi_error_code={}",
+                     "serialized_trace=[{}], serialized_events=[{}], "
+                     "ffi_error_code={}",
                      result.serialized_output, result.gas_consumed,
-                     result.serialized_trace,
+                     result.serialized_trace, result.serialized_events,
                      std::to_underlying(result.ffi_error_code));
   }
 };
@@ -164,15 +165,6 @@ template<> struct formatter<ForeignHostFnResult> {
   {
     return format_to(ctx.out(), "result_code={}, panic={}", result.result_code,
                      result.panic);
-  }
-};
-
-template<> struct formatter<GetEventLogLenResult> {
-  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
-  static auto format(const GetEventLogLenResult &result, auto &ctx)
-  {
-    return format_to(ctx.out(), "len={}, ffi_error_code={}", result.len,
-                     std::to_underlying(result.ffi_error_code));
   }
 };
 
