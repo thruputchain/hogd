@@ -537,7 +537,15 @@ GenTs::show_def(const UnionDecl &u)
 void
 GenTs::show_def(const ProgDef &prog)
 {
+  bool multi_ver = prog.versions.size() > 1;
+  std::set<string> emitted_args; // track generated _args structs
+
   for (const VersDef &vers : prog.versions) {
+    // Build args struct name, qualified by version for multi-version programs
+    auto args_struct_name = [&](const string &proc_id) -> string {
+      return multi_ver ? vers.id + "_" + proc_id + "_args" : proc_id + "_args";
+    };
+
     // Generate multi-arg request structs for procedures with >1 arg
     for (const auto &proc : vers.procs) {
       vector<string> real_args;
@@ -547,7 +555,9 @@ GenTs::show_def(const ProgDef &prog)
       if (real_args.size() <= 1)
         continue;
 
-      string args_name = proc.id + "_args";
+      string args_name = args_struct_name(proc.id);
+      if (!emitted_args.insert(args_name).second)
+        continue; // already generated
 
       // Build a StructBody with positional field names (arg0, arg1, ...)
       StructBody args_body;
@@ -567,8 +577,8 @@ GenTs::show_def(const ProgDef &prog)
     has_programs_ = true;
 
     // Emit RpcProgramMeta export
-    string export_name =
-        prog.versions.size() == 1 ? prog.id + "Program" : vers.id + "Program";
+    string export_name = multi_ver ? to_pascal_case(vers.id) + "Program"
+                                   : to_pascal_case(prog.id) + "Program";
     program_meta_ += std::format("\nexport const {0}: RpcProgramMeta = {{\n"
                                  "  programId: {1},\n"
                                  "  version: {2},\n"
@@ -590,7 +600,7 @@ GenTs::show_def(const ProgDef &prog)
         req_codec = proc_codec_ref(real_args[0]);
       }
       else {
-        req_codec = "_" + proc.id + "_args";
+        req_codec = "_" + args_struct_name(proc.id);
       }
 
       // Response codec
@@ -836,15 +846,14 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
     if (arm.decl.qual != Declaration::kVoid) {
       if (has_default_arm) {
         // { disc: number } overlaps — cast to inline variant type
-        string disc_val = case_label(arm.cases[0]);
         string ftype = ts_field_type(arm.decl, name);
         prbottom("      {{\n");
-        prbottom("        const v = val as {{ {0}: {1}; {2}: {3} }};\n",
-                 body.switch_id, disc_val, arm.decl.id, ftype);
+        prbottom("        const v = val as {{ {0}: number; {1}: {2} }};\n",
+                 body.switch_id, arm.decl.id, ftype);
         prbottom("        if (v.{0} === undefined) {{\n", arm.decl.id);
-        prbottom("          throw new Error(\"{0} encode: discriminant is {1} "
-                 "but {2} is undefined\");\n",
-                 name, arm.cases[0], arm.decl.id);
+        prbottom(
+            "          throw new Error(\"{0} encode: {1} is undefined\");\n",
+            name, arm.decl.id);
         prbottom("        }}\n");
         encode_field(arm.decl, "v." + arm.decl.id, name, 8);
         prbottom("        break;\n");
