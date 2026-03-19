@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <concepts>
+#include <coroutine>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -117,6 +119,13 @@ EventBlockContext::add_event(TxEventLog event)
   // could overwrite serialize_buf, leaving key/value pointing at stale or freed
   // memory.
   CHECK(trie_->insert_or_update(key, value));
+  using write_event_result_t =
+      decltype(std::declval<EventBlockContext &>().write_event(
+          std::declval<std::span<const uint8_t>>()));
+  static_assert(std::same_as<
+                decltype(std::declval<write_event_result_t::promise_type &>()
+                             .initial_suspend()),
+                std::suspend_never>);
   co_await write_event(std::span(*serialize_buf));
 
   // [event_log_] is a [PerThread<>] object, so it is safe to insert into it
@@ -195,12 +204,17 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
 x23::Async<void>
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
+  // DO NOT SUSPEND while still using the data paramter!  That would hold a reference to PerThread
+  // data across a coroutine suspend point!
 #if __cpp_lib_containers_ranges >= 202202L
   buffers_->buf.append_range(data);
 #else
   buffers_->buf.insert(buffers_->buf.end(), data.begin(), data.end());
 #endif
   buffers_->event_count++;
+
+  // data is no longer used; clear the reference to the span just to be defensive.
+  data = {};
 
   if (buffers_->buf.size() >= kBufferThreshold) {
     // Extract the buffer from the current thread's PerThread slot BEFORE the
@@ -219,6 +233,12 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
       if (state_ != BlockState::kActive) {
         x23assert(state_ == BlockState::kAbandoned ||
                   state_ == BlockState::kFinishing);
+        if (state_ == BlockState::kFinishing) {
+          // Put the data back so finish_file_write() can drain it.  We hold
+          // lock_, so finish_file_write() cannot iterate buffers until we
+          // release.
+          buffers_->buf.insert(buffers_->buf.end(), buf.begin(), buf.end());
+        }
         co_return;
       }
       pending_write_count_++;
