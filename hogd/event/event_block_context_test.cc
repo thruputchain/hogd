@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstring>
 #include <filesystem>
 #include <span>
 #include <string>
@@ -432,19 +433,16 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   std::vector<x23::Async<void>> producers;
   producers.reserve(kNumThreads);
   for (size_t t = 0; t < kNumThreads; t++) {
-    producers.push_back([&context, &events_accepted, t]() -> x23::Async<void> {
+    producers.push_back([](EventBlockContext &context,
+                           std::atomic<size_t> &events_accepted,
+                           size_t t) -> x23::Async<void> {
       co_await default_threadpool().bg();
       for (size_t i = 0; i < kEventsPerThread; i++) {
-        size_t idx = (t * kEventsPerThread) + i;
-        // Unique hash per event.
-        auto hash = sha256(std::as_bytes(
-            std::span(reinterpret_cast<const uint8_t *>(&idx), sizeof(idx))));
+        uint64_t idx = (t * kEventsPerThread) + i;
+        auto hash = sha256(std::as_bytes(std::span(&idx, 1)));
         x23::Vec<uint8_t, kMaxEventLength> payload;
         payload.resize(kPayloadSize);
-        // Fill with a recognizable pattern derived from idx.
-        for (size_t b = 0; b < kPayloadSize; b++) {
-          payload[b] = static_cast<uint8_t>((idx + b) & 0xFF);
-        }
+        std::memcpy(payload.data(), &idx, sizeof(idx));
 
         TxEventLog event{
             .proposed_tx_hash = hash,
@@ -458,7 +456,7 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
           events_accepted.fetch_add(1, std::memory_order_relaxed);
         }
       }
-    }());
+    }(context, events_accepted, t));
   }
 
   // Let producers run for a bit, then close the executor to trigger the

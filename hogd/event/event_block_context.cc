@@ -235,9 +235,11 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
         x23assert(state_ == BlockState::kAbandoned ||
                   state_ == BlockState::kFinishing);
         if (state_ == BlockState::kFinishing) {
-          // Put the data back so finish_file_write() can drain it.  We hold
-          // lock_, so finish_file_write() cannot iterate buffers until we
-          // release.
+          // Insert into the current thread's PerThread slot (which may differ
+          // from the slot we extracted from before co_await).
+          // finish_file_write() drains every slot via for_each(), so the data
+          // will be captured regardless of which slot holds it.  We hold lock_,
+          // so finish_file_write() cannot iterate until we release.
           buffers_->buf.insert(buffers_->buf.end(), buf.begin(), buf.end());
         }
         co_return;
