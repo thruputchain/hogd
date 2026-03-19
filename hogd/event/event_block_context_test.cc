@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <span>
@@ -425,6 +426,7 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   context.executor_open_block();
 
   std::atomic<size_t> events_accepted{0};
+  std::atomic<bool> any_event_accepted{false};
 
   // Each thread adds events with unique hashes and large payloads.
   std::vector<x23::Async<void>> producers;
@@ -432,6 +434,7 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   for (size_t t = 0; t < kNumThreads; t++) {
     producers.push_back([](EventBlockContext &context,
                            std::atomic<size_t> &events_accepted,
+                           std::atomic<bool> &any_event_accepted,
                            size_t t) -> x23::Async<void> {
       co_await default_threadpool().bg();
       for (size_t i = 0; i < kEventsPerThread; i++) {
@@ -451,15 +454,24 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
         };
         if (co_await context.add_event(std::move(event))) {
           events_accepted.fetch_add(1, std::memory_order_relaxed);
+          any_event_accepted.store(true, std::memory_order_release);
         }
       }
-    }(context, events_accepted, t));
+    }(context, events_accepted, any_event_accepted, t));
   }
 
-  // Let producers run for a bit, then close the executor to trigger the
-  // finish path concurrently with in-flight write_event flushes.
-  using namespace std::chrono_literals;
-  std::this_thread::sleep_for(1ms); // NOLINT(misc-include-cleaner)
+  // Wait until at least one producer has successfully added an event before
+  // closing the executor.  The bare sleep_for(1ms) was insufficient under
+  // ASAN+Release where coroutine scheduling overhead could prevent any
+  // producer from completing add_event within the window.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (!any_event_accepted.load(std::memory_order_acquire)) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      FAIL() << "Timed out waiting for any producer to accept an event";
+    }
+    std::this_thread::yield();
+  }
 
   context.executor_close_block();
 
