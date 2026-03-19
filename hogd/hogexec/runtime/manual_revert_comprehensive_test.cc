@@ -88,7 +88,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "ManualRevertBasicFunctionality: Failed to set "
                                 "bytestring in method 0";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Manually revert with return data
@@ -170,7 +170,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
                                 "set bytestring in parent method (method 0)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Invoke child method that will revert
@@ -182,27 +182,27 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                    output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Check that child's return data is available
              auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Parent should be able to access child's return data
              auto expected_child_data = make_bytestring("child_error");
              if ((**status)->size() != expected_child_data.size()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (std::memcmp((**status)->data(), expected_child_data.data(),
                              expected_child_data.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -219,7 +219,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
                                 "set bytestring in child method (method 1)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Child manually reverts with return data
@@ -303,7 +303,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ManualRevertVsNormalFailure: Failed to set "
                                   "bytestring in method 0 (manual revert)";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                ReturnBuffer buffer;
@@ -324,11 +324,11 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ManualRevertVsNormalFailure: Failed to set "
                                   "bytestring in method 1 (normal failure)";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Normal failure - no return data
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -426,7 +426,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                  ADD_FAILURE() << "GasConsumptionWithManualRevert: Failed to "
                                   "set bytestring in method 0, iteration "
                                << i;
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                if (!ctx.runtime().consume_gas(1000)) {
@@ -521,7 +521,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                                 "bytestring in level 1 (method 1)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call level 2
@@ -533,11 +533,11 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r2.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Revert with our own data
@@ -558,7 +558,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                                 "bytestring in level 2 (method 2)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call level 3
@@ -570,11 +570,11 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                    output_return_buffer_len);
              }();
              if (!r3.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r3.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Revert with our own data
@@ -595,7 +595,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                                 "bytestring in level 3 (method 3)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Revert with data
@@ -677,7 +677,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
                                   "bytestring in method 0";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Simulate syscall error - this should trigger manual revert
@@ -699,7 +699,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
                                   "bytestring in method 1";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Simulate insufficient gas error - this should trigger manual
@@ -723,7 +723,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
                                   "bytestring in method 2";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // Simulate custom contract error - this should trigger manual
@@ -746,7 +746,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
                                   "bytestring in method 3";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                // No error - state should persist
@@ -871,7 +871,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring in parent (method 0)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // try_invoke child method 1
@@ -880,26 +880,26 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value()) {
                ADD_FAILURE() << "try_invoke on child failed unexpectedly";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Child manually reverted, so we expect kFrameReverted
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                ADD_FAILURE()
                    << "Expected kSyscallErrorCodeFrameReverted from child";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Verify child's return data is available to parent
              auto status = ctx.handler().get_return_buffer();
              if (!status || !(*status)) {
                ADD_FAILURE() << "Child return data not available to parent";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto expected = make_bytestring("child_reverted");
@@ -907,7 +907,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                  std::memcmp((**status)->data(), expected.data(),
                              expected.size()) != 0) {
                ADD_FAILURE() << "Child return data mismatch";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Parent continues normally (no revert)
@@ -925,7 +925,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring in child (method 1)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // try_invoke grandchild method 2 (should succeed normally)
@@ -934,17 +934,17 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 2,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
                ADD_FAILURE() << "try_invoke on grandchild failed unexpectedly";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
                    << "Expected kSyscallErrorCodeNone from grandchild";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Child manually reverts with return data
@@ -967,7 +967,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
                    << "Failed to set bytestring in grandchild (method 2)";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Return normally (no revert)

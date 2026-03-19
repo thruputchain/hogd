@@ -147,13 +147,13 @@ ExecutorStateManager::remove_block(BlockID block_id)
 
       if (event_error.has_value()) [[unlikely]] {
         switch (event_error.value()) {
-        case SystemErrorCode::kSystemAbortTransaction:
+        case SystemErrorCode::Abandon:
           result = ExecResult::ExecResultSystemError;
           break;
-        case SystemErrorCode::kSystemValidationFailure:
+        case SystemErrorCode::ValidationFailure:
           result = ExecResult::ExecResultTxValidationFailure;
           break;
-        case SystemErrorCode::kSystemUnrecoverable:
+        case SystemErrorCode::Unrecoverable:
           error("Unrecoverable: Received system unrecoverable error code from "
                 "event server");
           result = ExecResult::ExecResultUnrecoverable;

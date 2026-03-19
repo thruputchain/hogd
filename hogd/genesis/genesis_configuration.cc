@@ -90,8 +90,7 @@ GenesisConfigurationLoader::load_genesis_configuration(
                    make_deployed_contract_hash(deploy_contract));
 
   // Write the initial token allocation
-  StorageKey allocation_key(
-      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  StorageKey allocation_key(StorageKeyType::FreeNativeTokenBalance);
   write_storage(allocation_key, initial_hog_token_supply());
 
   int128_t total_storage_costs = 0;
@@ -193,7 +192,7 @@ GenesisConfigurationLoader::calculate_storage_key(
   auto hash_result = sha256(key_data);
 
   // Create storage key
-  StorageKey storage_key(StorageKeyType::kStorageKeyTypeContractData);
+  StorageKey storage_key(StorageKeyType::ContractData);
   std::copy_n(hash_result.begin(), 32, storage_key.contract_data_key().begin());
 
   return storage_key;

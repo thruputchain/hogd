@@ -233,22 +233,20 @@ BlockManager::initialize_genesis_configuration(
         auto item =
             std::make_shared<const StorageItemWrapper>(hash,
                                                        &cost_model_.value());
-        base_database_->write_item(
-            AddressAndKey{.address = addr,
-                          .key = StorageKey(
-                              StorageKeyType::kStorageKeyTypeAddressMetadata)},
-            item);
+        base_database_->write_item(AddressAndKey{.address = addr,
+                                                 .key = StorageKey(
+                                                     StorageKeyType::Metadata)},
+                                   item);
       },
       [&](ContractAddress const &addr,
           AddressAuthData const &auth_data) -> int128_t {
         auto item =
             std::make_shared<const StorageItemWrapper>(auth_data,
                                                        &cost_model_.value());
-        base_database_->write_item(
-            AddressAndKey{.address = addr,
-                          .key = StorageKey(
-                              StorageKeyType::kStorageKeyTypeAddressAuthData)},
-            item);
+        base_database_->write_item(AddressAndKey{.address = addr,
+                                                 .key = StorageKey(
+                                                     StorageKeyType::AuthData)},
+                                   item);
         return item->storage_cost();
       });
 

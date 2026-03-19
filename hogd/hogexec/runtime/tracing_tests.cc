@@ -100,7 +100,7 @@ TEST_F(TracingTest, Sha256Repeated)
     ASSERT_NE(trace_call.outputs, nullptr);
     ASSERT_EQ(trace_call.outputs->hash, sha256(data));
     ASSERT_EQ(trace->system_calls[i].status.error(),
-              HostFnErrorCode::kHostNoneOrRecoverable);
+              HostFnErrorCode::NoneOrRecoverable);
     ASSERT_EQ(trace->system_calls[i].status.syscall_return_code(),
               SyscallErrorCode::kSyscallErrorCodeNone);
   }
@@ -160,8 +160,7 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   ASSERT_EQ(trace->invocation.invoked_address, fibonacci_caller_addr);
 
   // Root frame should have terminated with Return
-  ASSERT_EQ(trace->status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  ASSERT_EQ(trace->status.status_code(), InvocationFrameStatusCode::Return);
 
   // Find the Invoke syscall in the root frame
   const SyscallTrace *invoke_syscall = nullptr;
@@ -185,7 +184,7 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
 
   // Child frame should have terminated with Return
   ASSERT_EQ(child_trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+            InvocationFrameStatusCode::Return);
 
   // Child frame should have its own syscalls (at least GetCalldata + Return)
   ASSERT_GE(child_trace.system_calls.size(), 2U);
@@ -287,7 +286,7 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
                  r.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -322,8 +321,7 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
   ASSERT_EQ(trace->invocation.invoked_address, contract_0_addr);
 
   // Root frame should have terminated with Return (caller handled the error)
-  ASSERT_EQ(trace->status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  ASSERT_EQ(trace->status.status_code(), InvocationFrameStatusCode::Return);
 
   // Find the Invoke syscall in the root frame
   const SyscallTrace *invoke_syscall = nullptr;
@@ -353,7 +351,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   auto callee_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }}});
 
   // Caller contract: method 0 invokes callee method 0
@@ -371,7 +369,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
                  r.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                ADD_FAILURE() << "Expected kSyscallErrorCodeDeterministicWasm";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -408,8 +406,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   ASSERT_NE(trace, nullptr);
 
   // Root frame should have terminated with Return (caller handled error)
-  ASSERT_EQ(trace->status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  ASSERT_EQ(trace->status.status_code(), InvocationFrameStatusCode::Return);
 
   // Find the Invoke syscall in the root frame
   const SyscallTrace *invoke_syscall = nullptr;
@@ -435,8 +432,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   // Child frame should be the callee contract
   ASSERT_EQ(child_trace.invocation.invoked_address, callee_addr);
 
-  ASSERT_EQ(child_trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+  ASSERT_EQ(child_trace.status.status_code(), InvocationFrameStatusCode::Fault);
 }
 
 TEST_F(TracingTest, TryInvokeLockAcquireFailure)
@@ -458,7 +454,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring";
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }},
@@ -470,7 +466,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(),
                    std::as_bytes(std::span(args)),
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
 
                // Handle try_invoke result — return success regardless
@@ -523,8 +519,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
 
   // Root frame should have terminated with Return (caller handled try_invoke
   // failure)
-  ASSERT_EQ(trace->status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+  ASSERT_EQ(trace->status.status_code(), InvocationFrameStatusCode::Return);
 
   // Find the Invoke syscall in the root frame
   const SyscallTrace *invoke_syscall = nullptr;
@@ -537,7 +532,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   ASSERT_NE(invoke_syscall, nullptr);
 
   // Invoke should report kSyscallErrorCodeDeterministicWasm (lock failure
-  // converted the child result to kInvokeDeterministic)
+  // converted the child result to Deterministic)
   ASSERT_EQ(invoke_syscall->status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeDeterministicWasm);
 
@@ -554,9 +549,9 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   // Child trace shows Return — the child's deterministic execution succeeded,
   // but the trace status is reported as the child's execution result, before
   // the lock acquisition check fails and converts the frame result to
-  // kInvokeDeterministic
+  // Deterministic
   ASSERT_EQ(child_trace.status.status_code(),
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+            InvocationFrameStatusCode::Return);
 }
 
 } // namespace hogd

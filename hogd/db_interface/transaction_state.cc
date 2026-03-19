@@ -43,8 +43,7 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
   assert(!subtransaction_stack_.empty());
   if constexpr (is_debug_build()) {
     if (subtransaction_stack_.back().deltas_.contains(addrkey)) {
-      assert(addrkey.key.key_type() ==
-             StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+      assert(addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance);
     }
   }
   subtransaction_stack_.back().deltas_[addrkey] =

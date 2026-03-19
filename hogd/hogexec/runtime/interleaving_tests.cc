@@ -59,7 +59,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
               kKey, set_amount, add_amount,
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() || !r.value().has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -70,7 +70,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
               kKey, 35, 0,
               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
           if (!r.has_value() || !r.value().has_value()) {
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -92,7 +92,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
   // Grant initial tokens to test contract
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
 
-  StorageKey wrapped_key(StorageKeyType::kStorageKeyTypeContractData);
+  StorageKey wrapped_key(StorageKeyType::ContractData);
   wrapped_key.contract_data_key() = kKey;
 
   model::WorkQueue work_queue;

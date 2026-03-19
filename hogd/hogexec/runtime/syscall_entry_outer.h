@@ -379,10 +379,10 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
 {
   if (!status.has_value()) {
     switch (status.error().code()) {
-    case HostFnErrorCode::kHostExit:
+    case HostFnErrorCode::Exit:
       return "Host Exit (Contract Execution Panic)\n";
       break;
-    case HostFnErrorCode::kHostReturn:
+    case HostFnErrorCode::Return:
       return "Host Return (Contract Execution Success)\n";
       break;
     default:
@@ -585,17 +585,17 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
   bool is_handleable_error = [&]() noexcept {
     if (!syscall_result.has_value()) {
       switch (syscall_result.error().code()) {
-      case HostFnErrorCode::kHostAbortTransaction:
-      case HostFnErrorCode::kHostValidationFailure:
+      case HostFnErrorCode::Abandon:
+      case HostFnErrorCode::ValidationFailure:
         return false;
-      case HostFnErrorCode::kHostUnrecoverable:
-        error("Unrecoverable: syscall_entry_outer got kHostUnrecoverable");
+      case HostFnErrorCode::Unrecoverable:
+        error("Unrecoverable: syscall_entry_outer got Unrecoverable");
         return false;
-      case HostFnErrorCode::kHostOutOfGas:
-      case HostFnErrorCode::kHostExit:
-      case HostFnErrorCode::kHostReturn:
+      case HostFnErrorCode::OutOfGas:
+      case HostFnErrorCode::Exit:
+      case HostFnErrorCode::Return:
         return true;
-      case HostFnErrorCode::kHostNoneOrRecoverable:
+      case HostFnErrorCode::NoneOrRecoverable:
         panic("unreachable");
       }
       panic("Unhandled HostFnErrorCode (invalid enum?)");
@@ -606,15 +606,15 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
     bool gas_consume_res = runtime.consume_gas(gas_consumed.get());
     // If the error is not something that can be handled at any layer of the
-    // transaction, then cannot swap to kHostOutOfGas here.
+    // transaction, then cannot swap to OutOfGas here.
     if (is_handleable_error) {
       if (!gas_consume_res) {
-        return {HostFnError{HostFnErrorCode::kHostOutOfGas}};
+        return {HostFnError{HostFnErrorCode::OutOfGas}};
       }
     }
 
     // The syscall_result.has_value() check means that we only
-    // override syscall_result (by returning kHostExit) in a subset
+    // override syscall_result (by returning Exit) in a subset
     // of the cases covered by the is_handleable_error guard.
     if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
       // If the syscall cannot return to the wasm environment but the syscall
@@ -624,7 +624,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
             "Syscall {} attempted to return an error code {} but cannot return",
             SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
       }
-      return {HostFnError{HostFnErrorCode::kHostExit}};
+      return {HostFnError{HostFnErrorCode::Exit}};
     }
     return syscall_result;
   }();

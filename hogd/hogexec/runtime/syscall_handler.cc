@@ -56,17 +56,17 @@ ExecResult
 SystemCallHandler::to_exec_result(InvokeErrorCode error_code)
 {
   switch (error_code) {
-  case InvokeErrorCode::kInvokeNone:
+  case InvokeErrorCode::None:
     return ExecResult::ExecResultOK;
-  case InvokeErrorCode::kInvokeAbortTransaction:
+  case InvokeErrorCode::Abandon:
     return ExecResult::ExecResultSystemError;
-  case InvokeErrorCode::kInvokeDeterministic:
-  case InvokeErrorCode::kInvokeOutOfGas:
+  case InvokeErrorCode::Deterministic:
+  case InvokeErrorCode::OutOfGas:
     return ExecResult::ExecResultTxDeterministicError;
-  case InvokeErrorCode::kInvokeValidationFailure:
+  case InvokeErrorCode::ValidationFailure:
     return ExecResult::ExecResultTxValidationFailure;
-  case InvokeErrorCode::kInvokeUnrecoverable:
-    error("make_exec_result: received kInvokeUnrecoverable");
+  case InvokeErrorCode::Unrecoverable:
+    error("make_exec_result: received Unrecoverable");
     return ExecResult::ExecResultUnrecoverable;
   }
   assert(false);
@@ -77,11 +77,11 @@ ExecResult
 SystemCallHandler::to_exec_result(SystemErrorCode error_code)
 {
   switch (error_code) {
-  case SystemErrorCode::kSystemUnrecoverable:
+  case SystemErrorCode::Unrecoverable:
     return ExecResult::ExecResultUnrecoverable;
-  case SystemErrorCode::kSystemAbortTransaction:
+  case SystemErrorCode::Abandon:
     return ExecResult::ExecResultSystemError;
-  case SystemErrorCode::kSystemValidationFailure:
+  case SystemErrorCode::ValidationFailure:
     return ExecResult::ExecResultTxValidationFailure;
   }
   assert(false);
@@ -171,7 +171,7 @@ SystemCallHandler::perform_initial_validation()
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.validate()) {
       cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+          InvokeError{InvokeErrorCode::ValidationFailure};
       return;
     }
   }
@@ -195,7 +195,7 @@ SystemCallHandler::perform_initial_validation()
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
       cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+          InvokeError{InvokeErrorCode::ValidationFailure};
     }
   }
 }
@@ -208,7 +208,7 @@ SystemCallHandler::check_final_validation_data()
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.check_all_consumed()) {
       cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+          InvokeError{InvokeErrorCode::ValidationFailure};
     }
   }
 }
@@ -237,7 +237,7 @@ SystemCallHandler::root_invoke()
       invoke(root_invocation.invoked_address,
              sdk_method_id(root_invocation.entrypoint), available_gas,
              Calldata(root_invocation.calldata),
-             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+             std::to_underlying(InvokeFlag::None));
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -273,8 +273,7 @@ SystemCallHandler::get_most_recent_frame_output() const
     assert(invocation_frame_stack_.empty());
 
     if (!last_frame_.has_value()) {
-      return InvocationFrameOutput(
-          InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+      return InvocationFrameOutput(InvocationFrameStatusCode::Fault);
     }
     return last_frame_.value().get_frame_output();
   }
@@ -296,33 +295,33 @@ SystemCallHandler::handle_root_host_fn_status(
     return (status.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
             status.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted)
                ? InvokeStatus<void>{}
-               : InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               : InvokeError{InvokeErrorCode::Deterministic};
   }
   switch (status.error().code()) {
-  case HostFnErrorCode::kHostOutOfGas:
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-  case HostFnErrorCode::kHostReturn:
+  case HostFnErrorCode::OutOfGas:
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  case HostFnErrorCode::Return:
     return InvokeStatus<void>{};
-  case HostFnErrorCode::kHostExit:
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-  case HostFnErrorCode::kHostValidationFailure:
-    return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-  case HostFnErrorCode::kHostAbortTransaction:
-    return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-  case HostFnErrorCode::kHostUnrecoverable:
-    error("handle_root_host_fn_status: received kHostUnrecoverable");
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-  case HostFnErrorCode::kHostNoneOrRecoverable:
+  case HostFnErrorCode::Exit:
+    return InvokeError{InvokeErrorCode::Deterministic};
+  case HostFnErrorCode::ValidationFailure:
+    return InvokeError{InvokeErrorCode::ValidationFailure};
+  case HostFnErrorCode::Abandon:
+    return InvokeError{InvokeErrorCode::Abandon};
+  case HostFnErrorCode::Unrecoverable:
+    error("handle_root_host_fn_status: received Unrecoverable");
+    return InvokeError{InvokeErrorCode::Unrecoverable};
+  case HostFnErrorCode::NoneOrRecoverable:
     // This case should never happen, as it is instead handled by
     // the status.has_value() check above.
     panic("unreachable");
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    return InvokeError{InvokeErrorCode::Unrecoverable};
   }
   // Leaving the default arm out of the switch, so that the compiler
   // will raise a warning later if we add additional InvokeError codes.
   error("handle_root_host_fn_status: received unknown error code {}",
         status.error().code());
-  return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+  return InvokeError{InvokeErrorCode::Unrecoverable};
 }
 
 ExecResult
@@ -331,8 +330,8 @@ SystemCallHandler::try_commit_transaction()
   assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
     if (cumulative_invoke_result_.result_.error().code() ==
-        InvokeErrorCode::kInvokeUnrecoverable) {
-      error("try_commit_transaction: received kInvokeUnrecoverable");
+        InvokeErrorCode::Unrecoverable) {
+      error("try_commit_transaction: received Unrecoverable");
     }
 
     auto res = abort_transaction();
@@ -453,12 +452,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags)
 {
-  if (!validate_flags<InvokeFlag::kInvokeFlagTryInvoke,
-                      InvokeFlag::kInvokeFlagReadOnly>(flags)) {
+  if (!validate_flags<InvokeFlag::TryInvoke, InvokeFlag::ReadOnly>(flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
   if (!invocation_frame_stack_.empty() && is_read_only()) {
-    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
+    flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
   auto runtime = resolve_runtime(address);
@@ -538,8 +536,7 @@ SystemCallHandler::finish_frame(
   assert(!last_frame_finished_);
   if (!result.has_value()) {
     invocation_frame_stack_.get_active_frame().set_frame_return(
-        InvocationFrameOutput(
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeFault));
+        InvocationFrameOutput(InvocationFrameStatusCode::Fault));
   }
 
   if (invocation_frame_trace_) {
@@ -593,7 +590,7 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
         // This field is filled in by the individual syscall
         .body = SyscallTraceBody(syscall_number),
         // This field is filled in when the syscall finishes.
-        .status = HostFunctionStatusXdr(HostFnErrorCode::kHostUnrecoverable),
+        .status = HostFunctionStatusXdr(HostFnErrorCode::Unrecoverable),
     });
   }
 }
@@ -617,10 +614,10 @@ SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
 
     // field is uninitialized
     assert(invocation_frame_trace_->system_calls.back().status.error() ==
-           HostFnErrorCode::kHostUnrecoverable);
+           HostFnErrorCode::Unrecoverable);
     auto &status_field = invocation_frame_trace_->system_calls.back().status;
     if (status.has_value()) {
-      status_field.error(HostFnErrorCode::kHostNoneOrRecoverable);
+      status_field.error(HostFnErrorCode::NoneOrRecoverable);
       status_field.syscall_return_code() = status.value();
     }
     else {
@@ -660,17 +657,17 @@ SystemCallHandler::get_return_buffer() const
   }
 
   switch (top_frame.child_return_output_.value().status_code()) {
-  case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+  case InvocationFrameStatusCode::Return:
     return &top_frame.child_return_output_.value().return_buffer();
-  case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+  case InvocationFrameStatusCode::Abort:
     return &top_frame.child_return_output_.value().abort_buffer();
-  case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
+  case InvocationFrameStatusCode::Fault:
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
   error("Unrecoverable; Invalid invocation frame status code: {}",
         top_frame.child_return_output_.value().status_code());
-  return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  return SystemError{SystemErrorCode::Unrecoverable};
 }
 
 void
@@ -679,15 +676,13 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
 {
   assert(!invocation_frame_stack_.empty());
   if (revert_frame) {
-    InvocationFrameOutput output(
-        InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort);
+    InvocationFrameOutput output(InvocationFrameStatusCode::Abort);
     output.abort_buffer() = std::move(returned_buffer);
     invocation_frame_stack_.get_active_frame().set_frame_return(
         std::move(output));
   }
   else {
-    InvocationFrameOutput output(
-        InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn);
+    InvocationFrameOutput output(InvocationFrameStatusCode::Return);
     output.return_buffer() = std::move(returned_buffer);
     invocation_frame_stack_.get_active_frame().set_frame_return(
         std::move(output));
@@ -1264,9 +1259,9 @@ SystemStatus<SyscallStatus<int128_t>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
 {
-  AddressAndKey addrkey{
-      .address = contract_address,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey addrkey{.address = contract_address,
+                        .key =
+                            StorageKey(StorageKeyType::FreeNativeTokenBalance)};
 
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1324,9 +1319,9 @@ SystemCallHandler::modify_native_token_balance(
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  AddressAndKey addrkey{
-      .address = contract_address,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey addrkey{.address = contract_address,
+                        .key =
+                            StorageKey(StorageKeyType::FreeNativeTokenBalance)};
 
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1355,8 +1350,7 @@ namespace {
 AddressAndKey
 auth_data_addrkey(ContractAddress const &address)
 {
-  return {.address = address,
-          .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressAuthData)};
+  return {.address = address, .key = StorageKey(StorageKeyType::AuthData)};
 }
 } // namespace
 
@@ -1382,7 +1376,7 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
 
   if (item_view->get<DeletedItem>()) [[unlikely]] {
     error("Unrecoverable: unexpected manual delete of authentication data");
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   assert(item_view->get<UnmodifiedItem>());
@@ -1406,7 +1400,7 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
 
   if (item_view->get<DeletedItem>()) [[unlikely]] {
     error("Unrecoverable: unexpected manual delete of authentication data");
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
   assert(item_view->get<UnmodifiedItem>());
   AddressAuthDataItem new_item;
@@ -1431,7 +1425,7 @@ SystemCallHandler::set_address_gas_permission_configs(
 
   if (item_view->get<DeletedItem>()) [[unlikely]] {
     error("Unrecoverable: unexpected manual delete of authentication data");
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   assert(item_view->get<UnmodifiedItem>());

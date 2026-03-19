@@ -78,16 +78,14 @@ template<HostFnErrorCode Code> struct ErrorSyscallMeta {
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
+static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::Abandon>>);
+static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::OutOfGas>>);
 static_assert(
-    is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::kHostAbortTransaction>>);
+    is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::Unrecoverable>>);
+static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::Return>>);
+static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::Exit>>);
 static_assert(
-    is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::kHostOutOfGas>>);
-static_assert(
-    is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::kHostUnrecoverable>>);
-static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::kHostReturn>>);
-static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::kHostExit>>);
-static_assert(
-    is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::kHostValidationFailure>>);
+    is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::ValidationFailure>>);
 
 // Tests for reference leak bugs in storage item delta management
 // These tests verify that when a delta reservation fails, the reference count
@@ -119,7 +117,7 @@ public:
     host_call_context->syscall_handler = &handler;
 
     handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                        std::to_underlying(InvokeFlag::None));
 
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
@@ -153,7 +151,7 @@ public:
     host_call_context->syscall_handler = &handler;
 
     handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                        std::to_underlying(InvokeFlag::None));
 
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
@@ -170,7 +168,7 @@ public:
         wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
                                            0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
-    ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
+    ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
   }
@@ -178,35 +176,34 @@ public:
 
 TEST_F(SyscallErrorHandlingTest, AbortOverridesGasLimit)
 {
-  run_error_override_test<HostFnErrorCode::kHostAbortTransaction>();
+  run_error_override_test<HostFnErrorCode::Abandon>();
 }
 
 TEST_F(SyscallErrorHandlingTest, UnrecoverableErrorOverridesGasLimit)
 {
-  run_error_override_test<HostFnErrorCode::kHostUnrecoverable>();
+  run_error_override_test<HostFnErrorCode::Unrecoverable>();
 }
 
 TEST_F(SyscallErrorHandlingTest, ValidationFailureOverridesGasLimit)
 {
-  run_error_override_test<HostFnErrorCode::kHostValidationFailure>();
+  run_error_override_test<HostFnErrorCode::ValidationFailure>();
 }
 
 TEST_F(SyscallErrorHandlingTest, GasLimitOverridesReturn)
 {
-  run_gas_limit_supercedes_test<HostFnErrorCode::kHostReturn>();
+  run_gas_limit_supercedes_test<HostFnErrorCode::Return>();
 }
 
 TEST_F(SyscallErrorHandlingTest, GasLimitOverridesExit)
 {
-  run_gas_limit_supercedes_test<HostFnErrorCode::kHostExit>();
+  run_gas_limit_supercedes_test<HostFnErrorCode::Exit>();
 }
 
 namespace {
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 noreturn_failing_syscall_func() noexcept
 {
-  return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
-          WrappedGasAmount{1000}};
+  return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -232,7 +229,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::None));
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -242,7 +239,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
                                              0, 0);
   ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostUnrecoverable);
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
 }
 
 namespace {
@@ -278,7 +275,7 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::None));
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -293,7 +290,7 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
       wrap_outer<NoErrorSyscallMeta>(handler, runtime, kNoTracingSyscall, 0, 0,
                                      0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 }
 
 struct NoReturnNoErrorSyscallMeta {
@@ -319,7 +316,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::None));
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -329,14 +326,14 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
                                              0, 0);
   ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
 
   runtime.set_available_gas(10);
   syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
                                                        kNoTracingSyscall, 0, 0,
                                                        0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostOutOfGas);
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 }
 
 struct NoReturnReadOnlySyscallMeta {
@@ -363,7 +360,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagReadOnly));
+                      std::to_underlying(InvokeFlag::ReadOnly));
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -373,7 +370,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
                                               kNoTracingSyscall, 0, 0, 0, 0, 0,
                                               0, 0);
   ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // Gas is not consumed by the syscall.
   // TODO(geoff): This will break when we add a default gas cost for the error
   // handling (calling a non-readonly syscal in read-only mode should cost at
@@ -385,7 +382,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
                                                         kNoTracingSyscall, 0, 0,
                                                         0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::kHostExit);
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // TODO(geoff): same as above
   ASSERT_EQ(runtime.get_available_gas(), 10);
 }
@@ -410,7 +407,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::None));
 
   // Create a buffer larger than kMaxReturnBufferLen (1024)
   std::array<std::byte, 1025> oversized_buffer{};
@@ -419,9 +416,9 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
       syscall_Return_inner(handler,
                            std::span<const std::byte>(oversized_buffer), false);
 
-  // The syscall should fail with kHostExit
+  // The syscall should fail with Exit
   ASSERT_FALSE(status.has_value());
-  ASSERT_EQ(status.error().code(), HostFnErrorCode::kHostExit);
+  ASSERT_EQ(status.error().code(), HostFnErrorCode::Exit);
 
   // The gas consumed must be 0, not an error code value
   ASSERT_EQ(gas.get(), 0);
@@ -439,7 +436,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                      std::to_underlying(InvokeFlag::None));
 
   std::array<std::byte, 10> valid_buffer{};
 
@@ -447,9 +444,9 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
       syscall_Return_inner(handler, std::span<const std::byte>(valid_buffer),
                            false);
 
-  // The syscall should succeed with kHostReturn
+  // The syscall should succeed with Return
   ASSERT_FALSE(status.has_value());
-  ASSERT_EQ(status.error().code(), HostFnErrorCode::kHostReturn);
+  ASSERT_EQ(status.error().code(), HostFnErrorCode::Return);
 
   // The gas consumed must be 0
   ASSERT_EQ(gas.get(), 0);

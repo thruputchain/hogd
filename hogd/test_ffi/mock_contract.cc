@@ -17,13 +17,13 @@ MockContract::invoke(std::string_view method)
     error("Unrecoverable: MockContract::invoke failed to parse method name "
           "'{}'",
           method);
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    return InvokeError{InvokeErrorCode::Unrecoverable};
   }
   auto res = entry_point_(foreign_context_, *id);
 
   auto code = static_cast<InvokeErrorCode>(res.panic);
 
-  if (code == InvokeErrorCode::kInvokeNone) {
+  if (code == InvokeErrorCode::None) {
     return {};
   }
   return InvokeError{code};

@@ -109,7 +109,7 @@ to_system_error_code(auto err, auto &&f)
         error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on "
               "unexpected rpc: {}",
               err_code);
-        return SystemError{SystemErrorCode::kSystemUnrecoverable};
+        return SystemError{SystemErrorCode::Unrecoverable};
       }
       else if constexpr (kHasReturnType) {
         return SystemStatus<return_type>{NullValue};
@@ -125,14 +125,14 @@ to_system_error_code(auto err, auto &&f)
         error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on "
               "unexpected rpc: {}",
               err_code);
-        return SystemError{SystemErrorCode::kSystemUnrecoverable};
+        return SystemError{SystemErrorCode::Unrecoverable};
       }
     case RPCError::kRPCBadBlockID:
-      return SystemError{SystemErrorCode::kSystemAbortTransaction};
+      return SystemError{SystemErrorCode::Abandon};
     default:
       error("Unrecoverable: Received unhandled error type from RPC: {}",
             err_code);
-      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }();
 }
@@ -264,7 +264,7 @@ DatabaseProxy::get_db_tip(BlockID block_id)
           error("Unrecoverable: Received DbTip with block id equal to current "
                 "block id: {} (should be parent ID)",
                 x.id);
-          return SystemError{SystemErrorCode::kSystemUnrecoverable};
+          return SystemError{SystemErrorCode::Unrecoverable};
         }
         return x;
       });

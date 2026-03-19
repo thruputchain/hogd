@@ -80,8 +80,8 @@ InvocationFrame::mark_frame_as_failed(
 void
 InvocationFrame::commit_failed_child_frame()
 {
-  child_return_output_ = InvocationFrameOutput{
-      InvocationFrameStatusCode::kInvocationFrameStatusCodeFault};
+  child_return_output_ =
+      InvocationFrameOutput{InvocationFrameStatusCode::Fault};
 }
 
 void
@@ -121,9 +121,8 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
   }
 
   for (auto const &[addr, deployment] : new_contract_deployments_) {
-    AddressAndKey addrkey = {
-        .address = addr,
-        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
+    AddressAndKey addrkey = {.address = addr,
+                             .key = StorageKey(StorageKeyType::Metadata)};
     db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
                        std::to_underlying(
                            StorageDeltaFlags::kStorageDeltaFlagNone));
@@ -157,9 +156,8 @@ InvocationFrame::collect_storage_deltas(
   }
 
   for (auto const &[addr, deployment] : new_contract_deployments_) {
-    AddressAndKey addrkey = {
-        .address = addr,
-        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
+    AddressAndKey addrkey = {.address = addr,
+                             .key = StorageKey(StorageKeyType::Metadata)};
     StorageDelta delta = make_deployed_contract_delta(deployment);
     out.push_back(FlaggedStorageDelta{
         .addrkey = addrkey,
@@ -214,7 +212,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
           frame_stack_.pop_back();
-          return SystemError{SystemErrorCode::kSystemValidationFailure};
+          return SystemError{SystemErrorCode::ValidationFailure};
         }
         acq_success = res.value().get();
       }
@@ -225,7 +223,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         try_invoke_failed = true;
         // TODO(geoff): perhaps add additional gas consumption
         frame_result = InvokeResult{
-            .result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic},
+            .result_ = InvokeError{InvokeErrorCode::Deterministic},
             .gas_consumed_ = 0,
         };
       }
@@ -247,7 +245,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   if (frame_result.should_frame_revert()) {
     assert(try_invoke_failed ||
            frame_stack_.back().get_frame_output().status_code() ==
-               InvocationFrameStatusCode::kInvocationFrameStatusCodeFault);
+               InvocationFrameStatusCode::Fault);
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {

@@ -66,7 +66,7 @@ TEST_P(RevertTest, RootFrameReverts)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
                    << "RootFrameReverts: Failed to set bytestring in method 0";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Now revert the transaction
@@ -151,17 +151,17 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 1,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Method 1 should succeed, but state changes are gone because of
              // the manual revert
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Check that neither bytestring was written
@@ -170,18 +170,18 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 
              auto res1 = ctx.handler().get_bytestring(key1);
              if (!res1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (res1.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              auto res2 = ctx.handler().get_bytestring(key2);
              if (!res2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (res2.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -194,15 +194,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 2,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Method 2 should succeed in the try_invoke frame
              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Now manually revert this frame, which should undo the locks
              // acquired by method 2 and method 3
@@ -219,7 +219,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: Failed to "
                                 "set bytestring in method 2";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Try invoke method 3
@@ -228,15 +228,15 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 3,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r3.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Method 3 should succeed
              if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -251,7 +251,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: Failed to "
                                 "set bytestring in method 3";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -316,7 +316,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
           {0,
            [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
              // Return a fault immediately
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }},
           {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Call method 0, which will fault
@@ -325,18 +325,18 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
                return ctx.syscall<SyscallNo::kInvoke>(
                    ctx.handler().get_current_address(), 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Method 0 should have faulted
              if (r0.value() !=
                  SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                ADD_FAILURE() << "GetReturnBufferOnFault: Expected method 0 to "
                                 "return kSyscallErrorCodeDeterministicWasm";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              ReturnBuffer buffer;
@@ -348,7 +348,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
              if (!res.has_value()) {
                ADD_FAILURE()
                    << "GetReturnBufferOnFault: Failed to get return buffer";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (res.value() !=
                  SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable) {
@@ -356,7 +356,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
                    << "GetReturnBufferOnFault: Expected "
                       "kSyscallErrorCodeNoReturnBufferAvailable, got: "
                    << static_cast<int32_t>(res.value());
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};

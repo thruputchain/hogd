@@ -48,7 +48,7 @@ enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);
 // Translation of InvokeStatus<void> into an FFI-safe type.
 // This is the type returned by an invocation to a mocked contract.
 struct ForeignInvokeResult {
-  int32_t panic; // if panic is InvokeErrorCode::kInvokeNone, this is translated
+  int32_t panic; // if panic is InvokeErrorCode::None, this is translated
                  // to an InvokeStatus<void>{}
 };
 

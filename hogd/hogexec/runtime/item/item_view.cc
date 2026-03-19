@@ -305,7 +305,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       if (queue_delta_.consume->current_block_consumed.size() >=
           kRetrocausalQueueBlockEntriesMaxLen) {
         CHECK(std::holds_alternative<ValidationModeData>(execution_mode_data));
-        return SystemError{SystemErrorCode::kSystemValidationFailure};
+        return SystemError{SystemErrorCode::ValidationFailure};
       }
       queue_delta_.consume->current_block_consumed.push_back(
           *concurrent_entry.value());
@@ -409,14 +409,14 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
-    return SystemError{SystemErrorCode::kSystemValidationFailure};
+    return SystemError{SystemErrorCode::ValidationFailure};
   }
   if (bit_res->get()) {
     auto res =
         validation_data.consume_queue_entry_observation(base_item_->addrkey(),
                                                         index);
     if (!res.has_value()) {
-      return SystemError{SystemErrorCode::kSystemValidationFailure};
+      return SystemError{SystemErrorCode::ValidationFailure};
     }
     return res.value().get();
   }

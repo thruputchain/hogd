@@ -35,7 +35,7 @@ auto
 consume_gas_call(HostCallContext *ctxp) noexcept
 {
   if (!ctxp->runtime->consume_gas(100)) {
-    return error(HostFnErrorCode::kHostOutOfGas);
+    return error(HostFnErrorCode::OutOfGas);
   }
   return success();
 }
@@ -44,7 +44,7 @@ auto
 consume_gas_call2(HostCallContext *ctxp) noexcept
 {
   if (!ctxp->runtime->consume_gas(5000)) {
-    return error(HostFnErrorCode::kHostOutOfGas);
+    return error(HostFnErrorCode::OutOfGas);
   }
   return success();
 }

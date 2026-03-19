@@ -59,7 +59,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -128,7 +128,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsSuccess)
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -193,7 +193,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsEmpty)
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -265,7 +265,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapError)
              if (!status.has_value() ||
                  status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Expected error - return success to allow transaction to complete
              return {};
@@ -319,7 +319,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapAtEnd)
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -377,7 +377,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -453,7 +453,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
 
              if (!pk_status.has_value() ||
                  pk_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // 2. Set nonce config
@@ -468,7 +468,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
              if (!nonce_status.has_value() ||
                  nonce_status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // 3. Set gas permission configs
@@ -490,7 +490,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
              if (!gas_status.has_value() ||
                  gas_status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -570,7 +570,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE()
                    << "Bitmap with bit beyond kMaxSigners should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // All bits set - should also fail
@@ -581,7 +581,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
                  status2.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "Bitmap 0xFFFFFFFF should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Valid bitmap (highest valid bit) should succeed
@@ -591,7 +591,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigInvalidBitmap)
              if (!status3.has_value() ||
                  status3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Valid bitmap should succeed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -651,7 +651,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsInvalidBitmap)
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "Gas config with invalid bitmap should be "
                                 "rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -700,7 +700,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
                  status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE() << "scheme=null, weight!=null should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -753,7 +753,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
                ADD_FAILURE()
                    << "scheme=null, bytes not empty should be rejected";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});
@@ -807,7 +807,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to register key";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -820,7 +820,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to delete key";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }}});

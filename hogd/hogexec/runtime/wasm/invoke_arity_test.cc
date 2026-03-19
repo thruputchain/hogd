@@ -32,7 +32,7 @@ expected(int32_t result)
 TrampolineResult
 unexpected()
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::kHostUnrecoverable});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
 }
 
 TrampolineResult

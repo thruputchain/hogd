@@ -66,7 +66,7 @@ TEST_F(ShutdownTest, AcceptedBlockUAFUnclosedShutdown)
   EXPECT_THROW(advance_block(), std::runtime_error);
 }
 
-TEST_F(ShutdownTest, AbortTransactionNoBlockClose)
+TEST_F(ShutdownTest, AbandonNoBlockClose)
 {
   auto addr = make_contract_address(0);
   setup_grant_storage_token(addr, 1'000'000'000);

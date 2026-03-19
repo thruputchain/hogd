@@ -83,12 +83,12 @@ public:
 
   bool is_try_invoke() const
   {
-    return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke)) != 0;
+    return (flags_ & std::to_underlying(InvokeFlag::TryInvoke)) != 0;
   }
 
   bool is_read_only() const
   {
-    return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) != 0;
+    return (flags_ & std::to_underlying(InvokeFlag::ReadOnly)) != 0;
   }
 
   // returned pointer is invalidated by any call to add_item_view
@@ -113,10 +113,10 @@ public:
   bool should_revert() const
   {
     switch (to_return_output_.status_code()) {
-    case InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn:
+    case InvocationFrameStatusCode::Return:
       return false;
-    case InvocationFrameStatusCode::kInvocationFrameStatusCodeFault:
-    case InvocationFrameStatusCode::kInvocationFrameStatusCodeAbort:
+    case InvocationFrameStatusCode::Fault:
+    case InvocationFrameStatusCode::Abort:
       return true;
     }
     panic("Unreachable");
@@ -223,7 +223,7 @@ public:
 
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {
-    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = data_key;
     return AddressAndKey{.address = get_active_frame().address(), .key = key};
   }

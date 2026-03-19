@@ -39,14 +39,14 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
 {
   if (host_call_context_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
     error("Unrecoverable: nullptr(s) passed to wasmtime_contract_get_fn");
-    return make_err(SystemErrorCode::kSystemUnrecoverable);
+    return make_err(SystemErrorCode::Unrecoverable);
   }
 
   auto *host_call_context =
       static_cast<HostCallContext *>(host_call_context_ptr);
   if (host_call_context->syscall_handler == nullptr) [[unlikely]] {
     error("Unrecoverable: nullptr syscall_handler in wasmtime_contract_get_fn");
-    return make_err(SystemErrorCode::kSystemUnrecoverable);
+    return make_err(SystemErrorCode::Unrecoverable);
   }
   SystemCallHandler &syscall_handler = *host_call_context->syscall_handler;
 
@@ -63,7 +63,7 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
   if ((*res)->contract_type() != ContractType::kWasmi) [[unlikely]] {
     error("Unrecoverable: Attempt to access a non-wasmi contract from inside "
           "wasmtime_contract_get_fn");
-    return make_err(SystemErrorCode::kSystemUnrecoverable);
+    return make_err(SystemErrorCode::Unrecoverable);
   }
 
   // the try is technically unnecessary (for the ->wasmi_contract() access,
@@ -76,7 +76,7 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
                              .data_len = wasm.size()};
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
-    return make_err(SystemErrorCode::kSystemUnrecoverable);
+    return make_err(SystemErrorCode::Unrecoverable);
   }
 }
 
@@ -218,7 +218,7 @@ WasmtimeRuntime::invoke_internal(std::string_view method_name)
   InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
   trace("Wasmtime Invoke Result: {}",
         x23::show(static_cast<InvokeErrorCode>(res.error)));
-  if (wasmtime_error != InvokeErrorCode::kInvokeNone) {
+  if (wasmtime_error != InvokeErrorCode::None) {
     return InvokeError{wasmtime_error};
   }
   return {};

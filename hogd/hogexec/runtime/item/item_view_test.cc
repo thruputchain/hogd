@@ -54,10 +54,9 @@ protected:
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
         WireStorageItem(StorageItemType::kItemTypeDeleted),
-        AddressAndKey{
-            .address = ContractAddress{},
-            .key = StorageKey(
-                StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)},
+        AddressAndKey{.address = ContractAddress{},
+                      .key =
+                          StorageKey(StorageKeyType::FreeNativeTokenBalance)},
         BlockID{1}, *db_proxy_);
   }
 

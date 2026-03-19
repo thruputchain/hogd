@@ -53,7 +53,7 @@ protected:
            ::cxs_test::Foo foo{0xABCD};
            roundtrip_test<"roundtrip_foo">(foo, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            return {};
@@ -64,7 +64,7 @@ protected:
            ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
            roundtrip_test<"roundtrip_senum">(senum, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            return {};
          }},
@@ -75,17 +75,17 @@ protected:
            sunion.pos() = 5;
            roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            sunion.d(static_cast<::cxs_test::senum>(0)); // default case
            roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
            roundtrip_test<"roundtrip_sunion">(sunion, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            return {};
          }},
@@ -95,31 +95,31 @@ protected:
            int32_t value = -1;
            roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            value = 1;
            roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            value = 0;
            roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            value = std::numeric_limits<int32_t>::max();
            roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            value = std::numeric_limits<int32_t>::min();
            roundtrip_test<"roundtrip_i32">(value, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            return {};
@@ -132,7 +132,7 @@ protected:
            roundtrip_test<"roundtrip_sunion_no_void">(sunion, ctx.handler(),
                                                       success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            return {};
          }},
@@ -143,19 +143,19 @@ protected:
            uunion.one() = true;
            roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            uunion.d(2);
            uunion.two() = true;
            roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            uunion.d(4);
            uunion.four() = "hello";
            roundtrip_test<"roundtrip_uunion">(uunion, ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            return {};
@@ -168,14 +168,14 @@ protected:
            roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, ctx.handler(),
                                                    success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            uunion_bool.d(false);
            uunion_bool.two() = true;
            roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, ctx.handler(),
                                                    success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
            return {};
          }},
@@ -189,7 +189,7 @@ protected:
            roundtrip_test<"roundtrip_test_recursive">(test_recursive,
                                                       ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            // with a box ptr
@@ -198,7 +198,7 @@ protected:
            roundtrip_test<"roundtrip_test_recursive">(test_recursive,
                                                       ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            // with some elements in a vec
@@ -208,7 +208,7 @@ protected:
            roundtrip_test<"roundtrip_test_recursive">(test_recursive,
                                                       ctx.handler(), success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            return {};
@@ -222,13 +222,13 @@ protected:
            roundtrip_test<"roundtrip_opaque_vector">(vec, ctx.handler(),
                                                      success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            roundtrip_test<"roundtrip_opaque_slice">(vec, ctx.handler(),
                                                     success);
            if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return InvokeError{InvokeErrorCode::Deterministic};
            }
 
            return {};

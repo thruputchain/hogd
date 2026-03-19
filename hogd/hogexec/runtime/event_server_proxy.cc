@@ -43,13 +43,11 @@ EventServerProxy::open_block(BlockID block_id)
   case RPCError::kRPCNone:
     co_return SystemStatus<void>{};
   case RPCError::kRPCBadBlockID:
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemAbortTransaction}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Abandon}};
   default:
     error("Unrecoverable: Received unhandled error type from event server: {}",
           r);
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemUnrecoverable}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
 }
 
@@ -64,13 +62,11 @@ EventServerProxy::close_block(BlockID block_id)
   case RPCError::kRPCNone:
     co_return SystemStatus<void>{};
   case RPCError::kRPCBadBlockID:
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemAbortTransaction}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Abandon}};
   default:
     error("Unrecoverable: Received unhandled error type from event server: {}",
           r);
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemUnrecoverable}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
 }
 
@@ -87,13 +83,11 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
   case RPCError::kRPCNone:
     co_return SystemStatus<void>{};
   case RPCError::kRPCBadBlockID:
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemAbortTransaction}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Abandon}};
   default:
     error("Unrecoverable: Received unhandled error type from event server: {}",
           r);
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemUnrecoverable}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
 }
 
@@ -101,8 +95,7 @@ x23::Async<SystemStatus<void>>
 PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log)
 {
   if (emitted_event_) {
-    co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kSystemUnrecoverable}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
   emitted_event_ = true;
   co_return co_await event_server_proxy_.emit_event(block_id_, tx_id_,

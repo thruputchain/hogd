@@ -55,7 +55,7 @@ protected:
 
   static AddressAndKey get_queue_addrkey()
   {
-    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = kStorageKey;
     return AddressAndKey{.address = kContractAddress, .key = key};
   }
@@ -72,7 +72,7 @@ protected:
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "failed to insert element to RCQ";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -89,12 +89,12 @@ protected:
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "failed to consume element to RCQ";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (written_len != 4 || out != value) {
             ADD_FAILURE() << "Got bad result from RCQ: expected " << value
                           << " but got " << out;
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -114,11 +114,11 @@ protected:
                (res.value() !=
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist))) {
             ADD_FAILURE() << "Got unexpected item from rcq";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (written_len != 0) {
             ADD_FAILURE() << "Got bad result from RCQ";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -134,7 +134,7 @@ protected:
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -151,7 +151,7 @@ protected:
           if (!res.has_value() ||
               res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Consume should have failed";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -168,12 +168,12 @@ protected:
 
           auto r1 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-              x23::serialize(consume_a),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+              x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
+              written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -182,18 +182,18 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r3 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-              x23::serialize(consume_b),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+              x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
+              written_len);
 
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -210,12 +210,11 @@ protected:
 
           auto r1 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-              Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
-              written_len);
+              Calldata{}, std::to_underlying(InvokeFlag::None), written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(expect none)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -224,7 +223,7 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           wait_flag_1_ = true;
@@ -234,12 +233,12 @@ protected:
 
           auto r3 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-              x23::serialize(consume_b),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+              x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
+              written_len);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -255,12 +254,12 @@ protected:
 
           auto r1 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-              x23::serialize(insert_a),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+              x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
+              written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -269,17 +268,17 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r3 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-              x23::serialize(consume_b),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+              x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
+              written_len);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -297,17 +296,17 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-              x23::serialize(insert_1),
-              std::to_underlying(InvokeFlag::kInvokeFlagNone), written_len);
+              x23::serialize(insert_1), std::to_underlying(InvokeFlag::None),
+              written_len);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -323,14 +322,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(a)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -339,35 +337,33 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(b)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r4 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_c),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_c), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(c)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -384,14 +380,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert(a)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume(a)
@@ -399,14 +394,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(a)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
@@ -416,7 +410,7 @@ protected:
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // insert(b)
@@ -424,14 +418,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert(b)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume(b)
@@ -439,14 +432,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(b)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -461,20 +453,20 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-                Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume_empty";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -488,13 +480,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-                Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume_empty (first)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -503,20 +495,20 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-                Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume_empty (second)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -532,14 +524,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(a)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -548,21 +539,20 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(b)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r4 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -571,21 +561,20 @@ protected:
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (second)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           auto r5 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_c),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_c), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(c)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -604,7 +593,7 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // insert(a)
@@ -612,14 +601,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert(a)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // second delete
@@ -629,7 +617,7 @@ protected:
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (second)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // insert(b)
@@ -637,14 +625,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert(b)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume(b) -- self entry consumed before concurrent
@@ -652,14 +639,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(insert_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume self(b)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume(c) -- concurrent entry
@@ -667,14 +653,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_c),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_c), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(c)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -694,12 +679,12 @@ protected:
           if (!rp.has_value() ||
               rp.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
           if (peek_len != 4 || peeked != expected) {
             ADD_FAILURE() << "Peek: expected " << expected << " but got "
                           << peeked;
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // delete
@@ -709,7 +694,7 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume (should get same entry since peek doesn't advance)
@@ -717,14 +702,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(expected),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(expected), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after peek+delete";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -744,13 +728,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(past_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume past block entry";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
@@ -760,7 +743,7 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // insert new entry
@@ -769,13 +752,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume self entry (self entries consumed before concurrent)
@@ -784,13 +766,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume self entry";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume concurrent entry
@@ -799,13 +780,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume concurrent entry";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -824,13 +804,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume retrocausal item";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
@@ -840,7 +819,7 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // create bytestring
@@ -852,7 +831,7 @@ protected:
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
@@ -862,7 +841,7 @@ protected:
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // create nnint
@@ -873,7 +852,7 @@ protected:
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create nnint";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
@@ -883,7 +862,7 @@ protected:
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete nnint";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // insert item
@@ -892,13 +871,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r7.has_value() ||
               r7.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert item";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -916,12 +894,12 @@ protected:
           if (!rp.has_value() ||
               rp.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (peek_len != 4 || peeked != value) {
             ADD_FAILURE() << "Peek: expected " << value << " but got "
                           << peeked;
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
@@ -935,13 +913,13 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 26: try_delete_revert_then_consume(expected_value)
-    // invoke(method 25, kInvokeFlagTryInvoke) -> consume(expected_value)
+    // invoke(method 25, TryInvoke) -> consume(expected_value)
     builder.add<SerializationFormat::kTxs>(
         26,
         [](NativeSyscallContext &ctx,
@@ -950,17 +928,16 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 25, std::numeric_limits<GasAmount>::max(),
-                Calldata{},
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // queue should be intact after reverted delete
@@ -969,13 +946,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(expected_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after reverted delete";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -990,56 +966,52 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(peek_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(peek_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed first peek";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r2 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(peek_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(peek_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed second peek";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(a)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r4 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(consume_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume(b)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1056,14 +1028,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(self_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(self_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert self entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // try_invoke delete (reverted via inner error)
@@ -1071,17 +1042,16 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 25, std::numeric_limits<GasAmount>::max(),
-                Calldata{},
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // consume(self_val) - self entries consumed first
@@ -1089,14 +1059,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(self_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(self_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume self entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // consume(concurrent_val)
@@ -1105,13 +1074,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume concurrent entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1128,35 +1096,33 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r2 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(val_a),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(val_a), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert(a)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(val_b),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(val_b), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert(b)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1171,13 +1137,13 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
 
     // Method 32: try_invoke_delete_then_consume(expected_value)
-    // invoke(method 31, kInvokeFlagTryInvoke), expect conflict, consume
+    // invoke(method 31, TryInvoke), expect conflict, consume
     builder.add<SerializationFormat::kTxs>(
         32,
         [](NativeSyscallContext &ctx,
@@ -1186,18 +1152,17 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 31, std::numeric_limits<GasAmount>::max(),
-                Calldata{},
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Expect conflict when concurrent insert exists
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke delete should have conflicted";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // queue still intact
@@ -1206,13 +1171,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(expected_value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after conflicted delete";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1227,14 +1191,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(old_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(old_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume old entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -1243,21 +1206,20 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(peek_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(peek_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek after delete";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1272,14 +1234,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(old_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(old_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume old entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
@@ -1288,35 +1249,33 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r3 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(new_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(new_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert new entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r4 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(new_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(new_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek new entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1331,16 +1290,15 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(value), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert in insert_and_fail";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 35: consume_and_fail(value) — consume then error (for inner frame
@@ -1352,16 +1310,15 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(value), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume in consume_and_fail";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 36: inner_insert_revert_then_consume_empty(value)
@@ -1373,16 +1330,16 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // queue should be empty after reverted insert
@@ -1390,13 +1347,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-                Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume_empty after reverted insert";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1412,12 +1369,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(revert_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // successful insert
@@ -1425,14 +1382,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(real_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(real_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert real_val";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // only real_val should be consumable
@@ -1440,14 +1396,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(real_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(real_val), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume real_val";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1462,16 +1417,16 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // entry should still be available after reverted consume
@@ -1479,14 +1434,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(value), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after reverted consume";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1501,16 +1455,16 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // entry should still be visible via peek
@@ -1518,14 +1472,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(value), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek after reverted consume";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1541,17 +1494,17 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (1st)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE()
                 << "try_invoke should have reported inner failure (1st)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // second reverted consume
@@ -1560,17 +1513,17 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (2nd)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE()
                 << "try_invoke should have reported inner failure (2nd)";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // entry should still be available
@@ -1578,14 +1531,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
-                x23::serialize(value),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                x23::serialize(value), std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after two reverted consumes";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1604,16 +1556,16 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 42, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_val, insert_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume+insert";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke should have reported inner failure";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // original entry still available
@@ -1622,13 +1574,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume original entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // reverted insert should be gone
@@ -1636,13 +1587,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-                Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume_empty after reverted insert";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1659,13 +1610,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume in consume_insert_and_fail";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto r2 = [&]() {
@@ -1673,16 +1623,15 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert in consume_insert_and_fail";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 43: inner_insert_revert_then_consume(revert_val, concurrent_val)
@@ -1695,12 +1644,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(revert_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // consume concurrent entry (unaffected by reverted insert)
@@ -1709,13 +1658,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume concurrent entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1735,7 +1683,7 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // create bytestring
@@ -1747,7 +1695,7 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // delete bytestring
@@ -1757,7 +1705,7 @@ protected:
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           // consume concurrent entry -- the consume should succeed
@@ -1766,13 +1714,12 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_val),
-                std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           }();
           if (r4.has_value() &&
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Consume concurrent entry should have succeeded";
-            return InvokeError{InvokeErrorCode::kInvokeNone};
+            return InvokeError{InvokeErrorCode::None};
           }
 
           return {};
@@ -1790,7 +1737,7 @@ protected:
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // create bytestring
@@ -1802,7 +1749,7 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // consume concurrent entry -- the consume should fail because the
@@ -1811,13 +1758,13 @@ protected:
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 4, std::numeric_limits<GasAmount>::max(),
-                Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
                 output_return_buffer_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume concurrent entry";
-            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+            return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           return {};
@@ -1836,7 +1783,7 @@ protected:
                 written_len);
             if (!res.has_value()) {
               ADD_FAILURE() << "System error consuming entry";
-              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              return InvokeError{InvokeErrorCode::Deterministic};
             }
             if (res.value() == SyscallErrorCode::
                                    kSyscallErrorCodeNoRetrocausalQueueEntry ||
@@ -1846,7 +1793,7 @@ protected:
             }
             if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "Unexpected error consuming entry";
-              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
           return {};

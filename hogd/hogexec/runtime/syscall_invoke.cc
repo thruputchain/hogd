@@ -147,8 +147,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     calldata.resize_uninitialized(input_calldata.size());
   } catch (std::exception &e) {
     error("unrecoverable: failed to resize calldata: {}", e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
-            WrappedGasAmount{0}};
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
   if (!input_calldata.empty()) {
     assert(calldata.data() != nullptr);
@@ -202,7 +201,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   // -> !, which could lead to UB in the contract code if that function then
   // returns an error.
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::kHostExit}, WrappedGasAmount{0}};
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
   ReturnBuffer buffer;
@@ -210,8 +209,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     buffer.resize_uninitialized(input_buffer.size());
   } catch (std::exception &e) {
     error("unrecoverable: failed to resize return buffer: {}", e.what());
-    return {HostFnError{HostFnErrorCode::kHostUnrecoverable},
-            WrappedGasAmount{0}};
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
   if (!input_buffer.empty()) {
     assert(buffer.data() != nullptr);
@@ -223,7 +221,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 
   syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame);
 
-  return {HostFnError{HostFnErrorCode::kHostReturn}, WrappedGasAmount{0}};
+  return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -274,7 +272,7 @@ syscall_GetReturnedBuffer_inner(
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_Exit_inner() noexcept
 {
-  return {HostFnError{HostFnErrorCode::kHostExit}, WrappedGasAmount{0}};
+  return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

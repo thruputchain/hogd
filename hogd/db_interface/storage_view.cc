@@ -194,9 +194,9 @@ ParentBlockView::get_post_block_deployment(ContractAddress const &addr)
 {
   assert(closed_);
   {
-    auto item = get_post_block_storage_item(AddressAndKey{
-        .address = addr,
-        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)});
+    auto item = get_post_block_storage_item(
+        AddressAndKey{.address = addr,
+                      .key = StorageKey(StorageKeyType::Metadata)});
     if (!item) {
       return std::nullopt;
     }

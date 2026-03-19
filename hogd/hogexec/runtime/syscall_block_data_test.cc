@@ -59,12 +59,12 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Verify the returned height matches expected
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         return {};
@@ -133,12 +133,12 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Verify the returned height matches expected
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         return {};

@@ -93,8 +93,7 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
   // consume_gas (defined in this file), which is what we use to consume gas
   // within syscalls.
 
-  if (!res.has_value() &&
-      res.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
+  if (!res.has_value() && res.error().code() == InvokeErrorCode::OutOfGas) {
     gas_remaining = 0;
   }
 

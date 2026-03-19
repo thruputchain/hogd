@@ -47,28 +47,26 @@ InvokeResult::to_host_fn_result() const
     using enum InvokeErrorCode;
 
     switch (result_.error().code()) {
-    case kInvokeUnrecoverable:
-      return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
-    case kInvokeDeterministic:
+    case Unrecoverable:
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, gas_consumed_};
+    case Deterministic:
       // i.e. trap within Wasmi
-    case kInvokeOutOfGas:
+    case OutOfGas:
       // child frame ran out of the gas that was allocated to it
       // Note that that does not mean that the entire transaction is out of gas.
       // The amount of gas consumed will be checked against the parent's gas
       // limit in the syscall_entry
       return {SyscallErrorCode::kSyscallErrorCodeDeterministicWasm,
               gas_consumed_};
-    case kInvokeAbortTransaction:
-      return {HostFnError{HostFnErrorCode::kHostAbortTransaction},
-              gas_consumed_};
-    case kInvokeValidationFailure:
-      return {HostFnError{HostFnErrorCode::kHostValidationFailure},
-              gas_consumed_};
+    case Abandon:
+      return {HostFnError{HostFnErrorCode::Abandon}, gas_consumed_};
+    case ValidationFailure:
+      return {HostFnError{HostFnErrorCode::ValidationFailure}, gas_consumed_};
     default:
       error("Unrecoverable: InvokeResult::to_host_fn_result got unknown "
             "InvokeErrorCode {}",
             std::to_underlying(result_.error().code()));
-      return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
+      return {HostFnError{HostFnErrorCode::Unrecoverable}, gas_consumed_};
     }
     // unreachable
     assert(false);

@@ -60,8 +60,8 @@ SyscallHandlerContext::root_invoke()
   auto res = handler_.root_invoke();
 
   if (res.result_.has_value() ||
-      res.result_.error().code() == InvokeErrorCode::kInvokeDeterministic ||
-      res.result_.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
+      res.result_.error().code() == InvokeErrorCode::Deterministic ||
+      res.result_.error().code() == InvokeErrorCode::OutOfGas) {
 
     auto root_invocation_output = handler_.get_most_recent_frame_output();
     auto serialized_output =
@@ -82,9 +82,8 @@ SyscallHandlerContext::root_invoke()
     // Only return events when the invocation succeeded and the root frame
     // returned normally (not aborted/faulted).
     FFIDataBuffer serialized_events = kNullBuffer;
-    if (res.result_.has_value() &&
-        root_invocation_output.status_code() ==
-            InvocationFrameStatusCode::kInvocationFrameStatusCodeReturn) {
+    if (res.result_.has_value() && root_invocation_output.status_code() ==
+                                       InvocationFrameStatusCode::Return) {
       auto frame_events = handler_.copy_last_frame_events();
       if (!frame_events.empty()) {
         auto s = serialize_to_ffi_data_buffer(frame_events);
@@ -107,18 +106,18 @@ SyscallHandlerContext::root_invoke()
   CHECK(!res.result_.has_value());
 
   switch (res.result_.error().code()) {
-  case InvokeErrorCode::kInvokeNone:
-  case InvokeErrorCode::kInvokeDeterministic:
-  case InvokeErrorCode::kInvokeOutOfGas:
+  case InvokeErrorCode::None:
+  case InvokeErrorCode::Deterministic:
+  case InvokeErrorCode::OutOfGas:
     panic("unreachable per above checks");
-  case InvokeErrorCode::kInvokeUnrecoverable:
-    error("Unrecoverable: root_invoke got kInvokeUnrecoverable");
+  case InvokeErrorCode::Unrecoverable:
+    error("Unrecoverable: root_invoke got Unrecoverable");
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
-  case InvokeErrorCode::kInvokeValidationFailure:
+  case InvokeErrorCode::ValidationFailure:
     // TODO(geoff): this will need to be handled differently if we
     // add support in the SDK for testing transactions in validation mode.
-  case InvokeErrorCode::kInvokeAbortTransaction:
-    // kInvokeAbortTransaction should be unreachable in the test harness.
+  case InvokeErrorCode::Abandon:
+    // Abandon should be unreachable in the test harness.
     // Can only occur if someone holds a tx open across a call to advancing the
     // db block
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
@@ -187,10 +186,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   }
 
   // convert InvokeErrorCode to InvokeStatus<void>
-  InvokeStatus<void> status_code =
-      (invoke_error_code == InvokeErrorCode::kInvokeNone)
-          ? InvokeStatus<void>{}
-          : InvokeError{invoke_error_code};
+  InvokeStatus<void> status_code = (invoke_error_code == InvokeErrorCode::None)
+                                       ? InvokeStatus<void>{}
+                                       : InvokeError{invoke_error_code};
 
   // get the runtime and gas consumed by the invocation
   auto *runtime = pop_mock_runtime();
@@ -263,7 +261,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   // Only return events when the frame succeeded — failed or reverted
   // frames discard their events.
   bool frame_succeeded =
-      invoke_error_code == InvokeErrorCode::kInvokeNone && !manually_reverted;
+      invoke_error_code == InvokeErrorCode::None && !manually_reverted;
   FFIDataBuffer serialized_events = kNullBuffer;
   if (frame_succeeded && !frame_events.empty()) {
     auto s = serialize_to_ffi_data_buffer(frame_events);

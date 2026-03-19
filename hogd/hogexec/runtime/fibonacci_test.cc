@@ -124,10 +124,10 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
             client.template invoke_opt<"fibonacci">(ctx.handler(), input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (decoded.value().value().value() != expect) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });

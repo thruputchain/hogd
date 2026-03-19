@@ -94,7 +94,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().has_value() ||
                  !r_transfer.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -178,7 +178,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -193,7 +193,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -314,16 +314,16 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                    native_token_addr,
                    sdk_method_id(erc20_meta::entrypoint<"transfer">()),
                    ctx.runtime().get_available_gas(), calldata1,
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
 
              if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              // Should fail in try_invoke (insufficient funds for balance cost)
              if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // 2. Call transfer with same arguments, NOT in try_invoke frame -
@@ -334,15 +334,15 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                    native_token_addr,
                    sdk_method_id(erc20_meta::entrypoint<"transfer">()),
                    ctx.runtime().get_available_gas(), calldata1,
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
+                   std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
 
              if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // 3. Call transfer again with remainder (1), in try_invoke frame -
@@ -356,15 +356,15 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                    native_token_addr,
                    sdk_method_id(erc20_meta::entrypoint<"transfer">()),
                    ctx.runtime().get_available_gas(), calldata2,
-                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
 
              if (!r3.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};

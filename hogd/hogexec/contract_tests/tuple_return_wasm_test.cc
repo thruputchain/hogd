@@ -58,11 +58,11 @@ public:
         wasm_client.template invoke_opt<MethodName>(handler, args...);
     if (!decoded.has_value() || !decoded.value().has_value() ||
         !decoded.value().value().has_value()) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+      return InvokeError{InvokeErrorCode::Deterministic};
     }
     auto result = decoded.value().value().value();
     if (result != expected) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+      return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
   }

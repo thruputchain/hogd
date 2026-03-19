@@ -87,7 +87,7 @@ namespace {
 auto
 make_storage_key(uint8_t value)
 {
-  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+  StorageKey key(StorageKeyType::ContractData);
   key.contract_data_key() = StorageKeyContractData{value};
   return key;
 }

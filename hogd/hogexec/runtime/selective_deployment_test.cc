@@ -78,7 +78,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
                  return deploy_result.error().to_invoke_error();
                }
                if (!deploy_result.value().has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -178,7 +178,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
                if (!syscall_res.has_value() ||
                    syscall_res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
              }}});

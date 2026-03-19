@@ -123,7 +123,7 @@ protected:
                if (!del.has_value())
                  return del.error().to_invoke_error();
                if (!del.value().has_value())
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                for (uint8_t val : cd) {
                  auto ins = ctx.handler().retrocausal_queue_insert(
                      key, std::as_bytes(std::span(&val, 1)));

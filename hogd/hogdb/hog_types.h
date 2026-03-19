@@ -300,15 +300,15 @@ make_replay_cache_item_key(const Address &addr)
 make_item_key(const AddressAndKey &addrkey)
 {
   switch (addrkey.key.key_type()) {
-  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+  case StorageKeyType::FreeNativeTokenBalance:
     return make_address_balance_item_key(addrkey.address);
-  case StorageKeyType::kStorageKeyTypeAddressAuthData:
+  case StorageKeyType::AuthData:
     return make_address_auth_data_item_key(addrkey.address);
-  case StorageKeyType::kStorageKeyTypeAddressMetadata:
+  case StorageKeyType::Metadata:
     return make_address_metadata_item_key(addrkey.address);
-  case StorageKeyType::kStorageKeyTypeContractData:
+  case StorageKeyType::ContractData:
     return ItemKey(addrkey.address, addrkey.key.contract_data_key());
-  case StorageKeyType::kStorageKeyTypeReplayCache:
+  case StorageKeyType::ReplayCache:
     return make_replay_cache_item_key(addrkey.address);
   }
   std::unreachable();

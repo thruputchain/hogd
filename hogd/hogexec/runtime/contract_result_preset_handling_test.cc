@@ -101,11 +101,11 @@ make_caller_contract()
             client.template invoke_opt<"return_ok_void">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!result.value().value().value().is_ok()) {
           ADD_FAILURE() << "Return value is not ok";
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -118,15 +118,15 @@ make_caller_contract()
             client.template invoke_opt<"return_ok_int">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!result.value().value().value().is_ok()) {
           ADD_FAILURE() << "Return value is not ok";
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (result.value().value().value().ok() != 123) {
           ADD_FAILURE() << "Return value is not the expected value";
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -139,11 +139,11 @@ make_caller_contract()
             client.template invoke_opt<"return_err_void">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!result.value().value().value().is_err()) {
           ADD_FAILURE() << "Return value is not err";
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });
@@ -156,15 +156,15 @@ make_caller_contract()
             client.template invoke_opt<"return_err_int">(ctx.handler());
         if (!result.has_value() || !result.value().has_value() ||
             !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!result.value().value().value().is_err()) {
           ADD_FAILURE() << "Return value is not err";
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (result.value().value().value().err() != 456) {
           ADD_FAILURE() << "Return err value is not the expected value";
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
       });

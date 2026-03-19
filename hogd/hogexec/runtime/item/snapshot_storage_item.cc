@@ -54,9 +54,9 @@ SnapshotStorageItem::make_variant(WireStorageItem item,
 {
   // handle different key types differently
   switch (db_key.key_type()) {
-  case StorageKeyType::kStorageKeyTypeContractData:
+  case StorageKeyType::ContractData:
     return make_contract_key_variant(item);
-  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+  case StorageKeyType::FreeNativeTokenBalance:
     switch (item.type()) {
     case StorageItemType::kItemTypeNonnegativeInt:
       return variant_type{std::in_place_type<NativeTokenBalanceEntry>,
@@ -71,7 +71,7 @@ SnapshotStorageItem::make_variant(WireStorageItem item,
       assert(false);
       throw std::runtime_error("Impossible");
     }
-  case StorageKeyType::kStorageKeyTypeAddressAuthData:
+  case StorageKeyType::AuthData:
     switch (item.type()) {
     case StorageItemType::kItemTypeAuthData:
       return variant_type{std::in_place_type<AddressAuthDataEntry>,
@@ -150,7 +150,7 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
     }
     if (index != concurrent_queue_entries_.size()) [[unlikely]] {
       error("unrecoverable: bad get_concurrent_rcq_entry access");
-      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
 
@@ -168,7 +168,7 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
     }
     else if (concurrent_queue_entries_[index] != *entry) [[unlikely]] {
       error("unrecoverable: mismatch in concurrent rcq return results");
-      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
   return entry;

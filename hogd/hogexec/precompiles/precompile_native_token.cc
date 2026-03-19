@@ -71,7 +71,7 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   return {};
 }
@@ -86,7 +86,7 @@ get_msg_sender(NativeSyscallContext &ctx)
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   return sender;
 }
@@ -150,7 +150,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   trace("native token transfer: receiver {} amount {}", x23::show(receiver),
         x23::show(amount));
   if (!ctx.runtime().consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   // For now, amount_t is a uint, so we do not need to check for negative
@@ -165,7 +165,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
 
   // can't negate bigger values
   if (amount_unsigned_int > kMaxInt128) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
@@ -176,7 +176,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return r1.error().to_invoke_error();
   }
   if (!r1.value().has_value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   // add amount to receiver's balance
@@ -186,7 +186,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return r2.error().to_invoke_error();
   }
   if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   auto event_buf = make_event_from_xdr_struct(TransferEvent{
@@ -210,7 +210,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   trace("native token transfer_from: owner {} receiver {} amount {}",
         x23::show(owner), x23::show(receiver), x23::show(amount));
   if (!ctx.runtime().consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   uint128_t amount_unsigned_int =
@@ -224,7 +224,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
 
   // can't negate bigger values
   if (amount_unsigned_int > kMaxInt128) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
@@ -235,7 +235,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return r1.error().to_invoke_error();
   }
   if (!r1.value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   // add amount to receiver's balance
@@ -245,7 +245,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return r2.error().to_invoke_error();
   }
   if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   // subtract amount from spender's allowance
@@ -254,7 +254,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return allow_res.error();
   }
   if (!allow_res.value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   auto event_buf = make_event_from_xdr_struct(TransferEvent{
@@ -278,7 +278,7 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
   trace("native token adjust_allowance: spender {} amount {}",
         x23::show(spender), x23::show(amount));
   if (!ctx.runtime().consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   auto owner = get_msg_sender(ctx);
@@ -294,7 +294,7 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     return r.error();
   }
   if (!r.value()) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   auto event_buf = make_event_from_xdr_struct(ApprovalEvent{
@@ -319,7 +319,7 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   trace("native token get_allowance: owner {} spender {}", x23::show(owner),
         x23::show(spender));
   if (!ctx.runtime().consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   auto allow_key = allowance_key(owner, spender);
@@ -334,16 +334,16 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   // TODO(geoff): what is the correct overflow behavior on get_allowance?
   if (!output_set_opt) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   auto [total, of] = overflowing_add(output_set, output_add);
   if (of) {
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   }
   uint128_t utotal = std::max<int128_t>(total, 0);
   return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
@@ -380,14 +380,14 @@ make_native_token_contract()
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
         if (!ctx.runtime().consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+          return InvokeError{InvokeErrorCode::OutOfGas};
         }
         auto balance = ctx.handler().get_native_token_balance(contract_address);
         if (!balance.has_value()) {
           return balance.error().to_invoke_error();
         }
         if (!balance.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
@@ -401,7 +401,7 @@ make_native_token_contract()
           -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
         trace("native token get_balance");
         if (!ctx.runtime().consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+          return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
         auto caller_address = get_msg_sender(ctx);
@@ -414,7 +414,7 @@ make_native_token_contract()
           return balance.error().to_invoke_error();
         }
         if (!balance.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          return InvokeError{InvokeErrorCode::Deterministic};
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
@@ -437,7 +437,7 @@ make_native_token_contract()
         trace("native token total_supply");
         // TODO(geoff): gas costs
         if (!runtime.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+          return InvokeError{InvokeErrorCode::OutOfGas};
         }
         uint128_t total_supply =
             uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};

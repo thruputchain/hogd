@@ -14,28 +14,28 @@ check_item_key_type(StorageKeyType key_type, StorageItemType item_type)
 {
   if constexpr (is_debug_build()) {
     switch (key_type) {
-    case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    case StorageKeyType::FreeNativeTokenBalance:
       if (item_type != StorageItemType::kItemTypeNonnegativeInt) {
         error("item type is not valid for key type: {} with {}", key_type,
               item_type);
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeAddressAuthData:
+    case StorageKeyType::AuthData:
       if (item_type != StorageItemType::kItemTypeAuthData) {
         error("item type is not valid for key type: {} with {}", key_type,
               item_type);
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    case StorageKeyType::Metadata:
       if (item_type != StorageItemType::kItemTypeDeployedContractHash) {
         error("item type is not valid for key type: {} with {}", key_type,
               item_type);
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeContractData:
+    case StorageKeyType::ContractData:
       if (item_type == StorageItemType::kItemTypeAuthData ||
           item_type == StorageItemType::kItemTypeDeployedContractHash) {
         error("item type is not valid for key type: {} with {}", key_type,
@@ -43,7 +43,7 @@ check_item_key_type(StorageKeyType key_type, StorageItemType item_type)
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeReplayCache:
+    case StorageKeyType::ReplayCache:
       if (item_type != StorageItemType::kItemTypeReplayCacheData) {
         error("item type is not valid for key type: {} with {}", key_type,
               item_type);
@@ -62,28 +62,28 @@ check_delta_type(StorageKeyType key_type, StorageDeltaType delta_type)
 {
   if constexpr (is_debug_build()) {
     switch (key_type) {
-    case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    case StorageKeyType::FreeNativeTokenBalance:
       if (delta_type != StorageDeltaType::kDeltaTypeNonnegativeIntAdd) {
         error("delta type is not valid for key type: {} with {}", key_type,
               delta_type);
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeAddressAuthData:
+    case StorageKeyType::AuthData:
       if (delta_type != StorageDeltaType::kDeltaTypeAuthDataChange) {
         error("delta type is not valid for key type: {} with {}", key_type,
               delta_type);
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    case StorageKeyType::Metadata:
       if (delta_type != StorageDeltaType::kDeltaTypeDeployContract) {
         error("delta type is not valid for key type: {} with {}", key_type,
               delta_type);
         assert(false);
       }
       break;
-    case StorageKeyType::kStorageKeyTypeContractData:
+    case StorageKeyType::ContractData:
       if (delta_type == StorageDeltaType::kDeltaTypeAuthDataChange ||
           delta_type == StorageDeltaType::kDeltaTypeDeployContract) {
         error("delta type is not valid for key type: {} with {}", key_type,

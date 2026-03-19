@@ -34,7 +34,7 @@ NativeContract::invoke(Runtime::MethodID method,
 {
   const auto *fn = find_function(method);
   if (fn == nullptr)
-    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return InvokeError{InvokeErrorCode::Deterministic};
   NativeSyscallContext ctx(syscall_handler, runtime);
   return (*fn)(ctx);
 }
@@ -48,7 +48,7 @@ NativeContext::make_new_runtime(
     error("Unrecoverable: Attempt made to access a non-native contract from "
           "NativeContext: {}",
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
   assert(syscall_handler != nullptr);
 
@@ -60,7 +60,7 @@ NativeContext::make_new_runtime(
   if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
           deployed_contract_hash.hash);
-    return SystemError(SystemErrorCode::kSystemUnrecoverable);
+    return SystemError(SystemErrorCode::Unrecoverable);
   }
 
   if (contract.value()->contract_type() != deployed_contract_hash.contract_type)
@@ -68,7 +68,7 @@ NativeContext::make_new_runtime(
     error("Unrecoverable: Mismatch in contract type: {} != {}",
           contract.value()->contract_type(),
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   auto host_index = contract.value()->native_contract_id();
@@ -98,7 +98,7 @@ NativeRuntime::invoke_internal(std::string_view method_name)
     error("Unrecoverable: NativeRuntime::invoke_internal failed to parse "
           "method name '{}'",
           method_name);
-    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    return InvokeError{InvokeErrorCode::Unrecoverable};
   }
 
   return contract_.invoke(*method_id, *host_call_context_->syscall_handler,

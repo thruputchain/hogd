@@ -48,8 +48,7 @@ protected:
 
   int128_t get_initial_balance()
   {
-    auto key =
-        StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+    auto key = StorageKey(StorageKeyType::FreeNativeTokenBalance);
     auto it = storage_map_.find(key);
     if (it == storage_map_.end()) {
       return 0;
@@ -160,7 +159,7 @@ TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
                                                         entrypoint, calldata);
 
   // Verify the storage key is of the correct type
-  EXPECT_EQ(result.key_type(), StorageKeyType::kStorageKeyTypeContractData);
+  EXPECT_EQ(result.key_type(), StorageKeyType::ContractData);
 
   // Verify the key is not all zeros
   bool has_non_zero = false;

@@ -83,27 +83,27 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
   static SystemError from_raw_error_code(int32_t raw_error_code)
   {
     switch (raw_error_code) {
-    case std::to_underlying(SystemErrorCode::kSystemUnrecoverable):
-      return SystemError{SystemErrorCode::kSystemUnrecoverable};
-    case std::to_underlying(SystemErrorCode::kSystemAbortTransaction):
-      return SystemError{SystemErrorCode::kSystemAbortTransaction};
-    case std::to_underlying(SystemErrorCode::kSystemValidationFailure):
-      return SystemError{SystemErrorCode::kSystemValidationFailure};
+    case std::to_underlying(SystemErrorCode::Unrecoverable):
+      return SystemError{SystemErrorCode::Unrecoverable};
+    case std::to_underlying(SystemErrorCode::Abandon):
+      return SystemError{SystemErrorCode::Abandon};
+    case std::to_underlying(SystemErrorCode::ValidationFailure):
+      return SystemError{SystemErrorCode::ValidationFailure};
     default:
       error("Unrecoverable: Unknown system error code: {}", raw_error_code);
-      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
 
   HostFnError to_host_fn_error() const
   {
     switch (code()) {
-    case SystemErrorCode::kSystemUnrecoverable:
-      return HostFnError{HostFnErrorCode::kHostUnrecoverable};
-    case SystemErrorCode::kSystemAbortTransaction:
-      return HostFnError{HostFnErrorCode::kHostAbortTransaction};
-    case SystemErrorCode::kSystemValidationFailure:
-      return HostFnError{HostFnErrorCode::kHostValidationFailure};
+    case SystemErrorCode::Unrecoverable:
+      return HostFnError{HostFnErrorCode::Unrecoverable};
+    case SystemErrorCode::Abandon:
+      return HostFnError{HostFnErrorCode::Abandon};
+    case SystemErrorCode::ValidationFailure:
+      return HostFnError{HostFnErrorCode::ValidationFailure};
     }
     panic("invalid SystemErrorCode in to_host_fn_error: {}",
           std::to_underlying(code()));
@@ -112,12 +112,12 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
   InvokeError to_invoke_error() const
   {
     switch (code()) {
-    case SystemErrorCode::kSystemUnrecoverable:
-      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-    case SystemErrorCode::kSystemAbortTransaction:
-      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-    case SystemErrorCode::kSystemValidationFailure:
-      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    case SystemErrorCode::Unrecoverable:
+      return InvokeError{InvokeErrorCode::Unrecoverable};
+    case SystemErrorCode::Abandon:
+      return InvokeError{InvokeErrorCode::Abandon};
+    case SystemErrorCode::ValidationFailure:
+      return InvokeError{InvokeErrorCode::ValidationFailure};
     }
     panic("invalid SystemErrorCode in to_invoke_error: {}",
           std::to_underlying(code()));
@@ -165,7 +165,7 @@ struct InvokeResult {
   bool has_readable_proposal_data() const
   {
     return result_.has_value() ||
-           result_.error().code() == InvokeErrorCode::kInvokeDeterministic;
+           result_.error().code() == InvokeErrorCode::Deterministic;
   }
 
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;

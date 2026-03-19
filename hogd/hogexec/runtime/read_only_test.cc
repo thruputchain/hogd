@@ -77,7 +77,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
                  client_.invoke_opt<"read_only_bytestring_set">(ctx.handler(),
                                                                 false);
              if (!check_result(res)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -86,11 +86,10 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] =
                  client_.invoke_opt<"read_only_bytestring_set",
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagReadOnly)>(
+                                    std::to_underlying(InvokeFlag::ReadOnly)>(
                      ctx.handler(), true);
              if (!check_result(res)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -169,7 +168,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
                  client_.invoke_opt<"read_only_log_event">(ctx.handler(),
                                                            false);
              if (!check_result(res)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -178,11 +177,10 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] =
                  client_.invoke_opt<"read_only_log_event",
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagReadOnly)>(
+                                    std::to_underlying(InvokeFlag::ReadOnly)>(
                      ctx.handler(), true);
              if (!check_result(res)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -260,7 +258,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
           {0,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              if (!ctx.handler().is_read_only()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
@@ -269,18 +267,19 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // call 0, with no read-only flag added.
              if (!ctx.handler().is_read_only()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto res = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_contract_addr, 0, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone),
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(native_contract_addr, 0,
+                                                      UINT64_MAX, Calldata{},
+                                                      std::to_underlying(
+                                                          InvokeFlag::None),
+                                                      output_return_buffer_len);
              }();
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -289,14 +288,15 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
              // call 1, with read-only flag added.
              auto res = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   native_contract_addr, 1, UINT64_MAX, Calldata{},
-                   std::to_underlying(InvokeFlag::kInvokeFlagReadOnly),
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(native_contract_addr, 1,
+                                                      UINT64_MAX, Calldata{},
+                                                      std::to_underlying(
+                                                          InvokeFlag::ReadOnly),
+                                                      output_return_buffer_len);
              }();
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -371,25 +371,23 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
           {0,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = native_token_client.invoke_opt<
-                 "get_balance_of",
-                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(
+                 "get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
                  ctx.handler(), kObserverAddr);
              if (!res.has_value() || !res.value().has_value() ||
                  !res.value().value().has_value() ||
                  !res.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto balance = res.value().value().value().ok();
              if (balance != make_amount(12345)) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
           {1,
            [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = native_token_client.invoke_opt<
-                 "transfer",
-                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(
+                 "transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
                  ctx.handler(), kReceiverAddr, make_amount(transfer_amount));
              // The invoke should fail because modify_native_token_balance
              // returns InvalidSyscallInput in read-only mode, which causes
@@ -398,7 +396,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
              if (res.has_value() && res.value().has_value() &&
                  res.value().value().has_value() &&
                  res.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
@@ -409,7 +407,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
              if (!res.has_value() || !res.value().has_value() ||
                  !res.value().value().has_value() ||
                  !res.value().value().value().is_ok()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},

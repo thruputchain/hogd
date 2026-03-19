@@ -111,19 +111,18 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                      ctx.handler().get_current_address(), 1,
                      ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
-                     std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
 
                if (r0.has_value() ||
-                   r0.error().code() !=
-                       HostFnErrorCode::kHostAbortTransaction) {
+                   r0.error().code() != HostFnErrorCode::Abandon) {
                  ADD_FAILURE() << "Unexpected return value from try_invoke: "
                                << r0.error().error_code().message();
-                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
-               return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+               return InvokeError{InvokeErrorCode::Abandon};
              }},
             {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                // Perform a storage write
@@ -134,7 +133,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                        StorageDeltaFlags::kStorageDeltaFlagNone));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::Deterministic};
                }
 
                return {};
@@ -173,8 +172,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
   auto res = handler.root_invoke();
 
   ASSERT_FALSE(res.result_.has_value());
-  ASSERT_EQ(res.result_.error(),
-            InvokeError{InvokeErrorCode::kInvokeAbortTransaction});
+  ASSERT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Abandon});
 }
 
 } // namespace hogd
