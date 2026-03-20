@@ -319,7 +319,7 @@ open_syscall_handler(void *db, void *rc,
 OpenSyscallHandlerResult
 open_mocked_syscall_handler(void *db, void *rc,
                             struct FFISerializedAuthClaimData auth_claim_data,
-                            const uint8_t source_tx_hash[32]) noexcept
+                            const uint8_t source_tx_hash[32], uint8_t enable_tracing) noexcept
 {
   constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
       kTestFFIErrorCodeInvalidPointer);
@@ -345,10 +345,12 @@ open_mocked_syscall_handler(void *db, void *rc,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
-    auto *out = static_cast<void *>(
-        new SyscallHandlerContext(runtime_context->get(), *db_context,
-                                  auth_claim_data_xdr, source_hash));
-    return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
+    auto* handler = new SyscallHandlerContext(runtime_context->get(), *db_context,
+                                  auth_claim_data_xdr, source_hash);
+    if (enable_tracing) {
+      handler->to_handler().enable_tracing();
+    }
+    return {.syscall_handler = static_cast<void *>(handler), .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrBadInput const &e) {
     log_error("error deserializing signed transaction: {}", e);
     return make_ffi_result_type<OpenSyscallHandlerResult>(
@@ -917,20 +919,20 @@ open_syscall_handler(void *db, void *rc,
 OpenSyscallHandlerResult
 open_mocked_syscall_handler(void *db, void *rc,
                             struct FFISerializedAuthClaimData auth_claim_data,
-                            const uint8_t source_tx_hash[32])
+                            const uint8_t source_tx_hash[32], uint8_t enable_tracing)
 {
   hogd::do_ffi_trace("FFI (start): open_mocked_syscall_handler(db={}, rc={}, "
-                     "auth_claim_data=({}, len={}), source_tx_hash={})",
+                     "auth_claim_data=({}, len={}), source_tx_hash={}, enable_tracing={})",
                      db, rc, static_cast<const void *>(auth_claim_data.data),
                      auth_claim_data.len,
-                     static_cast<const void *>(source_tx_hash));
+                     static_cast<const void *>(source_tx_hash), enable_tracing);
   auto result = hogd::open_mocked_syscall_handler(db, rc, auth_claim_data,
-                                                  source_tx_hash);
+                                                  source_tx_hash, enable_tracing);
   hogd::do_ffi_trace("FFI (end): open_mocked_syscall_handler(db={}, rc={}, "
-                     "auth_claim_data=({}, len={}), source_tx_hash={}) -> {}",
+                     "auth_claim_data=({}, len={}), source_tx_hash={}, enable_tracing={}) -> {}",
                      db, rc, static_cast<const void *>(auth_claim_data.data),
                      auth_claim_data.len,
-                     static_cast<const void *>(source_tx_hash), result);
+                     static_cast<const void *>(source_tx_hash), enable_tracing, result);
   return result;
 }
 
