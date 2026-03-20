@@ -24,6 +24,7 @@
 #include <version>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -158,6 +159,12 @@ public:
   {
     std::vector<std::future<void>> completions;
     completions.reserve(divide_up<size_t>(r.size(), width));
+    // Drain all in-flight futures on scope exit so workers never outlive
+    // the locals they capture by reference (r, f, proj).
+    Defer drain{[&completions] {
+      for (auto &f : completions)
+        f.wait();
+    }};
     std::exception_ptr eptr;
     // The chunk subranges captured in submit() lambdas contain
     // transform_view iterators whose _M_parent points into |range|.
@@ -195,9 +202,8 @@ public:
             e.what());
     }
 
+    drain.reset();
     for (std::future<void> &f : completions) {
-      f.wait();
-      // Rethrows the exception, if it exists.
       f.get();
     }
     if (eptr) [[unlikely]] {
@@ -205,15 +211,15 @@ public:
     }
   }
 
-  // Work-stealing variant of for_each_parallel. Submits only worker_count()
-  // jobs instead of size/width jobs — each worker claims width-sized chunks
-  // via an atomic counter. Use this when the range is large relative to width
-  // (e.g. 1M elements / 1024 width would submit 1024 jobs with
-  // for_each_parallel but only worker_count() with this).
+  // Balanced variant of for_each_parallel. Submits only worker_count()
+  // jobs instead of size/width jobs — each worker dynamically claims
+  // width-sized chunks via an atomic counter. Use this when the range is
+  // large relative to width (e.g. 1M elements / 1024 width would submit
+  // 1024 jobs with for_each_parallel but only worker_count() with this).
   template<std::ranges::random_access_range R,
            std::invocable<std::ranges::range_reference_t<R>> Func>
-  void for_each_parallel_ws(R &&r, Func f,
-                            size_t width = kDefaultParallelRangeWidth)
+  void for_each_parallel_balanced(R &&r, Func f,
+                                  size_t width = kDefaultParallelRangeWidth)
   {
     auto total = std::ranges::size(r);
     if (total == 0)
@@ -221,6 +227,12 @@ public:
     std::atomic<size_t> next_chunk = 0;
     std::vector<std::future<void>> futures;
     futures.reserve(worker_count());
+    // Drain all in-flight futures on scope exit so workers never outlive
+    // the locals they capture by reference (next_chunk, r, f, width).
+    Defer drain{[&futures] {
+      for (auto &f : futures)
+        f.wait();
+    }};
     for (size_t i = 0; i < worker_count(); i++) {
       futures.push_back(submit([&] {
         while (true) {
@@ -234,8 +246,8 @@ public:
         }
       }));
     }
+    drain.reset();
     for (auto &future : futures) {
-      future.wait();
       future.get();
     }
   }

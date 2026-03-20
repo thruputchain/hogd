@@ -229,7 +229,7 @@ public:
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
     assert(!cleared_);
-    pool.for_each_parallel_ws(
+    pool.for_each_parallel_balanced(
         buckets_,
         [&f](std::atomic<value_bucket_t *> &bucket) {
           value_bucket_t::for_each(&bucket, f);
@@ -246,10 +246,10 @@ public:
       WorkerPool &pool = WorkerPool::get_default_pool())
   {
     assert(!cleared_);
-    pool.for_each_parallel_ws(
+    pool.for_each_parallel_balanced(
         buckets_,
         [&f](std::atomic<value_bucket_t *> &bucket) {
-          value_bucket_t *ptr = bucket.load(std::memory_order_relaxed);
+          value_bucket_t *ptr = bucket.load(std::memory_order_acquire);
           value_bucket_t::for_each_destructive(ptr, f);
         },
         width);
@@ -260,7 +260,7 @@ public:
              size_t width = 1024)
   {
     assert(!cleared_);
-    pool.for_each_parallel_ws(
+    pool.for_each_parallel_balanced(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
           value_bucket_t::clear(bucket.load(std::memory_order_acquire));
