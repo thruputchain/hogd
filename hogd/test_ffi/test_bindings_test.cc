@@ -230,8 +230,10 @@ mock_contract_event_then_fault(void * /*unused*/, uint64_t method_number)
         .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
-  EXPECT_TRUE(context->to_handler().log_event(nullptr, nullptr, nullptr,
-                                  std::as_bytes(std::span("test_event"))).has_value());
+  EXPECT_TRUE(context->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("test_event")))
+                  .has_value());
 
   return ForeignInvokeResult{
       .panic = std::to_underlying(InvokeErrorCode::Deterministic)};
@@ -252,8 +254,10 @@ mock_contract_event_then_revert(void * /*unused*/, uint64_t method_number)
         .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
-  EXPECT_TRUE(context->to_handler().log_event(nullptr, nullptr, nullptr,
-                                  std::as_bytes(std::span("test_event"))).has_value());
+  EXPECT_TRUE(context->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("test_event")))
+                  .has_value());
   context->to_handler().set_return_buffer(ReturnBuffer{0xAB}, true);
 
   return ForeignInvokeResult{.panic =
@@ -2091,8 +2095,11 @@ TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
 
   // Emit an event inside the frame
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
-  ASSERT_TRUE(SyscallHandlerContext::get_context()->to_handler().log_event(
-      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event"))).has_value());
+  ASSERT_TRUE(SyscallHandlerContext::get_context()
+                  ->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("frame_event")))
+                  .has_value());
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
 
   // Finish with a deterministic error (fault)
@@ -2144,8 +2151,11 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
 
   // Emit an event, then manually revert
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
-  ASSERT_TRUE(SyscallHandlerContext::get_context()->to_handler().log_event(
-      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event"))).has_value());
+  ASSERT_TRUE(SyscallHandlerContext::get_context()
+                  ->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("frame_event")))
+                  .has_value());
   SyscallHandlerContext::get_context()->to_handler().set_return_buffer(
       ReturnBuffer{0xDE, 0xAD}, /*revert_frame=*/true);
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
@@ -2201,8 +2211,11 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
 
   // Emit an event inside the frame
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
-  ASSERT_TRUE(SyscallHandlerContext::get_context()->to_handler().log_event(
-      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event"))).has_value());
+  ASSERT_TRUE(SyscallHandlerContext::get_context()
+                  ->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("frame_event")))
+                  .has_value());
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
 
   auto finish_res =
