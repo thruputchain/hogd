@@ -188,6 +188,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   EXPECT_NE(result.serialized_output.data, nullptr);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
   x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_events); });
+  x23::Defer d_tr([&] { free_ffi_data_buffer(result.serialized_trace); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -195,7 +196,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
 
   // Events are returned directly from root_invoke
   ASSERT_NE(result.serialized_events.data, nullptr);
-  ASSERT_GT(result.serialized_events.len, 0u);
+  ASSERT_GT(result.serialized_events.len, 0U);
 
   x23::Vec<TxEmittedEvent> events;
   x23::deserialize(&events, x23::BufView{result.serialized_events.data,
@@ -229,8 +230,10 @@ mock_contract_event_then_fault(void * /*unused*/, uint64_t method_number)
         .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
-  context->to_handler().log_event(nullptr, nullptr, nullptr,
-                                  std::as_bytes(std::span("test_event")));
+  EXPECT_TRUE(context->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("test_event")))
+                  .has_value());
 
   return ForeignInvokeResult{
       .panic = std::to_underlying(InvokeErrorCode::Deterministic)};
@@ -251,8 +254,10 @@ mock_contract_event_then_revert(void * /*unused*/, uint64_t method_number)
         .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
   }
 
-  context->to_handler().log_event(nullptr, nullptr, nullptr,
-                                  std::as_bytes(std::span("test_event")));
+  EXPECT_TRUE(context->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("test_event")))
+                  .has_value());
   context->to_handler().set_return_buffer(ReturnBuffer{0xAB}, true);
 
   return ForeignInvokeResult{.panic =
@@ -303,6 +308,8 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
@@ -311,7 +318,7 @@ TEST(TestBindingsTest, RootInvokeFaultNoEventsTest)
 
   // Events must NOT be returned on fault
   EXPECT_EQ(result.serialized_events.data, nullptr);
-  EXPECT_EQ(result.serialized_events.len, 0u);
+  EXPECT_EQ(result.serialized_events.len, 0U);
 }
 
 // Verify that root_invoke does NOT return events when the contract reverts
@@ -357,6 +364,8 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
   auto result = root_invoke(syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
@@ -365,7 +374,7 @@ TEST(TestBindingsTest, RootInvokeRevertNoEventsTest)
 
   // Events must NOT be returned on revert
   EXPECT_EQ(result.serialized_events.data, nullptr);
-  EXPECT_EQ(result.serialized_events.len, 0u);
+  EXPECT_EQ(result.serialized_events.len, 0U);
 
   // Normal workflow: try_commit drains events and handles the abort internally.
   auto commit_res = try_commit_transaction(syscall_handler);
@@ -767,6 +776,8 @@ TEST(TestBindingsTest, MockContractRevertTest)
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -846,6 +857,8 @@ TEST(TestBindingsTest, MockContractReturnTest)
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -922,6 +935,8 @@ TEST(TestBindingsTest, MockContractFaultTest)
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -993,6 +1008,8 @@ TEST(TestBindingsTest, MockContractOutOfGasTest)
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(result.serialized_output.data, nullptr);
   x23::Defer d4([&] { free_ffi_data_buffer(result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(result.serialized_events); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{result.serialized_output.data,
                                          result.serialized_output.len});
@@ -1019,7 +1036,7 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   SHA256Hash source_tx_hash{};
 
   auto handler = open_mocked_syscall_handler(db, rc, ffi_auth_claim_data,
-                                             source_tx_hash.data());
+                                             source_tx_hash.data(), 1);
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(handler.syscall_handler, nullptr);
 
@@ -1027,6 +1044,11 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
 
   auto result = root_invoke(handler.syscall_handler, 0);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+  x23::Defer d_bad_root([&] {
+    free_ffi_data_buffer(result.serialized_output);
+    free_ffi_data_buffer(result.serialized_trace);
+    free_ffi_data_buffer(result.serialized_events);
+  });
 
   Invocation invocation = {
       .invoked_address =
@@ -1050,14 +1072,15 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_NE(finish_res.serialized_output.data, nullptr);
   x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
+  x23::Defer d7([&] { free_ffi_data_buffer(finish_res.serialized_events); });
+
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_EQ(output.return_buffer().size(), 0);
   EXPECT_EQ(finish_res.gas_consumed, 0);
-  EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
-  EXPECT_EQ(finish_res.serialized_trace.len, 0);
 
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
@@ -1133,7 +1156,7 @@ make_mocked_handler(void *db, void *rc)
   };
   SHA256Hash source_tx_hash{};
   return open_mocked_syscall_handler(db, rc, ffi_auth_claim_data,
-                                     source_tx_hash.data());
+                                     source_tx_hash.data(), 1);
 }
 
 // Helper: open a mock invocation frame
@@ -1373,6 +1396,8 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_events); });
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
@@ -1427,6 +1452,8 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
 }
 
 // At the root mock frame, get_msg_sender() should return
@@ -1476,6 +1503,8 @@ TEST(TestBindingsTest, MockFrameGetMsgSenderAtRootTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
 }
 
 // Gracefully handle syscalls without a context pushed
@@ -1515,6 +1544,8 @@ TEST(TestBindingsTest, MockFrameSyscallWithoutContextTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
 }
 
 // A -> B -> C: contract C should see get_msg_sender() == B's address
@@ -1579,6 +1610,8 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
 }
 
 // Verify that calldata passed through invoke() is correctly received by the
@@ -1634,6 +1667,8 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
 }
 
 // Invoke a mock contract that sets a return buffer, then verify the return
@@ -1692,6 +1727,8 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_res.serialized_output);
+  free_ffi_data_buffer(finish_res.serialized_trace);
+  free_ffi_data_buffer(finish_res.serialized_events);
 }
 
 // Invoke a mock contract that reverts, and verify the parent frame sees
@@ -1751,6 +1788,8 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
                                    std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_events); });
 
   // The outer frame should still return successfully (the revert was handled)
   InvocationFrameOutput output;
@@ -1789,10 +1828,6 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
 
-  // Enable tracing before opening any frame
-  auto *ctx = static_cast<SyscallHandlerContext *>(handler.syscall_handler);
-  ctx->to_handler().enable_tracing();
-
   ContractAddress frame_addr{0xAA};
   Invocation invocation = {
       .invoked_address = frame_addr,
@@ -1825,6 +1860,7 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   ASSERT_NE(finish_res.serialized_trace.data, nullptr);
   ASSERT_GT(finish_res.serialized_trace.len, 0U);
   x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_events); });
 
   InvocationFrameTrace trace;
   x23::deserialize(&trace, x23::BufView{finish_res.serialized_trace.data,
@@ -1902,7 +1938,11 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
         finish_mock_invocation_frame(handler.syscall_handler,
                                      std::to_underlying(InvokeErrorCode::None));
     ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
-    x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+    x23::Defer df([&] {
+      free_ffi_data_buffer(finish_res.serialized_output);
+      free_ffi_data_buffer(finish_res.serialized_trace);
+      free_ffi_data_buffer(finish_res.serialized_events);
+    });
 
     InvocationFrameOutput output;
     x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -1931,7 +1971,11 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
                                      std::to_underlying(
                                          InvokeErrorCode::Deterministic));
     ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
-    x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+    x23::Defer df([&] {
+      free_ffi_data_buffer(finish_res.serialized_output);
+      free_ffi_data_buffer(finish_res.serialized_trace);
+      free_ffi_data_buffer(finish_res.serialized_events);
+    });
 
     InvocationFrameOutput output;
     x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -1957,7 +2001,11 @@ TEST(TestBindingsTest, MockFrameErrorCodeOutputTest)
     auto finish_res = finish_mock_invocation_frame(
         handler.syscall_handler, std::to_underlying(InvokeErrorCode::OutOfGas));
     ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
-    x23::Defer df([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+    x23::Defer df([&] {
+      free_ffi_data_buffer(finish_res.serialized_output);
+      free_ffi_data_buffer(finish_res.serialized_trace);
+      free_ffi_data_buffer(finish_res.serialized_events);
+    });
 
     InvocationFrameOutput output;
     x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -2003,7 +2051,11 @@ TEST(TestBindingsTest, MockFrameManualRevertTest)
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
-  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d4([&] {
+    free_ffi_data_buffer(finish_res.serialized_output);
+    free_ffi_data_buffer(finish_res.serialized_trace);
+    free_ffi_data_buffer(finish_res.serialized_events);
+  });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -2043,8 +2095,11 @@ TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
 
   // Emit an event inside the frame
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
-  SyscallHandlerContext::get_context()->to_handler().log_event(
-      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event")));
+  ASSERT_TRUE(SyscallHandlerContext::get_context()
+                  ->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("frame_event")))
+                  .has_value());
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
 
   // Finish with a deterministic error (fault)
@@ -2053,7 +2108,11 @@ TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
                                    std::to_underlying(
                                        InvokeErrorCode::Deterministic));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
-  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d4([&] {
+    free_ffi_data_buffer(finish_res.serialized_output);
+    free_ffi_data_buffer(finish_res.serialized_trace);
+    free_ffi_data_buffer(finish_res.serialized_events);
+  });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -2062,7 +2121,7 @@ TEST(TestBindingsTest, MockFrameFaultNoEventsTest)
 
   // Events must NOT be returned on fault
   EXPECT_EQ(finish_res.serialized_events.data, nullptr);
-  EXPECT_EQ(finish_res.serialized_events.len, 0u);
+  EXPECT_EQ(finish_res.serialized_events.len, 0U);
 }
 
 // Verify that finish_mock_invocation_frame does NOT return events when the
@@ -2092,8 +2151,11 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
 
   // Emit an event, then manually revert
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
-  SyscallHandlerContext::get_context()->to_handler().log_event(
-      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event")));
+  ASSERT_TRUE(SyscallHandlerContext::get_context()
+                  ->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("frame_event")))
+                  .has_value());
   SyscallHandlerContext::get_context()->to_handler().set_return_buffer(
       ReturnBuffer{0xDE, 0xAD}, /*revert_frame=*/true);
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
@@ -2102,7 +2164,11 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
-  x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
+  x23::Defer d4([&] {
+    free_ffi_data_buffer(finish_res.serialized_output);
+    free_ffi_data_buffer(finish_res.serialized_trace);
+    free_ffi_data_buffer(finish_res.serialized_events);
+  });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -2111,7 +2177,7 @@ TEST(TestBindingsTest, MockFrameManualRevertNoEventsTest)
 
   // Events must NOT be returned on manual revert
   EXPECT_EQ(finish_res.serialized_events.data, nullptr);
-  EXPECT_EQ(finish_res.serialized_events.len, 0u);
+  EXPECT_EQ(finish_res.serialized_events.len, 0U);
 
   // Normal workflow: try_commit drains events from last_frame_.
   auto commit_res = try_commit_transaction(handler.syscall_handler);
@@ -2145,8 +2211,11 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
 
   // Emit an event inside the frame
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
-  SyscallHandlerContext::get_context()->to_handler().log_event(
-      nullptr, nullptr, nullptr, std::as_bytes(std::span("frame_event")));
+  ASSERT_TRUE(SyscallHandlerContext::get_context()
+                  ->to_handler()
+                  .log_event(nullptr, nullptr, nullptr,
+                             std::as_bytes(std::span("frame_event")))
+                  .has_value());
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
 
   auto finish_res =
@@ -2155,6 +2224,7 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
   x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_events); });
+  x23::Defer d_tr([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
 
   InvocationFrameOutput output;
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
@@ -2163,7 +2233,7 @@ TEST(TestBindingsTest, MockFrameSuccessReturnsEventsTest)
 
   // Events MUST be returned on success
   ASSERT_NE(finish_res.serialized_events.data, nullptr);
-  ASSERT_GT(finish_res.serialized_events.len, 0u);
+  ASSERT_GT(finish_res.serialized_events.len, 0);
 
   x23::Vec<TxEmittedEvent> events;
   x23::deserialize(&events, x23::BufView{finish_res.serialized_events.data,
@@ -2195,9 +2265,6 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   auto handler = make_mocked_handler(db, rc);
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
-
-  auto *ctx = static_cast<SyscallHandlerContext *>(handler.syscall_handler);
-  ctx->to_handler().enable_tracing();
 
   ContractAddress addr_a{0x0A};
   ContractAddress addr_b{0x0B};
@@ -2248,6 +2315,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer db_out([&] { free_ffi_data_buffer(finish_b.serialized_output); });
   x23::Defer db_trace([&] { free_ffi_data_buffer(finish_b.serialized_trace); });
+  x23::Defer db_ev([&] { free_ffi_data_buffer(finish_b.serialized_events); });
 
   {
     InvocationFrameOutput b_output;
@@ -2282,6 +2350,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
   ASSERT_EQ(finish_c.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer dc_out([&] { free_ffi_data_buffer(finish_c.serialized_output); });
   x23::Defer dc_trace([&] { free_ffi_data_buffer(finish_c.serialized_trace); });
+  x23::Defer dc_ev([&] { free_ffi_data_buffer(finish_c.serialized_events); });
 
   {
     InvocationFrameOutput c_output;
@@ -2298,6 +2367,7 @@ TEST(TestBindingsTest, MockFrameNestedOpenFramesWithTracingTest)
                                    std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_a.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer da_out([&] { free_ffi_data_buffer(finish_a.serialized_output); });
+  x23::Defer da_ev([&] { free_ffi_data_buffer(finish_a.serialized_events); });
 
   {
     InvocationFrameOutput a_output;
@@ -2407,6 +2477,7 @@ TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
   ASSERT_EQ(finish_b.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_b.serialized_output);
   free_ffi_data_buffer(finish_b.serialized_trace);
+  free_ffi_data_buffer(finish_b.serialized_events);
 
   // Frame A is still open — close_syscall_handler must not crash.
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
@@ -2419,6 +2490,7 @@ TEST(TestBindingsTest, CloseHandlerWithUnfinishedOuterFrameTest)
   EXPECT_EQ(finish_a.ffi_error_code, kTestFFIErrorCodeNone);
   free_ffi_data_buffer(finish_a.serialized_output);
   free_ffi_data_buffer(finish_a.serialized_trace);
+  free_ffi_data_buffer(finish_a.serialized_events);
 
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
@@ -2687,12 +2759,9 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
   // 0.4.2).
   auto result = root_invoke(syscall_handler, 1 /* enable_tracing */);
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
-  if (result.serialized_output.data) {
-    free_ffi_data_buffer(result.serialized_output);
-  }
-  if (result.serialized_trace.data) {
-    free_ffi_data_buffer(result.serialized_trace);
-  }
+  free_ffi_data_buffer(result.serialized_output);
+  free_ffi_data_buffer(result.serialized_trace);
+  free_ffi_data_buffer(result.serialized_events);
 }
 
 // Verify that try_commit_transaction succeeds after the mock invocation path:
@@ -2728,7 +2797,8 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
                                    std::to_underlying(InvokeErrorCode::None));
   ASSERT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer d4([&] { free_ffi_data_buffer(finish_res.serialized_output); });
-  EXPECT_EQ(finish_res.serialized_trace.data, nullptr);
+  x23::Defer d5([&] { free_ffi_data_buffer(finish_res.serialized_events); });
+  x23::Defer d6([&] { free_ffi_data_buffer(finish_res.serialized_trace); });
 
   auto commit_res = try_commit_transaction(handler.syscall_handler);
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
