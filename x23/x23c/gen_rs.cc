@@ -790,11 +790,11 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   // Convert an i32 expression to the switch_type.  Enum newtypes have
   // From<i32>, but primitive types like u32/bool do not.
   auto convert_i32 = [&](std::string expr) -> std::string {
-    if (is_enum) {
-      return std::format("({}).into()", expr);
-    }
     if (is_bool) {
       return std::format("({}) != 0", expr);
+    }
+    if (is_enum) {
+      return std::format("({}).into()", expr);
     }
     if (switch_type == "i32") {
       return expr;
