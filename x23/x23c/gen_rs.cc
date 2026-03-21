@@ -787,6 +787,22 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   const bool is_enum = (switch_type == b.switch_type);
   const bool is_bool = (switch_type == "bool");
 
+  // Convert an i32 expression to the switch_type.  Enum newtypes have
+  // From<i32>, but primitive types like u32/bool do not.
+  auto convert_i32 = [&](std::string expr) -> std::string {
+    if (is_enum) {
+      return std::format("({}).into()", expr);
+    }
+    if (is_bool) {
+      return std::format("({}) != 0", expr);
+    }
+    if (switch_type == "i32") {
+      return expr;
+    }
+    // u32, i64, u64, etc.
+    return std::format("({}) as {}", expr, switch_type);
+  };
+
   auto bool_map = [](std::string_view b) -> std::string {
     if (b == "TRUE") {
       return "true";
@@ -871,8 +887,8 @@ GenRs::show_type(const UnionBody &b, string const &tname)
           default_decl =
               std::format("Default {{ {}: {} }},", b.switch_id, kEnumBaseType);
           default_match =
-              std::format("{0}::Default{{ {1} }} => (*{1}).into() ,\n", tname,
-                          b.switch_id);
+              std::format("{0}::Default{{ {1} }} => {2},\n", tname, b.switch_id,
+                          convert_i32(std::format("*{}", b.switch_id)));
         }
       }
       else {
@@ -901,8 +917,9 @@ GenRs::show_type(const UnionBody &b, string const &tname)
                          kEnumBaseType, a.decl.id,
                          type_name(a.decl, false, false));
           default_match =
-              std::format("{0}::Default{{ {1},..}} => (*{1}).into(),\n", tname,
-                          b.switch_id);
+              std::format("{0}::Default{{ {1},..}} => {2},\n", tname,
+                          b.switch_id,
+                          convert_i32(std::format("*{}", b.switch_id)));
         }
       }
     }
@@ -918,18 +935,23 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     switch_id = "type_";
   }
 
+  std::string unsafe_read =
+      std::format("unsafe {{ *(self as *const Self as *const {}) }}",
+                  kEnumBaseType);
+  std::string converted_read = convert_i32(unsafe_read);
+
   bottom_ +=
       std::format(R"(impl {0} {{
-    pub fn {2}(&self) -> {4} {{
+    pub fn {2}(&self) -> {3} {{
         match self {{
             {1}
-            _ => unsafe {{ *(self as *const Self as *const {3}) }}.into(),
+            _ => {4},
         }}
     }}
 }}
 
 )",
-                  tname, default_match, switch_id, kEnumBaseType, switch_type);
+                  tname, default_match, switch_id, switch_type, converted_read);
 }
 
 void
