@@ -14,6 +14,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
 # Enable WASM debug backtraces (preserves function names in stack traces)
@@ -71,6 +72,19 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=${BUILD_ARCHITECTURE}")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
+  if(STATIC_LIBCXX)
+    # Clang 22+ emits typed operator new/delete that require a libc++abi
+    # static initializer. When libc++abi is statically linked into a .so,
+    # init order isn't guaranteed — disable to avoid the resulting crash.
+    # 
+    # We specifically receive the following error message:
+    #```
+    # libc++abi: Terminating due to typed operator new being invoked before its static initializer in libcxx has been executed. This is likely happening in code with
+    # -ftyped-cxx-new-delete enabled and statically linking against libc++abi. If that is the case, and you cannot avoid invoking operator new in a static initializer,
+    # please try disabling TMO for that code with -fno-typed-cxx-new-delete. Otherwise, please file a bug report against libc++.
+    #```
+    add_compile_options(-fno-typed-cxx-new-delete)
+  endif()
   add_link_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-fuse-ld=lld)
   # Optional but robust when archiving bitcode:

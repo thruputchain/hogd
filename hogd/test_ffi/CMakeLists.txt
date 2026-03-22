@@ -30,9 +30,8 @@ target_link_libraries(
   runtime_test_util
 )
 
-# Optionally statically link libc++ so distributed binaries don't depend
-# on a specific libc++ version. Requires Clang. Enabled in CI release builds.
-option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
+# STATIC_LIBCXX option is declared in the top-level CMakeLists.txt so that
+# -fno-typed-cxx-new-delete can be set globally before any targets are defined.
 message(STATUS "STATIC_LIBCXX: ${STATIC_LIBCXX}")
 if(STATIC_LIBCXX)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
