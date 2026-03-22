@@ -1,6 +1,7 @@
+# Object library shared between the dylib and the test executable.
 add_library(
-    test_ffi
-    SHARED
+    test_ffi_objects
+    OBJECT
     db_context_wrapper.cc
     logger.cc
     mock_contract.cc
@@ -10,19 +11,20 @@ add_library(
 )
 
 add_dependencies(
-  test_ffi
+  test_ffi_objects
   generate_syscall_meta_h
   generate_syscall_inner_h
 )
 
 target_include_directories(
-  test_ffi
+  test_ffi_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
+# Propagate compile definitions and include directories from link deps.
 target_link_libraries(
-  test_ffi
+  test_ffi_objects
   auth_claim
   precompiles
   runtime
@@ -30,8 +32,27 @@ target_link_libraries(
   runtime_test_util
 )
 
-# STATIC_LIBCXX option is declared in the top-level CMakeLists.txt so that
-# -fno-typed-cxx-new-delete can be set globally before any targets are defined.
+# Hide all C++ symbols; only the extern "C" API in test_bindings.h is public.
+# For the test executable (which also links these objects) visibility is
+# irrelevant — executables don't have a symbol export table.
+set_target_properties(test_ffi_objects PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
+)
+
+# The shared library is consumed by Rust over the C API.
+add_library(test_ffi SHARED)
+target_link_libraries(
+  test_ffi
+  test_ffi_objects
+  auth_claim
+  precompiles
+  runtime
+  auth
+  runtime_test_util
+)
+
+# STATIC_LIBCXX option is declared in the top-level CMakeLists.txt.
 message(STATUS "STATIC_LIBCXX: ${STATIC_LIBCXX}")
 if(STATIC_LIBCXX)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -58,12 +79,10 @@ if(STATIC_LIBCXX)
     # Homebrew LLVM puts libc++ in lib/c++/; apt-installed LLVM uses lib/.
     foreach(_libdir "${_prefix}/lib/c++" "${_prefix}/lib")
       set(_libcxx_a "${_libdir}/libc++.a")
-      if(EXISTS "${_libcxx_a}")
+      set(_libcxxabi_a "${_libdir}/libc++abi.a")
+      if(EXISTS "${_libcxx_a}" AND EXISTS "${_libcxxabi_a}")
         target_link_options(test_ffi PRIVATE -nostdlib++)
-        # Only statically link libc++ (the standard library). libc++abi has a
-        # stable ABI and must remain dynamic to avoid a TMO static initializer
-        # ordering crash in Clang 22+.
-        target_link_libraries(test_ffi "${_libcxx_a}" -lc++abi)
+        target_link_libraries(test_ffi "${_libcxx_a}" "${_libcxxabi_a}")
         # Homebrew LLVM builds libc++abi against its own unwinder; pull it in
         # if present so we don't leave _Unwind_* symbols unresolved.
         set(_libunwind_a "${_libdir}/libunwind.a")
@@ -83,6 +102,19 @@ if(STATIC_LIBCXX)
   endif()
 endif()
 
+# Strip non-API symbols from the dylib.  On macOS, lld-macho lacks
+# --exclude-libs so we use an explicit exported-symbols list.  On Linux,
+# --exclude-libs,ALL hides symbols pulled from static archives (libc++,
+# libc++abi, libunwind, etc.); our own C++ symbols are already hidden via
+# CXX_VISIBILITY_PRESET above, and the extern "C" API retains default
+# visibility via a pragma in test_bindings.cc.
+if(APPLE)
+  target_link_options(test_ffi PRIVATE
+    "LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/test_ffi.exports")
+elseif(UNIX)
+  target_link_options(test_ffi PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 # Set rpath so test_ffi can find the Rust cdylib in the same directory.
 # Windows doesn't need this - it searches the DLL's directory by default.
 if(APPLE)
@@ -97,6 +129,8 @@ elseif(UNIX)
   )
 endif()
 
+# Tests link against the object files directly so they can reach internal
+# C++ symbols that the dylib intentionally hides.
 add_executable(
   test_ffi_test
   mock_syscall_test.cc
@@ -109,13 +143,14 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
-
 target_link_libraries(
   test_ffi_test
-  test_ffi
+  test_ffi_objects
+  auth_claim
+  precompiles
+  runtime
+  auth
+  runtime_test_util
   GTest::gtest
 )
 gtest_discover_tests(test_ffi_test)
-
-
-
