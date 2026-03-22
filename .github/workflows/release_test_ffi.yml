@@ -64,6 +64,7 @@ jobs:
             -t Debug \
             -c clang \
             -x "-DENABLE_TEST_FFI=ON" \
+            -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
             -x "-DRUST_BUILD_CPU=x86-64-v2" \
             -n
@@ -205,6 +206,7 @@ jobs:
             -t Debug \
             -c clang \
             -x "-DENABLE_TEST_FFI=ON" \
+            -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=armv8.5-a" \
             -x "-DRUST_BUILD_CPU=apple-m1" \
             -n

@@ -30,54 +30,55 @@ target_link_libraries(
   runtime_test_util
 )
 
-# Statically link libc++ so consumers don't need a specific version
-# installed. Derive the lib directory from the compiler path (works with
-# Homebrew LLVM on macOS and apt-installed LLVM on Linux).
-if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  message(FATAL_ERROR
-    "ENABLE_TEST_FFI requires Clang (need static libc++). "
-    "Current compiler: ${CMAKE_CXX_COMPILER_ID}")
-endif()
+# Optionally statically link libc++ so distributed binaries don't depend
+# on a specific libc++ version. Requires Clang. Enabled in CI release builds.
+option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
+if(STATIC_LIBCXX)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR
+      "STATIC_LIBCXX requires Clang. Current compiler: ${CMAKE_CXX_COMPILER_ID}")
+  endif()
 
-# Try the unresolved compiler path first (Homebrew symlinks point to the
-# right lib dir, but REALPATH lands in the Cellar where static libs aren't
-# installed).  Fall back to the resolved path for Linux where
-# /usr/bin/clang++-21 -> /usr/lib/llvm-21/bin/clang++.
-set(_candidate_prefixes "")
-get_filename_component(_cxx_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-get_filename_component(_cxx_prefix "${_cxx_bin_dir}" DIRECTORY)
-list(APPEND _candidate_prefixes "${_cxx_prefix}")
-get_filename_component(_cxx_real "${CMAKE_CXX_COMPILER}" REALPATH)
-get_filename_component(_cxx_real_bin "${_cxx_real}" DIRECTORY)
-get_filename_component(_cxx_real_prefix "${_cxx_real_bin}" DIRECTORY)
-list(APPEND _candidate_prefixes "${_cxx_real_prefix}")
-list(REMOVE_DUPLICATES _candidate_prefixes)
+  # Try the unresolved compiler path first (Homebrew symlinks point to the
+  # right lib dir, but REALPATH lands in the Cellar where static libs aren't
+  # installed).  Fall back to the resolved path for Linux where
+  # /usr/bin/clang++-21 -> /usr/lib/llvm-21/bin/clang++.
+  set(_candidate_prefixes "")
+  get_filename_component(_cxx_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  get_filename_component(_cxx_prefix "${_cxx_bin_dir}" DIRECTORY)
+  list(APPEND _candidate_prefixes "${_cxx_prefix}")
+  get_filename_component(_cxx_real "${CMAKE_CXX_COMPILER}" REALPATH)
+  get_filename_component(_cxx_real_bin "${_cxx_real}" DIRECTORY)
+  get_filename_component(_cxx_real_prefix "${_cxx_real_bin}" DIRECTORY)
+  list(APPEND _candidate_prefixes "${_cxx_real_prefix}")
+  list(REMOVE_DUPLICATES _candidate_prefixes)
 
-set(_found_libcxx FALSE)
-foreach(_prefix IN LISTS _candidate_prefixes)
-  # Homebrew LLVM puts libc++ in lib/c++/; apt-installed LLVM uses lib/.
-  foreach(_libdir "${_prefix}/lib/c++" "${_prefix}/lib")
-    set(_libcxx_a "${_libdir}/libc++.a")
-    set(_libcxxabi_a "${_libdir}/libc++abi.a")
-    if(EXISTS "${_libcxx_a}" AND EXISTS "${_libcxxabi_a}")
-      target_link_options(test_ffi PRIVATE -nostdlib++)
-      target_link_libraries(test_ffi "${_libcxx_a}" "${_libcxxabi_a}")
-      # Homebrew LLVM builds libc++abi against its own unwinder; pull it in
-      # if present so we don't leave _Unwind_* symbols unresolved.
-      set(_libunwind_a "${_libdir}/libunwind.a")
-      if(EXISTS "${_libunwind_a}")
-        target_link_libraries(test_ffi "${_libunwind_a}")
+  set(_found_libcxx FALSE)
+  foreach(_prefix IN LISTS _candidate_prefixes)
+    # Homebrew LLVM puts libc++ in lib/c++/; apt-installed LLVM uses lib/.
+    foreach(_libdir "${_prefix}/lib/c++" "${_prefix}/lib")
+      set(_libcxx_a "${_libdir}/libc++.a")
+      set(_libcxxabi_a "${_libdir}/libc++abi.a")
+      if(EXISTS "${_libcxx_a}" AND EXISTS "${_libcxxabi_a}")
+        target_link_options(test_ffi PRIVATE -nostdlib++)
+        target_link_libraries(test_ffi "${_libcxx_a}" "${_libcxxabi_a}")
+        # Homebrew LLVM builds libc++abi against its own unwinder; pull it in
+        # if present so we don't leave _Unwind_* symbols unresolved.
+        set(_libunwind_a "${_libdir}/libunwind.a")
+        if(EXISTS "${_libunwind_a}")
+          target_link_libraries(test_ffi "${_libunwind_a}")
+        endif()
+        set(_found_libcxx TRUE)
+        break()
       endif()
-      set(_found_libcxx TRUE)
+    endforeach()
+    if(_found_libcxx)
       break()
     endif()
   endforeach()
-  if(_found_libcxx)
-    break()
+  if(NOT _found_libcxx)
+    message(FATAL_ERROR "Static libc++ not found in any of: ${_candidate_prefixes}")
   endif()
-endforeach()
-if(NOT _found_libcxx)
-  message(FATAL_ERROR "Static libc++ not found in any of: ${_candidate_prefixes}")
 endif()
 
 # Set rpath so test_ffi can find the Rust cdylib in the same directory.
