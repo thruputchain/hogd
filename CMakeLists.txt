@@ -83,7 +83,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     # -ftyped-cxx-new-delete enabled and statically linking against libc++abi. If that is the case, and you cannot avoid invoking operator new in a static initializer,
     # please try disabling TMO for that code with -fno-typed-cxx-new-delete. Otherwise, please file a bug report against libc++.
     #```
-    add_compile_options(-Xclang -fno-typed-cxx-new-delete)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Xclang> $<$<COMPILE_LANGUAGE:CXX>:-fno-typed-cxx-new-delete>)
   endif()
   add_link_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-fuse-ld=lld)
