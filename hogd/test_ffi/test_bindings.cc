@@ -784,6 +784,7 @@ verify_signed_transaction_auth_from_db_impl(
 #ifdef __cplusplus
 extern "C" {
 #endif
+#pragma GCC visibility push(default)
 
 CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
@@ -1136,6 +1137,7 @@ free_ffi_data_buffer(struct FFIDataBuffer buffer)
   return result;
 }
 
+#pragma GCC visibility pop
 #ifdef __cplusplus
 }
 #endif
