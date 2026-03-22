@@ -58,10 +58,12 @@ if(STATIC_LIBCXX)
     # Homebrew LLVM puts libc++ in lib/c++/; apt-installed LLVM uses lib/.
     foreach(_libdir "${_prefix}/lib/c++" "${_prefix}/lib")
       set(_libcxx_a "${_libdir}/libc++.a")
-      set(_libcxxabi_a "${_libdir}/libc++abi.a")
-      if(EXISTS "${_libcxx_a}" AND EXISTS "${_libcxxabi_a}")
+      if(EXISTS "${_libcxx_a}")
         target_link_options(test_ffi PRIVATE -nostdlib++)
-        target_link_libraries(test_ffi "${_libcxx_a}" "${_libcxxabi_a}")
+        # Only statically link libc++ (the standard library). libc++abi has a
+        # stable ABI and must remain dynamic to avoid a TMO static initializer
+        # ordering crash in Clang 22+.
+        target_link_libraries(test_ffi "${_libcxx_a}" -lc++abi)
         # Homebrew LLVM builds libc++abi against its own unwinder; pull it in
         # if present so we don't leave _Unwind_* symbols unresolved.
         set(_libunwind_a "${_libdir}/libunwind.a")
