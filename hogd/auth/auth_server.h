@@ -14,7 +14,7 @@
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
-#include "hogd/base/types.h" =
+#include "hogd/base/types.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
