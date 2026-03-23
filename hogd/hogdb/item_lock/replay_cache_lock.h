@@ -61,6 +61,7 @@ private:
   mutable std::atomic<ReplayCacheMetadata *> meta_;
   mutable std::optional<ReplayCacheMetadata> meta_cell_;
   mutable std::once_flag meta_once_flag_;
+  mutable bool meta_poisoned_{false};
 
   mutable ConcurrentSet<uint128_t> conflicts_;
 

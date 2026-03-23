@@ -82,6 +82,9 @@ EventRPCContext::wait_for_executors_closed(BlockID block_id)
 x23::Async<EventStatus<SHA256Hash>>
 EventRPCContext::get_block_hash(BlockID block_id)
 {
+  x23::CoroGuard g;
+  co_await g(lock_);
+
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
     co_return EventError{EventErrorCode::kBadBlockID};

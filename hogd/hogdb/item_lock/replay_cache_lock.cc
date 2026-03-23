@@ -52,6 +52,7 @@ ReplayCacheLock::get_meta(const LockContext *ctx) const
         meta_cell_.emplace(ReplayCacheMetadata{});
       }
       else {
+        meta_poisoned_ = true;
         ret = meta.error();
         return;
       }
@@ -63,8 +64,15 @@ ReplayCacheLock::get_meta(const LockContext *ctx) const
     ret = {};
   });
 
+  // First caller gets the specific error from ret.
   if (!ret.has_value()) {
     return ret.error();
+  }
+
+  // Subsequent callers: call_once provides happens-before, so
+  // meta_poisoned_ is safely visible without an atomic.
+  if (meta_poisoned_) {
+    return HogDBError{HogDBCode::kInternal};
   }
 
   while ((r = meta_.load(std::memory_order_acquire)) == nullptr) {
