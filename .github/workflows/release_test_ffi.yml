@@ -53,7 +53,7 @@ jobs:
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
             ${{ secrets.HOGD_TO_HOGX_KEY }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - uses: ./.github/actions/prepare_env
@@ -100,7 +100,7 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: libtest_ffi-linux-x86_64
           path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
@@ -237,7 +237,7 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: libtest_ffi-linux-arm64
           path: release_artifacts/libtest_ffi-linux-arm64.tar.gz*
@@ -380,7 +380,7 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: libtest_ffi-macos-arm64
           path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
@@ -399,7 +399,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Parse version from header
         id: parse_version
@@ -423,19 +423,19 @@ jobs:
           echo "Tag matches version: $EXPECTED_TAG"
 
       - name: Download Linux Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: libtest_ffi-linux-x86_64
           path: artifacts
 
       - name: Download Linux ARM64 Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: libtest_ffi-linux-arm64
           path: artifacts
 
       - name: Download macOS Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: libtest_ffi-macos-arm64
           path: artifacts
