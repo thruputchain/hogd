@@ -250,6 +250,10 @@ public:
     std::atomic<size_t> cleared_count = 0;
     std::vector<std::future<void>> futures;
     futures.reserve(pool.worker_count());
+    Defer drain{[&futures] {
+      for (auto &f : futures)
+        f.wait();
+    }};
     for (size_t i = 0; i < pool.worker_count(); i++) {
       futures.push_back(pool.submit([&] {
         while (true) {
@@ -267,8 +271,9 @@ public:
         }
       }));
     }
+    drain.reset();
     for (auto &future : futures) {
-      future.wait();
+      future.get();
     }
     cleared_ = true;
   }
