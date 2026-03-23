@@ -96,7 +96,8 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
       make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
-  auto result = auth_server().verify_transactions(1, std::move(stx_vec))();
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(1, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 }
@@ -168,7 +169,8 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
       make_signature(sk2, tx3, /*auth_claim_idx=*/0, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
-  auto result = auth_server().verify_transactions(0, std::move(stx_vec))();
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(0, stx_span)();
 
   ASSERT_EQ(result.size(), 3);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);

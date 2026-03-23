@@ -3,6 +3,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unistd.h>
 #include <utility>
 
@@ -37,7 +38,8 @@ public:
   // DB::get_dbtip().height. That height is the count of the number of blocks
   // that have been committed.
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height, SignedTransactionBatch txs,
+  verify_transactions(BlockHeight height,
+                      std::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
@@ -141,8 +143,12 @@ public:
   {
     CHECK_PTR(auth_server_);
 
+    // The txs object is valid until the end of the coroutine.
+    // Because auth_server_->verify_transactions does not hold onto the txs
+    // input after verify_transactions returns, it is safe to pass a span to it.
     co_return co_await auth_server_->verify_transactions(
-        height, std::move(txs), /*max_parallelism=*/available_parallelism());
+        height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
+        /*max_parallelism=*/available_parallelism());
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,

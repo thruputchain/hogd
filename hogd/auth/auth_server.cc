@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -183,7 +184,8 @@ AuthServer::populate_auth_data(BlockHeight height,
 }
 
 x23::Async<AuthErrorCodeBatch>
-AuthServer::verify_transactions(BlockHeight height, SignedTransactionBatch txs,
+AuthServer::verify_transactions(BlockHeight height,
+                                std::span<const SignedTransaction> txs,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
