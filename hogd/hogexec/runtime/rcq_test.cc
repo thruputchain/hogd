@@ -162,6 +162,22 @@ protected:
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
+             }},
+            {5, // Set bytestring on rcq0 key (for type-change testing)
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &calldata = ctx.handler().get_calldata();
+               auto key = make_storage_key("rcq0");
+               auto res = ctx.handler().set_bytestring(
+                   key, std::as_bytes(std::span(calldata)),
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
              }}});
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -844,6 +860,89 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
   ASSERT_TRUE(queue.has_value());
   ASSERT_EQ(queue->metadata().live_entries,
             kRetrocausalQueueBlockEntriesMaxLen);
+}
+
+// Fuzz-found bug: cross-block type change (bytestring -> RCQ) followed by
+// a second RCQ insert TX in the same block triggers CHECK failure in
+// InvokeTX::commit() at invoke_tx.cc:191:
+//   cost_change <= vec.back().locked_storage_cost [32 < 22]
+//
+// Sequence: Block 1 sets a bytestring on key "rcq0".  Block 2 has two
+// transactions: TX1 does RCQ insert (type change bytestring -> RCQ), TX2
+// does another RCQ insert on the same key.  TX2's commit fails because
+// the cost accounting for the second transaction in the same block doesn't
+// correctly account for the type change done by TX1.
+//
+// This test CRASHES (CHECK abort) when run with --gtest_also_run_disabled_tests.
+// Enable once the cost tracking is fixed.
+TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "Requires HogDB for cost tracking";
+  }
+
+  auto context = make_context();
+  // The fuzz crash starts with 1B tokens granted once at init. After
+  // many blocks of operations, the balance is partially consumed. Grant
+  // a large amount — the bug is in cost *tracking*, not insufficient funds.
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  // Block 1: set bytestring on "rcq0" key.
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(5),
+                            .calldata = Calldata({0x2f})}}},
+        *context);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  // Block 2: Two separate transactions, both RCQ insert on "rcq0".
+  // TX1 does the type change (bytestring -> RCQ).  TX2 inserts more entries
+  // into the now-RCQ key.  The crash happens on TX2's commit: TX1 already
+  // acquired the lock for this key in this block, so TX2's lock() returns
+  // 0 marginal cost, leaving locked_storage_cost = 0, but commit_change
+  // returns the per-entry RCQ cost (8).
+  {
+    auto handler1 = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .calldata = Calldata({0x41})}}},
+        *context);
+    ASSERT_TRUE(handler1.root_invoke().is_root_success());
+    ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler2 = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .calldata = Calldata({0x07, 0x02, 0x42, 0x43})}}},
+        *context);
+    ASSERT_TRUE(handler2.root_invoke().is_root_success());
+    // BUG: CHECK_LE(cost_change, locked_storage_cost) [8 < 0] fires here.
+    // TX1 already locked the key in this block, so TX2's lock() returns 0
+    // marginal cost -> locked_storage_cost stays at default 0. But
+    // commit_change returns 8 (4 entries * kRCQCostPerEntry).
+    ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  advance_block();
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
