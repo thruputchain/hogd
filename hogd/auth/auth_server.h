@@ -1,10 +1,9 @@
 #pragma once
 
-#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
-#include <string>
+#include <span>
 #include <unistd.h>
 #include <utility>
 
@@ -15,17 +14,13 @@
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/os.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/loadgen/loadgen_server.h"
-#include "hogd/version.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-#include "x23/vec.h"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -44,7 +39,7 @@ public:
   // that have been committed.
   x23::Async<AuthErrorCodeBatch>
   verify_transactions(BlockHeight height,
-                      x23::span<const SignedTransaction> txs,
+                      std::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
@@ -148,9 +143,12 @@ public:
   {
     CHECK_PTR(auth_server_);
 
-    x23::span<const SignedTransaction> txs_span(txs.begin(), txs.end());
+    // The txs object is valid until the end of the coroutine.
+    // Because auth_server_->verify_transactions does not hold onto the txs
+    // input after verify_transactions returns, it is safe to pass a span to it.
     co_return co_await auth_server_->verify_transactions(
-        height, txs_span, /*max_parallelism=*/available_parallelism());
+        height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
+        /*max_parallelism=*/available_parallelism());
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
