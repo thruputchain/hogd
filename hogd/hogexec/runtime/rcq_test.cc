@@ -873,8 +873,8 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
 // the cost accounting for the second transaction in the same block doesn't
 // correctly account for the type change done by TX1.
 //
-// This test CRASHES (CHECK abort) when run with --gtest_also_run_disabled_tests.
-// Enable once the cost tracking is fixed.
+// This test CRASHES (CHECK abort) when run with
+// --gtest_also_run_disabled_tests. Enable once the cost tracking is fixed.
 TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
 {
   if (GetParam() == TestDB::kMockInMemory) {
@@ -894,10 +894,9 @@ TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{
-                            .invoked_address = contract_address_,
-                            .entrypoint = entrypoint_from_method_id(5),
-                            .calldata = Calldata({0x2f})}}},
+                        Invocation{.invoked_address = contract_address_,
+                                   .entrypoint = entrypoint_from_method_id(5),
+                                   .calldata = Calldata({0x2f})}}},
         *context);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -916,10 +915,9 @@ TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{
-                            .invoked_address = contract_address_,
-                            .entrypoint = entrypoint_from_method_id(0),
-                            .calldata = Calldata({0x41})}}},
+                        Invocation{.invoked_address = contract_address_,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .calldata = Calldata({0x41})}}},
         *context);
     ASSERT_TRUE(handler1.root_invoke().is_root_success());
     ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -930,10 +928,10 @@ TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{
-                            .invoked_address = contract_address_,
-                            .entrypoint = entrypoint_from_method_id(0),
-                            .calldata = Calldata({0x07, 0x02, 0x42, 0x43})}}},
+                        Invocation{.invoked_address = contract_address_,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .calldata =
+                                       Calldata({0x07, 0x02, 0x42, 0x43})}}},
         *context);
     ASSERT_TRUE(handler2.root_invoke().is_root_success());
     // BUG: CHECK_LE(cost_change, locked_storage_cost) [8 < 0] fires here.
