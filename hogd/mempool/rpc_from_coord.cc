@@ -1116,7 +1116,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
                        .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
-  result.db_tip() = cache.db_tip;
+  result.block().db_tip = cache.db_tip;
+  result.block().signed_transactions = {};
 
   {
     x23::CoroGuard cg;
