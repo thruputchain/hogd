@@ -1117,7 +1117,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
   result.block().db_tip = cache.db_tip;
-  result.block().signed_transactions = {};
+  result.block().signed_transactions() = {};
+  co_await t_to_parallel_batch(cache.txs, result.block().signed_transactions);
 
   {
     x23::CoroGuard cg;
