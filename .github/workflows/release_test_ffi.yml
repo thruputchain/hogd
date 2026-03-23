@@ -53,7 +53,7 @@ jobs:
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
             ${{ secrets.HOGD_TO_HOGX_KEY }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
       - uses: ./.github/actions/prepare_env
@@ -100,10 +100,147 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: libtest_ffi-linux-x86_64
           path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
+
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
+
+  build-linux-arm64:
+    runs-on: namespace-profile-hogd-linux-arm64
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+            ${{ secrets.HOGD_TO_HOGX_KEY }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
+            else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
+
+      - name: Configure Environment
+        run: |
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
+
+      - name: Configure Build
+        run: |
+          ./scripts/build.sh -d build \
+            -t Debug \
+            -c clang \
+            -x "-DENABLE_TEST_FFI=ON" \
+            -x "-DSTATIC_LIBCXX=ON" \
+            -x "-DBUILD_ARCHITECTURE=armv8.2-a" \
+            -x "-DRUST_BUILD_CPU=neoverse-n1" \
+            -n
+
+      - name: Build test_ffi Library
+        run: |
+          make -C build -j$(nproc) test_ffi
+
+      - name: Verify Library Built
+        run: |
+          ls -lh build/hogd/test_ffi/libtest_ffi.so
+          file build/hogd/test_ffi/libtest_ffi.so
+
+      - name: Generate Rust Bindings
+        run: |
+          cargo install bindgen-cli
+          mkdir -p release_artifacts
+          hogd/test_ffi/run_bindgen.sh release_artifacts/bindings.rs
+          echo "Generated bindings.rs:"
+          head -20 release_artifacts/bindings.rs
+
+      - name: Package Library
+        run: |
+          cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
+          cp build/hogd/rust/libunified_lib.so release_artifacts/
+          cp hogd/test_ffi/test_bindings.h release_artifacts/
+          cd release_artifacts
+          tar -czf libtest_ffi-linux-arm64.tar.gz libtest_ffi.so libunified_lib.so test_bindings.h bindings.rs
+          sha256sum libtest_ffi-linux-arm64.tar.gz > libtest_ffi-linux-arm64.tar.gz.sha256
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: libtest_ffi-linux-arm64
+          path: release_artifacts/libtest_ffi-linux-arm64.tar.gz*
 
       - name: Print Log Download Instructions
         if: always()
@@ -243,7 +380,7 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: libtest_ffi-macos-arm64
           path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
@@ -254,7 +391,7 @@ jobs:
 
   create-release:
     if: ${{ !inputs.dry_run }}
-    needs: [build-linux-x86_64, build-macos-arm64]
+    needs: [build-linux-x86_64, build-linux-arm64, build-macos-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -262,7 +399,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Parse version from header
         id: parse_version
@@ -286,13 +423,19 @@ jobs:
           echo "Tag matches version: $EXPECTED_TAG"
 
       - name: Download Linux Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: libtest_ffi-linux-x86_64
           path: artifacts
 
+      - name: Download Linux ARM64 Artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: libtest_ffi-linux-arm64
+          path: artifacts
+
       - name: Download macOS Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: libtest_ffi-macos-arm64
           path: artifacts
@@ -325,6 +468,8 @@ jobs:
           files: |
             artifacts/libtest_ffi-linux-x86_64.tar.gz
             artifacts/libtest_ffi-linux-x86_64.tar.gz.sha256
+            artifacts/libtest_ffi-linux-arm64.tar.gz
+            artifacts/libtest_ffi-linux-arm64.tar.gz.sha256
             artifacts/libtest_ffi-macos-arm64.tar.gz
             artifacts/libtest_ffi-macos-arm64.tar.gz.sha256
           body: |
@@ -337,6 +482,10 @@ jobs:
             **Linux x86_64:**
             - `libtest_ffi-linux-x86_64.tar.gz` - Shared library (.so) and header file
             - `libtest_ffi-linux-x86_64.tar.gz.sha256` - SHA256 checksum
+
+            **Linux ARM64:**
+            - `libtest_ffi-linux-arm64.tar.gz` - Shared library (.so) and header file
+            - `libtest_ffi-linux-arm64.tar.gz.sha256` - SHA256 checksum
 
             **macOS ARM64:**
             - `libtest_ffi-macos-arm64.tar.gz` - Dynamic library (.dylib) and header file
@@ -351,21 +500,21 @@ jobs:
 
             ### Usage
 
-            **Linux:**
+            **Linux x86_64:**
             ```bash
-            # Extract
             tar -xzf libtest_ffi-linux-x86_64.tar.gz
-
-            # Verify checksum
             sha256sum -c libtest_ffi-linux-x86_64.tar.gz.sha256
             ```
 
-            **macOS:**
+            **Linux ARM64:**
             ```bash
-            # Extract
-            tar -xzf libtest_ffi-macos-arm64.tar.gz
+            tar -xzf libtest_ffi-linux-arm64.tar.gz
+            sha256sum -c libtest_ffi-linux-arm64.tar.gz.sha256
+            ```
 
-            # Verify checksum
+            **macOS ARM64:**
+            ```bash
+            tar -xzf libtest_ffi-macos-arm64.tar.gz
             shasum -a 256 -c libtest_ffi-macos-arm64.tar.gz.sha256
             ```
 
