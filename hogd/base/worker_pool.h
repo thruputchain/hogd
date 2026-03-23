@@ -24,6 +24,7 @@
 #include <version>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -158,6 +159,12 @@ public:
   {
     std::vector<std::future<void>> completions;
     completions.reserve(divide_up<size_t>(r.size(), width));
+    // Drain all in-flight futures on scope exit so workers never outlive
+    // the locals they capture by reference (r, f, proj).
+    Defer drain{[&completions] {
+      for (auto &f : completions)
+        f.wait();
+    }};
     std::exception_ptr eptr;
     // The chunk subranges captured in submit() lambdas contain
     // transform_view iterators whose _M_parent points into |range|.
@@ -195,9 +202,8 @@ public:
             e.what());
     }
 
+    drain.reset();
     for (std::future<void> &f : completions) {
-      f.wait();
-      // Rethrows the exception, if it exists.
       f.get();
     }
     if (eptr) [[unlikely]] {

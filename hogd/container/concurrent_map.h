@@ -273,6 +273,25 @@ public:
     cleared_ = true;
   }
 
+  // Like for_each_parallel but computes width to produce roughly
+  // worker_count() jobs, avoiding excessive dispatch overhead when
+  // scanning the full bucket array.
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
+  void for_each_parallel_among_workers(
+      Func f, WorkerPool &pool = WorkerPool::get_default_pool())
+  {
+    for_each_parallel(std::move(f), worker_width(pool), pool);
+  }
+
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
+  void for_each_parallel_destructive_among_workers(
+      Func f, WorkerPool &pool = WorkerPool::get_default_pool())
+  {
+    for_each_parallel_destructive(std::move(f), worker_width(pool), pool);
+  }
+
   void clear(WorkerPool &pool = WorkerPool::get_default_pool(),
              size_t width = 1024)
   {
@@ -287,6 +306,11 @@ public:
   }
 
 private:
+  size_t worker_width(WorkerPool &pool) const
+  {
+    return std::max<size_t>(1, buckets_.size() / pool.worker_count());
+  }
+
   void clear_slow() noexcept
   {
     for (auto &bucket : buckets_) {
