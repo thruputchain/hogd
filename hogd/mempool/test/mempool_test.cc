@@ -663,7 +663,7 @@ TEST(Mempool, ValidateCommit)
             SchedulerValidationResult::SchedulerValidationOK);
 
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.db_tip().id)();
+      res_validate.block().db_tip.id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
@@ -730,7 +730,7 @@ TEST(Mempool, ValidateTwo)
             SchedulerValidationResult::SchedulerValidationOK);
 
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.db_tip().id)();
+      res_validate.block().db_tip.id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   // Now nominate another block.
@@ -783,7 +783,7 @@ TEST(Mempool, ValidateTwo)
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.db_tip().id)();
+      res_validate.block().db_tip.id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
@@ -857,13 +857,13 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(db_tip.height, 1);
 
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.db_tip().id)();
+      res_validate.block().db_tip.id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip, res_validate.db_tip());
+  EXPECT_EQ(db_tip, res_validate.block().db_tip);
 }
 
 TEST(Mempool, GenerateBlockId)
