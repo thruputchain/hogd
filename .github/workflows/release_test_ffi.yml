@@ -500,21 +500,21 @@ jobs:
 
             ### Usage
 
-            **Linux:**
+            **Linux x86_64:**
             ```bash
-            # Extract
             tar -xzf libtest_ffi-linux-x86_64.tar.gz
-
-            # Verify checksum
             sha256sum -c libtest_ffi-linux-x86_64.tar.gz.sha256
             ```
 
-            **macOS:**
+            **Linux ARM64:**
             ```bash
-            # Extract
-            tar -xzf libtest_ffi-macos-arm64.tar.gz
+            tar -xzf libtest_ffi-linux-arm64.tar.gz
+            sha256sum -c libtest_ffi-linux-arm64.tar.gz.sha256
+            ```
 
-            # Verify checksum
+            **macOS ARM64:**
+            ```bash
+            tar -xzf libtest_ffi-macos-arm64.tar.gz
             shasum -a 256 -c libtest_ffi-macos-arm64.tar.gz.sha256
             ```
 
