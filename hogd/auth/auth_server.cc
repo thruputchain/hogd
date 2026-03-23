@@ -183,8 +183,7 @@ AuthServer::populate_auth_data(BlockHeight height,
 }
 
 x23::Async<AuthErrorCodeBatch>
-AuthServer::verify_transactions(BlockHeight height,
-                                x23::span<const SignedTransaction> txs,
+AuthServer::verify_transactions(BlockHeight height, SignedTransactionBatch txs,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
@@ -193,8 +192,7 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  static std::unordered_map<ContractAddress, AddressAuthData> auth_data;
-  auth_data.clear();
+  std::unordered_map<ContractAddress, AddressAuthData> auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
