@@ -273,6 +273,7 @@ public:
     }
     drain.reset();
     for (auto &future : futures) {
+      // Rethrows the exception, if it exists.
       future.get();
     }
     cleared_ = true;

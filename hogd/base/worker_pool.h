@@ -204,6 +204,7 @@ public:
 
     drain.reset();
     for (std::future<void> &f : completions) {
+      // Rethrows the exception, if it exists.
       f.get();
     }
     if (eptr) [[unlikely]] {
