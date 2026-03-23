@@ -238,7 +238,7 @@ BlockTX::commit(WorkerPool &pool)
   // Extract auth/balance data (parallel destructive, no DAO writes).
   PerThread<KeyChangeBatch> key_changes;
 
-  item_locks_.for_each_parallel_destructive(
+  item_locks_.for_each_parallel_destructive_among_workers(
       [&key_changes](std::pair<const ItemKey &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
@@ -259,11 +259,11 @@ BlockTX::commit(WorkerPool &pool)
           }
         }
       },
-      1024, pool);
+      pool);
 
   PerThread<std::vector<Delta>> balance_deltas;
 
-  addr_balance_locks_.for_each_parallel_destructive(
+  addr_balance_locks_.for_each_parallel_destructive_among_workers(
       [&balance_deltas](std::pair<const Address &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
@@ -277,7 +277,7 @@ BlockTX::commit(WorkerPool &pool)
         balance_deltas->push_back(
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
       },
-      1024, pool);
+      pool);
 
   background_commit_worker_.submit_job(block_height_, std::move(key_changes),
                                        std::move(balance_deltas));
@@ -318,23 +318,24 @@ BlockTX::stage_locks(ChangeSet &changes)
   std::mutex err_lock;
   HogDBStatus<void> status;
 
-  item_locks_.for_each_parallel([&](std::pair<const ItemKey &, ItemLock &> v) {
-    if (!v.second.is_finalized()) {
-      return;
-    }
-    auto r = v.second.stage_committed_changes(
-        LockContext(&db_, block_height_, v.first, &cost_model_), changes);
-    if (!r) [[unlikely]] {
-      std::scoped_lock guard(err_lock);
-      status = r;
-    }
-  });
+  item_locks_.for_each_parallel_among_workers(
+      [&](std::pair<const ItemKey &, ItemLock &> v) {
+        if (!v.second.is_finalized()) {
+          return;
+        }
+        auto r = v.second.stage_committed_changes(
+            LockContext(&db_, block_height_, v.first, &cost_model_), changes);
+        if (!r) [[unlikely]] {
+          std::scoped_lock guard(err_lock);
+          status = r;
+        }
+      });
 
   if (!status) {
     return status;
   }
 
-  addr_balance_locks_.for_each_parallel(
+  addr_balance_locks_.for_each_parallel_among_workers(
       [&](std::pair<const Address &, ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
