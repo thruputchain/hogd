@@ -270,10 +270,11 @@ File::close()
   if (fd_ == kInvalidFD)
     return {};
 
+  int closed_fd = fd_;
   ErrnoStatus<void> ret = sys_close(fd_);
   fd_ = kInvalidFD;
   if (!ret) {
-    error("could not close fd {}: {}", fd_, ret.error());
+    error("could not close fd {}: {}", closed_fd, ret.error());
     return ret.error();
   }
 
