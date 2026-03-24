@@ -124,7 +124,7 @@ private:
         value_ =
             base_pool_->fetch_add(std::max<uint64_t>(kBaseAllocSize, count),
                                   std::memory_order_relaxed);
-        limit_ = value_ + count;
+        limit_ = value_ + std::max<uint64_t>(kBaseAllocSize, count);
       }
       uint64_t result = value_;
       value_ += count;
