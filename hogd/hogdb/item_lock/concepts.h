@@ -28,6 +28,11 @@ struct LockContext {
   BlockHeight block_height;
   const ItemKey &key;
   const StorageCostModel *cost_model;
+
+  // The ItemLock's snapshot_cost_ (cost at block start). Used by per-type
+  // locks to compute conservative reservations that account for the
+  // snapshot_cost_transform subtraction in ItemLock.
+  int128_t item_lock_snapshot_cost = 0;
 };
 
 template<typename Lock>
