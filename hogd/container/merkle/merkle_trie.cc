@@ -312,6 +312,7 @@ MerkleTrie::get_proof_by_node(const Key &k)
       return {SHA256Hash(), {}};
     }
 
+    bool restart = false;
     while (node) {
       node->hash_lock.lock_writer();
       // TODO(jhumphri): Need to hold lock on child hash. Maybe we should just
@@ -322,15 +323,19 @@ MerkleTrie::get_proof_by_node(const Key &k)
       node->hash_lock.unlock();
 
       if (node->parent && !node->parent->rw_lock.try_lock_reader()) {
-        // Need to restart.
+        // Need to restart from find_node().
         node->rw_lock.unlock();
         ret.clear();
-        continue;
+        restart = true;
+        break;
       }
       // Cache [node->parent] before dropping the lock.
       Node *parent = node->parent;
       node->rw_lock.unlock();
       node = parent;
+    }
+    if (restart) {
+      continue;
     }
     return {root_.hash, ret};
   }
