@@ -965,11 +965,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -982,6 +984,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   if (tx_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1002,6 +1005,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -1028,6 +1032,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     }
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -1040,11 +1045,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   x23::Vec<ProposedTransaction> txs;
   {
     for (const SignedTransactionHash &tx_hash : cache.tx_hashes) {
-      SignedTransaction *tx = scheduler_->find_tx(tx_hash);
+      std::shared_ptr<const SignedTransaction> tx =
+          scheduler_->find_tx(tx_hash);
       if (!tx) {
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);
         co_await decrement_num_validations_in_progress();
+        info("validate ret");
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       }
@@ -1072,6 +1079,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1105,6 +1113,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1132,6 +1141,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
   }
+  info("validate ret");
   co_return result;
 }
 

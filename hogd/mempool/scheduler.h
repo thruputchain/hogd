@@ -59,11 +59,22 @@ public:
   void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
                 x23::XdrVec<SignedTransaction> &txs);
 
-  SignedTransaction *find_tx(const SignedTransactionHash &tx_hash)
+  std::shared_ptr<const SignedTransaction>
+  find_tx(const SignedTransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_.find(tx_hash);
     if (tx_value_ptr) {
-      return &tx_value_ptr->tx;
+      return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
+                                                      &(*tx_value_ptr)->tx);
+    }
+    return {};
+  }
+
+  SignedTransaction *find_tx_borrowed(const SignedTransactionHash &tx_hash)
+  {
+    auto [tx_value_ptr, _] = txs_.find(tx_hash);
+    if (tx_value_ptr) {
+      return &(*tx_value_ptr)->tx;
     }
     return nullptr;
   }
@@ -179,7 +190,7 @@ private:
 
   struct AccountState {
     HogAge hog_age{};
-    std::map<TxKey, TxValue *> txs;
+    std::map<TxKey, std::shared_ptr<TxValue>> txs;
   };
 
   struct AccountKey {
@@ -210,7 +221,7 @@ private:
   // rather than have [insert_tx_into_runqueue()] increment [size_] for every
   // single tx.
   bool insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
-                               TxValue &tx_value);
+                               const std::shared_ptr<TxValue> &tx_value);
   bool add_txs_helper(const SignedTransaction &tx);
 
   // TODO(jhumphri): Give this a better name.
@@ -251,7 +262,7 @@ private:
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
-  SynchronizedMap<SignedTransactionHash, TxValue> txs_;
+  SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>> txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
   SynchronizedMap<ContractAddress, AccountState> accounts_;
 

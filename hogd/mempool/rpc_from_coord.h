@@ -191,7 +191,8 @@ public:
     x23::XdrVec<x23::BorrowedPtr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
-      x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
+      x23::BorrowedPtr<SignedTransaction> tx(
+          scheduler_->find_tx_borrowed(tx_hash));
       ret.push_back(tx);
     }
 

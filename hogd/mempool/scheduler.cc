@@ -184,16 +184,16 @@ Scheduler::get_account_key(const ContractAddress &account)
 
 bool
 Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
-                                   TxValue &tx_value)
+                                   const std::shared_ptr<TxValue> &tx_value)
 {
-  const ContractAddress &account = tx_value.tx.tx.invocation.invoked_address;
+  const ContractAddress &account = tx_value->tx.tx.invocation.invoked_address;
   const TxKey key{.expiry_block_height =
-                      tx_value.tx.tx.uniquifier.block_expiry_height,
+                      tx_value->tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
   auto [account_state, lock] = get_account_state(account);
   // Check if the tx is already present in [account_state->txs]. If it is, we
   // are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state->txs.insert({key, &tx_value}).second;
+  return account_state->txs.insert({key, tx_value}).second;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec below
@@ -202,19 +202,21 @@ bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
   const SignedTransactionHash &tx_hash = sha256(tx.tx);
-  TxValue *value = nullptr;
+  std::shared_ptr<TxValue> value;
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
     // into the scheduler again. This can happen if the tx was originally
     // added to the scheduler, then the tx was removed during nomination by
     // [schedule()], then a validated block was committed rather than the
     // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
+    const auto [tx_ptr, lock] =
+        txs_.find_or_insert(tx_hash,
+                            std::make_shared<TxValue>(TxValue{.tx = tx}));
     CHECK_PTR(tx_ptr);
-    value = tx_ptr;
+    value = *tx_ptr;
   }
 
-  return insert_tx_into_runqueue(tx_hash, *value);
+  return insert_tx_into_runqueue(tx_hash, value);
 }
 
 x23::Async<void>
@@ -480,7 +482,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
   auto [account_state, lock] = get_account_state(account);
-  std::map<TxKey, TxValue *> &txs = account_state->txs;
+  std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
   const TxKey lower_bound{.expiry_block_height = current_block(),
                           .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
@@ -584,7 +586,8 @@ Scheduler::schedule(size_t num_txs,
     const ContractAddress account = account_key.account;
     auto [account_state, account_lock] = get_account_state(account);
     HogAge *hog_ages = &account_state->hog_age;
-    std::map<TxKey, TxValue *> &txs_to_schedule = account_state->txs;
+    std::map<TxKey, std::shared_ptr<TxValue>> &txs_to_schedule =
+        account_state->txs;
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       auto it = txs_to_schedule.lower_bound(lower_bound);
@@ -720,7 +723,7 @@ Scheduler::remove_from_scheduler(
           auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
           CHECK_PTR(tx_value_ptr);
 
-          const SignedTransaction &tx = tx_value_ptr->tx;
+          const SignedTransaction &tx = (*tx_value_ptr)->tx;
           const ContractAddress &account = tx.tx.invocation.invoked_address;
           const TxKey key = {.expiry_block_height =
                                  tx.tx.uniquifier.block_expiry_height,
@@ -728,7 +731,8 @@ Scheduler::remove_from_scheduler(
           {
             auto [account_state, account_lock] =
                 scheduler.get_account_state(account);
-            std::map<TxKey, TxValue *> &txs = account_state->txs;
+            std::map<TxKey, std::shared_ptr<TxValue>> &txs =
+                account_state->txs;
             // The tx may or may not be on the runqueue. If the tx is included
             // in a block we are *nominating*, then it has already been taken
             // off of the runqueue. If the tx is included in a block we are
