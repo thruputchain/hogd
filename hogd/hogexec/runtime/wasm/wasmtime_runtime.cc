@@ -149,7 +149,7 @@ WasmtimeContext::make_new_runtime(
                                            new_runtime_result.runtime_pointer);
 }
 
-ContractVerifyResult
+bool
 WasmtimeContext::verify_contract(Contract const &contract) const
 {
   assert(wasmtime_context_ptr_);
@@ -158,7 +158,7 @@ WasmtimeContext::verify_contract(Contract const &contract) const
   // kWasmi For now, wasmtime contracts use the same WASM bytecode format as
   // wasmi
   if (contract.contract_type() != ContractType::kWasmi) {
-    return ContractVerifyResult{.success = false};
+    return false;
   }
 
   try {
@@ -169,7 +169,7 @@ WasmtimeContext::verify_contract(Contract const &contract) const
                                     wasm.size());
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
-    return ContractVerifyResult{.success = false};
+    return false;
   }
 }
 

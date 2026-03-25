@@ -16,7 +16,6 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd {
 
@@ -98,10 +97,9 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  ContractVerifyResult
-  verify_contract(Contract const & /*unused*/) const override
+  bool verify_contract(Contract const & /*unused*/) const override
   {
-    return ContractVerifyResult{.success = true};
+    return true;
   }
 
 private:

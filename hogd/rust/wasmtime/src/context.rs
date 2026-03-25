@@ -9,7 +9,7 @@ use wasmtime::{Engine, InstancePre, Linker, Module};
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
-use common::{ContractVerifyResult, SystemErrorCode};
+use common::SystemErrorCode;
 
 use crate::global_context::WasmtimeGlobalContext;
 // assert that the memory is exported and starts at at most 1 page
@@ -145,21 +145,24 @@ impl WasmtimeContext {
         Ok(Some(instance_pre))
     }
 
-    pub fn verify_contract(
-        &self,
-        contract_data: &[u8],
-    ) -> ContractVerifyResult {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
         let engine = self.engine();
         let module = match Module::new(engine, contract_data) {
             Ok(m) => m,
-            Err(e) => return ContractVerifyResult::err(e.to_string()),
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Contract verification failed: {}", e);
+                return false;
+            }
         };
         if !check_memory_limit(&module) {
-            return ContractVerifyResult::err(
-                "memory limit check failed".to_string(),
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: memory limit check failed"
             );
+            return false;
         }
-        ContractVerifyResult::ok()
+        true
     }
 }
 
@@ -206,19 +209,15 @@ pub unsafe extern "C" fn wasmtime_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
-) -> ContractVerifyResult {
+) -> bool {
     debug_assert!(!p.is_null());
-
     if contract_data_p.is_null() {
-        return ContractVerifyResult::err(
-            "null contract data pointer".to_string(),
-        );
+        #[cfg(debug_assertions)]
+        eprintln!("Contract verification failed: null contract data pointer");
+        return false;
     }
-
     let context: *const WasmtimeContext = p.cast::<WasmtimeContext>();
-
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
-
     unsafe { (*context).verify_contract(wasm) }
 }

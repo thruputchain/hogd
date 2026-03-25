@@ -36,7 +36,6 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/rust/wasmi/bindings.h"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -194,7 +193,7 @@ SystemCallHandler::perform_initial_validation()
   for (auto const &[_, contract] : newly_created_contracts_) {
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
-    if (!res.success) {
+    if (!res) {
       error("Contract verification failed");
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};

@@ -7,7 +7,6 @@
 #include "contract.hh"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd {
 
@@ -30,12 +29,12 @@ MultiplexedContext::make_new_runtime(
                                             syscall_handler);
 }
 
-ContractVerifyResult
+bool
 MultiplexedContext::verify_contract(Contract const &contract) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
-    return ContractVerifyResult{.success = false};
+    return false;
   }
   return it->second.first->verify_contract(contract);
 }

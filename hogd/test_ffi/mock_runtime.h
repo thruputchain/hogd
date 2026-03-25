@@ -12,7 +12,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/rust/wasmi/bindings.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
@@ -41,7 +40,7 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  ContractVerifyResult verify_contract(Contract const &contract) const override
+  bool verify_contract(Contract const &contract) const override
   {
     return base_context_->verify_contract(contract);
   };

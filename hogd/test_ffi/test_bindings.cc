@@ -30,7 +30,6 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
-#include "hogd/rust/wasmi/bindings.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
@@ -598,8 +597,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   // Verify wasm contracts before storing — reject contracts that would
   // fail during instantiation (e.g., memory exceeding limits).
   if (contract.contract_type() == ContractType::kWasmi) {
-    auto verify_result = (*context_cast)->verify_contract(contract);
-    if (!verify_result.success) {
+    if (!(*context_cast)->verify_contract(contract)) {
       return kTestFFIErrorCodeContractVerificationFailed;
     }
   }
@@ -807,15 +805,10 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     contract.wasmi_contract().wasm.append_range(
         std::span(contract_bytes, contract_len));
 
-    auto result = rc->verify_contract(contract);
-
-    if (result.success) {
-      return VerifyContractResult{.success = 1,
-                                  .ffi_error_code = kTestFFIErrorCodeNone};
-    }
-
-    return VerifyContractResult{.success = 0,
-                                .ffi_error_code = kTestFFIErrorCodeNone};
+    bool valid = rc->verify_contract(contract);
+    return VerifyContractResult{
+        .success = valid ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0),
+        .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error in do_verify_contract: {}", e);
     return VerifyContractResult{.success = 0,
