@@ -145,14 +145,19 @@ impl WasmtimeContext {
         Ok(Some(instance_pre))
     }
 
-    pub fn verify_contract(&self, contract_data: &[u8]) -> ContractVerifyResult {
+    pub fn verify_contract(
+        &self,
+        contract_data: &[u8],
+    ) -> ContractVerifyResult {
         let engine = self.engine();
         let module = match Module::new(engine, contract_data) {
             Ok(m) => m,
             Err(e) => return ContractVerifyResult::err(e.to_string()),
         };
         if !check_memory_limit(&module) {
-            return ContractVerifyResult::err("memory limit check failed".to_string());
+            return ContractVerifyResult::err(
+                "memory limit check failed".to_string(),
+            );
         }
         ContractVerifyResult::ok()
     }
@@ -205,7 +210,9 @@ pub unsafe extern "C" fn wasmtime_verify_contract(
     debug_assert!(!p.is_null());
 
     if contract_data_p.is_null() {
-        return ContractVerifyResult::err("null contract data pointer".to_string());
+        return ContractVerifyResult::err(
+            "null contract data pointer".to_string(),
+        );
     }
 
     let context: *const WasmtimeContext = p.cast::<WasmtimeContext>();

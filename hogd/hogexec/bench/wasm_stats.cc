@@ -71,9 +71,8 @@ process_contract(std::string const &contract_name, std::string const &filename)
   CHECK(framework.get_syscall_handler() != nullptr);
 
   // Create runtime
-  auto runtime_result =
-      framework.get_context()->make_new_runtime(deployed_hash,
-                                                framework.get_syscall_handler());
+  auto runtime_result = framework.get_context()->make_new_runtime(
+      deployed_hash, framework.get_syscall_handler());
 
   if (!runtime_result.has_value()) {
     std::println(stderr, "Failed to create runtime for {}", contract_name);

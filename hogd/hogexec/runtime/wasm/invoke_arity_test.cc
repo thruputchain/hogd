@@ -154,9 +154,8 @@ protected:
     link_fn("test", "arg8", &arity8);
     make_syscall_handler(contract);
 
-    auto runtime_res =
-        get_context()->make_new_runtime(deployed_contract_hash,
-                                        get_syscall_handler());
+    auto runtime_res = get_context()->make_new_runtime(deployed_contract_hash,
+                                                       get_syscall_handler());
     ASSERT_TRUE(runtime_res.has_value());
     runtime_ = std::move(runtime_res.value());
 

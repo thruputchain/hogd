@@ -135,8 +135,7 @@ WasmtimeContext::make_new_runtime(
 
   NewWasmtimeRuntimeResult new_runtime_result =
       new_wasmtime_runtime(deployed_contract_hash.hash.data(),
-                           host_call_context.get(),
-                           wasmtime_context_ptr_);
+                           host_call_context.get(), wasmtime_context_ptr_);
 
   if (new_runtime_result.err_code != 0) [[unlikely]] {
     return SystemError::from_raw_error_code(new_runtime_result.err_code);

@@ -144,8 +144,7 @@ WasmiContext::make_new_runtime(
 
   NewWasmiRuntimeResult new_runtime_result =
       new_wasmi_runtime(deployed_contract_hash.hash.data(),
-                        host_call_context.get(),
-                        wasmi_context_ptr_);
+                        host_call_context.get(), wasmi_context_ptr_);
 
   if (new_runtime_result.err_code != 0) {
     return SystemError::from_raw_error_code(new_runtime_result.err_code);

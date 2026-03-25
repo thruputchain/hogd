@@ -286,10 +286,9 @@ struct VerifyContractResult {
 // Verify a contract's wasm bytecode against the current runtime context.
 // context: returned by open_runtime_context().
 // contract_bytes/contract_len: raw wasm bytecode to validate.
-struct VerifyContractResult
-do_verify_contract(void *context,
-                   const uint8_t *contract_bytes,
-                   uint32_t contract_len);
+struct VerifyContractResult do_verify_contract(void *context,
+                                               const uint8_t *contract_bytes,
+                                               uint32_t contract_len);
 
 #ifdef __cplusplus
 }

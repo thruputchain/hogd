@@ -98,7 +98,8 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  ContractVerifyResult verify_contract(Contract const & /*unused*/) const override
+  ContractVerifyResult
+  verify_contract(Contract const & /*unused*/) const override
   {
     return ContractVerifyResult{.success = true};
   }

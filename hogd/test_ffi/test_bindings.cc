@@ -30,13 +30,13 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
+#include "hogd/rust/wasmi/bindings.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
 #include "hogd/test_ffi/ffi_error.h"
 #include "hogd/test_ffi/formatter.h" // IWYU pragma: keep
 #include "hogd/test_ffi/logger.h"
-#include "hogd/rust/wasmi/bindings.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
@@ -793,14 +793,13 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
                         uint32_t contract_len) noexcept
 {
   if (context == nullptr || contract_bytes == nullptr) {
-    return VerifyContractResult{
-        .success = 0,
-        .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    return VerifyContractResult{.success = 0,
+                                .ffi_error_code =
+                                    kTestFFIErrorCodeInvalidPointer};
   }
 
   try {
-    auto *rc_ptr =
-        static_cast<std::shared_ptr<MockRuntimeContext> *>(context);
+    auto *rc_ptr = static_cast<std::shared_ptr<MockRuntimeContext> *>(context);
     CHECK(*rc_ptr != nullptr);
     auto *rc = rc_ptr->get();
 
@@ -811,18 +810,17 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     auto result = rc->verify_contract(contract);
 
     if (result.success) {
-      return VerifyContractResult{
-          .success = 1,
-          .ffi_error_code = kTestFFIErrorCodeNone};
+      return VerifyContractResult{.success = 1,
+                                  .ffi_error_code = kTestFFIErrorCodeNone};
     }
 
     return VerifyContractResult{.success = 0,
                                 .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error in do_verify_contract: {}", e);
-    return VerifyContractResult{
-        .success = 0,
-        .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+    return VerifyContractResult{.success = 0,
+                                .ffi_error_code =
+                                    kTestFFIErrorCodeUnrecoverableError};
   }
 }
 
@@ -1174,8 +1172,7 @@ verify_signed_transaction_auth_from_db(void *db,
 }
 
 VerifyContractResult
-do_verify_contract(void *context,
-                   const uint8_t *contract_bytes,
+do_verify_contract(void *context, const uint8_t *contract_bytes,
                    uint32_t contract_len)
 {
   hogd::do_ffi_trace(

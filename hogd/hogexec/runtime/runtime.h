@@ -132,7 +132,8 @@ public:
 
   // Perform any required validation checks on the contract.
   // In the case of webassembly, this is the webassembly validator.
-  virtual ContractVerifyResult verify_contract(Contract const &contract) const = 0;
+  virtual ContractVerifyResult
+  verify_contract(Contract const &contract) const = 0;
 
   virtual SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,

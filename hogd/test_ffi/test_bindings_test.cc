@@ -2867,9 +2867,10 @@ TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
 
   auto wasm = test::load_wasm_from_file("test_large_memory.wasm");
 
-  auto result = do_verify_contract(rc, reinterpret_cast<const uint8_t *>(
-                                           wasm.wasm.data()),
-                                   wasm.wasm.size());
+  auto result =
+      do_verify_contract(rc,
+                         reinterpret_cast<const uint8_t *>(wasm.wasm.data()),
+                         wasm.wasm.size());
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.success, 0);
 }
