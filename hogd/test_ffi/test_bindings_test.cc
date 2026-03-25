@@ -2831,4 +2831,63 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
   }
 }
 
+// Test that setup_create_contract rejects wasm contracts with memory
+// exceeding the allowed limit. A module with 100 initial pages should
+// be rejected by verification.
+TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // Minimal valid wasm module with 100-page initial memory (6.4 MB).
+  // This exceeds the 1-page (64 KB) memory limit enforced by the runtime.
+  // Structure: magic + version + memory_section(100 pages) + export_section("memory")
+  uint8_t large_memory_wasm[] = {
+      0x00, 0x61, 0x73, 0x6d, // magic
+      0x01, 0x00, 0x00, 0x00, // version 1
+      // Memory section (id=5, len=3): 1 memory, no max, initial=100
+      0x05, 0x03, 0x01, 0x00, 0x64,
+      // Export section (id=7, len=10): export "memory" as memory[0]
+      0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+  };
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract().wasm.append_range(
+      std::span(large_memory_wasm, sizeof(large_memory_wasm)));
+
+  auto bytes = x23::serialize(contract);
+
+  // setup_create_contract should reject this contract because its memory
+  // exceeds the allowed limit. Before the fix, this would succeed and the
+  // contract would fail later with an Unrecoverable error during instantiation.
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_NE(result, kTestFFIErrorCodeNone);
+}
+
+// Test that do_verify_contract returns failure for wasm with large memory.
+TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
+{
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  // Same minimal wasm with 100-page memory
+  uint8_t large_memory_wasm[] = {
+      0x00, 0x61, 0x73, 0x6d,
+      0x01, 0x00, 0x00, 0x00,
+      0x05, 0x03, 0x01, 0x00, 0x64,
+      0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+  };
+
+  auto result = do_verify_contract(rc, large_memory_wasm,
+                                   sizeof(large_memory_wasm));
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(result.success, 0);
+}
+
 } // namespace hogd

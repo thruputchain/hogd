@@ -595,6 +595,15 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
   }
 
+  // Verify wasm contracts before storing — reject contracts that would
+  // fail during instantiation (e.g., memory exceeding limits).
+  if (contract.contract_type() == ContractType::kWasmi) {
+    auto verify_result = (*context_cast)->verify_contract(contract);
+    if (!verify_result.success) {
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+  }
+
   auto h = sha256(contract);
 
   db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
