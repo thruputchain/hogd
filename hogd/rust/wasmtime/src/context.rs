@@ -147,8 +147,22 @@ impl WasmtimeContext {
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
         let engine = self.engine();
-        Module::validate(engine, contract_data).is_ok()
-        // TODO(geoff): consider validating that contract memory exports are good and no start function
+        let module = match Module::new(engine, contract_data) {
+            Ok(m) => m,
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Contract verification failed: {}", e);
+                return false;
+            }
+        };
+        if !check_memory_limit(&module) {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: memory limit check failed"
+            );
+            return false;
+        }
+        true
     }
 }
 
@@ -197,16 +211,13 @@ pub unsafe extern "C" fn wasmtime_verify_contract(
     contract_size: usize,
 ) -> bool {
     debug_assert!(!p.is_null());
-
-    // empty contract might trigger this case.
     if contract_data_p.is_null() {
+        #[cfg(debug_assertions)]
+        eprintln!("Contract verification failed: null contract data pointer");
         return false;
     }
-
     let context: *const WasmtimeContext = p.cast::<WasmtimeContext>();
-
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
-
     unsafe { (*context).verify_contract(wasm) }
 }

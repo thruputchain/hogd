@@ -109,6 +109,12 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_oob_element_segment.wasm
 )
 
+wat2wasm_target(
+  test_large_memory_wasm
+  wat/test_large_memory.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_large_memory.wasm
+)
+
 add_dependencies(
   wasm_runtime_test_objects
   all_wasm_headers

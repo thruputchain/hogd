@@ -153,4 +153,8 @@ target_link_libraries(
   runtime_test_util
   GTest::gtest
 )
+add_dependencies(
+  test_ffi_test
+  test_large_memory_wasm
+)
 gtest_discover_tests(test_ffi_test)

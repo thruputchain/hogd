@@ -593,6 +593,14 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
   }
 
+  // Verify wasm contracts before storing — reject contracts that would
+  // fail during instantiation (e.g., memory exceeding limits).
+  if (contract.contract_type() == ContractType::kWasmi) {
+    if (!(*context_cast)->verify_contract(contract)) {
+      return kTestFFIErrorCodeContractVerificationFailed;
+    }
+  }
+
   auto h = sha256(contract);
 
   db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
@@ -774,6 +782,41 @@ verify_signed_transaction_auth_from_db_impl(
     log_error("error during verify_signed_transaction_auth_from_db: {}", e);
     return make_ffi_result_type<VerifyAuthResultFromDBResult>(
         kTestFFIErrorCodeUnrecoverableError);
+  }
+}
+
+VerifyContractResult
+do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
+                        uint32_t contract_len) noexcept
+{
+  if (context == nullptr || contract_bytes == nullptr) {
+    return VerifyContractResult{.success = 0,
+                                .ffi_error_code =
+                                    kTestFFIErrorCodeInvalidPointer};
+  }
+
+  try {
+    auto *rc_ptr = static_cast<std::shared_ptr<MockRuntimeContext> *>(context);
+    CHECK(*rc_ptr != nullptr);
+    auto *rc = rc_ptr->get();
+
+    Contract contract;
+    x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
+
+    bool valid = rc->verify_contract(contract);
+    return VerifyContractResult{.success = valid ? static_cast<uint8_t>(1)
+                                                 : static_cast<uint8_t>(0),
+                                .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (x23::XdrException const &e) {
+    log_error("error deserializing contract in do_verify_contract: {}", e);
+    return VerifyContractResult{.success = 0,
+                                .ffi_error_code =
+                                    kTestFFIErrorCodeDeserializeError};
+  } catch (std::exception const &e) {
+    log_error("error in do_verify_contract: {}", e);
+    return VerifyContractResult{.success = 0,
+                                .ffi_error_code =
+                                    kTestFFIErrorCodeUnrecoverableError};
   }
 }
 
@@ -1121,6 +1164,24 @@ verify_signed_transaction_auth_from_db(void *db,
                      "signed_tx={}, signed_tx_len={}) -> {}",
                      db, static_cast<const void *>(signed_tx.data),
                      signed_tx.len, result);
+  return result;
+}
+
+VerifyContractResult
+do_verify_contract(void *context, const uint8_t *contract_bytes,
+                   uint32_t contract_len)
+{
+  hogd::do_ffi_trace(
+      "FFI (start): do_verify_contract(context={}, contract_bytes={}, "
+      "contract_len={})",
+      context, static_cast<const void *>(contract_bytes), contract_len);
+  auto result =
+      hogd::do_verify_contract_impl(context, contract_bytes, contract_len);
+  hogd::do_ffi_trace(
+      "FFI (end): do_verify_contract(context={}, contract_bytes={}, "
+      "contract_len={}) -> success={}, ffi_error={}",
+      context, static_cast<const void *>(contract_bytes), contract_len,
+      result.success, result.ffi_error_code);
   return result;
 }
 

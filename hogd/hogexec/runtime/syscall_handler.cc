@@ -194,6 +194,7 @@ SystemCallHandler::perform_initial_validation()
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
+      error("Contract verification failed");
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};
     }
@@ -737,7 +738,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_.make_new_runtime(*deployed_hash, this, false);
+  return runtime_context_.make_new_runtime(*deployed_hash, this);
 }
 
 Calldata const &

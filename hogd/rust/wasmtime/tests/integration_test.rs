@@ -271,14 +271,10 @@ fn test_create_runtime() {
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
         // Create a runtime with null host context (no syscalls needed for basic test)
-        let runtime = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime.is_null(), "Should successfully create runtime");
 
@@ -303,14 +299,10 @@ fn test_get_memory() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let runtime = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
         assert!(!runtime.is_null());
 
         // Get the memory
@@ -344,14 +336,10 @@ fn test_invoke_function() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let runtime = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -385,14 +373,10 @@ fn test_gas_metering() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let runtime = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -457,23 +441,15 @@ fn test_multiple_runtimes() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let runtime1 = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime1 =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
-        let runtime2 = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime2 =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime1.is_null());
         assert!(!runtime2.is_null());
@@ -502,14 +478,10 @@ fn test_fibonacci_computation() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let runtime = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -549,14 +521,10 @@ fn test_fibonacci_computation_overflow() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let runtime = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -647,39 +615,27 @@ fn test_module_cache() {
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
         // Create first runtime - this should compile and cache the module
-        let runtime1 = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime1 =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime1.is_null(), "First runtime should be created");
 
         // Create second runtime with same hash - should use cached module
-        let runtime2 = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime2 =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime2.is_null(), "Second runtime should be created");
 
         // Create third runtime with different hash (fibonacci) - should cache separately
         let fibonacci_hash = [1u8; 32];
-        let runtime3 = new_wasmtime_runtime(
-            fibonacci_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        )
-        .get()
-        .unwrap();
+        let runtime3 =
+            new_wasmtime_runtime(fibonacci_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
 
         assert!(!runtime3.is_null(), "Third runtime should be created");
 
@@ -728,12 +684,8 @@ fn test_audit_1_oob_data_segment_instantiation() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let result = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        );
+        let result =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context);
 
         // After fix: err_code == 0 but runtime pointer is null
         // (same convention as other module-level failures like check_memory_limit)
@@ -768,12 +720,8 @@ fn test_audit_1_oob_element_segment_instantiation() {
         let context_ptr: *mut c_void =
             core::mem::transmute(Box::into_raw(Box::new(1)));
 
-        let result = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        );
+        let result =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context);
 
         let runtime_ptr = result.get().unwrap();
         assert!(
@@ -807,7 +755,6 @@ fn test_pool_exhaustion_returns_system_error() {
             let result = new_wasmtime_runtime(
                 contract_hash.as_ptr(),
                 context_ptr,
-                false,
                 context,
             );
             let runtime_ptr = result
@@ -820,12 +767,8 @@ fn test_pool_exhaustion_returns_system_error() {
             runtimes.push(runtime_ptr);
         }
 
-        let exhausted_result = new_wasmtime_runtime(
-            contract_hash.as_ptr(),
-            context_ptr,
-            false,
-            context,
-        );
+        let exhausted_result =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context);
         assert!(
             exhausted_result.get().is_none(),
             "Expected err_code != 0 on pool exhaustion, not panic"

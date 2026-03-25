@@ -7,6 +7,7 @@ use core::slice;
 
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use crate::wasmi_error::TrampolineError;
+use crate::wasmi_runtime::check_memory_limit;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
@@ -252,9 +253,23 @@ impl WasmiContext {
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        // TODO(geoff): consider caching the engine
         let engine = Self::new_engine();
-        Module::validate(&engine, contract_data).is_ok()
+        let module = match Module::new(&engine, contract_data) {
+            Ok(m) => m,
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Contract verification failed: {}", e);
+                return false;
+            }
+        };
+        if !check_memory_limit(&module) {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: memory limit check failed"
+            );
+            return false;
+        }
+        true
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);
@@ -500,16 +515,13 @@ pub unsafe extern "C" fn wasmi_verify_contract(
     contract_size: usize,
 ) -> bool {
     debug_assert!(!p.is_null());
-
-    // empty contract might trigger this case.
     if contract_data_p.is_null() {
+        #[cfg(debug_assertions)]
+        eprintln!("Contract verification failed: null contract data pointer");
         return false;
     }
-
     let context: *const WasmiContext = p.cast::<WasmiContext>();
-
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
-
     unsafe { (*context).verify_contract(wasm) }
 }

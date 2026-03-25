@@ -40,7 +40,7 @@ MockRuntime::invoke_internal(std::string_view method_name)
 SystemStatus<std::unique_ptr<Runtime>>
 MockRuntimeContext::make_new_runtime(
     DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler, bool do_contract_verify)
+    SystemCallHandler *syscall_handler)
 {
   if (deployed_contract_hash.contract_type == ContractType::kMockTest) {
 
@@ -72,7 +72,7 @@ MockRuntimeContext::make_new_runtime(
   // otherwise some other contract type; returns whatever the base context
   // wants to do with the contract.
   return base_context_->make_new_runtime(deployed_contract_hash,
-                                         syscall_handler, do_contract_verify);
+                                         syscall_handler);
 }
 
 } // namespace hogd
