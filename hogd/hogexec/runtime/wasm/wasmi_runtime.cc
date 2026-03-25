@@ -161,19 +161,24 @@ WasmiContext::make_new_runtime(
                                         wasmi_runtime_ptr);
 }
 
-bool
+ContractVerifyResult
 WasmiContext::verify_contract(Contract const &contract) const
 {
   assert(wasmi_context_ptr_);
 
   if (contract.contract_type() != ContractType::kWasmi) {
-    return false;
+    return ContractVerifyResult{.success = false, .detail = nullptr};
   }
 
-  return wasmi_verify_contract(wasmi_context_ptr_,
-                               reinterpret_cast<const uint8_t *>(
-                                   contract.wasmi_contract().wasm.data()),
-                               contract.wasmi_contract().wasm.size());
+  try {
+    return wasmi_verify_contract(wasmi_context_ptr_,
+                                 reinterpret_cast<const uint8_t *>(
+                                     contract.wasmi_contract().wasm.data()),
+                                 contract.wasmi_contract().wasm.size());
+  } catch (x23::XdrBadUnionAccess const &e) {
+    error("Unrecoverable: Bad union access: {}", e.what());
+    return ContractVerifyResult{.success = false, .detail = nullptr};
+  }
 }
 
 std::span<std::byte>

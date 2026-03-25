@@ -24,7 +24,7 @@ public:
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) override;
 
-  bool verify_contract(Contract const &contract) const override;
+  ContractVerifyResult verify_contract(Contract const &contract) const override;
 
   ~MultiplexedContext() override
   {

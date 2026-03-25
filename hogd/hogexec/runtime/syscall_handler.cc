@@ -194,7 +194,15 @@ SystemCallHandler::perform_initial_validation()
   for (auto const &[_, contract] : newly_created_contracts_) {
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
-    if (!res) {
+    if (!res.success) {
+      if (res.detail != nullptr) {
+        error("Contract verification failed: {}",
+              std::string_view(reinterpret_cast<char const *>(res.detail->error_msg),
+                               res.detail->error_msg_len));
+        free_contract_verify_error_detail(res.detail);
+      } else {
+        error("Contract verification failed");
+      }
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};
     }

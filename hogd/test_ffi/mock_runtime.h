@@ -12,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/rust/wasmi/bindings.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
@@ -41,9 +42,9 @@ public:
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) override;
 
-  bool verify_contract(Contract const & /*unused*/) const override
+  ContractVerifyResult verify_contract(Contract const &contract) const override
   {
-    return true;
+    return base_context_->verify_contract(contract);
   };
 
   // Sets the function pointer and context that a mocked contract calls into.
