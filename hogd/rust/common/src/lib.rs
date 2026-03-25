@@ -2,6 +2,9 @@ pub use hogexec_internal::ffi_enums::*;
 
 pub mod contract_loader;
 
+pub mod contract_verify_result;
+pub use contract_verify_result::*;
+
 mod trampoline_bindings;
 pub use trampoline_bindings::*;
 
