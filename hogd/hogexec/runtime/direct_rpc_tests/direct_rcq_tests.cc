@@ -3535,5 +3535,95 @@ TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
 }
 
+// FullSubtransactionRollbackReleasesRCQLock
+//
+// Insert into an RCQ in a subtransaction, then pop that subtransaction
+// entirely (no outer frame touched the key). This exercises the
+// try_atomic_change_lock(before=delta, after=nullptr) path — the full
+// lock release during rollback. After rollback, verify the key doesn't
+// appear in committed state.
+TEST_F(DirectRCQTests, FullSubtransactionRollbackReleasesRCQLock)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_full_release");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Push a subtransaction that inserts into the RCQ.
+  tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0xAA})}),
+               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Pop it — this is the ONLY subtransaction that touched this key,
+  // so modify_lock is called with after=nullptr, fully releasing the lock.
+  auto pop_r = tx.pop_subtransactions(1);
+  ASSERT_TRUE(pop_r.has_value()) << "pop_subtransactions returned error";
+
+  // Commit the (now empty) transaction.
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+
+  // The RCQ should not exist — the insert was fully rolled back.
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
+// ConsumeThreeBlocksInOneDelta
+//
+// Build a 3-block RCQ (one entry per block), then consume all 3 blocks
+// in a single delta. This exercises the intermediate block iteration loop
+// in try_atomic_change_lock (lines 255-261 of retrocausal_queue_lock.cc)
+// which reads each intermediate block from the DAO to count consumed entries.
+TEST_F(DirectRCQTests, ConsumeThreeBlocksInOneDelta)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_three_block_consume");
+
+  // Block 1: insert entry {1}.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 2: insert entry {2}.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({2})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  // Block 3: insert entry {3}.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_insert_delta({make_rcq_entry({3})}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  advance_block();
+
+  // Now consume all 3 blocks at once: max_fully_consumed_block_number=3,
+  // partial_consumed_number=0. This means:
+  //   - First block (block 1): consumed entirely (1 entry)
+  //   - Intermediate block (block 2): consumed entirely (1 entry) — this
+  //     is the loop at line 255 that was previously uncovered
+  //   - The consume stops at block 3 (fully consumed, partial=0)
+  auto tx4 = make_new_per_tx_db_proxy();
+  tx4.add_delta(key, make_rcq_consume_delta(3, 0, {}),
+                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  r = tx4.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx4.commit_transaction({}).has_value());
+  advance_block();
+
+  // The RCQ should be empty (all 3 entries consumed, 0 live).
+  ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
