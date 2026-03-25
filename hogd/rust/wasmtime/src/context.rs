@@ -117,8 +117,8 @@ impl WasmtimeContext {
         // Instead, if the module has a start function, it will fail to instantiate a new runtime
         // as we supply no fuel during instantiation.
 
-        let instance_pre =
-            Arc::new(match self.linker().instantiate_pre(&module) {
+        let instance_pre = Arc::new(
+            match self.linker().instantiate_pre(&module) {
                 Ok(instance_pre) => instance_pre,
                 Err(e) => {
                     debug_log!(eprintln!("Error instantiating store: {e}"));
@@ -128,13 +128,14 @@ impl WasmtimeContext {
                         }
                         None => {
                             debug_log!(eprintln!(
-                                "Error instantiating store: {e}"
+                                "Unrecoverable: Unknown error instantiating store: {e}"
                             ));
                             return Err(SystemErrorCode::kSystemUnrecoverable);
                         }
                     }
                 }
-            });
+            },
+        );
 
         self.global_context.instance_pre_cache().put(
             hash,
