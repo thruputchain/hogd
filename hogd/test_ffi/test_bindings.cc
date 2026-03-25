@@ -801,14 +801,18 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     CHECK(*rc_ptr != nullptr);
     auto *rc = rc_ptr->get();
 
-    Contract contract(ContractType::kWasmi);
-    contract.wasmi_contract().wasm.append_range(
-        std::span(contract_bytes, contract_len));
+    Contract contract;
+    x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
 
     bool valid = rc->verify_contract(contract);
     return VerifyContractResult{
         .success = valid ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0),
         .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (x23::XdrException const &e) {
+    log_error("error deserializing contract in do_verify_contract: {}", e);
+    return VerifyContractResult{.success = 0,
+                                .ffi_error_code =
+                                    kTestFFIErrorCodeDeserializeError};
   } catch (std::exception const &e) {
     log_error("error in do_verify_contract: {}", e);
     return VerifyContractResult{.success = 0,

@@ -283,9 +283,10 @@ struct VerifyContractResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
-// Verify a contract's wasm bytecode against the current runtime context.
+// Verify a serialized Contract against the current runtime context.
 // context: returned by open_runtime_context().
-// contract_bytes/contract_len: raw wasm bytecode to validate.
+// contract_bytes/contract_len: XDR-serialized Contract (same format as
+//                              setup_create_contract).
 struct VerifyContractResult do_verify_contract(void *context,
                                                const uint8_t *contract_bytes,
                                                uint32_t contract_len);

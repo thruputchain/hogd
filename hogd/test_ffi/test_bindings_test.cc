@@ -2865,12 +2865,13 @@ TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
   ASSERT_NE(rc, nullptr);
   x23::Defer d([rc] { close_runtime_context(rc); });
 
-  auto wasm = test::load_wasm_from_file("test_large_memory.wasm");
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_large_memory.wasm");
 
-  auto result =
-      do_verify_contract(rc,
-                         reinterpret_cast<const uint8_t *>(wasm.wasm.data()),
-                         wasm.wasm.size());
+  auto bytes = x23::serialize(contract);
+
+  auto result = do_verify_contract(rc, bytes.data(), bytes.size());
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.success, 0);
 }
