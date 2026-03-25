@@ -152,7 +152,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
 
   auto runtime_res =
-      context->make_new_runtime(deployed_contract_hash, &handler, true);
+      context->make_new_runtime(deployed_contract_hash, &handler);
   ASSERT_TRUE(runtime_res.has_value());
   auto runtime = std::move(runtime_res.value());
   ASSERT_TRUE(runtime != nullptr);

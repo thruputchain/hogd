@@ -10,7 +10,7 @@ extern "C" {
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
 #define TEST_FFI_VERSION_MINOR 11
-#define TEST_FFI_VERSION_PATCH 5
+#define TEST_FFI_VERSION_PATCH 6
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -25,6 +25,8 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeDeserializeError = 4,
   // Unrecoverable error of unknown type
   kTestFFIErrorCodeUnrecoverableError = 5,
+  // Contract failed wasm verification (e.g., memory exceeds limits)
+  kTestFFIErrorCodeContractVerificationFailed = 6,
 };
 
 enum TestFFILogLevel {
@@ -272,6 +274,22 @@ struct VerifyAuthResultFromDBResult {
 // signed_tx: serialized SignedTransaction
 struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
     void *db, struct FFISerializedSignedTransaction signed_tx);
+
+// Result of contract wasm verification.
+struct VerifyContractResult {
+  // 1 if contract is valid, 0 if invalid
+  uint8_t success;
+  // FFI-level error code
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Verify a serialized Contract against the current runtime context.
+// context: returned by open_runtime_context().
+// contract_bytes/contract_len: XDR-serialized Contract (same format as
+//                              setup_create_contract).
+struct VerifyContractResult do_verify_contract(void *context,
+                                               const uint8_t *contract_bytes,
+                                               uint32_t contract_len);
 
 #ifdef __cplusplus
 }

@@ -102,8 +102,7 @@ public:
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
-                   SystemCallHandler *syscall_handler,
-                   bool do_contract_verify) override;
+                   SystemCallHandler *syscall_handler) override;
 
   bool verify_contract(Contract const &contract) const override;
 

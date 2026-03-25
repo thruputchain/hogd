@@ -5,6 +5,7 @@ _advance_new_block
 _close_runtime_context
 _close_syscall_handler
 _create_db
+_do_verify_contract
 _enable_syscall_logging
 _finish_mock_invocation_frame
 _free_db

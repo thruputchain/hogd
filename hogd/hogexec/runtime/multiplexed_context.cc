@@ -19,15 +19,14 @@ MultiplexedContext::MultiplexedContext(
 SystemStatus<std::unique_ptr<Runtime>>
 MultiplexedContext::make_new_runtime(
     DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler, bool do_contract_verify)
+    SystemCallHandler *syscall_handler)
 {
   auto it = contexts_.find(deployed_contract_hash.contract_type);
   if (it == contexts_.end()) {
     return nullptr;
   }
   return it->second.first->make_new_runtime(deployed_contract_hash,
-                                            syscall_handler,
-                                            do_contract_verify);
+                                            syscall_handler);
 }
 
 bool

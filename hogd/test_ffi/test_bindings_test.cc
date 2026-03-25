@@ -19,6 +19,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -2829,6 +2830,50 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
   for (auto &th : threads) {
     th.join();
   }
+}
+
+// Test that setup_create_contract rejects wasm contracts with memory
+// exceeding the allowed limit. See wat/test_large_memory.wat (100 initial
+// pages, well above the 1-page limit).
+TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_large_memory.wasm");
+
+  auto bytes = x23::serialize(contract);
+
+  // setup_create_contract should reject this contract because its memory
+  // exceeds the allowed limit. Before the fix, this would succeed and the
+  // contract would fail later with an Unrecoverable error during instantiation.
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
+}
+
+// Test that do_verify_contract returns failure for wasm with large memory.
+TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
+{
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_large_memory.wasm");
+
+  auto bytes = x23::serialize(contract);
+
+  auto result = do_verify_contract(rc, bytes.data(), bytes.size());
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(result.success, 0);
 }
 
 } // namespace hogd

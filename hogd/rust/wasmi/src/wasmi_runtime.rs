@@ -33,7 +33,7 @@ pub struct WasmiRuntime {
 use crate::wasmi_debug_log as debug_log;
 
 // assert that the memory is exported and starts at at most 1 page
-fn check_memory_limit(module: &Module) -> bool {
+pub(crate) fn check_memory_limit(module: &Module) -> bool {
     let export = module.get_export("memory");
     if export.is_none() {
         debug_log!(eprintln!("\"memory\" not exported from module"));
@@ -212,7 +212,6 @@ impl NewWasmiRuntimeResult {
 pub unsafe extern "C" fn new_wasmi_runtime(
     hash: *const u8,      // 32 bytes
     userctx: *mut c_void, // *HostCallContext
-    do_verify_contract: bool,
     wasmi_context_ptr: *mut c_void,
 ) -> NewWasmiRuntimeResult {
     if hash.is_null() || wasmi_context_ptr.is_null() {
@@ -235,10 +234,6 @@ pub unsafe extern "C" fn new_wasmi_runtime(
             return NewWasmiRuntimeResult::new(Err(code));
         }
     };
-
-    if do_verify_contract && !wasmi_context.verify_contract(slice) {
-        return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
-    }
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
         Some(res) => Box::new(res),

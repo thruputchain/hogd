@@ -27,7 +27,7 @@ TEST_P(InstantiateTest, MissingImportFail)
 
   make_syscall_handler(contract);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
@@ -45,7 +45,7 @@ TEST_P(InstantiateTest, InstantiateFail)
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
@@ -63,7 +63,7 @@ TEST_P(InstantiateTest, InstantiateUnexportedMemory)
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
 
   EXPECT_FALSE(runtime.value());
@@ -81,7 +81,7 @@ TEST_P(InstantiateTest, InstantiateNoStart)
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
@@ -102,7 +102,7 @@ TEST_P(InstantiateTest, InstantiateOobDataSegment)
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
@@ -123,7 +123,7 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
       .contract_type = ContractType::kWasmi,
   };
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }

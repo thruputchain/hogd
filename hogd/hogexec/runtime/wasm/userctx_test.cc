@@ -55,7 +55,7 @@ protected:
 TEST_P(UserCtxTest, CheckCtxCorrect)
 {
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 get_syscall_handler(), true);
+                                                 get_syscall_handler());
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
