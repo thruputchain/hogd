@@ -100,7 +100,7 @@ public:
 
   ContractVerifyResult verify_contract(Contract const & /*unused*/) const override
   {
-    return ContractVerifyResult{.success = true, .detail = nullptr};
+    return ContractVerifyResult{.success = true};
   }
 
 private:

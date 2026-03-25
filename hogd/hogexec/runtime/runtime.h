@@ -19,7 +19,6 @@
 namespace hogd {
 
 struct ContractVerifyResult;
-struct ContractVerifyErrorDetail;
 
 // Context to be passed into a host function call
 class SystemCallHandler;

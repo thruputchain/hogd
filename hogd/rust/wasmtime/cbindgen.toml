@@ -61,7 +61,7 @@ parse_deps = true
 include = ["common"]
 exclude = []
 clean = false
-extra_bindings = ["common"]
+extra_bindings = []
 
 [parse.expand]
 crates = []

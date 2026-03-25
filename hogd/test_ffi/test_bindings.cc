@@ -786,7 +786,6 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
   if (context == nullptr || contract_bytes == nullptr) {
     return VerifyContractResult{
         .success = 0,
-        .error_message = kNullBuffer,
         .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
   }
 
@@ -805,29 +804,15 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     if (result.success) {
       return VerifyContractResult{
           .success = 1,
-          .error_message = kNullBuffer,
           .ffi_error_code = kTestFFIErrorCodeNone};
     }
 
-    FFIDataBuffer error_buf = kNullBuffer;
-    if (result.detail != nullptr) {
-      auto buf = make_new_data_buffer(result.detail->error_msg_len);
-      if (buf.has_value() && buf.value().data != nullptr) {
-        std::memcpy(buf.value().data, result.detail->error_msg,
-                    result.detail->error_msg_len);
-        error_buf = buf.value();
-      }
-      free_contract_verify_error_detail(result.detail);
-    }
-
     return VerifyContractResult{.success = 0,
-                                .error_message = error_buf,
                                 .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error in do_verify_contract: {}", e);
     return VerifyContractResult{
         .success = 0,
-        .error_message = kNullBuffer,
         .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
 }

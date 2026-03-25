@@ -35,7 +35,7 @@ MultiplexedContext::verify_contract(Contract const &contract) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
-    return ContractVerifyResult{.success = false, .detail = nullptr};
+    return ContractVerifyResult{.success = false};
   }
   return it->second.first->verify_contract(contract);
 }

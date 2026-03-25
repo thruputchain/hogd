@@ -277,10 +277,6 @@ struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
 struct VerifyContractResult {
   // 1 if contract is valid, 0 if invalid
   uint8_t success;
-  // On failure (debug builds only): UTF-8 error message from the wasm validator.
-  // On success or release builds: data is NULL and len is 0.
-  // Must be freed with free_ffi_data_buffer() if data is non-null.
-  struct FFIDataBuffer error_message;
   // FFI-level error code
   enum TestFFIErrorCode ffi_error_code;
 };
