@@ -203,7 +203,7 @@ public:
         // than copy them into [tx_store], the lock is released at the end of
         // this function, which is *before* the txs are accessed and serialized
         // by x23. So that is still not safe.
-        SignedTransaction *tx_ptr = new SignedTransaction;
+        auto tx_ptr = new SignedTransaction;
         *tx_ptr = *tx;
         ret.push_back(x23::Ptr<SignedTransaction>(tx_ptr));
       }
