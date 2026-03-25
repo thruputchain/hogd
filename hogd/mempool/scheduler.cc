@@ -731,8 +731,7 @@ Scheduler::remove_from_scheduler(
           {
             auto [account_state, account_lock] =
                 scheduler.get_account_state(account);
-            std::map<TxKey, std::shared_ptr<TxValue>> &txs =
-                account_state->txs;
+            std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
             // The tx may or may not be on the runqueue. If the tx is included
             // in a block we are *nominating*, then it has already been taken
             // off of the runqueue. If the tx is included in a block we are
