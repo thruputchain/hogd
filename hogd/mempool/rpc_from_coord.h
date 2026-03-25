@@ -194,8 +194,9 @@ public:
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
       if (tx) {
-        // This is a bit awkward, but I need to allocate a new tx ([tx_ptr]) and
-        // copy the existing tx ([tx]) into it so that [tx] is not freed from
+        // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
+        // using [x23::Ptr]'s value constructor rather than just use the
+        // existing [tx] pointer. This avoids the issue where [tx] is freed from
         // the scheduler by another thread before we can serialize and return
         // the tx from this RPC.
         //
@@ -203,9 +204,7 @@ public:
         // than copy them into [tx_store], the lock is released at the end of
         // this function, which is *before* the txs are accessed and serialized
         // by x23. So that is still not safe.
-        auto tx_ptr = new SignedTransaction;
-        *tx_ptr = *tx;
-        ret.push_back(x23::Ptr<SignedTransaction>(tx_ptr));
+        ret.push_back(x23::Ptr<SignedTransaction>(*tx));
       }
       else {
         ret.push_back(nullptr);
