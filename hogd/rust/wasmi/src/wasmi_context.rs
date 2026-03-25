@@ -7,6 +7,7 @@ use core::slice;
 
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use crate::wasmi_error::TrampolineError;
+use crate::wasmi_runtime::check_memory_limit;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
@@ -253,10 +254,14 @@ impl WasmiContext {
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> ContractVerifyResult {
         let engine = Self::new_engine();
-        match Module::validate(&engine, contract_data) {
-            Ok(()) => ContractVerifyResult::ok(),
-            Err(e) => ContractVerifyResult::err(e.to_string()),
+        let module = match Module::new(&engine, contract_data) {
+            Ok(m) => m,
+            Err(e) => return ContractVerifyResult::err(e.to_string()),
+        };
+        if !check_memory_limit(&module) {
+            return ContractVerifyResult::err("memory limit check failed".to_string());
         }
+        ContractVerifyResult::ok()
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);

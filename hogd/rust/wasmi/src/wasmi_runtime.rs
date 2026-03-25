@@ -33,7 +33,7 @@ pub struct WasmiRuntime {
 use crate::wasmi_debug_log as debug_log;
 
 // assert that the memory is exported and starts at at most 1 page
-fn check_memory_limit(module: &Module) -> bool {
+pub(crate) fn check_memory_limit(module: &Module) -> bool {
     let export = module.get_export("memory");
     if export.is_none() {
         debug_log!(eprintln!("\"memory\" not exported from module"));

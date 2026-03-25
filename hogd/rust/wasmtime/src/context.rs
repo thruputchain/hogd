@@ -147,11 +147,14 @@ impl WasmtimeContext {
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> ContractVerifyResult {
         let engine = self.engine();
-        match Module::validate(engine, contract_data) {
-            Ok(()) => ContractVerifyResult::ok(),
-            Err(e) => ContractVerifyResult::err(e.to_string()),
+        let module = match Module::new(engine, contract_data) {
+            Ok(m) => m,
+            Err(e) => return ContractVerifyResult::err(e.to_string()),
+        };
+        if !check_memory_limit(&module) {
+            return ContractVerifyResult::err("memory limit check failed".to_string());
         }
-        // TODO(geoff): consider validating that contract memory exports are good and no start function
+        ContractVerifyResult::ok()
     }
 }
 
