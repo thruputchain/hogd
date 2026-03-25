@@ -755,7 +755,6 @@ fn test_pool_exhaustion_returns_system_error() {
             let result = new_wasmtime_runtime(
                 contract_hash.as_ptr(),
                 context_ptr,
-                false,
                 context,
             );
             let runtime_ptr = result
