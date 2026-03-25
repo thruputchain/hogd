@@ -212,7 +212,6 @@ impl NewWasmiRuntimeResult {
 pub unsafe extern "C" fn new_wasmi_runtime(
     hash: *const u8,      // 32 bytes
     userctx: *mut c_void, // *HostCallContext
-    do_verify_contract: bool,
     wasmi_context_ptr: *mut c_void,
 ) -> NewWasmiRuntimeResult {
     if hash.is_null() || wasmi_context_ptr.is_null() {
@@ -235,15 +234,6 @@ pub unsafe extern "C" fn new_wasmi_runtime(
             return NewWasmiRuntimeResult::new(Err(code));
         }
     };
-
-    if do_verify_contract {
-        let result = wasmi_context.verify_contract(slice);
-        if !result.success {
-            // Free detail if present (debug builds)
-            unsafe { common::free_contract_verify_error_detail(result.detail) };
-            return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
-        }
-    }
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
         Some(res) => Box::new(res),

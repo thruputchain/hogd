@@ -222,7 +222,6 @@ impl NewWasmtimeRuntimeResult {
 pub unsafe extern "C" fn new_wasmtime_runtime(
     hash: *const u8,      // 32 bytes
     userctx: *mut c_void, // *HostCallContext
-    do_verify_contract: bool,
     wasmtime_context_ptr: *mut c_void,
 ) -> NewWasmtimeRuntimeResult {
     if hash.is_null() || wasmtime_context_ptr.is_null() {
@@ -236,26 +235,6 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 
     let wasmtime_context: &mut WasmtimeContext =
         unsafe { &mut *wasmtime_context_ptr.cast::<WasmtimeContext>() };
-
-    if do_verify_contract {
-        let slice = match wasmtime_context.fetch_contract(userctx, hash_slice) {
-            Ok(Some(slice)) => slice,
-            Ok(None) => {
-                return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
-            }
-            Err(code) => {
-                debug_log!(eprintln!("Error fetching contract: {:?}", code));
-                return NewWasmtimeRuntimeResult::err(code);
-            }
-        };
-
-        let verify_result = wasmtime_context.verify_contract(slice);
-        if !verify_result.success {
-            debug_log!(eprintln!("Contract verification failed"));
-            unsafe { common::free_contract_verify_error_detail(verify_result.detail) };
-            return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
-        }
-    }
 
     let b = match WasmtimeRuntime::new(hash_slice, wasmtime_context, userctx) {
         Ok(Some(res)) => Box::new(res),

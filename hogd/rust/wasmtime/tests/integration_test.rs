@@ -274,7 +274,6 @@ fn test_create_runtime() {
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -306,7 +305,6 @@ fn test_get_memory() {
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -347,7 +345,6 @@ fn test_invoke_function() {
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -388,7 +385,6 @@ fn test_gas_metering() {
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -460,7 +456,6 @@ fn test_multiple_runtimes() {
         let runtime1 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -469,7 +464,6 @@ fn test_multiple_runtimes() {
         let runtime2 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -505,7 +499,6 @@ fn test_fibonacci_computation() {
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -552,7 +545,6 @@ fn test_fibonacci_computation_overflow() {
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -650,7 +642,6 @@ fn test_module_cache() {
         let runtime1 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -662,7 +653,6 @@ fn test_module_cache() {
         let runtime2 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -675,7 +665,6 @@ fn test_module_cache() {
         let runtime3 = new_wasmtime_runtime(
             fibonacci_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         )
         .get()
@@ -731,7 +720,6 @@ fn test_audit_1_oob_data_segment_instantiation() {
         let result = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         );
 
@@ -771,7 +759,6 @@ fn test_audit_1_oob_element_segment_instantiation() {
         let result = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         );
 
@@ -823,7 +810,6 @@ fn test_pool_exhaustion_returns_system_error() {
         let exhausted_result = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             context_ptr,
-            false,
             context,
         );
         assert!(

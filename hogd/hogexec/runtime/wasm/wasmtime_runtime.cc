@@ -128,14 +128,14 @@ WasmtimeContext::~WasmtimeContext()
 SystemStatus<std::unique_ptr<Runtime>>
 WasmtimeContext::make_new_runtime(
     DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler, bool do_contract_verify)
+    SystemCallHandler *syscall_handler)
 {
   assert(syscall_handler != nullptr);
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
   NewWasmtimeRuntimeResult new_runtime_result =
       new_wasmtime_runtime(deployed_contract_hash.hash.data(),
-                           host_call_context.get(), do_contract_verify,
+                           host_call_context.get(),
                            wasmtime_context_ptr_);
 
   if (new_runtime_result.err_code != 0) [[unlikely]] {

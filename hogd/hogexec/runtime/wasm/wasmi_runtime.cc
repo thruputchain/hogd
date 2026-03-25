@@ -138,13 +138,13 @@ WasmiContext::~WasmiContext()
 SystemStatus<std::unique_ptr<Runtime>>
 WasmiContext::make_new_runtime(
     DeployedContractHash const &deployed_contract_hash,
-    SystemCallHandler *syscall_handler, bool do_contract_verify)
+    SystemCallHandler *syscall_handler)
 {
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
   NewWasmiRuntimeResult new_runtime_result =
       new_wasmi_runtime(deployed_contract_hash.hash.data(),
-                        host_call_context.get(), do_contract_verify,
+                        host_call_context.get(),
                         wasmi_context_ptr_);
 
   if (new_runtime_result.err_code != 0) {

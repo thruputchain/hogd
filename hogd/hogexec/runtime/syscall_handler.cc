@@ -746,7 +746,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_.make_new_runtime(*deployed_hash, this, false);
+  return runtime_context_.make_new_runtime(*deployed_hash, this);
 }
 
 Calldata const &
