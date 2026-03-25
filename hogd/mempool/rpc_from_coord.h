@@ -185,10 +185,10 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::Ptr<const SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>> ret;
+    x23::XdrVec<x23::Ptr<const SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
