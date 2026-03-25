@@ -965,13 +965,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -984,7 +982,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   if (tx_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1005,7 +1002,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -1032,7 +1028,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     }
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -1043,19 +1038,26 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
+  x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
   {
     for (const SignedTransactionHash &tx_hash : cache.tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
       if (!tx) {
-        co_await finish_all_executors(cache.block_id);
-        co_await abandon_block(cache);
-        co_await decrement_num_validations_in_progress();
-        info("validate ret");
-        co_return SchedulerValidationResult(
-            SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+        missing_tx_hashes.push_back(tx_hash);
+        continue;
       }
       cache.txs.push_back(*tx);
+    }
+    if (!missing_tx_hashes.empty()) {
+      co_await finish_all_executors(cache.block_id);
+      co_await abandon_block(cache);
+      co_await decrement_num_validations_in_progress();
+
+      SchedulerValidationResult ret(
+          SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+      ret.missing_tx_hashes() = missing_tx_hashes;
+      co_return ret;
     }
     x23::XdrVec<NondeterministicProposalData> tx_nominations;
     CHECK(co_await parallel_batch_to_t(
@@ -1079,7 +1081,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1113,7 +1114,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1141,7 +1141,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
   }
-  info("validate ret");
   co_return result;
 }
 
