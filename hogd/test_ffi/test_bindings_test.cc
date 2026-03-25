@@ -2855,7 +2855,7 @@ TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
   // exceeds the allowed limit. Before the fix, this would succeed and the
   // contract would fail later with an Unrecoverable error during instantiation.
   auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
-  EXPECT_NE(result, kTestFFIErrorCodeNone);
+  EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
 // Test that do_verify_contract returns failure for wasm with large memory.

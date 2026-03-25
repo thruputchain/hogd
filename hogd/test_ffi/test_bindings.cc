@@ -600,7 +600,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   if (contract.contract_type() == ContractType::kWasmi) {
     auto verify_result = (*context_cast)->verify_contract(contract);
     if (!verify_result.success) {
-      return kTestFFIErrorCodeUnrecoverableError;
+      return kTestFFIErrorCodeContractVerificationFailed;
     }
   }
 

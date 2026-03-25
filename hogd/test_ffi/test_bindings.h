@@ -25,6 +25,8 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeDeserializeError = 4,
   // Unrecoverable error of unknown type
   kTestFFIErrorCodeUnrecoverableError = 5,
+  // Contract failed wasm verification (e.g., memory exceeds limits)
+  kTestFFIErrorCodeContractVerificationFailed = 6,
 };
 
 enum TestFFILogLevel {
