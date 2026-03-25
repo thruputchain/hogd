@@ -11,7 +11,7 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinkEntry, SystemErrorCode};
+use common::{ContractVerifyResult, LinkEntry, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -251,10 +251,12 @@ impl WasmiContext {
         linker
     }
 
-    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        // TODO(geoff): consider caching the engine
+    pub fn verify_contract(&self, contract_data: &[u8]) -> ContractVerifyResult {
         let engine = Self::new_engine();
-        Module::validate(&engine, contract_data).is_ok()
+        match Module::validate(&engine, contract_data) {
+            Ok(()) => ContractVerifyResult::ok(),
+            Err(e) => ContractVerifyResult::err(e.to_string()),
+        }
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);
@@ -498,12 +500,11 @@ pub unsafe extern "C" fn wasmi_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
-) -> bool {
+) -> ContractVerifyResult {
     debug_assert!(!p.is_null());
 
-    // empty contract might trigger this case.
     if contract_data_p.is_null() {
-        return false;
+        return ContractVerifyResult::err("null contract data pointer".to_string());
     }
 
     let context: *const WasmiContext = p.cast::<WasmiContext>();

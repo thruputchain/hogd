@@ -9,7 +9,7 @@ use wasmtime::{Engine, InstancePre, Linker, Module};
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
-use common::SystemErrorCode;
+use common::{ContractVerifyResult, SystemErrorCode};
 
 use crate::global_context::WasmtimeGlobalContext;
 // assert that the memory is exported and starts at at most 1 page
@@ -145,9 +145,12 @@ impl WasmtimeContext {
         Ok(Some(instance_pre))
     }
 
-    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> ContractVerifyResult {
         let engine = self.engine();
-        Module::validate(engine, contract_data).is_ok()
+        match Module::validate(engine, contract_data) {
+            Ok(()) => ContractVerifyResult::ok(),
+            Err(e) => ContractVerifyResult::err(e.to_string()),
+        }
         // TODO(geoff): consider validating that contract memory exports are good and no start function
     }
 }
@@ -195,12 +198,11 @@ pub unsafe extern "C" fn wasmtime_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
-) -> bool {
+) -> ContractVerifyResult {
     debug_assert!(!p.is_null());
 
-    // empty contract might trigger this case.
     if contract_data_p.is_null() {
-        return false;
+        return ContractVerifyResult::err("null contract data pointer".to_string());
     }
 
     let context: *const WasmtimeContext = p.cast::<WasmtimeContext>();

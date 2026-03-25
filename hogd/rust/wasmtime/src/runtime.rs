@@ -249,8 +249,10 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
             }
         };
 
-        if !wasmtime_context.verify_contract(slice) {
+        let verify_result = wasmtime_context.verify_contract(slice);
+        if !verify_result.success {
             debug_log!(eprintln!("Contract verification failed"));
+            unsafe { common::free_contract_verify_error_detail(verify_result.detail) };
             return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
         }
     }

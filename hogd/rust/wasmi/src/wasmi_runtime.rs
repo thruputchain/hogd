@@ -236,8 +236,13 @@ pub unsafe extern "C" fn new_wasmi_runtime(
         }
     };
 
-    if do_verify_contract && !wasmi_context.verify_contract(slice) {
-        return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
+    if do_verify_contract {
+        let result = wasmi_context.verify_contract(slice);
+        if !result.success {
+            // Free detail if present (debug builds)
+            unsafe { common::free_contract_verify_error_detail(result.detail) };
+            return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
+        }
     }
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
