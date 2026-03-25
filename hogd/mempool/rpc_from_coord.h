@@ -206,11 +206,11 @@ public:
         // this function, which is *before* the txs are accessed and serialized
         // by x23. So that is still not safe.
         tx_store.push_back(*tx);
-        // [tx_store.back()] is a stable pointer because we call
+        // [&tx_store.back()] is a stable pointer because we call
         // [tx_store.reserve(tx_hashes.size())] above, so the backing store of
         // [tx_store] will never be resized.
         ret.push_back(
-            x23::BorrowedPtr<const SignedTransaction>(tx_store.back()));
+            x23::BorrowedPtr<const SignedTransaction>(&tx_store.back()));
       }
       else {
         ret.push_back(nullptr);
