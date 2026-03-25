@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -35,6 +36,7 @@
 #include "hogd/test_ffi/ffi_error.h"
 #include "hogd/test_ffi/formatter.h" // IWYU pragma: keep
 #include "hogd/test_ffi/logger.h"
+#include "hogd/rust/wasmi/bindings.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
@@ -777,6 +779,59 @@ verify_signed_transaction_auth_from_db_impl(
   }
 }
 
+VerifyContractResult
+do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
+                        uint32_t contract_len) noexcept
+{
+  if (context == nullptr || contract_bytes == nullptr) {
+    return VerifyContractResult{
+        .success = 0,
+        .error_message = kNullBuffer,
+        .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+
+  try {
+    auto *rc_ptr =
+        static_cast<std::shared_ptr<MockRuntimeContext> *>(context);
+    CHECK(*rc_ptr != nullptr);
+    auto *rc = rc_ptr->get();
+
+    Contract contract(ContractType::kWasmi);
+    contract.wasmi_contract().wasm.append_range(
+        std::span(contract_bytes, contract_len));
+
+    auto result = rc->verify_contract(contract);
+
+    if (result.success) {
+      return VerifyContractResult{
+          .success = 1,
+          .error_message = kNullBuffer,
+          .ffi_error_code = kTestFFIErrorCodeNone};
+    }
+
+    FFIDataBuffer error_buf = kNullBuffer;
+    if (result.detail != nullptr) {
+      auto buf = make_new_data_buffer(result.detail->error_msg_len);
+      if (buf.has_value() && buf.value().data != nullptr) {
+        std::memcpy(buf.value().data, result.detail->error_msg,
+                    result.detail->error_msg_len);
+        error_buf = buf.value();
+      }
+      free_contract_verify_error_detail(result.detail);
+    }
+
+    return VerifyContractResult{.success = 0,
+                                .error_message = error_buf,
+                                .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error in do_verify_contract: {}", e);
+    return VerifyContractResult{
+        .success = 0,
+        .error_message = kNullBuffer,
+        .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+}
+
 } // namespace
 
 } // namespace hogd
@@ -1121,6 +1176,25 @@ verify_signed_transaction_auth_from_db(void *db,
                      "signed_tx={}, signed_tx_len={}) -> {}",
                      db, static_cast<const void *>(signed_tx.data),
                      signed_tx.len, result);
+  return result;
+}
+
+VerifyContractResult
+do_verify_contract(void *context,
+                   const uint8_t *contract_bytes,
+                   uint32_t contract_len)
+{
+  hogd::do_ffi_trace(
+      "FFI (start): do_verify_contract(context={}, contract_bytes={}, "
+      "contract_len={})",
+      context, static_cast<const void *>(contract_bytes), contract_len);
+  auto result =
+      hogd::do_verify_contract_impl(context, contract_bytes, contract_len);
+  hogd::do_ffi_trace(
+      "FFI (end): do_verify_contract(context={}, contract_bytes={}, "
+      "contract_len={}) -> success={}, ffi_error={}",
+      context, static_cast<const void *>(contract_bytes), contract_len,
+      result.success, result.ffi_error_code);
   return result;
 }
 

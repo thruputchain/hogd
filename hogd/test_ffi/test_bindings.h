@@ -10,7 +10,7 @@ extern "C" {
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
 #define TEST_FFI_VERSION_MINOR 11
-#define TEST_FFI_VERSION_PATCH 5
+#define TEST_FFI_VERSION_PATCH 7
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -272,6 +272,26 @@ struct VerifyAuthResultFromDBResult {
 // signed_tx: serialized SignedTransaction
 struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
     void *db, struct FFISerializedSignedTransaction signed_tx);
+
+// Result of contract wasm verification.
+struct VerifyContractResult {
+  // 1 if contract is valid, 0 if invalid
+  uint8_t success;
+  // On failure (debug builds only): UTF-8 error message from the wasm validator.
+  // On success or release builds: data is NULL and len is 0.
+  // Must be freed with free_ffi_data_buffer() if data is non-null.
+  struct FFIDataBuffer error_message;
+  // FFI-level error code
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Verify a contract's wasm bytecode against the current runtime context.
+// context: returned by open_runtime_context().
+// contract_bytes/contract_len: raw wasm bytecode to validate.
+struct VerifyContractResult
+do_verify_contract(void *context,
+                   const uint8_t *contract_bytes,
+                   uint32_t contract_len);
 
 #ifdef __cplusplus
 }
