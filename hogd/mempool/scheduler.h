@@ -70,15 +70,6 @@ public:
     return {};
   }
 
-  SignedTransaction *find_tx_borrowed(const SignedTransactionHash &tx_hash)
-  {
-    auto [tx_value_ptr, _] = txs_.find(tx_hash);
-    if (tx_value_ptr) {
-      return &(*tx_value_ptr)->tx;
-    }
-    return nullptr;
-  }
-
   void get_txs_for_account(const ContractAddress &address,
                            SignedTransactionHashBatch &tx_hashes,
                            SignedTransactionBatch &txs)
