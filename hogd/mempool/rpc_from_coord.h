@@ -188,29 +188,24 @@ public:
   x23::Async<x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    x23::Vec<SignedTransaction> tx_store;
-    tx_store.reserve(tx_hashes.size());
-
     x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
       if (tx) {
-        // This is a bit awkward, but I need to copy the tx into [tx_store] so
-        // that the tx is not freed from the scheduler by another thread before
-        // we can serialize and return the tx from this RPC.
+        // This is a bit awkward, but I need to allocate a new tx ([tx_ptr]) and
+        // copy the existing tx ([tx]) into it so that [tx] is not freed from
+        // the scheduler by another thread before we can serialize and return
+        // the tx from this RPC.
         //
         // Even if we hold [scheduler_->global_lock_] to protect the txs rather
         // than copy them into [tx_store], the lock is released at the end of
         // this function, which is *before* the txs are accessed and serialized
         // by x23. So that is still not safe.
-        tx_store.push_back(*tx);
-        // [&tx_store.back()] is a stable pointer because we call
-        // [tx_store.reserve(tx_hashes.size())] above, so the backing store of
-        // [tx_store] will never be resized.
-        ret.push_back(
-            x23::BorrowedPtr<const SignedTransaction>(&tx_store.back()));
+        SignedTransaction *tx_ptr = new SignedTransaction;
+        *tx_ptr = *tx;
+        ret.push_back(x23::Ptr<SignedTransaction>(tx_ptr));
       }
       else {
         ret.push_back(nullptr);
