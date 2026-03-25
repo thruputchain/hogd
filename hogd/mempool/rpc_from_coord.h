@@ -185,13 +185,25 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<SignedTransaction>>
+  x23::Async<x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<SignedTransaction> ret;
+    x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
+
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
-      ret.push_back(*scheduler_->find_tx(tx_hash));
+      std::shared_ptr<const SignedTransaction> tx =
+          scheduler_->find_tx(tx_hash);
+      if (tx) {
+        // It is safe to use the raw pointer because we hold
+        // [scheduler_->global_lock_].
+        ret.push_back(x23::BorrowedPtr<const SignedTransaction>(tx.get()));
+      }
+      else {
+        ret.push_back(nullptr);
+      }
     }
 
     co_return ret;
