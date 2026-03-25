@@ -233,7 +233,7 @@ TEST(Scheduler, FindTx)
   EXPECT_EQ(scheduler->size(), 1UL);
 
   SignedTransactionHash hash = sha256(txs[0].tx);
-  SignedTransaction *tx = scheduler->find_tx(hash);
+  std::shared_ptr<const SignedTransaction> tx = scheduler->find_tx(hash);
   ASSERT_NE(tx, nullptr);
   EXPECT_EQ(sha256(tx->tx), hash);
   EXPECT_EQ(tx->tx.invocation.invoked_address,
@@ -378,7 +378,8 @@ TEST(Scheduler, ReenqueueTxs)
   EXPECT_EQ(scheduler->size(), 2UL);
 
   for (const SignedTransactionHash &hash : scheduled_hashes) {
-    SignedTransaction *reenqueued_tx = scheduler->find_tx(hash);
+    std::shared_ptr<const SignedTransaction> reenqueued_tx =
+        scheduler->find_tx(hash);
     ASSERT_NE(reenqueued_tx, nullptr);
   }
 }

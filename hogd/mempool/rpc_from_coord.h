@@ -185,20 +185,27 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<x23::BorrowedPtr<SignedTransaction>> ret;
+    x23::XdrVec<x23::BorrowedPtr<const SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
+
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
-      x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
-      ret.push_back(tx);
+      std::shared_ptr<const SignedTransaction> tx =
+          scheduler_->find_tx(tx_hash);
+      if (tx) {
+        // It is safe to use the raw pointer because we hold
+        // [scheduler_->global_lock_].
+        ret.push_back(x23::BorrowedPtr<const SignedTransaction>(tx.get()));
+      }
+      else {
+        ret.push_back(nullptr);
+      }
     }
 
-    // [OptSignedTransactionBatch] is an
-    // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
-    // which are not the same as [Ptrs], but they serialize the same way. So
-    // we return a span of [BorrowedPtr]s.
     co_return ret;
   }
 
