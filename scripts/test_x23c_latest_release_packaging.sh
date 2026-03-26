@@ -11,8 +11,10 @@ echo fake-x23c
 EOF
 chmod +x "$binary"
 
+script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/package_x23c_latest_release.sh"
 artifacts_dir="$tmpdir/artifacts"
-./scripts/package_x23c_latest_release.sh "$binary" "$artifacts_dir"
+
+(cd /tmp && "$script" "$binary" "$artifacts_dir")
 
 test -f "$artifacts_dir/x23c-linux-x86_64.tar.gz"
 test -f "$artifacts_dir/SHA256SUMS"

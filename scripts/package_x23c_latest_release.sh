@@ -14,6 +14,9 @@ if [[ ! -x "$binary_path" ]]; then
   exit 1
 fi
 
+script_dir=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+repo_root=$(cd "$script_dir/.." && pwd)
+
 mkdir -p "$output_dir"
 staging_dir=$(mktemp -d)
 trap 'rm -rf "$staging_dir"' EXIT
@@ -29,7 +32,7 @@ tar -C "$staging_dir" -czf "$archive_path" x23c
   sha256sum x23c-linux-x86_64.tar.gz > SHA256SUMS
 )
 
-commit_sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+commit_sha="${GITHUB_SHA:-$(git -C "$repo_root" rev-parse HEAD)}"
 build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 run_url=""
 
