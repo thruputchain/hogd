@@ -52,9 +52,10 @@ awk '
   $0 == "      - name: Build x23c" { if (!build) build = NR }
   $0 == "      - name: Package x23c artifacts" { if (!package) package = NR }
   $0 == "      - name: Publish latest-x23c release" { if (!publish) publish = NR }
+  $0 == "      - name: Move latest-x23c tag to published commit" { if (!move_tag) move_tag = NR }
   END {
-    if (!(build && package && publish &&
-          build < package && package < publish)) {
+    if (!(build && package && publish && move_tag &&
+          build < package && package < publish && publish < move_tag)) {
       exit 1
     }
   }
@@ -102,3 +103,11 @@ printf '%s\n' "$publish_step_block" | grep -qF "name: x23c latest"
 printf '%s\n' "$publish_step_block" | grep -qF "body_path: artifacts/release_notes.md"
 printf '%s\n' "$publish_step_block" | grep -qF "prerelease: true"
 printf '%s\n' "$publish_step_block" | grep -qF "make_latest: false"
+
+move_tag_step_block="$(extract_step_block "Move latest-x23c tag to published commit")"
+printf '%s\n' "$move_tag_step_block" | grep -qF "uses: actions/github-script@v7"
+printf '%s\n' "$move_tag_step_block" | grep -qF "updateRef"
+printf '%s\n' "$move_tag_step_block" | grep -qF "tags/latest-x23c"
+printf '%s\n' "$move_tag_step_block" | grep -qF "createRef"
+printf '%s\n' "$move_tag_step_block" | grep -qF "refs/tags/latest-x23c"
+printf '%s\n' "$move_tag_step_block" | grep -qF "process.env.GITHUB_SHA"
