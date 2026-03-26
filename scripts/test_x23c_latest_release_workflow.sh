@@ -4,6 +4,10 @@ set -euo pipefail
 workflow=.github/workflows/x23c_latest_release.yml
 
 test -f "$workflow"
+
+# Require a structural, manual-only trigger block:
+# on:
+#   workflow_dispatch:
 awk '
   BEGIN {
     in_on = 0
@@ -37,45 +41,68 @@ awk '
     }
   }
 ' "$workflow"
+
 grep -qF "concurrency:" "$workflow"
 grep -qF "group: x23c-latest-release" "$workflow"
 grep -qF "cancel-in-progress: false" "$workflow"
 grep -qF "runs-on: namespace-profile-hogd-linux" "$workflow"
-grep -qF "./scripts/build.sh -d build/release -t Release -c gcc x23c" "$workflow"
-grep -qF "./scripts/package_x23c_latest_release.sh build/release/x23/x23c/x23c artifacts" "$workflow"
-grep -qF "tag_name: latest-x23c" "$workflow"
-grep -qF "name: x23c latest" "$workflow"
-grep -qF "prerelease: true" "$workflow"
-grep -qF "make_latest: false" "$workflow"
-grep -qF "actions/github-script@v7" "$workflow"
-grep -qF 'const tag = "latest-x23c";' "$workflow"
+
+# Ensure critical release steps exist and appear in strict order.
 awk '
-  BEGIN {
-    in_get_release_call = 0
-    get_release_targets_latest = 0
-  }
-  /getReleaseByTag\(\{/ {
-    in_get_release_call = 1
-    call_has_target = 0
-    next
-  }
-  in_get_release_call {
-    if ($0 ~ /tag[[:space:]]*,/ || $0 ~ /tag:[[:space:]]*"latest-x23c"/) {
-      call_has_target = 1
-    }
-    if ($0 ~ /\}\);/) {
-      if (call_has_target) {
-        get_release_targets_latest = 1
-      }
-      in_get_release_call = 0
-    }
-  }
+  $0 == "      - name: Build x23c" { if (!build) build = NR }
+  $0 == "      - name: Package x23c artifacts" { if (!package) package = NR }
+  $0 == "      - name: Delete prior latest-x23c release and tag" { if (!delete_step) delete_step = NR }
+  $0 == "      - name: Publish latest-x23c release" { if (!publish) publish = NR }
   END {
-    if (!get_release_targets_latest) {
+    if (!(build && package && delete_step && publish &&
+          build < package && package < delete_step && delete_step < publish)) {
       exit 1
     }
   }
 ' "$workflow"
-grep -qF "deleteRelease" "$workflow"
-grep -qF 'ref: `tags/${tag}`' "$workflow"
-grep -qF "softprops/action-gh-release@v2" "$workflow"
+
+extract_step_block() {
+  local step_name="$1"
+  awk -v step_name="$step_name" '
+    BEGIN {
+      in_step = 0
+      found = 0
+    }
+    /^      - name: / {
+      if (in_step) {
+        exit 0
+      }
+      if ($0 == "      - name: " step_name) {
+        in_step = 1
+        found = 1
+      }
+    }
+    in_step { print }
+    END {
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "$workflow"
+}
+
+build_step_block="$(extract_step_block "Build x23c")"
+printf '%s\n' "$build_step_block" | grep -qF "run: ./scripts/build.sh -d build/release -t Release -c gcc x23c"
+
+package_step_block="$(extract_step_block "Package x23c artifacts")"
+printf '%s\n' "$package_step_block" | grep -qF "run: ./scripts/package_x23c_latest_release.sh build/release/x23/x23c/x23c artifacts"
+
+delete_step_block="$(extract_step_block "Delete prior latest-x23c release and tag")"
+printf '%s\n' "$delete_step_block" | grep -qF "uses: actions/github-script@v7"
+printf '%s\n' "$delete_step_block" | grep -qF 'const tag = "latest-x23c";'
+printf '%s\n' "$delete_step_block" | grep -qF "getReleaseByTag({"
+printf '%s\n' "$delete_step_block" | grep -qF "tag,"
+printf '%s\n' "$delete_step_block" | grep -qF "deleteRelease"
+printf '%s\n' "$delete_step_block" | grep -qF 'ref: `tags/${tag}`'
+
+publish_step_block="$(extract_step_block "Publish latest-x23c release")"
+printf '%s\n' "$publish_step_block" | grep -qF "uses: softprops/action-gh-release@v2"
+printf '%s\n' "$publish_step_block" | grep -qF "tag_name: latest-x23c"
+printf '%s\n' "$publish_step_block" | grep -qF "name: x23c latest"
+printf '%s\n' "$publish_step_block" | grep -qF "prerelease: true"
+printf '%s\n' "$publish_step_block" | grep -qF "make_latest: false"
