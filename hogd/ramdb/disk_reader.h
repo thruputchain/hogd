@@ -29,7 +29,8 @@ public:
   // otherwise the highest valid LSN. It returns the LSN that was loaded if
   // successful.
   DBStatus<uint64_t> load(Directory &dir,
-                          std::optional<uint64_t> lsn = std::nullopt);
+                          std::optional<uint64_t> lsn = std::nullopt,
+                          uint64_t *max_snapshot_end_lsn = nullptr);
 
   // verify checks the integrity of a database on disk. it returns the highest
   // LSN that is valid.
@@ -57,7 +58,8 @@ private:
   DBStatus<void> load_database(
       Directory &dir,
       const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
-      std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn = nullptr);
+      std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn = nullptr,
+      uint64_t *max_snapshot_end_lsn = nullptr);
 
   // apply_changes loads a buffer of changes into map_.
   DBStatus<void> apply_changes(std::vector<UniqueLoglet> &&log);

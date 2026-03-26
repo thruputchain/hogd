@@ -264,6 +264,17 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     return DBError{DBCode::kTooBig};
   }
 
+  // Reject incremental snapshots that would create a gap in snapshot coverage.
+  // Recovery processes snapshots before WAL files, so a gap between the prior
+  // snapshot's end_lsn and this snapshot's begin_lsn would cause recovery to
+  // stop at the gap, losing all data after it.
+  if (begin_lsn != 0 && begin_lsn > max_snapshot_end_lsn_) {
+    error("snapshot begin_lsn {} exceeds max snapshot coverage {}; "
+          "this would create an unrecoverable gap",
+          begin_lsn, max_snapshot_end_lsn_);
+    return DBError{DBCode::kTooBig};
+  }
+
   std::latch setup_latch{1};
   auto promise = std::make_shared<std::promise<DBStatus<void>>>();
 
@@ -382,6 +393,11 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     // completing a snapshot may make some files redundant, so trigger cleanup.
     notify_wal_grew();
 
+    // Update snapshot coverage only after the snapshot is fully durable.
+    // The caller must check the future before using end_lsn as begin_lsn
+    // for a subsequent incremental snapshot.
+    max_snapshot_end_lsn_ = std::max(max_snapshot_end_lsn_, end_lsn);
+
     promise->set_value({});
   }).detach();
   // TODO(stutsman): should we keep track of the ongoing snapshot thread so
@@ -410,7 +426,8 @@ Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
 
   DiskReader r(*db->loglet_allocator_, db->map_);
   // load up to a specific LSN or everything if no lsn limit given.
-  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
+  uint64_t snap_end = 0;
+  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn, &snap_end);
   if (!load_ret) {
     error("failed to load database: {}", load_ret.error());
     return load_ret.error();
@@ -426,6 +443,7 @@ Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
   else
     info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
   db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold);
+  db->max_snapshot_end_lsn_ = snap_end;
   return db;
 }
 

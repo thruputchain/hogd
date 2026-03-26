@@ -474,7 +474,8 @@ longest_snapshot(const std::vector<FileMetadata> &files, uint64_t max_begin_lsn)
 } // namespace
 
 DBStatus<uint64_t>
-DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
+DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
+                 uint64_t *max_snapshot_end_lsn)
 {
   ElapsedTimer timer{};
   std::shared_ptr<void> _{nullptr, [&timer](...) {
@@ -487,7 +488,7 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
       [this](std::vector<UniqueLoglet> &&log) {
         return apply_changes(std::move(log));
       },
-      target_lsn, &lsn);
+      target_lsn, &lsn, max_snapshot_end_lsn);
   if (!ret && (target_lsn || lsn == 0))
     return ret.error();
   assert(!target_lsn || *target_lsn == lsn);
@@ -584,9 +585,11 @@ DBStatus<void>
 DiskReader::load_database(
     Directory &dir,
     const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
-    std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn)
+    std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn,
+    uint64_t *max_snapshot_end_lsn)
 {
   uint64_t cur_lsn = 0;
+  uint64_t max_snap_end = 0;
   DBStatus<void> ret{};
 
   DBStatus<std::vector<std::string>> filenames =
@@ -645,6 +648,10 @@ DiskReader::load_database(
     // file contained no useful records
     if (tmp == cur_lsn)
       continue;
+
+    // Track the highest snapshot end LSN that contributed to recovery.
+    if (file.snapshot_file_)
+      max_snap_end = std::max(max_snap_end, file.end_lsn_exclusive_);
   }
 
   // we reached the end; are we still missing data?
@@ -663,6 +670,8 @@ DiskReader::load_database(
 
   if (loaded_lsn)
     *loaded_lsn = cur_lsn;
+  if (max_snapshot_end_lsn)
+    *max_snapshot_end_lsn = max_snap_end;
   return ret;
 }
 
