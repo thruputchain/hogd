@@ -29,7 +29,7 @@ tar -C "$staging_dir" -czf "$archive_path" x23c
 
 (
   cd "$output_dir"
-  sha256sum x23c-linux-x86_64.tar.gz > SHA256SUMS
+  sha256sum x23c-linux-x86_64.tar.gz >SHA256SUMS
 )
 
 commit_sha="${GITHUB_SHA:-$(git -C "$repo_root" rev-parse HEAD)}"
@@ -48,4 +48,4 @@ fi
   if [[ -n "$run_url" ]]; then
     echo "- Workflow run: ${run_url}"
   fi
-} > "$output_dir/release_notes.md"
+} >"$output_dir/release_notes.md"

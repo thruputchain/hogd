@@ -5,7 +5,7 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
 binary="$tmpdir/x23c"
-cat > "$binary" <<'EOF'
+cat >"$binary" <<'EOF'
 #!/usr/bin/env bash
 echo fake-x23c
 EOF
