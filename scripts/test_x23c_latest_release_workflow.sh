@@ -51,15 +51,18 @@ grep -qF "runs-on: namespace-profile-hogd-linux" "$workflow"
 awk '
   $0 == "      - name: Build x23c" { if (!build) build = NR }
   $0 == "      - name: Package x23c artifacts" { if (!package) package = NR }
-  $0 == "      - name: Delete prior latest-x23c release and tag" { if (!delete_step) delete_step = NR }
   $0 == "      - name: Publish latest-x23c release" { if (!publish) publish = NR }
   END {
-    if (!(build && package && delete_step && publish &&
-          build < package && package < delete_step && delete_step < publish)) {
+    if (!(build && package && publish &&
+          build < package && package < publish)) {
       exit 1
     }
   }
 ' "$workflow"
+
+if grep -qF "      - name: Delete prior latest-x23c release and tag" "$workflow"; then
+  exit 1
+fi
 
 extract_step_block() {
   local step_name="$1"
@@ -92,17 +95,10 @@ printf '%s\n' "$build_step_block" | grep -qF "run: ./scripts/build.sh -d build/r
 package_step_block="$(extract_step_block "Package x23c artifacts")"
 printf '%s\n' "$package_step_block" | grep -qF "run: ./scripts/package_x23c_latest_release.sh build/release/x23/x23c/x23c artifacts"
 
-delete_step_block="$(extract_step_block "Delete prior latest-x23c release and tag")"
-printf '%s\n' "$delete_step_block" | grep -qF "uses: actions/github-script@v7"
-printf '%s\n' "$delete_step_block" | grep -qF 'const tag = "latest-x23c";'
-printf '%s\n' "$delete_step_block" | grep -qF "getReleaseByTag({"
-printf '%s\n' "$delete_step_block" | grep -qF "tag,"
-printf '%s\n' "$delete_step_block" | grep -qF "deleteRelease"
-printf '%s\n' "$delete_step_block" | grep -qF 'ref: `tags/${tag}`'
-
 publish_step_block="$(extract_step_block "Publish latest-x23c release")"
 printf '%s\n' "$publish_step_block" | grep -qF "uses: softprops/action-gh-release@v2"
 printf '%s\n' "$publish_step_block" | grep -qF "tag_name: latest-x23c"
 printf '%s\n' "$publish_step_block" | grep -qF "name: x23c latest"
+printf '%s\n' "$publish_step_block" | grep -qF "body_path: artifacts/release_notes.md"
 printf '%s\n' "$publish_step_block" | grep -qF "prerelease: true"
 printf '%s\n' "$publish_step_block" | grep -qF "make_latest: false"
