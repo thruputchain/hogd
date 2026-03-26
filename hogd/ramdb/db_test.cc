@@ -704,25 +704,15 @@ TEST_F(DatabaseTest, DiskCleanup)
   check_integrity();
 }
 
-// EmptySnapshotThenInsertSnapshotReopen
+// IncrementalSnapshotAfterReopenRejectsGap
 //
-// Fuzz-found bug: data is lost after the sequence:
-//   1. sync_and_snapshot(0) on an empty DB
-//   2. sync + close + reopen from WAL
-//   3. put one item
-//   4. sync_and_snapshot(last_sync_lsn)
-//   5. sync + close + reopen → item is gone
-//
-// Root cause: the first snapshot creates 0-1.snap. After reopen, the
-// DiskWriter creates a new WAL starting at LSN 2. The put goes into 2.log.
-// The second snapshot creates 2-3.snap containing the item. But on the
-// final reopen, DiskReader loads 0-1.snap (up to LSN 1), then looks for
-// the next file — the old 0.log that bridged LSN 1→2 was overwritten by
-// the DiskWriter on the second open. Recovery detects a gap at LSN 1
-// and stops, never reaching 2-3.snap. The item is lost.
-TEST_F(DatabaseTest, DISABLED_EmptySnapshotThenInsertSnapshotReopen)
+// After reopen, sync() returns an LSN that exceeds the snapshot coverage
+// (e.g., the prior snapshot covers 0-1 but sync returns 2). Using that LSN
+// as begin_lsn for sync_and_snapshot would create a gap in snapshot coverage
+// that recovery cannot bridge. sync_and_snapshot must reject this.
+TEST_F(DatabaseTest, IncrementalSnapshotAfterReopenRejectsGap)
 {
-  // Step 1: snapshot the empty database.
+  // Step 1: snapshot the empty database. Snapshot covers LSN 0-1.
   auto snap1 = db_->sync_and_snapshot(0);
   ASSERT_TRUE(snap1.has_value());
   auto &[lsn1, future1] = *snap1;
@@ -731,7 +721,7 @@ TEST_F(DatabaseTest, DISABLED_EmptySnapshotThenInsertSnapshotReopen)
   // Step 2: sync + close + reopen.
   auto sync1 = db_->sync();
   ASSERT_TRUE(sync1.has_value());
-  uint64_t last_lsn = *sync1;
+  uint64_t last_lsn = *sync1; // LSN 2 — beyond snapshot coverage (1).
   db_.reset();
   auto ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
@@ -745,19 +735,25 @@ TEST_F(DatabaseTest, DISABLED_EmptySnapshotThenInsertSnapshotReopen)
   ASSERT_TRUE(put_ret.has_value());
   oracle_[key] = value;
 
-  // Step 4: snapshot using LSN from step 2's sync.
+  // Step 4: sync_and_snapshot(last_lsn) should be rejected — last_lsn (2)
+  // exceeds the snapshot coverage (1), which would create an unrecoverable gap.
   auto snap2 = db_->sync_and_snapshot(last_lsn);
-  ASSERT_TRUE(snap2.has_value());
-  auto &[lsn2, future2] = *snap2;
-  ASSERT_TRUE(future2.get().has_value());
+  ASSERT_FALSE(snap2.has_value())
+      << "sync_and_snapshot should reject begin_lsn that creates a gap";
 
-  // Step 5: sync + close + reopen and verify.
-  auto sync2 = db_->sync();
-  ASSERT_TRUE(sync2.has_value());
+  // Step 5: Using begin_lsn=0 (full snapshot) should succeed.
+  auto snap3 = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap3.has_value());
+  auto &[lsn3, future3] = *snap3;
+  ASSERT_TRUE(future3.get().has_value());
+
+  // Step 6: sync + close + reopen and verify. Data is preserved.
+  auto sync3 = db_->sync();
+  ASSERT_TRUE(sync3.has_value());
   db_.reset();
   ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
-  check_integrity(); // BUG: db has 0 items, oracle has 1.
+  check_integrity();
 }
 
 } // namespace hogd
