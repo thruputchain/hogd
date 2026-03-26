@@ -13,6 +13,10 @@ permissions:
   contents: write
   actions: read
 
+concurrency:
+  group: x23c-latest-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: namespace-profile-hogd-linux
