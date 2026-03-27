@@ -21,7 +21,6 @@ struct GenTs {
   std::size_t indent_{};
   vector<string> codec_names_; // collect codec entries for namespace
   bool has_programs_{};
-  bool needs_void_codec_{};
   std::set<string> primitive_codecs_; // primitive codecs needed in imports
   std::set<string> emitted_args_;     // dedup _args structs across all ProgDefs
 
@@ -161,10 +160,8 @@ GenTs::to_camel_case(const string &name)
 string
 GenTs::proc_codec_ref(const string &type)
 {
-  if (type == "void") {
-    needs_void_codec_ = true;
+  if (type == "void")
     return "VoidCodec";
-  }
 
   // Primitive types → named codecs from @groundhog/xdr
   static const std::map<string, string> primitive_codec_map{
@@ -378,16 +375,9 @@ GenTs::show_def(const Typedef &d)
       prtop("}}\n");
 
       codec_names_.push_back(d.id);
-      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{\n");
-      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", cref);
-      prbottom("  }},\n");
-      prbottom("  decode(r) {{\n");
-      prbottom("    return {0}(Array.from({{ length: {1} }}, () => "
-               "{2}.decode(r)));\n",
-               factory, d.bound, cref);
-      prbottom("  }},\n");
-      prbottom("}};\n");
+      prbottom("\nconst _{0} = FixedArrayCodec(() => {1}, Number({2})) as "
+               "XdrCodec<{0}>;\n",
+               d.id, cref, d.bound);
     }
     break;
   }
@@ -429,18 +419,9 @@ GenTs::show_def(const Typedef &d)
       prtop("}}\n");
 
       codec_names_.push_back(d.id);
-      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{\n");
-      prbottom("    w.writeUint32(BigInt(val.length));\n");
-      prbottom("    for (const _item of val) {0}.encode(w, _item);\n", cref);
-      prbottom("  }},\n");
-      prbottom("  decode(r) {{\n");
-      prbottom("    const _len = Number(r.readUint32());\n");
-      prbottom("    return {0}(Array.from({{ length: _len }}, () => "
-               "{1}.decode(r)));\n",
-               factory, cref);
-      prbottom("  }},\n");
-      prbottom("}};\n");
+      prbottom("\nconst _{0} = VarArrayCodec(() => {1}, Number({2})) as "
+               "XdrCodec<{0}>;\n",
+               d.id, cref, map_bound(d.bound));
     }
     break;
   }
@@ -477,20 +458,8 @@ GenTs::show_def(const Typedef &d)
     prtop("}}\n");
 
     codec_names_.push_back(d.id);
-    prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
-    prbottom("  encode(w, val) {{\n");
-    prbottom("    if (val !== null) {{\n");
-    prbottom("      w.writeUint32(1n);\n");
-    prbottom("      {0}.encode(w, val);\n", cref);
-    prbottom("    }} else {{\n");
-    prbottom("      w.writeUint32(0n);\n");
-    prbottom("    }}\n");
-    prbottom("  }},\n");
-    prbottom("  decode(r) {{\n");
-    prbottom("    return {0}(Number(r.readUint32()) ? {1}.decode(r) : null);\n",
-             factory, cref);
-    prbottom("  }},\n");
-    prbottom("}};\n");
+    prbottom("\nconst _{0} = OptionCodec(() => {1}) as XdrCodec<{0}>;\n", d.id,
+             cref);
     break;
   }
   case Declaration::kVoid:
@@ -583,7 +552,6 @@ GenTs::show_def(const ProgDef &prog)
           real_args.push_back(a);
 
       if (real_args.empty()) {
-        needs_void_codec_ = true;
         req_codec = "VoidCodec";
       }
       else if (real_args.size() == 1) {
@@ -975,8 +943,9 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
       bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n", indent,
                              val_expr, map_write_method(base));
     else
-      bottom_ += std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                             indent, val_expr, ref);
+      bottom_ +=
+          std::format("{}FixedArrayCodec({}, Number({})).encode(w, {});\n",
+                      indent, ref, bound, val_expr);
     break;
   }
 
@@ -985,16 +954,15 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
       bottom_ += std::format("{}w.writeVarOpaque({}, Number({}));\n", indent,
                              val_expr, map_bound(d.bound));
     }
-    else {
+    else if (is_primitive_type(base)) {
       bottom_ += std::format("{}w.writeUint32(BigInt({}.length));\n", indent,
                              val_expr);
-      if (is_primitive_type(base))
-        bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n",
-                               indent, val_expr, map_write_method(base));
-      else
-        bottom_ +=
-            std::format("{}for (const _item of {}) {}.encode(w, _item);\n",
-                        indent, val_expr, ref);
+      bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n", indent,
+                             val_expr, map_write_method(base));
+    }
+    else {
+      bottom_ += std::format("{}VarArrayCodec({}, Number({})).encode(w, {});\n",
+                             indent, ref, map_bound(d.bound), val_expr);
     }
     break;
 
@@ -1004,12 +972,8 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     break;
 
   case Declaration::kPtr:
-    bottom_ += std::format("{}if ({} !== null) {{\n", indent, val_expr);
-    bottom_ += std::format("{}  w.writeUint32(1n);\n", indent);
-    bottom_ += std::format("{}  {}.encode(w, {});\n", indent, ref, val_expr);
-    bottom_ += std::format("{}}} else {{\n", indent);
-    bottom_ += std::format("{}  w.writeUint32(0n);\n", indent);
-    bottom_ += std::format("{}}}\n", indent);
+    bottom_ += std::format("{}OptionCodec({}).encode(w, {});\n", indent, ref,
+                           val_expr);
     break;
 
   case Declaration::kVoid:
@@ -1048,10 +1012,9 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
                       "r.{}());\n",
                       indent, d.id, bound, map_read_method(base));
     else
-      bottom_ +=
-          std::format("{}const {} = Array.from({{ length: Number({}) }}, () => "
-                      "{}.decode(r));\n",
-                      indent, d.id, bound, ref);
+      bottom_ += std::format(
+          "{}const {} = FixedArrayCodec({}, Number({})).decode(r);\n", indent,
+          d.id, ref, bound);
     break;
   }
 
@@ -1060,18 +1023,18 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       bottom_ += std::format("{}const {} = r.readVarOpaque(Number({}));\n",
                              indent, d.id, map_bound(d.bound));
     }
-    else {
+    else if (is_primitive_type(base)) {
       string len_var = "_" + d.id + "_len";
       bottom_ += std::format("{}const {} = Number(r.readUint32());\n", indent,
                              len_var);
-      if (is_primitive_type(base))
-        bottom_ += std::format(
-            "{}const {} = Array.from({{ length: {} }}, () => r.{}());\n",
-            indent, d.id, len_var, map_read_method(base));
-      else
-        bottom_ += std::format(
-            "{}const {} = Array.from({{ length: {} }}, () => {}.decode(r));\n",
-            indent, d.id, len_var, ref);
+      bottom_ += std::format(
+          "{}const {} = Array.from({{ length: {} }}, () => r.{}());\n", indent,
+          d.id, len_var, map_read_method(base));
+    }
+    else {
+      bottom_ +=
+          std::format("{}const {} = VarArrayCodec({}, Number({})).decode(r);\n",
+                      indent, d.id, ref, map_bound(d.bound));
     }
     break;
 
@@ -1081,9 +1044,8 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     break;
 
   case Declaration::kPtr:
-    bottom_ += std::format(
-        "{}const {} = Number(r.readUint32()) ? {}.decode(r) : null;\n", indent,
-        d.id, ref);
+    bottom_ += std::format("{}const {} = OptionCodec({}).decode(r);\n", indent,
+                           d.id, ref);
     break;
 
   case Declaration::kVoid:
@@ -1105,17 +1067,15 @@ gen_ts(vector<Definition> *defs)
                     "// Generated from x23c commit: " +
                     x23::git_commit_hash() + "\n\n";
 
-  if (gs.has_programs_) {
-    string imports = "import { type XdrCodec, type RpcProgramMeta";
-    if (gs.needs_void_codec_)
-      imports += ", VoidCodec";
+  {
+    string imports = "import { type XdrCodec"
+                     ", VoidCodec, OptionCodec, VarArrayCodec, FixedArrayCodec";
+    if (gs.has_programs_)
+      imports += ", type RpcProgramMeta";
     for (const auto &pc : gs.primitive_codecs_)
       imports += ", " + pc;
     imports += " } from \"@groundhog/xdr\";\n";
     preamble += imports;
-  }
-  else {
-    preamble += "import type { XdrCodec } from \"@groundhog/xdr\";\n";
   }
 
   preamble += "import * as proto from \"./index.js\";\n";
