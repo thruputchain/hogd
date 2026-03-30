@@ -209,10 +209,9 @@ public:
 
   bool has_active_frame_for(ContractAddress const &addr) const
   {
-    return std::ranges::any_of(frame_stack_,
-                       [&](const InvocationFrame &frame) {
-                         return frame.address() == addr;
-                       });
+    return std::ranges::any_of(frame_stack_, [&](const InvocationFrame &frame) {
+      return frame.address() == addr;
+    });
   }
 
   // Lookup the hash of the contract deployed at the queried address,

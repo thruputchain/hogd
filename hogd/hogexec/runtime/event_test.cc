@@ -59,11 +59,12 @@ public:
 
 TEST_F(EventTest, EventSuccess)
 {
-  // A native contract with the following methods:
-  // 0: Produces an event with 0 topics
-  // 1: Produces an event with 1 topic
-  // 2: Invokes method 0 and then method 1
-  auto native_contract_0 = std::make_unique<NativeContract>(
+  // Emitter: 0 = event with 0 topics, 1 = event with 1 topic.
+  // Orchestrator: invokes emitter 0 then emitter 1 (no self-reentrance).
+  ContractAddress addr_emitter = make_contract_address(0xFF);
+  ContractAddress addr_orchestrator = make_contract_address(0xFE);
+
+  auto native_contract_emitter = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -84,8 +85,7 @@ TEST_F(EventTest, EventSuccess)
 
              return {};
            }},
-          {1,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              const std::string event_data = "test 1 topic";
 
              SHA256Hash topic = sha256(std::string("topic"));
@@ -103,14 +103,16 @@ TEST_F(EventTest, EventSuccess)
              }
 
              return {};
-           }},
-          {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+           }}});
+
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto status = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
+                   addr_emitter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              [[maybe_unused]] auto gas = GasAmount{0};
@@ -125,9 +127,8 @@ TEST_F(EventTest, EventSuccess)
              auto status2 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
+                   addr_emitter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
              }();
              [[maybe_unused]] auto gas2 = GasAmount{0};
@@ -147,18 +148,18 @@ TEST_F(EventTest, EventSuccess)
            }}});
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_0));
+  contract_map.emplace(0, std::move(native_contract_emitter));
+  contract_map.emplace(1, std::move(native_contract_orchestrator));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0xFF);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {addr_emitter, addr_orchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
@@ -169,8 +170,8 @@ TEST_F(EventTest, EventSuccess)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = addr_orchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
@@ -188,8 +189,8 @@ TEST_F(EventTest, EventSuccess)
   auto tx_event_log = get_tx_event_log(tx_id);
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 2);
-  ASSERT_EQ(tx_event_log.value().events[0].contract_address, contract_0_addr);
-  ASSERT_EQ(tx_event_log.value().events[1].contract_address, contract_0_addr);
+  ASSERT_EQ(tx_event_log.value().events[0].contract_address, addr_emitter);
+  ASSERT_EQ(tx_event_log.value().events[1].contract_address, addr_emitter);
 
   auto event_data0 = tx_event_log.value().events[0];
   ASSERT_EQ(event_data0.num_topics, 0);
@@ -387,27 +388,29 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
 TEST_F(EventTest, EventWithRevertingFrames)
 {
-  // A native contract with the following methods:
-  // 0: Produces an event with 0 topics, with the event set by the input
-  // calldata
-  // 1. Calls method 0, and then manually reverts the frame
-  // 2. Calls method 0, and then returns a Deterministic error
-  // 3. Calls method 0, then method 1, then method 0, then method 2, then method
-  // 0.
+  // Four contracts:
+  // - Emitter: logs 0-topic event from calldata.
+  // - ManualRevert: invokes emitter with fixed calldata, then manual frame
+  // revert.
+  // - DeterministicFail: invokes emitter with fixed calldata, then
+  // Deterministic error.
+  // - Orchestrator: emitter, manual-revert, emitter, deterministic-fail,
+  // emitter.
+  //
+  // Part 1 invokes orchestrator:0; expect 3 committed events. Part 2 invokes
+  // manual-revert:0; expect 0 events (top-frame manual revert).
 
-  // The test part 1 calls method 3; then checks for the events at the end;
-  // there should be 3 events. The test part 2 calls method 1; then checks for
-  // the events at the end; there should be 0 events (checking manual revert of
-  // the top frame)
+  ContractAddress addr_emitter = make_contract_address(0xFF);
+  ContractAddress addr_manual_revert = make_contract_address(0xFE);
+  ContractAddress addr_deterministic = make_contract_address(0xFD);
+  ContractAddress addr_orchestrator = make_contract_address(0xFC);
 
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
+  auto make_context =
+      [addr_emitter, addr_manual_revert,
+       addr_deterministic]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_emitter = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            // Method 0: Produces an event with 0 topics, with event data from
-            // calldata
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Use calldata as event data
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
 
                auto status = ctx.syscall<SyscallNo::kLogEvent>(
@@ -424,20 +427,20 @@ TEST_F(EventTest, EventWithRevertingFrames)
                }
 
                return {};
-             }},
-            // Method 1: Calls method 0, then manually reverts the frame
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call method 0 with some test data
+             }}});
+
+    auto native_contract_manual_revert = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                std::string test_data = "method1_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
                auto status = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), calldata,
-                     std::to_underlying(InvokeFlag::None),
+                     addr_emitter, 0, ctx.runtime().get_available_gas(),
+                     calldata, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
                [[maybe_unused]] auto gas = GasAmount{0};
@@ -453,23 +456,22 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return InvokeError{InvokeErrorCode::OutOfGas};
                }
 
-               // Manually revert the frame - this should revert the event
                ctx.handler().set_return_buffer(ReturnBuffer{}, true);
                return {};
-             }},
-            // Method 2: Calls method 0, then returns a Deterministic error
-            {2,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call method 0 with some test data
+             }}});
+
+    auto native_contract_deterministic = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                std::string test_data = "method2_event";
                Calldata calldata(test_data.begin(), test_data.end());
 
                auto status = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), calldata,
-                     std::to_underlying(InvokeFlag::None),
+                     addr_emitter, 0, ctx.runtime().get_available_gas(),
+                     calldata, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
                [[maybe_unused]] auto gas = GasAmount{0};
@@ -485,12 +487,14 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  return InvokeError{InvokeErrorCode::OutOfGas};
                }
 
-               // Return a deterministic error - this should revert the event
                return InvokeError{InvokeErrorCode::Deterministic};
-             }},
-            // Method 3: Calls method 0, then 1, then 0, then 2, then 0
-            {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call method 0 (first event - should succeed)
+             }}});
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [addr_emitter, addr_manual_revert, addr_deterministic](
+                 NativeSyscallContext &ctx) -> InvokeStatus<void> {
                {
                  std::string test_data = "first_event";
                  Calldata calldata(test_data.begin(), test_data.end());
@@ -498,9 +502,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  auto status = [&]() {
                    RuntimeMemoryLength output_return_buffer_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       ctx.handler().get_current_address(), 0,
-                       ctx.runtime().get_available_gas(), calldata,
-                       std::to_underlying(InvokeFlag::None),
+                       addr_emitter, 0, ctx.runtime().get_available_gas(),
+                       calldata, std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
@@ -518,14 +521,12 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  }
                }
 
-               // Call method 1 (should revert, so no event)
                {
                  auto status = [&]() {
                    RuntimeMemoryLength output_return_buffer_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       ctx.handler().get_current_address(), 1,
-                       ctx.runtime().get_available_gas(), Calldata{},
-                       std::to_underlying(InvokeFlag::None),
+                       addr_manual_revert, 0, ctx.runtime().get_available_gas(),
+                       Calldata{}, std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
@@ -533,7 +534,6 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
-                 // Method 1 should have manually reverted
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                    return InvokeError{InvokeErrorCode::Deterministic};
@@ -544,7 +544,6 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  }
                }
 
-               // Call method 0 again (second event - should succeed)
                {
                  std::string test_data = "second_event";
                  Calldata calldata(test_data.begin(), test_data.end());
@@ -552,9 +551,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  auto status = [&]() {
                    RuntimeMemoryLength output_return_buffer_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       ctx.handler().get_current_address(), 0,
-                       ctx.runtime().get_available_gas(), calldata,
-                       std::to_underlying(InvokeFlag::None),
+                       addr_emitter, 0, ctx.runtime().get_available_gas(),
+                       calldata, std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
@@ -572,15 +570,12 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  }
                }
 
-               // Call method 2 (should fail with deterministic error, so no
-               // event)
                {
                  auto status = [&]() {
                    RuntimeMemoryLength output_return_buffer_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       ctx.handler().get_current_address(), 2,
-                       ctx.runtime().get_available_gas(), Calldata{},
-                       std::to_underlying(InvokeFlag::None),
+                       addr_deterministic, 0, ctx.runtime().get_available_gas(),
+                       Calldata{}, std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
@@ -588,7 +583,6 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    return InvokeError{InvokeErrorCode::Unrecoverable};
                  }
 
-                 // Method 2 should have failed with deterministic error
                  if (status.value() !=
                      SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                    return InvokeError{InvokeErrorCode::Deterministic};
@@ -599,7 +593,6 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  }
                }
 
-               // Call method 0 one more time (third event - should succeed)
                {
                  std::string test_data = "third_event";
                  Calldata calldata(test_data.begin(), test_data.end());
@@ -607,9 +600,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  auto status = [&]() {
                    RuntimeMemoryLength output_return_buffer_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       ctx.handler().get_current_address(), 0,
-                       ctx.runtime().get_available_gas(), calldata,
-                       std::to_underlying(InvokeFlag::None),
+                       addr_emitter, 0, ctx.runtime().get_available_gas(),
+                       calldata, std::to_underlying(InvokeFlag::None),
                        output_return_buffer_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
@@ -631,20 +623,23 @@ TEST_F(EventTest, EventWithRevertingFrames)
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_emitter));
+    contract_map.emplace(1, std::move(native_contract_manual_revert));
+    contract_map.emplace(2, std::move(native_contract_deterministic));
+    contract_map.emplace(3, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
-  // Mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0xFF);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {addr_emitter, addr_manual_revert,
+                             addr_deterministic, addr_orchestrator};
+  for (int i = 0; i < 4; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
-  // Now invoke the contract with method 3
+  // Part 1: orchestrator sequence
   EphemeralTxIdentifier tx_id_1;
 
   auto context = make_context();
@@ -654,8 +649,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(3),
+                      Invocation{.invoked_address = addr_orchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
@@ -668,15 +663,15 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
-  // Now invoke the contract with method 1
+  // Part 2: manual-revert entry alone
   EphemeralTxIdentifier tx_id_2;
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(1),
+                      Invocation{.invoked_address = addr_manual_revert,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
@@ -696,9 +691,9 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 3);
 
-  // Verify the events are from the correct contract
+  // Verify the events are from the emitter contract
   for (const auto &event : tx_event_log.value().events) {
-    ASSERT_EQ(event.contract_address, contract_0_addr);
+    ASSERT_EQ(event.contract_address, addr_emitter);
   }
 
   // Verify the event data matches what we expect

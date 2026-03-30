@@ -447,8 +447,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
@@ -465,8 +464,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
 
     auto contract_caller = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {0, [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                Calldata args = {'t', 'e', 's', 't'};
                RuntimeMemoryLength output_return_buffer_len = 0;
                [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(

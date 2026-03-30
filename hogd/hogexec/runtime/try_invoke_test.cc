@@ -63,13 +63,14 @@ protected:
 // Not really a try invoke test, but it's a convenient way to test general
 // invocation.
 TEST_P(TryInvokeTest, ReadWriteBytestring)
-{ // A native contract with the following methods:
-  // 0: takes the input calldata and writes it to a hardcoded storage key.
-  // 1: Reads the bytestring from the hardcoded storage key and returns it.
-  // 2: Invokes method 0 and then method 1, checking that the written value is
-  // read correctly.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<
+{ // Storage contract: 0 writes calldata to a hardcoded key; 1 reads it back
+  // into the return buffer.  Orchestrator contract: invokes storage 0 then
+  // storage 1 and checks the returned bytes match root calldata.
+  ContractAddress addr_storage = make_contract_address(0);
+  ContractAddress addr_orchestrator = make_contract_address(1);
+
+  auto make_context = [addr_storage]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_storage = std::make_unique<
         NativeContract>(std::unordered_map<Runtime::MethodID,
                                            NativeContract::function_t>{
         {0,
@@ -88,8 +89,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
            return {};
          }},
-        {1,
-         [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            auto key = make_storage_key("test");
            auto res = ctx.handler().get_bytestring(key);
            if (!res.has_value()) {
@@ -108,73 +108,77 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
            ctx.handler().set_return_buffer(std::move(out), false);
            return {};
-         }},
-        {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           auto calldata = ctx.handler().get_calldata();
-
-           auto r0 = [&]() {
-             RuntimeMemoryLength output_return_buffer_len = 0;
-             return ctx.syscall<SyscallNo::kInvoke>(
-                 ctx.handler().get_current_address(), 0,
-                 ctx.runtime().get_available_gas(),
-                 ctx.handler().get_calldata(),
-                 std::to_underlying(InvokeFlag::None),
-                 output_return_buffer_len);
-           }();
-
-           if (!r0.has_value()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           auto r1 = [&]() {
-             RuntimeMemoryLength output_return_buffer_len = 0;
-             return ctx.syscall<SyscallNo::kInvoke>(
-                 ctx.handler().get_current_address(), 1,
-                 ctx.runtime().get_available_gas(), Calldata{},
-                 std::to_underlying(InvokeFlag::None),
-                 output_return_buffer_len);
-           }();
-
-           if (!r1.has_value()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           auto returned_buffer = ctx.handler().get_return_buffer();
-           if (!returned_buffer.has_value() ||
-               !returned_buffer.value().has_value()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           auto const &returned_buffer_data = returned_buffer.value().value();
-
-           if (returned_buffer_data->size() != calldata.size()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           if (!returned_buffer_data->empty()) {
-             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
-                             calldata.size()) != 0) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-           }
-
-           return {};
          }}});
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [addr_storage](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto calldata = ctx.handler().get_calldata();
+
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     addr_storage, 0, ctx.runtime().get_available_gas(),
+                     ctx.handler().get_calldata(),
+                     std::to_underlying(InvokeFlag::None),
+                     output_return_buffer_len);
+               }();
+
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto r1 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     addr_storage, 1, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     output_return_buffer_len);
+               }();
+
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto returned_buffer = ctx.handler().get_return_buffer();
+               if (!returned_buffer.has_value() ||
+                   !returned_buffer.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto const &returned_buffer_data =
+                   returned_buffer.value().value();
+
+               if (returned_buffer_data->size() != calldata.size()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               if (!returned_buffer_data->empty()) {
+                 if (std::memcmp(returned_buffer_data->data(), calldata.data(),
+                                 calldata.size()) != 0) {
+                   return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+               }
+
+               return {};
+             }}});
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_storage));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {addr_storage, addr_orchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
@@ -183,8 +187,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = ContractAddress{},
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = addr_orchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1, 2, 3, 4, 5}},
               }},
@@ -204,9 +208,9 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = ContractAddress{},
+                                Invocation{.invoked_address = addr_orchestrator,
                                            .entrypoint =
-                                               entrypoint_from_method_id(2),
+                                               entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
       *context);
