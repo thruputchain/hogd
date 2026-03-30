@@ -863,7 +863,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
 {
   constexpr static ContractAddress kAddressParent = make_contract_address(1);
   constexpr static ContractAddress kAddressChild = make_contract_address(2);
-  constexpr static ContractAddress kAddressGrandchild = make_contract_address(3);
+  constexpr static ContractAddress kAddressGrandchild =
+      make_contract_address(3);
 
   auto parent_data = make_bytestring("parent_state");
   auto child_data = make_bytestring("child_state");
@@ -876,8 +877,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
   auto native_contract_parent = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [parent_data, parent_key
-            ](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+           [parent_data,
+            parent_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), parent_key,
                  std::as_bytes(std::span(parent_data)),
@@ -927,8 +928,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
   auto native_contract_child = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [child_data, child_return_data, child_key
-            ](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+           [child_data, child_return_data,
+            child_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
