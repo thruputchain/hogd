@@ -163,6 +163,7 @@ public:
     }
     CHECK_EQ(last_committed_block_.height, -1);
     CHECK_EQ(auth_data_height(), -1);
+    CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
 
     MerkleTrie empty_trie;
     empty_trie.generate_all_hashes();
@@ -181,6 +182,7 @@ public:
     CHECK_EQ(last_committed_block_.height, 0);
     CHECK_EQ(last_committed_block_.id, 0UL);
     scheduler_->set_current_block(last_committed_block_.height);
+    scheduler_->transfer_finished_.store(last_committed_block_.height);
 
     co_return ret;
   }
@@ -260,6 +262,17 @@ public:
     co_return;
   }
 
+  x23::Async<void> wait_for_transfer_data(BlockHeight expected_height)
+  {
+    int64_t current_height;
+    while ((current_height = scheduler_->transfer_finished_.load()) !=
+           static_cast<int64_t>(expected_height)) {
+      CHECK_EQ(current_height + 1, expected_height);
+      co_await scheduler_->transfer_finished_.wait(current_height);
+    }
+    co_return;
+  }
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -322,6 +335,7 @@ private:
 
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.height, db_sched_client_);
+    scheduler_->transfer_finished_.store(last_committed_block_.height);
     co_await db_rpc_->register_scheduler(scheduler_);
 
     auth_client_ = std::make_unique<auth_sched_client_t>(

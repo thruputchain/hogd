@@ -164,7 +164,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
   info("submit_vetted, {} txs", txs.size());
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+  info("submit_vetted, got lock. will now add txs");
   co_await scheduler_->add_txs(txs);
+  info("submit_vetted, finished adding txs. will now return");
   co_return;
 }
 
@@ -813,10 +817,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   record_stage(stage_precheck);
 
   // Wait for hogdb to notify us of all HOG transfers that occurred in the
-  // previous block. These transfer affect account balances, which in turn
-  // affects scheduling priorities for accounts, so we need to wait for this
-  // notification before scheduling the next block.
-  co_await scheduler_->transfer_finished_.acquire();
+  // previous block. These transfers affect account balances, which in turn
+  // affect scheduling priorities for accounts, so we need to wait for the
+  // transfer data for the last committed block before scheduling the next
+  // block.
+  co_await wait_for_transfer_data(db_tip.height);
   record_stage(stage_wait_transfers);
   co_await wait_for_auth_data(db_tip.height);
   record_stage(stage_wait_auth_data);
@@ -997,7 +1002,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
 
-  co_await scheduler_->transfer_finished_.acquire();
+  co_await wait_for_transfer_data(nomination.block_height - 1);
   co_await wait_for_auth_data(nomination.block_height - 1);
 
   if (co_await create_snapshot(
@@ -1338,9 +1343,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 // validate(). Also be sure to make sure this works with the genesis block.
 // I do not need to check this in add_txs--this is all kept in sync by the
 // [auth_data_changed] callback.
-//
-// Also [transfer_finished_] should not be a CoroSem, it should instead be set
-// to the last block height seen in the callback.
 x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          KeyChangeBatch key_changes)

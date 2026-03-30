@@ -104,6 +104,9 @@ x23::Async<void>
 Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 {
   auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
+  if (res.result() != DbSchedResult::DbSchedResultOK) {
+    info("read_average_hog_ages did not return OK");
+  }
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
   for (size_t i = 0; i < res.hog_age_batch().size(); i++) {
     const HogAge &age = res.hog_age_batch()[i];

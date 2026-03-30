@@ -156,7 +156,7 @@ public:
   // Debug.
   void dump_runqueue();
 
-  x23::CoroSem transfer_finished_;
+  x23::CoroFutex<int64_t> transfer_finished_{-1};
   x23::CoroLock global_lock_;
 
 private:
