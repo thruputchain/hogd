@@ -164,7 +164,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   SignedTransactionBatch txs;
   CHECK(co_await parallel_batch_to_t(batch, txs));
   info("submit_vetted, {} txs", txs.size());
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+  info("submit_vetted, got lock. will now add txs");
   co_await scheduler_->add_txs(txs);
+  info("submit_vetted, finished adding txs. will now return");
   co_return;
 }
 
