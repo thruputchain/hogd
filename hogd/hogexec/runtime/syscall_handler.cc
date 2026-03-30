@@ -460,6 +460,12 @@ SystemCallHandler::invoke(ContractAddress const &address,
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
+  // reentrance guard
+  // check if the address is already on the stack
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return {SyscallErrorCode::kSyscallErrorCodeReentrance, 0};
+  }
+
   auto runtime = resolve_runtime(address);
   if (!runtime) {
     trace("SystemError: resolving runtime for address: {}, error {}",
