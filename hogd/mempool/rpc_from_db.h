@@ -67,7 +67,8 @@ public:
     CHECK_PTR(scheduler_.get());
     co_await scheduler_->process_transfers(transfers);
 
-    scheduler_->transfer_finished_.release();
+    scheduler_->transfer_finished_.store(transfers.block);
+    scheduler_->transfer_finished_.broadcast(&default_threadpool());
     // @geoff to @jhumphri: Do we need the cg = nullptr here? The cg gets
     // dropped automatically by going out of scope at the end of the function
     // body
