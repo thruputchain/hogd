@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <functional>
@@ -205,6 +206,13 @@ public:
                ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
+
+  bool has_active_frame_for(ContractAddress const &addr) const
+  {
+    return std::ranges::any_of(frame_stack_, [&](const InvocationFrame &frame) {
+      return frame.address() == addr;
+    });
+  }
 
   // Lookup the hash of the contract deployed at the queried address,
   // _only_ for contracts that are deployed during the current transaction.

@@ -437,14 +437,17 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
 
 TEST_F(TracingTest, TryInvokeLockAcquireFailure)
 {
-  ContractAddress contract_addr = make_contract_address(0);
+  // Two contracts (no self-reentrance): writer stores calldata under "test"
+  // with an exclusive lock; caller try_invokes writer:0.  Uncommitted tx1
+  // leaves the lock held so tx2's try_invoke fails lock acquisition.
+
+  ContractAddress addr_writer = make_contract_address(0);
+  ContractAddress addr_caller = make_contract_address(1);
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
+    auto contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            // Method 0: write calldata to storage key "test"
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto const &calldata = ctx.handler().get_calldata();
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
@@ -457,39 +460,43 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
-             }},
-            // Method 1: try_invoke method 0
-            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             }}});
+
+    auto contract_caller = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                Calldata args = {'t', 'e', 's', 't'};
                RuntimeMemoryLength output_return_buffer_len = 0;
                [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(),
+                   addr_writer, 0, ctx.runtime().get_available_gas(),
                    std::as_bytes(std::span(args)),
                    std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
 
-               // Handle try_invoke result — return success regardless
                return {};
              }}});
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract));
+    contract_map.emplace(0, std::move(contract_writer));
+    contract_map.emplace(1, std::move(contract_caller));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  auto contract_xdr = make_native_contract(0);
-  write_contract(contract_xdr);
-  write_deployment(contract_addr, contract_xdr);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  ContractAddress addrs[] = {addr_writer, addr_caller};
+  for (int i = 0; i < 2; ++i) {
+    auto contract_xdr = make_native_contract(i);
+    write_contract(contract_xdr);
+    write_deployment(addrs[i], contract_xdr);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
-  // Tx 1: invoke method 1 (try_invoke writes to "test", acquires lock)
+  // Tx 1: caller try_invokes writer:0 (writes to "test", acquires lock)
   auto handler1 = make_new_system_call_handler(
       Transaction{.invocation =
-                      Invocation{.invoked_address = contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(1),
+                      Invocation{.invoked_address = addr_caller,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}},
       *context);
@@ -498,11 +505,11 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit — keeps the exclusive lock held
 
-  // Tx 2: invoke method 1 with tracing (try_invoke fails due to lock)
+  // Tx 2: same invocation with tracing (try_invoke fails due to lock)
   auto handler2 = make_new_system_call_handler(
       Transaction{.invocation =
-                      Invocation{.invoked_address = contract_addr,
-                                 .entrypoint = entrypoint_from_method_id(1),
+                      Invocation{.invoked_address = addr_caller,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}},
       *context);
@@ -514,8 +521,8 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
   auto const *trace = handler2.get_trace();
   ASSERT_NE(trace, nullptr);
 
-  // Root frame should be contract 0
-  ASSERT_EQ(trace->invocation.invoked_address, contract_addr);
+  // Root frame is the caller contract
+  ASSERT_EQ(trace->invocation.invoked_address, addr_caller);
 
   // Root frame should have terminated with Return (caller handled try_invoke
   // failure)
@@ -543,8 +550,8 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
 
   auto const &child_trace = *invoke_trace.outputs->child_trace;
 
-  // Child should be the same contract at address 0
-  ASSERT_EQ(child_trace.invocation.invoked_address, contract_addr);
+  // Child frame is the writer contract
+  ASSERT_EQ(child_trace.invocation.invoked_address, addr_writer);
 
   // Child trace shows Return — the child's deterministic execution succeeded,
   // but the trace status is reported as the child's execution result, before

@@ -223,6 +223,9 @@ protected:
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
+            // stop deadlock on test failure
+            wait_flag_1_ = true;
+            wait_flag_1_.notify_all();
             return InvokeError{InvokeErrorCode::None};
           }
 
@@ -1833,6 +1836,8 @@ protected:
                 }},
         *context_);
 
+    handler.hack_dont_use_test_bypass_allow_reentrance();
+
     auto r = handler.root_invoke();
     ASSERT_TRUE(r.is_root_success());
     auto res = handler.try_commit_transaction();
@@ -1854,6 +1859,7 @@ protected:
                                    .calldata = x23::serialize(args...)},
                 }},
         *context_);
+    handler.hack_dont_use_test_bypass_allow_reentrance();
 
     auto r = handler.root_invoke();
     ASSERT_TRUE(r.is_root_success());

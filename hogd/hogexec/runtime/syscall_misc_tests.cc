@@ -88,6 +88,7 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -134,6 +135,7 @@ TEST_F(SyscallMiscTests, TestInvokeFrameReverted)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -617,6 +619,7 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -669,6 +672,7 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 

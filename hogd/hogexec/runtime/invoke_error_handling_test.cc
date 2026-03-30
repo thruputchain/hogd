@@ -61,12 +61,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
     throw std::runtime_error("Unhandled enum value");
   };
 
-  auto native_contract_xdr = make_native_contract(0);
-  auto native_contract_address = make_contract_address(0);
+  constexpr ContractAddress kCalleeAddress = make_contract_address(0);
+  constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
 
-  // a native contract with methods that just return different InvokeError
-  // codes, and one method that calls all the other methods.
-  auto native_contract = std::make_unique<NativeContract>(
+  // Callee: methods that return each InvokeError code. Orchestrator: invokes
+  // those methods on the callee contract (no self-reentrance).
+  auto callee_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
@@ -92,13 +92,16 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
            [&](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
              return inner_func(InvokeErrorCode::Unrecoverable);
            }},
-          {6,
-           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      });
+
+  auto orchestrator_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [kCalleeAddress](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_address,
-                                                      0, UINT64_MAX, Calldata{},
-                                                      0,
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 0,
+                                                      UINT64_MAX, Calldata{}, 0,
                                                       output_return_buffer_len);
              }();
              if (!r.has_value() ||
@@ -109,9 +112,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r2 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_address,
-                                                      1, UINT64_MAX, Calldata{},
-                                                      0,
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 1,
+                                                      UINT64_MAX, Calldata{}, 0,
                                                       output_return_buffer_len);
              }();
              if (!r2.has_value() ||
@@ -125,9 +127,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              // caller
              auto r3 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_address,
-                                                      2, UINT64_MAX, Calldata{},
-                                                      0,
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 2,
+                                                      UINT64_MAX, Calldata{}, 0,
                                                       output_return_buffer_len);
              }();
              if (!r3.has_value() ||
@@ -139,9 +140,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r4 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_address,
-                                                      3, UINT64_MAX, Calldata{},
-                                                      0,
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 3,
+                                                      UINT64_MAX, Calldata{}, 0,
                                                       output_return_buffer_len);
              }();
              if (r4.has_value() ||
@@ -152,9 +152,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r5 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_address,
-                                                      4, UINT64_MAX, Calldata{},
-                                                      0,
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 4,
+                                                      UINT64_MAX, Calldata{}, 0,
                                                       output_return_buffer_len);
              }();
              if (r5.has_value() ||
@@ -166,9 +165,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r6 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_address,
-                                                      5, UINT64_MAX, Calldata{},
-                                                      0,
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 5,
+                                                      UINT64_MAX, Calldata{}, 0,
                                                       output_return_buffer_len);
              }();
              if (r6.has_value() ||
@@ -182,12 +180,18 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(callee_contract));
+  contract_map.emplace(1, std::move(orchestrator_contract));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
-  // mark the contract as existing and deployed within the database
-  write_contract(native_contract_xdr);
-  write_deployment(native_contract_address, native_contract_xdr);
+
+  auto callee_xdr = make_native_contract(0);
+  write_contract(callee_xdr);
+  write_deployment(kCalleeAddress, callee_xdr);
+
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(orchestrator_xdr);
+  write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
   // now invoke the contract
   {
@@ -197,8 +201,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                 Transaction{
                     .invocation =
                         Invocation{
-                            .invoked_address = native_contract_address,
-                            .entrypoint = entrypoint_from_method_id(6),
+                            .invoked_address = kOrchestratorAddress,
+                            .entrypoint = entrypoint_from_method_id(0),
                             .gas_limit = UINT64_MAX,
                             .calldata = {},
                         },
