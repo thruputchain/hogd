@@ -190,9 +190,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   // (450) matches the gas consumed for that subtree. The three roles are
   // deployed as separate native contracts at separate addresses.
 
-  constexpr ContractAddress kAddressConsumer = test_contract_address(0);
-  constexpr ContractAddress kAddressMiddle = test_contract_address(1);
-  constexpr ContractAddress kAddressEntry = test_contract_address(2);
+  constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
+  constexpr static ContractAddress kAddressMiddle = test_contract_address(1);
+  constexpr static ContractAddress kAddressEntry = test_contract_address(2);
 
   NativeContractBuilder builder_consumer;
   builder_consumer.add<NativeContractBuilder::kDefaultSerializationFormat>(
@@ -208,7 +208,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   NativeContractBuilder builder_middle;
   builder_middle.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [kAddressConsumer](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+      [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         // Invoke consumer method 0 three times, with various gas costs
         auto r1 = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
@@ -272,7 +272,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [kAddressMiddle](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         auto r = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
