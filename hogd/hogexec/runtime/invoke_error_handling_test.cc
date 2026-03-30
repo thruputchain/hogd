@@ -100,9 +100,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
            [kCalleeAddress](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 0, UINT64_MAX, Calldata{}, 0,
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 0,
+                                                      UINT64_MAX, Calldata{}, 0,
+                                                      output_return_buffer_len);
              }();
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -112,9 +112,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r2 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 1, UINT64_MAX, Calldata{}, 0,
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 1,
+                                                      UINT64_MAX, Calldata{}, 0,
+                                                      output_return_buffer_len);
              }();
              if (!r2.has_value() ||
                  r2.value() !=
@@ -127,9 +127,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              // caller
              auto r3 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 2, UINT64_MAX, Calldata{}, 0,
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 2,
+                                                      UINT64_MAX, Calldata{}, 0,
+                                                      output_return_buffer_len);
              }();
              if (!r3.has_value() ||
                  r3.value() !=
@@ -140,9 +140,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r4 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 3, UINT64_MAX, Calldata{}, 0,
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 3,
+                                                      UINT64_MAX, Calldata{}, 0,
+                                                      output_return_buffer_len);
              }();
              if (r4.has_value() ||
                  r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
@@ -152,9 +152,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r5 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 4, UINT64_MAX, Calldata{}, 0,
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 4,
+                                                      UINT64_MAX, Calldata{}, 0,
+                                                      output_return_buffer_len);
              }();
              if (r5.has_value() ||
                  r5.error() !=
@@ -165,9 +165,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
              auto r6 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 5, UINT64_MAX, Calldata{}, 0,
-                   output_return_buffer_len);
+               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 5,
+                                                      UINT64_MAX, Calldata{}, 0,
+                                                      output_return_buffer_len);
              }();
              if (r6.has_value() ||
                  r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
