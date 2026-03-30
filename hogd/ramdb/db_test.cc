@@ -704,6 +704,58 @@ TEST_F(DatabaseTest, DiskCleanup)
   check_integrity();
 }
 
+// IncrementalSnapshotAfterReopenRejectsGap
+//
+// After reopen, sync() returns an LSN that exceeds the snapshot coverage
+// (e.g., the prior snapshot covers 0-1 but sync returns 2). Using that LSN
+// as begin_lsn for sync_and_snapshot would create a gap in snapshot coverage
+// that recovery cannot bridge. sync_and_snapshot must reject this.
+TEST_F(DatabaseTest, IncrementalSnapshotAfterReopenRejectsGap)
+{
+  // Step 1: snapshot the empty database. Snapshot covers LSN 0-1.
+  auto snap1 = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap1.has_value());
+  auto &[lsn1, future1] = *snap1;
+  ASSERT_TRUE(future1.get().has_value());
+
+  // Step 2: sync + close + reopen.
+  auto sync1 = db_->sync();
+  ASSERT_TRUE(sync1.has_value());
+  uint64_t last_lsn = *sync1; // LSN 2 — beyond snapshot coverage (1).
+  db_.reset();
+  auto ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+  check_integrity();
+
+  // Step 3: insert one item.
+  std::string key(kKeySize, 'A');
+  std::string value(kValueSize, 'B');
+  auto put_ret = db_->put(std::as_bytes(std::span(key)), 0,
+                          std::as_bytes(std::span(value)));
+  ASSERT_TRUE(put_ret.has_value());
+  oracle_[key] = value;
+
+  // Step 4: sync_and_snapshot(last_lsn) should be rejected — last_lsn (2)
+  // exceeds the snapshot coverage (1), which would create an unrecoverable gap.
+  auto snap2 = db_->sync_and_snapshot(last_lsn);
+  ASSERT_FALSE(snap2.has_value())
+      << "sync_and_snapshot should reject begin_lsn that creates a gap";
+
+  // Step 5: Using begin_lsn=0 (full snapshot) should succeed.
+  auto snap3 = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap3.has_value());
+  auto &[lsn3, future3] = *snap3;
+  ASSERT_TRUE(future3.get().has_value());
+
+  // Step 6: sync + close + reopen and verify. Data is preserved.
+  auto sync3 = db_->sync();
+  ASSERT_TRUE(sync3.has_value());
+  db_.reset();
+  ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+  check_integrity();
+}
+
 } // namespace hogd
 
 int

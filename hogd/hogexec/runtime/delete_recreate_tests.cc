@@ -52,13 +52,15 @@ protected:
 
 TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 {
-  // A native contract with the following methods:
-  // 0: Reads a storage key, expecting it to be empty. Then writes a bytestring
-  // to that same hardcoded storage key. 1: Deletes the storage key. 2: Calls 0,
-  // then calls 1, then calls 0 again.
-  //    Expected behavior: all three of those calls should succeed.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
+  // Storage contract: 0 = read-empty then write bytestring; 1 = delete key.
+  // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
+  // Expected: all three nested invokes succeed.
+  static constexpr ContractAddress kAddressStorage = make_contract_address(0);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(1);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_storage = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -101,8 +103,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
                return {};
              }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
                auto delete_status =
@@ -120,14 +121,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                }
 
                return {};
-             }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call method 0 (read empty, then write)
+             }}});
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(),
+                     kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
@@ -137,13 +139,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Call method 1 (delete)
                auto r1 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 1, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
@@ -151,13 +151,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Call method 0 again (read empty, then write)
                auto r2 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 0, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
@@ -167,21 +165,22 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
                return {};
              }}});
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_storage));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressStorage, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
@@ -190,8 +189,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
@@ -208,7 +207,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
   // Verify that the bytestring was written (from the second call to method 0)
   auto read_res = lookup_storage_item_from_db(
-      make_contract_data_addrkey(contract_0_addr, "test"));
+      make_contract_data_addrkey(kAddressStorage, "test"));
   ASSERT_TRUE(read_res.has_value());
   auto expect = make_bytestring("hello");
   ASSERT_EQ(read_res.value().bytestring(), expect);
@@ -216,13 +215,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
 TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 {
-  // A native contract with the following methods:
-  // 0: Reads a storage key, expecting it to be empty. Then writes a nonnegative
-  // integer to that same hardcoded storage key. 1: Deletes the storage key. 2:
-  // Calls 0, then calls 1, then calls 0 again.
-  //    Expected behavior: all three of those calls should succeed.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
+  // Storage contract: 0 = read-empty then write nnint; 1 = delete key.
+  // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
+  // Expected: all three nested invokes succeed.
+  static constexpr ContractAddress kAddressStorage = make_contract_address(0);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(1);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_storage = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -264,8 +265,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
                return {};
              }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
                auto delete_status =
@@ -283,14 +283,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                }
 
                return {};
-             }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call method 0 (read empty, then write)
+             }}});
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(),
+                     kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
@@ -300,13 +301,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Call method 1 (delete)
                auto r1 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 1, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
@@ -314,13 +313,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Call method 0 again (read empty, then write)
                auto r2 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 0, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
@@ -330,21 +327,22 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
                return {};
              }}});
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_storage));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressStorage, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
@@ -353,8 +351,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
@@ -371,7 +369,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
   // Verify that the nnint was written (from the second call to method 0)
   auto read_res = lookup_storage_item_from_db(
-      make_contract_data_addrkey(contract_0_addr, "test"));
+      make_contract_data_addrkey(kAddressStorage, "test"));
   ASSERT_TRUE(read_res.has_value());
   ASSERT_EQ(read_res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
   auto nnint_item = read_res.value().nnint();
@@ -380,13 +378,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
 TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 {
-  // A native contract with the following methods:
-  // 0: Consumes from a storage key, expecting it to be empty. Then inserts an
-  // item into that same hardcoded storage key. 1: Deletes the storage key. 2:
-  // Calls 0, then calls 1, then calls 0 again.
-  //    Expected behavior: all three of those calls should succeed.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
+  // Storage contract: 0 = consume-empty then insert; 1 = delete key.
+  // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
+  // Expected: all three nested invokes succeed.
+  static constexpr ContractAddress kAddressStorage = make_contract_address(0);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(1);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_storage = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -427,8 +427,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 
                return {};
              }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                // Delete the storage key
                auto delete_status =
@@ -446,14 +445,15 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                }
 
                return {};
-             }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Call method 0 (consume empty, then insert)
+             }}});
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(),
+                     kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
@@ -463,13 +463,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Call method 1 (delete)
                auto r1 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 1, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
@@ -477,13 +475,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Call method 0 again (consume empty, then insert)
                auto r2 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 0, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
                      output_return_buffer_len);
                }();
 
@@ -493,21 +489,22 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 
                return {};
              }}});
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_storage));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressStorage, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
@@ -516,8 +513,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
@@ -535,7 +532,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
   // Verify that the queue exists and has exactly one item (from the second call
   // to method 0)
   auto read_res = lookup_storage_item_from_db(
-      make_contract_data_addrkey(contract_0_addr, "test"));
+      make_contract_data_addrkey(kAddressStorage, "test"));
   ASSERT_TRUE(read_res.has_value());
   ASSERT_EQ(read_res.value().type(),
             StorageItemType::kItemTypeRetrocausalQueue);
@@ -581,7 +578,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = contract_0_addr,
+                      Invocation{.invoked_address = kAddressStorage,
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},

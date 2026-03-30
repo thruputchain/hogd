@@ -1,0 +1,172 @@
+name: x23c latest release
+
+on:
+  workflow_dispatch:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+    paths:
+      - 'x23/x23c/**'
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+  CARGO_BUILD_JOBS: "6"
+  X23C_RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: x23c-latest-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
+    runs-on: namespace-profile-hogd-linux
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+            ${{ secrets.HOGD_TO_HOGX_KEY }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
+            else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Configure Environment
+        run: |
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'NPROC=18' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
+
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_NAMESPACE=gcc-release" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
+
+      - name: Build x23c
+        run: ./scripts/build.sh -d build/release -t Release -c gcc x23c
+
+      - name: Package x23c artifacts
+        run: ./scripts/package_x23c_latest_release.sh build/release/x23/x23c/x23c artifacts
+
+      - name: Publish latest-x23c release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-x23c
+          target_commitish: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          name: x23c latest
+          body_path: artifacts/release_notes.md
+          overwrite_files: true
+          files: |
+            artifacts/x23c-linux-x86_64.tar.gz
+            artifacts/SHA256SUMS
+          draft: false
+          prerelease: true
+          make_latest: false
+
+      - name: Move latest-x23c tag to published commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = process.env.X23C_RELEASE_SHA;
+            try {
+              await github.rest.git.updateRef({
+                ...context.repo,
+                ref: "tags/latest-x23c",
+                sha,
+                force: true,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+              await github.rest.git.createRef({
+                ...context.repo,
+                ref: "refs/tags/latest-x23c",
+                sha,
+              });
+            }
+
+      - name: Upload artifacts for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x23c-latest-release-artifacts
+          if-no-files-found: ignore
+          path: artifacts
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions

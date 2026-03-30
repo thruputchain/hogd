@@ -63,13 +63,14 @@ protected:
 // Not really a try invoke test, but it's a convenient way to test general
 // invocation.
 TEST_P(TryInvokeTest, ReadWriteBytestring)
-{ // A native contract with the following methods:
-  // 0: takes the input calldata and writes it to a hardcoded storage key.
-  // 1: Reads the bytestring from the hardcoded storage key and returns it.
-  // 2: Invokes method 0 and then method 1, checking that the written value is
-  // read correctly.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<
+{ // Storage contract: 0 writes calldata to a hardcoded key; 1 reads it back
+  // into the return buffer.  Orchestrator contract: invokes storage 0 then
+  // storage 1 and checks the returned bytes match root calldata.
+  ContractAddress addr_storage = make_contract_address(0);
+  ContractAddress addr_orchestrator = make_contract_address(1);
+
+  auto make_context = [addr_storage]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_storage = std::make_unique<
         NativeContract>(std::unordered_map<Runtime::MethodID,
                                            NativeContract::function_t>{
         {0,
@@ -88,8 +89,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
            return {};
          }},
-        {1,
-         [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
            auto key = make_storage_key("test");
            auto res = ctx.handler().get_bytestring(key);
            if (!res.has_value()) {
@@ -108,73 +108,77 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
            ctx.handler().set_return_buffer(std::move(out), false);
            return {};
-         }},
-        {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-           auto calldata = ctx.handler().get_calldata();
-
-           auto r0 = [&]() {
-             RuntimeMemoryLength output_return_buffer_len = 0;
-             return ctx.syscall<SyscallNo::kInvoke>(
-                 ctx.handler().get_current_address(), 0,
-                 ctx.runtime().get_available_gas(),
-                 ctx.handler().get_calldata(),
-                 std::to_underlying(InvokeFlag::None),
-                 output_return_buffer_len);
-           }();
-
-           if (!r0.has_value()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           auto r1 = [&]() {
-             RuntimeMemoryLength output_return_buffer_len = 0;
-             return ctx.syscall<SyscallNo::kInvoke>(
-                 ctx.handler().get_current_address(), 1,
-                 ctx.runtime().get_available_gas(), Calldata{},
-                 std::to_underlying(InvokeFlag::None),
-                 output_return_buffer_len);
-           }();
-
-           if (!r1.has_value()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           auto returned_buffer = ctx.handler().get_return_buffer();
-           if (!returned_buffer.has_value() ||
-               !returned_buffer.value().has_value()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           auto const &returned_buffer_data = returned_buffer.value().value();
-
-           if (returned_buffer_data->size() != calldata.size()) {
-             return InvokeError{InvokeErrorCode::Deterministic};
-           }
-
-           if (!returned_buffer_data->empty()) {
-             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
-                             calldata.size()) != 0) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-           }
-
-           return {};
          }}});
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [addr_storage](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto calldata = ctx.handler().get_calldata();
+
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     addr_storage, 0, ctx.runtime().get_available_gas(),
+                     ctx.handler().get_calldata(),
+                     std::to_underlying(InvokeFlag::None),
+                     output_return_buffer_len);
+               }();
+
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto r1 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     addr_storage, 1, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     output_return_buffer_len);
+               }();
+
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto returned_buffer = ctx.handler().get_return_buffer();
+               if (!returned_buffer.has_value() ||
+                   !returned_buffer.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto const &returned_buffer_data =
+                   returned_buffer.value().value();
+
+               if (returned_buffer_data->size() != calldata.size()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               if (!returned_buffer_data->empty()) {
+                 if (std::memcmp(returned_buffer_data->data(), calldata.data(),
+                                 calldata.size()) != 0) {
+                   return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+               }
+
+               return {};
+             }}});
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_storage));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  auto contract_0_addr = make_contract_address(0);
-  write_deployment(contract_0_addr, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+  ContractAddress addrs[] = {addr_storage, addr_orchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
@@ -183,8 +187,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = ContractAddress{},
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = addr_orchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1, 2, 3, 4, 5}},
               }},
@@ -204,9 +208,9 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = ContractAddress{},
+                                Invocation{.invoked_address = addr_orchestrator,
                                            .entrypoint =
-                                               entrypoint_from_method_id(2),
+                                               entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
       *context);
@@ -219,19 +223,40 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 }
 
 TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
-{ // A native contract with the following methods:
-  // 0: Invokes method 1, in a try_invoke frame.
-  // 1: Makes a bytestring write.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
+{ // Writer: method 0 writes "hello" to a bytestring key. Caller: method 0
+  // try_invokes writer:0 (no self-reentrance).
+  static constexpr ContractAddress kAddressWriter = make_contract_address(0);
+  static constexpr ContractAddress kAddressCaller = make_contract_address(1);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_writer = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
+                                  "bytestring on writer";
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               return {};
+             }},
+        });
+
+    auto native_contract_caller = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
@@ -247,44 +272,30 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
 
                return {};
              }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               auto [res, _gas] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
-               if (!res.has_value() ||
-                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
-                                  "bytestring in method 1";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-
-               return {};
-             }},
         });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
+    contract_map.emplace(0, std::move(native_contract_writer));
+    contract_map.emplace(1, std::move(native_contract_caller));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
-  write_deployment(ContractAddress{}, contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
-  setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressWriter, kAddressCaller};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // now invoke the contract
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = ContractAddress{},
+                                Invocation{.invoked_address = kAddressCaller,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
@@ -300,7 +311,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   advance_block();
 
   auto read_res = lookup_storage_item_from_db(
-      make_contract_data_addrkey(ContractAddress{}, "test"));
+      make_contract_data_addrkey(kAddressWriter, "test"));
   ASSERT_TRUE(read_res.has_value());
   auto expect_span = std::as_bytes(std::span{"hello"});
   Bytestring expect;
@@ -309,256 +320,320 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
-TEST_P(TryInvokeTest, TryInvokeHandleErrors)
+namespace {
+
+constexpr ContractAddress kTryInvokeHandleErrorsWriter =
+    NativeContractTestFramework::make_contract_address(0);
+constexpr ContractAddress kTryInvokeHandleErrorsFault =
+    NativeContractTestFramework::make_contract_address(4);
+
+// Shared native contracts for TryInvokeHandleErrors_* tests: writer,
+// orchestrator, fault, and bridge (see comments on each TEST_P).
+std::unique_ptr<RuntimeContext>
+make_try_invoke_handle_errors_context()
 {
-  // A native contract with the following methods:
-  // 0: Performs a bytestring write of "hello".
-  // 1: Performs a bytestring write of "world".
-  // 2: Invokes method 0, in a try_invoke frame.  Then invokes method 1, in
-  // another try_invoke frame. (sequential try invokes)
-  // 3: Invokes method 0, in a try_invoke frame.  Then returns an error.
-  // 4: Invokes method 3, in a regular frame.  Then invokes method 1, in a
-  // try_invoke frame.
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               auto [res, _gas] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
-               if (!res.has_value() ||
-                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
-                                  "bytestring in method 0";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               auto [res, _gas] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span{"world"}),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
-               if (!res.has_value() ||
-                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
-                                  "bytestring in method 1";
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }},
-            {2,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Try invoke method 0
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               // Try invoke method 1
-               auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }},
-            {3,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Try invoke method 0
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               // Return an error
+  auto native_contract_writer = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = NativeContractTestFramework::make_storage_key("test");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key, std::as_bytes(std::span{"hello"}),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
+                                "bytestring in method 0";
                return InvokeError{InvokeErrorCode::Deterministic};
-             }},
-            {4,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Regular invoke of method 3
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 3,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
-               }();
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               // Try invoke method 1
-               auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(), Calldata{},
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }},
-        });
-    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
-    return std::make_unique<NativeContext>(std::move(contract_map));
-  };
+             }
+             return {};
+           }},
+          {1,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = NativeContractTestFramework::make_storage_key("test");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key, std::as_bytes(std::span{"world"}),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
+                                "bytestring in method 1";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
 
-  auto context = make_context();
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kTryInvokeHandleErrorsWriter, 0,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kTryInvokeHandleErrorsWriter, 1,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+          {1,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kTryInvokeHandleErrorsWriter, 0,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return InvokeError{InvokeErrorCode::Deterministic};
+           }},
+      });
 
-  // mark the contract as existing and deployed within the database
-  auto contract_0 = make_native_contract(0);
-  write_contract(contract_0);
+  auto native_contract_fault = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kTryInvokeHandleErrorsWriter, 0,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return InvokeError{InvokeErrorCode::Deterministic};
+           }},
+      });
 
-  // Test case 1: sequential good try invokes
-  // Invoke method 2, starting with a clean contract deployment
-  write_deployment(make_contract_address(1), contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
+  auto native_contract_bridge = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kTryInvokeHandleErrorsFault, 0,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::None),
+                   output_return_buffer_len);
+             }();
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kTryInvokeHandleErrorsWriter, 1,
+                   ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_orchestrator));
+  contract_map.emplace(2, std::move(native_contract_fault));
+  contract_map.emplace(3, std::move(native_contract_bridge));
+  return std::make_unique<NativeContext>(std::move(contract_map));
+}
+
+} // namespace
+
+// Writer: 0 = "hello", 1 = "world" on shared key.
+// Orchestrator: 0 = try_invoke writer 0 then try_invoke writer 1; 1 =
+// try_invoke writer 0 then error.
+TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
+{
+  auto context = make_try_invoke_handle_errors_context();
+
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  auto fault_xdr = make_native_contract(2);
+  auto bridge_xdr = make_native_contract(3);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_contract(fault_xdr);
+  write_contract(bridge_xdr);
+  write_deployment(kTryInvokeHandleErrorsWriter, writer_xdr);
+  setup_grant_storage_token(kTryInvokeHandleErrorsWriter, 1'000'000'000);
+  write_deployment(kTryInvokeHandleErrorsFault, fault_xdr);
+  setup_grant_storage_token(kTryInvokeHandleErrorsFault, 1'000'000'000);
+
+  // Sequential good try invokes: orchestrator at address 1, method 0.
+  write_deployment(make_contract_address(1), orchestrator_xdr);
   setup_grant_storage_token(make_contract_address(1), 1'000'000'000);
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = make_contract_address(1),
-                                   .entrypoint = entrypoint_from_method_id(2),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}}}},
-        *context);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
-    advance_block();
-    // Check that the last write was "world"
-    auto read_res = lookup_storage_item_from_db(
-        make_contract_data_addrkey(make_contract_address(1), "test"));
-    ASSERT_TRUE(read_res.has_value());
-    auto expect_span = std::as_bytes(std::span{"world"});
-    Bytestring expect;
-    expect.resize(expect_span.size());
-    std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-    ASSERT_EQ(read_res.value().bytestring(), expect);
-  }
 
-  // Test case 2: unwinding a frame that contains a try_invoke
-  // Invoke method 3, starting with a clean contract deployment
-  write_deployment(make_contract_address(2), contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = make_contract_address(1),
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events()());
+  advance_block();
+  // Check that the last write was "world"
+  auto read_res = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kTryInvokeHandleErrorsWriter, "test"));
+  ASSERT_TRUE(read_res.has_value());
+  auto expect_span = std::as_bytes(std::span{"world"});
+  Bytestring expect;
+  expect.resize(expect_span.size());
+  std::memcpy(expect.data(), expect_span.data(), expect_span.size());
+  ASSERT_EQ(read_res.value().bytestring(), expect);
+}
+
+TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
+{
+  auto context = make_try_invoke_handle_errors_context();
+
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  auto fault_xdr = make_native_contract(2);
+  auto bridge_xdr = make_native_contract(3);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_contract(fault_xdr);
+  write_contract(bridge_xdr);
+  write_deployment(kTryInvokeHandleErrorsWriter, writer_xdr);
+  setup_grant_storage_token(kTryInvokeHandleErrorsWriter, 1'000'000'000);
+  write_deployment(kTryInvokeHandleErrorsFault, fault_xdr);
+  setup_grant_storage_token(kTryInvokeHandleErrorsFault, 1'000'000'000);
+
+  // Unwinding a frame that contains a try_invoke: orchestrator at address 2,
+  // method 1.
+  write_deployment(make_contract_address(2), orchestrator_xdr);
   setup_grant_storage_token(make_contract_address(2), 1'000'000'000);
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = make_contract_address(2),
-                                   .entrypoint = entrypoint_from_method_id(3),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}}}},
-        *context);
-    auto res = handler.root_invoke();
-    ASSERT_FALSE(res.result_); // Should return error
-    auto commit_res = handler.try_commit_transaction();
-    // transaction should not commit
-    ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
-    advance_block();
-    // Storage should not be updated
-    auto read_res = lookup_storage_item_from_db(
-        make_contract_data_addrkey(make_contract_address(2), "test"));
-    // Should be empty or not present
-    ASSERT_FALSE(read_res.has_value());
-  }
 
-  // Test case 3: bad try_invoke followed by a good
-  // Invoke method 4, starting with a clean contract deployment
-  write_deployment(make_contract_address(3), contract_0);
-  // This test is not focused on storage token costs, so we just grant
-  // an arbitrarily large number.
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = make_contract_address(2),
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *context);
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.result_); // Should return error
+  auto commit_res = handler.try_commit_transaction();
+  // transaction should not commit
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
+  advance_block();
+  // Storage should not be updated
+  auto read_res = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kTryInvokeHandleErrorsWriter, "test"));
+  // Should be empty or not present
+  ASSERT_FALSE(read_res.has_value());
+}
+
+// Fault: 0 = same as orchestrator 1 (try_invoke writer 0, deterministic error)
+// — callee of a regular invoke from the bridge.
+// Bridge: 0 = regular invoke fault:0, then try_invoke writer 1.
+TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
+{
+  auto context = make_try_invoke_handle_errors_context();
+
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  auto fault_xdr = make_native_contract(2);
+  auto bridge_xdr = make_native_contract(3);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_contract(fault_xdr);
+  write_contract(bridge_xdr);
+  write_deployment(kTryInvokeHandleErrorsWriter, writer_xdr);
+  setup_grant_storage_token(kTryInvokeHandleErrorsWriter, 1'000'000'000);
+  write_deployment(kTryInvokeHandleErrorsFault, fault_xdr);
+  setup_grant_storage_token(kTryInvokeHandleErrorsFault, 1'000'000'000);
+
+  // Bridge at address 3, method 0: regular invoke fault, then try_invoke
+  // writer.
+  write_deployment(make_contract_address(3), bridge_xdr);
   setup_grant_storage_token(make_contract_address(3), 1'000'000'000);
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = make_contract_address(3),
-                                   .entrypoint = entrypoint_from_method_id(4),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = {}}}},
-        *context);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
-    advance_block();
-    // Storage should be updated to "world"
-    auto read_res = lookup_storage_item_from_db(
-        make_contract_data_addrkey(make_contract_address(3), "test"));
-    ASSERT_TRUE(read_res.has_value());
-    auto expect_span = std::as_bytes(std::span{"world"});
-    Bytestring expect;
-    expect.resize(expect_span.size());
-    std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-    ASSERT_EQ(read_res.value().bytestring(), expect);
-  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = make_contract_address(3),
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events()());
+  advance_block();
+  // Storage should be updated to "world"
+  auto read_res = lookup_storage_item_from_db(
+      make_contract_data_addrkey(kTryInvokeHandleErrorsWriter, "test"));
+  ASSERT_TRUE(read_res.has_value());
+  auto expect_span = std::as_bytes(std::span{"world"});
+  Bytestring expect;
+  expect.resize(expect_span.size());
+  std::memcpy(expect.data(), expect_span.data(), expect_span.size());
+  ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
 TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
 {
   // Test on try invoke with nnint_add.
   //
-  // Native contract with the following methods:
-  // 0: Loads the calldata, interprets it as one int8_t value [a], and
-  // performs an nnint_add of (a) on a storage key.
+  // Callee contract — method 0: loads the calldata, interprets it as one int8_t
+  // value [a], and performs an nnint_add of (a) on a storage key.
   //
-  // 1: Invokes method 0 in a try_invoke frame, with arguments [-5].
-  // Check that that invocation failed, and then return a deterministic error.
+  // Caller contract — method 0: invokes callee method 0 in a try_invoke frame,
+  // with arguments [-5]. Check that that invocation failed, and then return a
+  // deterministic error.
   //
-  // The test invokes method 1, and then checks that the transaction fails.
-  // Then checks that the storage item is not created.
+  // The test invokes the caller, then checks that the transaction fails. Then
+  // checks that the storage item is not created.
+  static constexpr ContractAddress kAddressCallee = make_contract_address(48);
+  static constexpr ContractAddress kAddressCaller = make_contract_address(49);
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(48);
-
-  // Deploy contract with two methods:
-  // 0: Loads calldata as two int8_t values [a, b] and performs nnint_set_add of
-  // (a, b) 1: Invokes method 0 in try_invoke frame with [5, -10], checks
-  // failure, then returns error
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_callee = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -592,14 +667,18 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
 
                return {}; // Success
              }},
-            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Invoke method 0 in try_invoke frame with arguments [-5]
+        });
+
+    auto native_contract_caller = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               // Invoke callee method 0 in try_invoke frame with arguments [-5]
                Calldata args = {static_cast<uint8_t>(-5)};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args,
+                     kAddressCallee, 0, ctx.runtime().get_available_gas(), args,
                      std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
@@ -618,34 +697,38 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
 
                // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+             }},
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract));
+    contract_map.emplace(0, std::move(native_contract_callee));
+    contract_map.emplace(1, std::move(native_contract_caller));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // Deploy contract and grant storage tokens
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressCallee, kAddressCaller};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
-  // Invoke method 1 (which should fail)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
+                                Invocation{.invoked_address = kAddressCaller,
                                            .entrypoint =
-                                               entrypoint_from_method_id(1),
+                                               entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
       *context);
 
   auto res = handler.root_invoke();
-  // The transaction should fail because method 1 returns a deterministic error
+  // The transaction should fail because the caller returns a deterministic
+  // error (after observing that the try_invoke of the callee did not succeed).
   ASSERT_FALSE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
@@ -654,8 +737,9 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
 
   advance_block();
 
-  // Check that the storage item is not created
-  auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
+  // Check that the storage item is not created (callee never committed a valid
+  // nnint write)
+  auto data_addrkey = make_contract_data_addrkey(kAddressCallee, "test");
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_FALSE(data_item_opt.has_value());
 }
@@ -668,33 +752,33 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // https://github.com/groundhogchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
   // does not occur again.
   //
-  // Native contract with the following methods:
-  // 0: Loads the calldata, then perform a bytestring write of that calldata.
+  // Writer contract — method 0: loads the calldata, then performs a bytestring
+  // write of that calldata to a fixed key.
   //
-  // 1: Invoke method 0 in a try_invoke frame, with argument "hello".
-  // Then invokes method 0 again in try_invoke, with argument "world".
+  // Orchestrator contract:
+  // 0: Invoke writer method 0 in a try_invoke frame, with argument "hello".
+  // Then invokes writer method 0 again in try_invoke, with argument "world".
   // Both should succeed.
-  //
-  // 2: Invoke method 0 in a try_invoke frame, with argument "foo".
+  // 1: Invoke writer method 0 in a try_invoke frame, with argument "foo".
   // Check that the try_invoke fails.
   // Then return a deterministic error.
   //
-  // The test invokes method 1, but does not immediately commit the transaction.
-  // Then it starts another transaction that invokes method 2.
+  // The test invokes orchestrator method 0, but does not immediately commit the
+  // transaction.
+  // Then it starts another transaction that invokes orchestrator method 1.
   // That second transaction should fail.
   // We then terminate the test without committing either transaction.
   // The test should not crash.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(53);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(53);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(54);
 
-  // Deploy contract with three methods:
-  // 0: Write calldata as bytestring to storage
-  // 1: Try invoke method 0 twice with "hello" and "world" (both should succeed)
-  // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then
-  // return error
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
+  // Writer: method 0 — write calldata as bytestring to storage.
+  // Orchestrator: 0 — try_invoke writer twice ("hello", "world"); 1 —
+  // try_invoke writer with "foo" (exclusive lock), then return error.
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -711,16 +795,19 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                }
                return {};
              }},
-            {1,
+        });
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Try invoke method 0 with "hello"
+               // Try invoke writer method 0 with "hello"
                Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_hello,
-                     std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                     args_hello, std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value() ||
@@ -728,14 +815,13 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Try invoke method 0 with "world"
+               // Try invoke writer method 0 with "world"
                Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
                auto r1 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_world,
-                     std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                     args_world, std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r1.has_value() ||
@@ -745,20 +831,20 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 
                return {};
              }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Try invoke method 0 with "foo" (should fail due to exclusive
-               // lock)
+            {1,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               // Try invoke writer method 0 with "foo" (should fail due to
+               // exclusive lock)
                Calldata args_foo = {'f', 'o', 'o'};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_foo,
-                     std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                     args_foo, std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
-                 ADD_FAILURE() << "shoudl not have system error";
+                 ADD_FAILURE() << "should not have system error";
                  return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
@@ -770,46 +856,53 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 
                // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+             }},
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract));
+    contract_map.emplace(0, std::move(native_contract_writer));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // Deploy contract and grant storage tokens
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressWriter, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
-  // First transaction: invoke method 1 (should succeed and acquire exclusive
-  // lock)
+  // First transaction: invoke orchestrator method 0 (should succeed and acquire
+  // exclusive lock on writer storage)
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(1),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet (keeps the exclusive lock)
 
-  // Second transaction: invoke method 2 (should fail due to exclusive lock)
+  // Second transaction: invoke orchestrator method 1 (should fail due to
+  // exclusive lock)
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(2),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *context);
 
   auto res2 = handler2.root_invoke();
@@ -820,32 +913,32 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 {
   // Test on try invoke where a transaction fails after a try_invoke fails.
   //
-  // Native contract with the following methods:
-  // 0: Loads the calldata, then perform a bytestring write of that calldata.
+  // Writer contract — method 0: loads the calldata, then performs a bytestring
+  // write of that calldata to a fixed key.
   //
-  // 1: Invoke method 0 in a try_invoke frame, with argument "hello".
-  // Then invokes method 0 again in try_invoke, with argument "world".
+  // Orchestrator contract:
+  // 0: Invoke writer method 0 in a try_invoke frame, with argument "hello".
+  // Then invokes writer method 0 again in try_invoke, with argument "world".
   // Both should succeed.
-  //
-  // 2: Invoke method 0 in a try_invoke frame, with argument "foo".
+  // 1: Invoke writer method 0 in a try_invoke frame, with argument "foo".
   // Check that the try_invoke fails.
   // Then return a deterministic error.
   //
-  // The test invokes method 1, but does not immediately commit the transaction.
-  // Then it starts another transaction that invokes method 2.
-  // That second transaction should fail.  We then commit the first transaction,
+  // The test invokes orchestrator method 0, but does not immediately commit the
+  // transaction.
+  // Then it starts another transaction that invokes orchestrator method 1.
+  // That second transaction should fail. We then commit the first transaction,
   // which should succeed.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(53);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(53);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(54);
 
-  // Deploy contract with three methods:
-  // 0: Write calldata as bytestring to storage
-  // 1: Try invoke method 0 twice with "hello" and "world" (both should succeed)
-  // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then
-  // return error
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
+  // Writer: method 0 — write calldata as bytestring to storage.
+  // Orchestrator: 0 — try_invoke writer twice ("hello", "world"); 1 —
+  // try_invoke writer with "foo" (exclusive lock), then return error.
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -862,16 +955,19 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                }
                return {};
              }},
-            {1,
+        });
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Try invoke method 0 with "hello"
+               // Try invoke writer method 0 with "hello"
                Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_hello,
-                     std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                     args_hello, std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value() ||
@@ -879,14 +975,13 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               // Try invoke method 0 with "world"
+               // Try invoke writer method 0 with "world"
                Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
                auto r1 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_world,
-                     std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                     args_world, std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r1.has_value() ||
@@ -896,20 +991,20 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
                return {};
              }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Try invoke method 0 with "foo" (should fail due to exclusive
-               // lock)
+            {1,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               // Try invoke writer method 0 with "foo" (should fail due to
+               // exclusive lock)
                Calldata args_foo = {'f', 'o', 'o'};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_foo,
-                     std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                     args_foo, std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
                if (!r0.has_value()) {
-                 ADD_FAILURE() << "shoudl not have system error";
+                 ADD_FAILURE() << "should not have system error";
                  return InvokeError{InvokeErrorCode::Unrecoverable};
                }
 
@@ -921,46 +1016,53 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
                // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::Deterministic};
-             }}});
+             }},
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract));
+    contract_map.emplace(0, std::move(native_contract_writer));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // Deploy contract and grant storage tokens
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressWriter, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
-  // First transaction: invoke method 1 (should succeed and acquire exclusive
-  // lock)
+  // First transaction: invoke orchestrator method 0 (should succeed and acquire
+  // exclusive lock on writer storage)
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(1),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet (keeps the exclusive lock)
 
-  // Second transaction: invoke method 2 (should fail due to exclusive lock)
+  // Second transaction: invoke orchestrator method 1 (should fail due to
+  // exclusive lock)
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(2),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *context);
 
   auto res2 = handler2.root_invoke();
@@ -977,8 +1079,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   advance_block();
 
   // Check that the storage item was written with "world" (the last write from
-  // method 1)
-  auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
+  // orchestrator method 0)
+  auto data_addrkey = make_contract_data_addrkey(kAddressWriter, "test");
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_TRUE(data_item_opt.has_value());
 
@@ -994,30 +1096,30 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 {
   // Test on try invoke where a transaction fails after a try_invoke fails.
   //
-  // Native contract with the following methods:
-  // 0: Loads the calldata, interprets it as one int8_t value [a], and
-  // performs an nnint_add of (a) on a storage key.
+  // Writer contract — method 0: loads the calldata, interprets it as one int8_t
+  // value [a], and performs an nnint_add of (a) on a storage key.
   //
-  // 1: Invokes method 0 in a try_invoke frame, with arguments [-5].
+  // Orchestrator contract:
+  // 0: Invokes writer method 0 in a try_invoke frame, with arguments [-5].
   // Check that that invocation failed, and then return a deterministic error.
+  // 1: Invokes writer method 0 with arguments [1] (try_invoke).
+  // Check that the invocation succeeds.
   //
-  // 2: Invokes method 0 with arguments [1].
-  // Check that the the invocation succeeds.
-  //
-  // The text invokes method 2, but does not immediately commit the transaction.
-  // Then it starts another transaction that invokes method 1.
-  // That second transaction should fail.  We then commit the first transaction,
+  // The test invokes orchestrator method 1, but does not immediately commit the
+  // transaction.
+  // Then it starts another transaction that invokes orchestrator method 0.
+  // That second transaction should fail. We then commit the first transaction,
   // which should succeed.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(49);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(50);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(51);
 
-  // Deploy contract with three methods:
-  // 0: Loads calldata as one int8_t value [a] and performs nnint_add of (a)
-  // 1: Invokes method 0 in try_invoke frame with [-5], checks failure, then
-  // returns error 2: Invokes method 0 with [1], checks success
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
+  // Writer: method 0 — nnint_add from one calldata byte.
+  // Orchestrator: 0 — try_invoke writer with [-5], then error; 1 — try_invoke
+  // writer with [1], expect success.
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -1048,15 +1150,18 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 
                return {}; // Success
              }},
-            {1,
+        });
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Invoke method 0 in try_invoke frame with arguments [-5]
+               // Invoke writer method 0 in try_invoke frame with arguments [-5]
                Calldata args = {static_cast<uint8_t>(-5)};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args,
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(), args,
                      std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
@@ -1074,14 +1179,14 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::Deterministic};
              }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Invoke method 0 with arguments [1]
+            {1,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               // Invoke writer method 0 with arguments [1]
                Calldata args = {1};
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args,
+                     kAddressWriter, 0, ctx.runtime().get_available_gas(), args,
                      std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
                }();
@@ -1096,45 +1201,52 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                }
 
                return {};
-             }}});
+             }},
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract));
+    contract_map.emplace(0, std::move(native_contract_writer));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // Deploy contract and grant storage tokens
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressWriter, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
-  // First transaction: invoke method 2 (should succeed)
+  // First transaction: invoke orchestrator method 1 (should succeed; writes
+  // nnint on writer)
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(2),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet
 
-  // Second transaction: invoke method 1 (should fail)
+  // Second transaction: invoke orchestrator method 0 (should fail)
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(1),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *context);
 
   auto res2 = handler2.root_invoke();
@@ -1150,8 +1262,9 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 
   advance_block();
 
-  // Check that the storage item was created with value 1 (from method 2)
-  auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
+  // Check that the storage item was created with value 1 (from orchestrator
+  // method 1)
+  auto data_addrkey = make_contract_data_addrkey(kAddressWriter, "test");
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_TRUE(data_item_opt.has_value());
   ASSERT_EQ(data_item_opt.value().type(),
@@ -1163,26 +1276,116 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 {
   // Test on try invoke responding to rejection from the database.
 
-  // Native contract with the following methods:
-  // 0: Loads the calldata, interprets it as two int8_t values [a, b], and
-  // performs an nnint_set_add of (a, b) on a storage key.
+  // Writer contract — method 0: loads the calldata as two int8_t values [a, b],
+  // and performs an nnint_set_add of (a, b) on a storage key.
+  //
+  // Orchestrator (two native registrations, one per test case, each targeting
+  // its paired writer):
+  // 0:
+  // Load the calldata, and interpret it as two booleans [b1, b2].
+  // Invoke writer method 0 with parameters (10, -5), in a try_invoke frame.
+  // Then invoke writer method 0 with parameters (5, 10), in another try_invoke
+  // frame.
+  // Assert that b1 is true if and only if the first invocation of writer
+  // method 0 succeeded. Assert that b2 is true if and only if the second
+  // invocation of writer method 0 succeeded. Then return success.
   //
   // 1:
-  // Load the calldata, and interpret it as two booleans [b1, b2].
-  // Invoke method 0 with parameters (10, -5), in a try_invoke frame. Then
-  // invoke method 0 with parameters (5, 10), in another try_invoke frame.
-  // Assert that b1 is true if and only if the first invocation of method 0
-  // succeeded. Assert that b2 is true if and only if the second invocation of
-  // method 0 succeeded. Then return success.
-  //
-  // 2:
   // Load the calldata, and interpret it as a boolean.
-  // Invoke method 0 with parameters (5, -5), in a try_invoke frame.
+  // Invoke writer method 0 with parameters (5, -5), in a try_invoke frame.
   // Assert that the try_invoke frame returns successfully if and only if the
   // input boolean is true. Then return success.
 
+  static constexpr ContractAddress kWriterTc1 = make_contract_address(28);
+  static constexpr ContractAddress kOrchTc1 = make_contract_address(29);
+  static constexpr ContractAddress kWriterTc2 = make_contract_address(30);
+  static constexpr ContractAddress kOrchTc2 = make_contract_address(31);
+
+  auto make_orchestrator = [](ContractAddress writer_addr) {
+    return std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [writer_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &calldata = ctx.handler().get_calldata();
+               if (calldata.size() != 2) { // Expecting two booleans
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               bool expect_first_succeeds = static_cast<bool>(calldata[0]);
+               bool expect_second_succeeds = static_cast<bool>(calldata[1]);
+
+               Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     writer_addr, 0, ctx.runtime().get_available_gas(),
+                     args_first_invoke,
+                     std::to_underlying(InvokeFlag::TryInvoke),
+                     output_return_buffer_len);
+               }();
+
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               bool first_succeeded =
+                   (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+               if (first_succeeded != expect_first_succeeds) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               Calldata args_second_invoke = {5, 10};
+               auto r1 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     writer_addr, 0, ctx.runtime().get_available_gas(),
+                     args_second_invoke,
+                     std::to_underlying(InvokeFlag::TryInvoke),
+                     output_return_buffer_len);
+               }();
+
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               bool second_succeeded =
+                   (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+               if (second_succeeded != expect_second_succeeds) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               return {};
+             }},
+            {1,
+             [writer_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto const &calldata = ctx.handler().get_calldata();
+               if (calldata.size() != 1) { // Expecting one boolean
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
+
+               Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
+               auto r0 = [&]() {
+                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     writer_addr, 0, ctx.runtime().get_available_gas(),
+                     args_invoke, std::to_underlying(InvokeFlag::TryInvoke),
+                     output_return_buffer_len);
+               }();
+
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               bool invoke_succeeded =
+                   (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+               if (invoke_succeeded != expect_invoke_succeeds) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }},
+        });
+  };
+
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_db_failure = std::make_unique<NativeContract>(
+    auto native_contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -1214,111 +1417,43 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                return {}; // Success
              }},
-            {1,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &calldata = ctx.handler().get_calldata();
-               if (calldata.size() != 2) { // Expecting two booleans
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               bool expect_first_succeeds = static_cast<bool>(calldata[0]);
-               bool expect_second_succeeds = static_cast<bool>(calldata[1]);
-
-               Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_first_invoke,
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               bool first_succeeded =
-                   (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
-               if (first_succeeded != expect_first_succeeds) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-
-               Calldata args_second_invoke = {5, 10};
-               auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_second_invoke,
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               bool second_succeeded =
-                   (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone);
-               if (second_succeeded != expect_second_succeeds) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-
-               return {};
-             }},
-            {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               auto const &calldata = ctx.handler().get_calldata();
-               if (calldata.size() != 1) { // Expecting one boolean
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
-
-               Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
-               auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
-                 return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 0,
-                     ctx.runtime().get_available_gas(), args_invoke,
-                     std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
-               }();
-
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-
-               bool invoke_succeeded =
-                   (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
-               if (invoke_succeeded != expect_invoke_succeeds) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-               return {};
-             }}});
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_db_failure));
+    contract_map.emplace(0, std::move(native_contract_writer));
+    contract_map.emplace(1, make_orchestrator(kWriterTc1));
+    contract_map.emplace(2, make_orchestrator(kWriterTc2));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  auto contract_template = make_native_contract(0); // native_id = 0
-  write_contract(contract_template);
+  auto writer_template = make_native_contract(0);
+  auto orch_tc1_template = make_native_contract(1);
+  auto orch_tc2_template = make_native_contract(2);
+  write_contract(writer_template);
+  write_contract(orch_tc1_template);
+  write_contract(orch_tc2_template);
 
   // Test case 1:
   // Test that try invoke can acquire an exclusive lock.
-  ContractAddress tc1_addr = make_contract_address(30); // Using a new address
-  write_deployment(tc1_addr, contract_template);
+  write_deployment(kWriterTc1, writer_template);
+  write_deployment(kOrchTc1, orch_tc1_template);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
-  setup_grant_storage_token(tc1_addr, 1'000'000'000);
+  setup_grant_storage_token(kWriterTc1, 1'000'000'000);
+  setup_grant_storage_token(kOrchTc1, 1'000'000'000);
 
-  // TC1.1: First, invoke method 1 with parameters [true, true]. This should
-  // succeed. This should leave, in the database, an exclusive lock on the item.
+  // TC1.1: First, invoke orchestrator method 0 with parameters [true, true].
+  // This should succeed. This should leave, in the database, an exclusive lock
+  // on the item.
   SystemCallHandler tc1_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = tc1_addr,
-                                 .entrypoint = entrypoint_from_method_id(1),
+                      Invocation{.invoked_address = kOrchTc1,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1, 1}},
               }},
@@ -1329,7 +1464,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   }
 
   // TC1.2: Then, in the same block, before committing the first transaction,
-  // create a second transaction that invokes method 2 with parameter [false].
+  // create a second transaction that invokes orchestrator method 1 with
+  // parameter [false].
   // This should succeed (the try invoke fails, because the first tx still holds
   // the exclusive lock).
   SystemCallHandler tc1_handler2 = make_new_system_call_handler(
@@ -1337,8 +1473,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = tc1_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = kOrchTc1,
+                                 .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0}},
               }},
@@ -1357,15 +1493,15 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
-  // TC1.4: Then invoke method 2 again, with parameter [true]. This should
-  // succeed.
+  // TC1.4: Then invoke orchestrator method 1 again, with parameter [true]. This
+  // should succeed.
   SystemCallHandler tc1_handler3 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = tc1_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = kOrchTc1,
+                                 .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1}},
               }},
@@ -1382,24 +1518,27 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
   // Test case 2:
   // Test that try invoke can handle a rejection from the database.
-  // First, invoke method 2, with parameter [true].  This should succeed.
+  // First, invoke orchestrator method 1, with parameter [true]. This should
+  // succeed.
   // Commit the first transaction.
-  // Then, invoke method 1 with parameters [false, true].  This should succeed.
+  // Then, invoke orchestrator method 0 with parameters [false, true]. This
+  // should succeed.
   // Commit the second transaction.
-  ContractAddress tc2_addr = make_contract_address(31); // New address for TC2
-  write_deployment(tc2_addr, contract_template);
+  write_deployment(kWriterTc2, writer_template);
+  write_deployment(kOrchTc2, orch_tc2_template);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
-  setup_grant_storage_token(tc2_addr, 1'000'000'000);
+  setup_grant_storage_token(kWriterTc2, 1'000'000'000);
+  setup_grant_storage_token(kOrchTc2, 1'000'000'000);
 
-  // Step 1 & 2: Invoke M2({true}) and commit.
+  // Step 1 & 2: Invoke orchestrator method 1 ({true}) and commit.
   SystemCallHandler tc2_handler1 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = tc2_addr,
-                                 .entrypoint = entrypoint_from_method_id(2),
+                      Invocation{.invoked_address = kOrchTc2,
+                                 .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1}}, // true
               }},
@@ -1412,14 +1551,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     ASSERT_TRUE(tc2_handler1.emit_events()());
   }
 
-  // Step 3 & 4: Invoke M1({false, true}) and commit.
+  // Step 3 & 4: Invoke orchestrator method 0 ({false, true}) and commit.
   SystemCallHandler tc2_handler2 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
                   .invocation =
-                      Invocation{.invoked_address = tc2_addr,
-                                 .entrypoint = entrypoint_from_method_id(1),
+                      Invocation{.invoked_address = kOrchTc2,
+                                 .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1}}, // {false, true}
               }},
@@ -1438,15 +1577,18 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 TEST_P(TryInvokeTest, StorageCostAccounting)
 {
   // Test that checks that storage costs are accounted for correctly in try
-  // invoke. A contract has enough storage tokens for one bytestring write. The
-  // root frame invokes a try_invoke frame, which attempts to write two
-  // bytestrings. That frame fails. The root frame then invokes a try_invoke
-  // frame, which makes one bytestring write. That frame succeeds. After commit,
-  // the storage token balance should be zero and only the first key should
-  // exist.
+  // invoke. The writer contract has enough storage tokens for one bytestring
+  // write. The root frame invokes a try_invoke frame on the writer, which
+  // attempts to write two bytestrings. That frame fails. The root frame then
+  // invokes a try_invoke frame on the writer, which makes one bytestring write.
+  // That frame succeeds. After commit, the writer's storage token balance
+  // should be zero and only the first key should exist. Storage tokens are
+  // granted only to the writer (the contract that owns the storage), not the
+  // orchestrator.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(42);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(42);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(41);
 
   // Bytestrings
   auto str_abc = make_bytestring("abc");
@@ -1457,104 +1599,110 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // Cost for one bytestring write ("abc")
   int128_t one_write_cost = cost_model->get_bytestring_cost(str_abc.size());
 
-  // Deploy contract with three methods:
-  // 0: Write "abc" to key0
-  // 1: Write "abc" to key0 and "def" to key1
-  // 2: Root method: try_invoke method 0 (succeeds), then try_invoke method 1
-  // (fails)
-  auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<Runtime::MethodID,
-                                         NativeContract::function_t>{
-      {0,
-       [str_abc](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         auto key0 = make_storage_key("test0");
-         auto [res, _gas] = syscall_BytestringSet_inner(
-             ctx.handler(), key0, std::as_bytes(std::span(str_abc)),
-             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-         if (!res.has_value() ||
-             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           ADD_FAILURE()
-               << "StorageCostAccounting: Failed to set bytestring in method 0";
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }},
-      {1,
-       [str_abc, str_def](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         auto key0 = make_storage_key("test0");
-         auto key1 = make_storage_key("test1");
-         auto [res0, _gas0] = syscall_BytestringSet_inner(
-             ctx.handler(), key0, std::as_bytes(std::span(str_abc)),
-             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-         if (!res0.has_value() ||
-             res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
-                            "in method 1 (key0)";
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         auto [res1, _gas1] = syscall_BytestringSet_inner(
-             ctx.handler(), key1, std::as_bytes(std::span(str_def)),
-             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-         if (!res1.has_value() ||
-             res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
-                            "in method 1 (key1)";
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }},
-      {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         // First, try_invoke method 1 (should fail)
-         auto r1 = [&]() {
-           RuntimeMemoryLength output_return_buffer_len = 0;
-           return ctx.syscall<SyscallNo::kInvoke>(
-               ctx.handler().get_current_address(), 1,
-               ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::TryInvoke),
-               output_return_buffer_len);
-         }();
-         if (!r1.has_value()) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         // Should fail (not enough tokens for two writes)
-         if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         // Then, try_invoke method 0 (should succeed)
-         auto r0 = [&]() {
-           RuntimeMemoryLength output_return_buffer_len = 0;
-           return ctx.syscall<SyscallNo::kInvoke>(
-               ctx.handler().get_current_address(), 0,
-               ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::TryInvoke),
-               output_return_buffer_len);
-         }();
-         if (!r0.has_value() ||
-             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }}});
+  // Writer: 0 — write "abc" to key0; 1 — write "abc" to key0 and "def" to key1.
+  // Orchestrator: 0 — try_invoke writer 1 (fails), then try_invoke writer 0
+  // (succeeds).
+  auto native_contract_writer = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [str_abc](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key0, std::as_bytes(std::span(str_abc)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "StorageCostAccounting: Failed to set bytestring in "
+                      "writer method 0";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+          {1,
+           [str_abc, str_def](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto key1 = make_storage_key("test1");
+             auto [res0, _gas0] = syscall_BytestringSet_inner(
+                 ctx.handler(), key0, std::as_bytes(std::span(str_abc)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res0.has_value() ||
+                 res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "StorageCostAccounting: Failed to set "
+                                "bytestring in writer method 1 (key0)";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             auto [res1, _gas1] = syscall_BytestringSet_inner(
+                 ctx.handler(), key1, std::as_bytes(std::span(str_def)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res1.has_value() ||
+                 res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "StorageCostAccounting: Failed to set "
+                                "bytestring in writer method 1 (key1)";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // First, try_invoke writer method 1 (should fail)
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // Should fail (not enough tokens for two writes)
+             if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // Then, try_invoke writer method 0 (should succeed)
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r0.has_value() ||
+                 r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_orchestrator));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant exactly enough storage tokens for one write
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, one_write_cost);
+  // Deploy writer and orchestrator; grant storage tokens only on the writer.
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_deployment(kAddressWriter, writer_xdr);
+  write_deployment(kAddressOrchestrator, orchestrator_xdr);
+  setup_grant_storage_token(kAddressWriter, one_write_cost);
 
-  // Single transaction: invoke method 2 (root)
+  // Single transaction: invoke orchestrator method 0 (root)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(2),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -1564,9 +1712,9 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
 
   advance_block();
 
-  // 3. Check storage token balance is zero
+  // 3. Check writer storage token balance is zero
   AddressAndKey token_addrkey =
-      make_free_native_token_balance_addrkey(contract_addr);
+      make_free_native_token_balance_addrkey(kAddressWriter);
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   // assert that the free token balance item exists and has value 0
   ASSERT_TRUE(token_item_opt.has_value());
@@ -1574,14 +1722,14 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 0);
 
-  // 4. Check that only key0 exists and has value "abc"
-  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  // 4. Check that only key0 exists on the writer and has value "abc"
+  auto data_addrkey0 = make_contract_data_addrkey(kAddressWriter, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());
   const auto &data_item0 = data_item0_opt.value();
   ASSERT_EQ(data_item0.bytestring(), str_abc);
 
-  auto data_addrkey1 = make_contract_data_addrkey(contract_addr, "test1");
+  auto data_addrkey1 = make_contract_data_addrkey(kAddressWriter, "test1");
   auto data_item1_opt = lookup_storage_item_from_db(data_addrkey1);
   ASSERT_FALSE(data_item1_opt.has_value());
 }
@@ -1589,15 +1737,17 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
 TEST_P(TryInvokeTest, MarginalCostAccounting)
 {
   // Test to demonstrate necessity for memoizing locked costs.
-  // Root frame invokes three try_invoke frames.  Each one writes a bytestring,
-  // (on separate keys) but the contract only has enough storage tokens for two
-  // and a half. As such, the first and second try_invokes will succeed, and the
-  // third will fail.
+  // Root frame invokes three try_invoke frames on the writer. Each one writes a
+  // bytestring on separate keys, but the writer only has enough storage tokens
+  // for two and a half. As such, the first and second try_invokes will succeed,
+  // and the third will fail.
   //
-  // At the end, the storage token balance should be half a bytestring write.
+  // At the end, the writer's storage token balance should be half a bytestring
+  // write. Tokens are granted only to the writer, not the orchestrator.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(43);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(43);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(40);
 
   // Bytestring and cost
   auto str_abc = make_bytestring("abc");
@@ -1609,12 +1759,9 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   int128_t half_write_cost = one_write_cost / 2;
   int128_t total_tokens = (one_write_cost * 2) + half_write_cost;
 
-  // Deploy contract with four methods:
-  // 0: Write "abc" to key0
-  // 1: Write "abc" to key1
-  // 2: Write "abc" to key2
-  // 3: Root method: try_invoke method 0, then 1, then 2
-  auto native_contract = std::make_unique<NativeContract>(
+  // Writer: 0 — "abc" to key0; 1 — "def" to key1; 2 — "ghi" to key2.
+  // Orchestrator: 0 — try_invoke writer 0, then 1, then 2 (third fails).
+  auto native_contract_writer = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_abc](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -1625,7 +1772,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
-                                "bytestring in method 0";
+                                "bytestring in writer method 0";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
@@ -1639,7 +1786,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
-                                "bytestring in method 1";
+                                "bytestring in writer method 1";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
@@ -1653,45 +1800,46 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
-                                "bytestring in method 2";
+                                "bytestring in writer method 2";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
-          {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Try invoke method 0
+      });
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Try invoke writer method 0
              auto r0 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             // Try invoke method 1
+             // Try invoke writer method 1
              auto r1 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             // Try invoke method 2 (should fail)
+             // Try invoke writer method 2 (should fail)
              auto r2 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 2,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 2, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r2.has_value()) {
@@ -1702,28 +1850,33 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
-           }}});
+           }},
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_orchestrator));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant exactly enough storage tokens for two and a half
-  // writes
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, total_tokens);
+  // Deploy writer and orchestrator; grant storage tokens only on the writer.
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_deployment(kAddressWriter, writer_xdr);
+  write_deployment(kAddressOrchestrator, orchestrator_xdr);
+  setup_grant_storage_token(kAddressWriter, total_tokens);
 
-  // Single transaction: invoke method 3 (root)
+  // Single transaction: invoke orchestrator method 0 (root)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(3),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -1733,8 +1886,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
 
   advance_block();
 
-  // Check storage token balance is half a write
-  AddressAndKey token_addrkey = {.address = contract_addr,
+  // Check writer storage token balance is half a write
+  AddressAndKey token_addrkey = {.address = kAddressWriter,
                                  .key = StorageKey(
                                      StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
@@ -1743,19 +1896,19 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), half_write_cost);
 
-  // Check that key0 and key1 exist and have value "abc" and "def" respectively
-  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  // Check that key0 and key1 exist on the writer and have value "abc" and "def"
+  auto data_addrkey0 = make_contract_data_addrkey(kAddressWriter, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_abc);
 
-  auto data_addrkey1 = make_contract_data_addrkey(contract_addr, "test1");
+  auto data_addrkey1 = make_contract_data_addrkey(kAddressWriter, "test1");
   auto data_item1_opt = lookup_storage_item_from_db(data_addrkey1);
   ASSERT_TRUE(data_item1_opt.has_value());
   ASSERT_EQ(data_item1_opt.value().bytestring(), str_def);
 
-  // Check that key2 does not exist
-  auto data_addrkey2 = make_contract_data_addrkey(contract_addr, "test2");
+  // Check that key2 does not exist on the writer
+  auto data_addrkey2 = make_contract_data_addrkey(kAddressWriter, "test2");
   auto data_item2_opt = lookup_storage_item_from_db(data_addrkey2);
   ASSERT_FALSE(data_item2_opt.has_value());
 }
@@ -1764,16 +1917,17 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
 {
   // Test to check how marginal costs are accounted for when a try_invoke
   // updates, not creates, an item.
-  // Root invocation makes three try_invoke invocations.
+  // Root invocation makes three try_invoke invocations on the writer.
   // The first two succeed, and the third fails.
   // The first makes a short bytestring write.
   // The second makes a medium bytestring write.
   // The third makes a long bytestring write.
-  // The contract has enough storage tokens for the first two writes, but not
-  // the third.
+  // The writer has enough storage tokens for the first two writes, but not the
+  // third. Storage tokens are granted only to the writer, not the orchestrator.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(44);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(44);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(39);
 
   // Bytestrings
   auto str_short = make_bytestring("abc");            // 3 bytes
@@ -1793,122 +1947,127 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // the third
   int128_t total_tokens = cost_short + marginal_medium;
 
-  // Deploy contract with four methods:
-  // 0: Write "abc" to key0
-  // 1: Write "abc" to key1
-  // 2: Write "abc" to key2
-  // 3: Root method: try_invoke method 0, then 1, then 2
-  auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<Runtime::MethodID,
-                                         NativeContract::function_t>{
-      {0,
-       [str_short](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         auto key0 = make_storage_key("test0");
-         auto [res, _gas] = syscall_BytestringSet_inner(
-             ctx.handler(), key0, std::as_bytes(std::span(str_short)),
-             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-         if (!res.has_value() ||
-             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           ADD_FAILURE()
-               << "CostChangeAccounting: Failed to set bytestring in method 0";
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }},
-      {1,
-       [str_medium](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         auto key0 = make_storage_key("test0");
-         auto [res, _gas] = syscall_BytestringSet_inner(
-             ctx.handler(), key0, std::as_bytes(std::span(str_medium)),
-             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-         if (!res.has_value() ||
-             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           ADD_FAILURE()
-               << "CostChangeAccounting: Failed to set bytestring in method 1";
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }},
-      {2,
-       [str_long](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         auto key0 = make_storage_key("test0");
-         auto [res, _gas] = syscall_BytestringSet_inner(
-             ctx.handler(), key0, std::as_bytes(std::span(str_long)),
-             std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-         if (!res.has_value() ||
-             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           ADD_FAILURE()
-               << "CostChangeAccounting: Failed to set bytestring in method 2";
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }},
-      {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-         // Try invoke method 0 (short)
-         auto r0 = [&]() {
-           RuntimeMemoryLength output_return_buffer_len = 0;
-           return ctx.syscall<SyscallNo::kInvoke>(
-               ctx.handler().get_current_address(), 0,
-               ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::TryInvoke),
-               output_return_buffer_len);
-         }();
-         if (!r0.has_value() ||
-             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         // Try invoke method 1 (medium)
-         auto r1 = [&]() {
-           RuntimeMemoryLength output_return_buffer_len = 0;
-           return ctx.syscall<SyscallNo::kInvoke>(
-               ctx.handler().get_current_address(), 1,
-               ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::TryInvoke),
-               output_return_buffer_len);
-         }();
-         if (!r1.has_value() ||
-             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         // Try invoke method 2 (long) -- should fail
-         auto r2 = [&]() {
-           RuntimeMemoryLength output_return_buffer_len = 0;
-           return ctx.syscall<SyscallNo::kInvoke>(
-               ctx.handler().get_current_address(), 2,
-               ctx.runtime().get_available_gas(), Calldata{},
-               std::to_underlying(InvokeFlag::TryInvoke),
-               output_return_buffer_len);
-         }();
-         if (!r2.has_value()) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         // expects an error
-         if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::Deterministic};
-         }
-         return {};
-       }}});
+  // Writer: 0 — short to key0; 1 — medium to key0; 2 — long to key0.
+  // Orchestrator: 0 — try_invoke writer 0, then 1, then 2 (third fails).
+  auto native_contract_writer = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [str_short](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key0, std::as_bytes(std::span(str_short)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "CostChangeAccounting: Failed to set bytestring "
+                      "in writer method 0";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+          {1,
+           [str_medium](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key0, std::as_bytes(std::span(str_medium)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "CostChangeAccounting: Failed to set bytestring "
+                      "in writer method 1";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+          {2,
+           [str_long](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key0, std::as_bytes(std::span(str_long)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "CostChangeAccounting: Failed to set bytestring "
+                      "in writer method 2";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Try invoke writer method 0 (short)
+             auto r0 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r0.has_value() ||
+                 r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // Try invoke writer method 1 (medium)
+             auto r1 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r1.has_value() ||
+                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // Try invoke writer method 2 (long) -- should fail
+             auto r2 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 2, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r2.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // expects an error
+             if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_orchestrator));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant exactly enough storage tokens for the first two
-  // updates
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, total_tokens);
+  // Deploy writer and orchestrator; grant storage tokens only on the writer.
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_deployment(kAddressWriter, writer_xdr);
+  write_deployment(kAddressOrchestrator, orchestrator_xdr);
+  setup_grant_storage_token(kAddressWriter, total_tokens);
 
-  // Single transaction: invoke method 3 (root)
+  // Single transaction: invoke orchestrator method 0 (root)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(3),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -1918,8 +2077,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
 
   advance_block();
 
-  // Check storage token balance is zero
-  AddressAndKey token_addrkey = {.address = contract_addr,
+  // Check writer storage token balance is zero
+  AddressAndKey token_addrkey = {.address = kAddressWriter,
                                  .key = StorageKey(
                                      StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
@@ -1928,8 +2087,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 0);
 
-  // Check that key0 exists and has value "abcdef"
-  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  // Check that key0 exists on the writer and has value "abcdef"
+  auto data_addrkey0 = make_contract_data_addrkey(kAddressWriter, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_medium);
@@ -1939,13 +2098,15 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
 {
   // Test to make sure that if the cost of an item decreases, the storage token
   // balance is calculated correctly. Root invocation makes two try_invoke
-  // invocations. Both succeed. The first makes a long bytestring write. The
-  // second makes a short bytestring write. The contract has enough storage
-  // tokens for both writes. The end of the test asserts that the storage token
-  // balance was charged for the short write.
+  // invocations on the writer. Both succeed. The first makes a long bytestring
+  // write. The second makes a short bytestring write. The writer has enough
+  // storage tokens for both writes. The end of the test asserts that the
+  // writer's storage token balance was charged for the short write. Storage
+  // tokens are granted only to the writer, not the orchestrator.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(45);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(45);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(38);
 
   // Bytestrings
   auto str_long = make_bytestring("abcdefghijklmno"); // 15 bytes
@@ -1960,11 +2121,10 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   // Grant enough tokens for the long write.
   int128_t total_tokens = cost_long;
 
-  // Deploy contract with three methods:
-  // 0: Write long string
-  // 1: Write short string
-  // 2: Root method: try_invoke method 0, then try_invoke method 1
-  auto native_contract = std::make_unique<NativeContract>(
+  // Writer: 0 — long string to key0; 1 — short string to key0.
+  // Orchestrator: 0 — try_invoke writer 0 (long), then try_invoke writer 1
+  // (short).
+  auto native_contract_writer = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_long](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -1975,7 +2135,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
-                                "bytestring in method 0";
+                                "bytestring in writer method 0";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
@@ -1989,32 +2149,34 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
-                                "bytestring in method 1";
+                                "bytestring in writer method 1";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
-          {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Try invoke method 0 (long)
+      });
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Try invoke writer method 0 (long)
              auto r0 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             // Try invoke method 1 (short)
+             // Try invoke writer method 1 (short)
              auto r1 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
@@ -2022,27 +2184,33 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
-           }}});
+           }},
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_orchestrator));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant enough storage tokens for the long write
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, total_tokens);
+  // Deploy writer and orchestrator; grant storage tokens only on the writer.
+  auto writer_xdr = make_native_contract(0);
+  auto orchestrator_xdr = make_native_contract(1);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_deployment(kAddressWriter, writer_xdr);
+  write_deployment(kAddressOrchestrator, orchestrator_xdr);
+  setup_grant_storage_token(kAddressWriter, total_tokens);
 
-  // Single transaction: invoke method 2 (root)
+  // Single transaction: invoke orchestrator method 0 (root)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(2),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -2052,8 +2220,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
 
   advance_block();
 
-  // Check storage token balance
-  AddressAndKey token_addrkey = {.address = contract_addr,
+  // Check writer storage token balance
+  AddressAndKey token_addrkey = {.address = kAddressWriter,
                                  .key = StorageKey(
                                      StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
@@ -2065,8 +2233,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   int128_t expected_balance = total_tokens - cost_short;
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), expected_balance);
 
-  // Check that key0 exists and has value from the short write.
-  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  // Check that key0 exists on the writer and has value from the short write.
+  auto data_addrkey0 = make_contract_data_addrkey(kAddressWriter, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_short);
@@ -2076,16 +2244,20 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 {
   // Test to make sure that if the cost of an item decreases, the storage token
   // balance is calculated correctly.
-  //  Root invocation first makes a try_invocation call into a method that
-  // just makes a long bytestring write.
-  // Then, it makes a regular invocation into another method.
-  // That method makes a try_invoke call into another method, which makes a
-  // short bytestring write (that should succeed). The regular invocation then
-  // returns an error. The root method should expect that error (and finish
-  // successfully).
+  // Root invocation first makes a try_invocation into the writer that performs
+  // a long bytestring write.
+  // Then it makes a regular invocation into a separate contract.
+  // That contract try_invokes the writer's short write, then returns an error.
+  // The root orchestrator expects that error and finishes successfully.
+  // Storage tokens are granted only to the writer.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(46);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(46);
+  // Intermediate contract (old method 2): try_invoke writer short write, then
+  // returns error so that frame's effects roll back.
+  static constexpr ContractAddress kAddressTryInvokeThenError =
+      make_contract_address(37);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(36);
 
   // Bytestrings
   auto str_long = make_bytestring("abcdefghijklmno"); // 15 bytes
@@ -2099,12 +2271,11 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   // Grant enough tokens for the long write.
   int128_t total_tokens = cost_long;
 
-  // Deploy contract with four methods:
-  // 0: Write long string
-  // 1: Write short string
-  // 2: Try-invoke method 1, then return error
-  // 3: Root method: try_invoke method 0, then try_invoke method 2
-  auto native_contract = std::make_unique<NativeContract>(
+  // Writer: 0 — long string to key0; 1 — short string to key0.
+  // kAddressTryInvokeThenError: 0 — try_invoke writer 1, then error.
+  // Orchestrator: 0 — try_invoke writer 0, then regular invoke
+  // kAddressTryInvokeThenError:0 (expects failure).
+  auto native_contract_writer = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_long](NativeSyscallContext &ctx) -> InvokeStatus<void> {
@@ -2115,7 +2286,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
-                                "bytestring in method 0";
+                                "bytestring in writer method 0";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
@@ -2129,20 +2300,22 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
-                                "bytestring in method 1";
+                                "bytestring in writer method 1";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
            }},
-          {2,
+      });
+  auto native_contract_try_invoke_then_error = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Try invoke method 1 (short write)
+             // Try invoke writer method 1 (short write)
              auto r1 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value() ||
@@ -2153,14 +2326,17 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
              // be rolled back.
              return InvokeError{InvokeErrorCode::Deterministic};
            }},
-          {3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Try invoke method 0 (long write)
+      });
+  auto native_contract_orchestrator = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Try invoke writer method 0 (long write)
              auto r0 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 0,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r0.has_value() ||
@@ -2168,11 +2344,11 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
-             // Regular invoke on method 2
+             // Regular invoke on intermediate contract (old method 2)
              auto r2 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 2,
+                   kAddressTryInvokeThenError, 0,
                    ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::None),
                    output_return_buffer_len);
@@ -2180,32 +2356,43 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             // We expect method 2 to fail.
+             // We expect the intermediate to fail.
              if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
-           }}});
+           }},
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_try_invoke_then_error));
+  contract_map.emplace(2, std::move(native_contract_orchestrator));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant enough storage tokens for the long write
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, total_tokens);
+  // Deploy writer, intermediate, and orchestrator; grant storage tokens only on
+  // the writer.
+  auto writer_xdr = make_native_contract(0);
+  auto try_invoke_then_error_xdr = make_native_contract(1);
+  auto orchestrator_xdr = make_native_contract(2);
+  write_contract(writer_xdr);
+  write_contract(try_invoke_then_error_xdr);
+  write_contract(orchestrator_xdr);
+  write_deployment(kAddressWriter, writer_xdr);
+  write_deployment(kAddressTryInvokeThenError, try_invoke_then_error_xdr);
+  write_deployment(kAddressOrchestrator, orchestrator_xdr);
+  setup_grant_storage_token(kAddressWriter, total_tokens);
 
-  // Single transaction: invoke method 3 (root)
+  // Single transaction: invoke orchestrator method 0 (root)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(3),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
       *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -2215,8 +2402,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 
   advance_block();
 
-  // Check storage token balance
-  AddressAndKey token_addrkey = {.address = contract_addr,
+  // Check writer storage token balance
+  AddressAndKey token_addrkey = {.address = kAddressWriter,
                                  .key = StorageKey(
                                      StorageKeyType::FreeNativeTokenBalance)};
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
@@ -2228,8 +2415,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   // So the balance should be 0.
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 0);
 
-  // Check that key0 exists and has value from the long write.
-  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  // Check that key0 exists on the writer and has value from the long write.
+  auto data_addrkey0 = make_contract_data_addrkey(kAddressWriter, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_long);
@@ -2431,17 +2618,27 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   }
 }
 
+namespace {
+
+constexpr ContractAddress kNNIntInterleavingWriter =
+    NativeContractTestFramework::make_contract_address(0);
+constexpr ContractAddress kNNIntInterleavingOrchestrator =
+    NativeContractTestFramework::make_contract_address(1);
+
+} // namespace
+
 TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 {
 
   constexpr static StorageKeyContractData kKey = make_storage_key("test");
-  constexpr static int32_t kTestContractId = 0;
+  constexpr static int32_t kWriterNativeId = 0;
+  constexpr static int32_t kOrchestratorNativeId = 1;
 
   static auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    NativeContractBuilder builder;
+    NativeContractBuilder builder_writer;
 
     // perform a set_add_nnint
-    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+    builder_writer.add<NativeContractBuilder::kDefaultSerializationFormat>(
         0,
         [](NativeSyscallContext &ctx, int64_t set_amount,
            int64_t add_amount) -> InvokeStatus<void> {
@@ -2458,7 +2655,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         });
 
     // perform a add_nnint
-    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+    builder_writer.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1,
         [](NativeSyscallContext &ctx,
            int64_t add_amount) -> InvokeStatus<void> {
@@ -2472,10 +2669,26 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           return {};
         });
 
-    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          // perform an add_nnint, then perform a set_add_nnint with the
-          // same set value in a try_invoke frame
+    builder_writer.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          // reset contract state
+          int128_t set_value = 35;
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+              ctx.handler(), kKey, &set_value, 0,
+              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
+    NativeContractBuilder builder_orchestrator;
+    builder_orchestrator.add<
+        NativeContractBuilder::kDefaultSerializationFormat>(
+        0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          // perform an add_nnint on the writer, then a set_add_nnint with the
+          // same set value on the writer in a try_invoke frame
           auto calldata0 =
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<int64_t>(100)
@@ -2484,9 +2697,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           auto r0 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
-                ctx.handler().get_current_address(), 1,
-                ctx.runtime().get_available_gas(), calldata0,
-                std::to_underlying(InvokeFlag::TryInvoke),
+                kNNIntInterleavingWriter, 1, ctx.runtime().get_available_gas(),
+                calldata0, std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r0.has_value()) {
@@ -2502,9 +2714,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           auto r1 = [&]() {
             RuntimeMemoryLength output_return_buffer_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
-                ctx.handler().get_current_address(), 0,
-                ctx.runtime().get_available_gas(), calldata1,
-                std::to_underlying(InvokeFlag::TryInvoke),
+                kNNIntInterleavingWriter, 0, ctx.runtime().get_available_gas(),
+                calldata1, std::to_underlying(InvokeFlag::TryInvoke),
                 output_return_buffer_len);
           }();
           if (!r1.has_value()) {
@@ -2514,38 +2725,28 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 
           return {};
         });
-    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          // reset contract state
-          int128_t set_value = 35;
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
-              ctx.handler(), kKey, &set_value, 0,
-              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-          // auto r = handler.set_nnint(key, 35, 0);
-          // if (!r.has_value() || !r.value().has_value()) {
-          if (!r.has_value() ||
-              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          return {};
-        });
 
-    auto native_contract = builder.build();
+    auto native_contract_writer = builder_writer.build();
+    auto native_contract_orchestrator = builder_orchestrator.build();
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(kTestContractId, std::move(native_contract));
+    contract_map.emplace(kWriterNativeId, std::move(native_contract_writer));
+    contract_map.emplace(kOrchestratorNativeId,
+                         std::move(native_contract_orchestrator));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   static auto context = make_context();
 
-  // Deploy contracts
-  auto test_contract_xdr = make_native_contract(kTestContractId);
-  write_contract(test_contract_xdr);
-  write_deployment(ContractAddress{}, test_contract_xdr);
+  // Deploy writer and orchestrator; grant storage tokens on the writer only.
+  auto writer_xdr = make_native_contract(kWriterNativeId);
+  auto orchestrator_xdr = make_native_contract(kOrchestratorNativeId);
+  write_contract(writer_xdr);
+  write_contract(orchestrator_xdr);
+  write_deployment(kNNIntInterleavingWriter, writer_xdr);
+  write_deployment(kNNIntInterleavingOrchestrator, orchestrator_xdr);
 
-  // Grant initial tokens to test contract
-  setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
+  setup_grant_storage_token(kNNIntInterleavingWriter, 1'000'000'000);
 
   // write an initial int128 value
   StorageKey wrapped_key(StorageKeyType::ContractData);
@@ -2566,12 +2767,14 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   .tx =
                       Transaction{
                           .invocation =
-                              Invocation{.invoked_address = ContractAddress{},
+                              Invocation{.invoked_address =
+                                             kNNIntInterleavingOrchestrator,
                                          .entrypoint =
-                                             entrypoint_from_method_id(2),
+                                             entrypoint_from_method_id(0),
                                          .gas_limit = UINT64_MAX,
                                          .calldata = {}}}},
               *context);
+          handler.hack_dont_use_test_bypass_allow_reentrance();
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
             throw std::runtime_error("root invoke 0 failed");
@@ -2591,8 +2794,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         [](model::RunnableActionSet &set, auto self) -> model::Async {
           co_await set.bg();
 
-          // If this one preceeds the set_add_nnint in method 2, then that will
-          // succeed.
+          // If this one preceeds the set_add_nnint in the orchestrator, then
+          // that will succeed.
           auto calldata =
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<int64_t, int64_t>(100, 100)
@@ -2602,11 +2805,11 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   .tx =
                       Transaction{
                           .invocation =
-                              Invocation{.invoked_address = ContractAddress{},
-                                         .entrypoint =
-                                             entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
-                                         .calldata = calldata}}},
+                              Invocation{
+                                  .invoked_address = kNNIntInterleavingWriter,
+                                  .entrypoint = entrypoint_from_method_id(0),
+                                  .gas_limit = UINT64_MAX,
+                                  .calldata = calldata}}},
               *context);
           auto res = handler.root_invoke();
           co_await set.bg();
@@ -2626,13 +2829,13 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
     {
       auto handler = make_new_system_call_handler(
           SignedTransaction{
-              .tx =
-                  Transaction{
-                      .invocation =
-                          Invocation{.invoked_address = ContractAddress{},
-                                     .entrypoint = entrypoint_from_method_id(3),
-                                     .gas_limit = UINT64_MAX,
-                                     .calldata = {}}}},
+              .tx = Transaction{.invocation =
+                                    Invocation{.invoked_address =
+                                                   kNNIntInterleavingWriter,
+                                               .entrypoint =
+                                                   entrypoint_from_method_id(3),
+                                               .gas_limit = UINT64_MAX,
+                                               .calldata = {}}}},
           *context);
 
       auto res = handler.root_invoke();
@@ -2649,7 +2852,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
     advance_block();
 
     auto res = lookup_storage_item_from_db(
-        AddressAndKey{.address = ContractAddress{}, .key = wrapped_key});
+        AddressAndKey{.address = kNNIntInterleavingWriter, .key = wrapped_key});
     ASSERT_TRUE(res.has_value());
     ASSERT_EQ(res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
     int128_t value = from_xdr(res.value().nnint());
@@ -2839,53 +3042,111 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 {
   // Assert that if a try_invoke frame successfully acquires locks but then its
   // parent frame does a manual revert, then the locks are released. This test
-  // creates one native contract with three methods. The first method is a
-  // try_invoke on the second method. The second method does a try_invoke on the
-  // third method, and then manually reverts. The third method performs a
-  // bytestring write, and then return success. This test invokes the first
-  // method.  Afterwards, it asserts that the bytestring was not written.
+  // uses three contracts:
+  // Entry: try_invoke middle:0.
+  // Middle: try_invoke writer:0, then manually revert.
+  // Writer:0 writes "hello"; writer:1 asserts the key has no bytestring (used
+  // from entry after the middle frame returns). This test invokes entry:0.
+  // Afterwards, it asserts that the bytestring was not written on the writer.
 
-  // Contract address
-  ContractAddress contract_addr = make_contract_address(47);
+  static constexpr ContractAddress kAddressWriter = make_contract_address(47);
+  static constexpr ContractAddress kAddressMiddle = make_contract_address(48);
+  static constexpr ContractAddress kAddressEntry = make_contract_address(49);
 
   // Bytestring to write
   auto str_hello = make_bytestring("hello");
   auto key = make_storage_key("test");
 
-  // Deploy contract with three methods:
-  // 0: try_invoke method 1
-  // 1: try_invoke method 2, then manually revert
-  // 2: Write "hello" to storage and return success
-  auto native_contract = std::make_unique<NativeContract>(
+  // Writer: 0 — write "hello"; 1 — verify key has no bytestring (for entry's
+  // post-revert check on writer storage).
+  // Middle: 0 — try_invoke writer 0, then manually revert.
+  // Entry: 0 — try_invoke middle 0; try_invoke writer 1; return-buffer checks.
+  auto native_contract_writer = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
+           [str_hello, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), key, std::as_bytes(std::span(str_hello)),
+                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "ManualRevertUndoesTryInvokeLocks: Failed to "
+                                "set bytestring in writer method 0";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+          {1,
            [key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Try invoke method 1
+             auto res = ctx.handler().get_bytestring(key);
+             if (!res.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+  auto native_contract_middle = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Try invoke writer method 0
+             auto r2 = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r2.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // Writer method 0 should succeed in the try_invoke frame
+             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             // Now manually revert this frame, which should undo the locks
+             // acquired by writer method 0
+             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+             return {};
+           }},
+      });
+  auto native_contract_entry = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Try invoke middle method 0
              auto r1 = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 1,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressMiddle, 0, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    output_return_buffer_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             // Method 1 should succeed, but state changes are gone because of
-             // the manual revert
+             // Middle should report frame reverted because of the manual revert
              if (r1.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
-             auto res = ctx.handler().get_bytestring(key);
-             if (!res.has_value()) {
-               // assert no system error
+             // Writer storage should not retain the write; verify via writer
+             // method 1 (same contract that would have held the key).
+             auto r_w = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressWriter, 1, ctx.runtime().get_available_gas(),
+                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   output_return_buffer_len);
+             }();
+             if (!r_w.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             if (res.value().has_value()) {
-               // assert no bytestring returned
+             if (r_w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
@@ -2901,58 +3162,31 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 
              return {};
            }},
-          {1,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // Try invoke method 2
-             auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(
-                   ctx.handler().get_current_address(), 2,
-                   ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
-             }();
-             if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             // Method 2 should succeed in the try_invoke frame
-             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             // Now manually revert this frame, which should undo the locks
-             // acquired by method 2
-             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-             return {};
-           }},
-          {2,
-           [str_hello, key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto [res, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), key, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
-             if (!res.has_value() ||
-                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "ManualRevertUndoesTryInvokeLocks: Failed to "
-                                "set bytestring in method 2";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(native_contract_writer));
+  contract_map.emplace(1, std::move(native_contract_middle));
+  contract_map.emplace(2, std::move(native_contract_entry));
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant storage tokens
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  // Deploy contracts; grant storage tokens on the writer only
+  auto writer_xdr = make_native_contract(0);
+  auto middle_xdr = make_native_contract(1);
+  auto entry_xdr = make_native_contract(2);
+  write_contract(writer_xdr);
+  write_contract(middle_xdr);
+  write_contract(entry_xdr);
+  write_deployment(kAddressWriter, writer_xdr);
+  write_deployment(kAddressMiddle, middle_xdr);
+  write_deployment(kAddressEntry, entry_xdr);
+  setup_grant_storage_token(kAddressWriter, 1'000'000'000);
 
-  // Invoke method 0
+  // Invoke entry method 0
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
+                                Invocation{.invoked_address = kAddressEntry,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
@@ -2966,9 +3200,9 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 
   advance_block();
 
-  // Check that the bytestring was NOT written (locks were released due to
-  // manual revert)
-  auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
+  // Check that the bytestring was NOT written on the writer (locks were
+  // released due to manual revert)
+  auto data_addrkey = make_contract_data_addrkey(kAddressWriter, "test");
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_FALSE(data_item_opt.has_value());
 }

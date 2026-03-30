@@ -268,39 +268,28 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     after->consumed_past_entries_ = consumed_entries;
   }
 
-  // Compute the absolute cost for the new entry count. Consumes are not
-  // accounted for here; transactions that consume won't see the returned
-  // storage cost until they commit.
-  const size_t new_live_entries =
-      meta.live_entries + delta.insert.added_entries.size();
-
-  int128_t absolute_cost =
-      ctx.cost_model->get_retrocausal_queue_cost(new_live_entries);
-
-  // Pessimistic reserve: when inserting into a non-empty RCQ, we must reserve
-  // enough to cover the case where a concurrent consume empties the queue
-  // before we commit. In that case, commit_change would calculate cost relative
-  // to the empty state (cost_before=0), meaning we'd pay the full
-  // kBaseItemCost.
+  // Conservative reservation: assume insertion into an empty RCQ.
+  // We can't rely on the snapshot credit (from prior-block entries) because
+  // a concurrent TX in this block may have type-changed or deleted the item,
+  // invalidating the snapshot baseline.
   //
-  // To ensure cost_change <= locked_storage_cost in all cases:
-  //   ItemLock computes: marginal_reserve = absolute_cost - snapshot_cost
-  //   We need: marginal_reserve >= cost_if_empty (worst case after concurrent
-  //   consume) Therefore: absolute_cost >= snapshot_cost + cost_if_empty
-  if (!delta.insert.added_entries.empty() && meta.live_entries > 0) {
-    // Compute snapshot cost (cost at block start)
-    int128_t snapshot_cost =
-        ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries);
-
-    // Cost if the RCQ were empty and we're adding only our entries
-    int128_t cost_if_empty = ctx.cost_model->get_retrocausal_queue_cost(
-        delta.insert.added_entries.size());
-
-    // Ensure absolute_cost is at least snapshot + cost_if_empty
-    absolute_cost = std::max(absolute_cost, snapshot_cost + cost_if_empty);
+  // For deltas that both insert and consume: current-block consumes reduce
+  // the net entry count (they consume entries this TX inserted). Past-block
+  // consumes are ignored since an empty queue has nothing from past blocks.
+  //
+  // We add item_lock_snapshot_cost so that snapshot_cost_transform (which
+  // subtracts snapshot_cost_) yields exactly the standalone RCQ cost.
+  // commit_change returns the actual marginal cost (which may be much less),
+  // and the excess is refunded via released_cost in InvokeTX::commit.
+  size_t net_entries = delta.insert.added_entries.size();
+  if (delta.consume) {
+    size_t current_consumed = delta.consume->current_block_consumed.size();
+    net_entries =
+        (net_entries > current_consumed) ? net_entries - current_consumed : 0;
   }
-
-  return absolute_cost;
+  int128_t standalone_cost =
+      ctx.cost_model->get_retrocausal_queue_cost(net_entries);
+  return standalone_cost + ctx.item_lock_snapshot_cost;
 }
 
 int128_t

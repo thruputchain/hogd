@@ -124,10 +124,11 @@ public:
   // items should be included in a snapshot.
   DBStatus<uint64_t> sync();
 
-  // write all of the state changes that happened at after begin_lsn (which is 0
-  // or an lsn previously returned by sync() but before this call (with
-  // begin_lsn being an lsn previously returned by a different call to sync()
-  // or sync_and_snapshot()).
+  // write all of the state changes that happened after begin_lsn.
+  // begin_lsn must be 0 (full snapshot) or an end_lsn returned by a prior
+  // call to sync_and_snapshot() on this Database instance (or loaded from
+  // disk during recovery). Using an LSN from sync() that exceeds the
+  // snapshot coverage will be rejected to prevent unrecoverable gaps.
   DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
   sync_and_snapshot(uint64_t begin_lsn);
 
@@ -181,6 +182,12 @@ private:
 
   // runs background_worker().
   std::jthread bg_th_;
+
+  // The highest end_lsn_exclusive of any snapshot loaded during recovery or
+  // created by sync_and_snapshot(). Used to validate begin_lsn in
+  // sync_and_snapshot() — begin_lsn must be 0 or <= this value to avoid
+  // creating snapshot gaps that recovery cannot bridge.
+  uint64_t max_snapshot_end_lsn_{0};
 
   // periodically updated stats; registered in register_metrics().
   struct Metrics {

@@ -48,10 +48,13 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
                                  const ItemChange *after,
                                  const LockContext &ctx)
 {
+  auto ctx_with_snapshot = ctx;
+  ctx_with_snapshot.item_lock_snapshot_cost = snapshot_cost_;
+
   auto lock_state = lock_state_.load(std::memory_order_relaxed);
 
   if (lock_state == kFinalized) {
-    return handle_try_atomic_from_finalized(before, after, ctx);
+    return handle_try_atomic_from_finalized(before, after, ctx_with_snapshot);
   }
 
   if (lock_state == kFinalizedPermamentExclusiveLock) {
@@ -69,12 +72,12 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
         CHECK(after->is_balance());
       }
     }
-    return handle_uncommitted_try_new_lock(after, ctx, lock);
+    return handle_uncommitted_try_new_lock(after, ctx_with_snapshot, lock);
   }
 
   if (after == nullptr) {
     CHECK_CONST_PTR(before);
-    handle_release_uncommitted_lock(before, ctx, lock);
+    handle_release_uncommitted_lock(before, ctx_with_snapshot, lock);
     // this value should be ignored, so returning a value that is obviously
     // invalid
     return std::numeric_limits<int128_t>::max();
@@ -85,7 +88,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   CHECK_GT(pending_refcount_, 0U);
   // No need to modify pending_refcount_ here -- we already have a reference and
   // don't need to release it, as both before and after are non-null.
-  return handle_try_atomic_from_pending(before, after, ctx, lock);
+  return handle_try_atomic_from_pending(before, after, ctx_with_snapshot, lock);
 }
 
 int128_t

@@ -873,9 +873,7 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
 // the cost accounting for the second transaction in the same block doesn't
 // correctly account for the type change done by TX1.
 //
-// This test CRASHES (CHECK abort) when run with
-// --gtest_also_run_disabled_tests. Enable once the cost tracking is fixed.
-TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
+TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "Requires HogDB for cost tracking";
@@ -934,10 +932,12 @@ TEST_P(RCQTest, DISABLED_CrossBlockTypeChangeBytestringToRCQCostTracking)
                                        Calldata({0x07, 0x02, 0x42, 0x43})}}},
         *context);
     ASSERT_TRUE(handler2.root_invoke().is_root_success());
-    // BUG: CHECK_LE(cost_change, locked_storage_cost) [8 < 0] fires here.
-    // TX1 already locked the key in this block, so TX2's lock() returns 0
-    // marginal cost -> locked_storage_cost stays at default 0. But
-    // commit_change returns 8 (4 entries * kRCQCostPerEntry).
+    // Before the fix (#1357), this triggered:
+    //   CHECK_LE(cost_change, locked_storage_cost) [8 < 0]
+    // TX2's reservation was 0 because snapshot_cost_transform clamped
+    // against the old bytestring cost, but commit_change returned 8.
+    // Now fixed: try_atomic_change_lock returns a conservative standalone
+    // cost that survives the snapshot_cost_transform subtraction.
     ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
   }
   advance_block();

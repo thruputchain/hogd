@@ -5,24 +5,12 @@
 #include <algorithm>
 #include <compare>
 #include <cstddef>
-#include <functional>
 #include <span>
-#include <string>
-#include <string_view>
 #include <type_traits>
 #include <utility>
 
 #include "hogd/base/unique_function.h"
 #include "x23/vec.h"
-
-// enable hashing of const byte spans.
-template<> struct std::hash<std::span<const std::byte>> {
-  std::size_t operator()(const std::span<const std::byte> &span) const noexcept
-  {
-    return std::hash<std::string_view>{}(
-        {reinterpret_cast<const char *>(span.data()), span.size()});
-  }
-};
 
 namespace hogd {
 

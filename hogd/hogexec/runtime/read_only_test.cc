@@ -252,26 +252,36 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
 
 TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 {
-  auto native_contract_addr = make_contract_address(1);
-  auto native_contract = std::make_unique<NativeContract>(
+  // Root invokes the middle contract with InvokeFlag::ReadOnly. The middle
+  // contract invokes the leaf with InvokeFlag::None (no ReadOnly on that
+  // syscall). The leaf still observes is_read_only() == true: read-only mode
+  // propagates to nested frames without re-specifying the flag on each invoke.
+  static constexpr ContractAddress kAddressLeaf = make_contract_address(1);
+  static constexpr ContractAddress kAddressMiddle = make_contract_address(2);
+  static constexpr ContractAddress kAddressRoot = make_contract_address(3);
+
+  auto contract_leaf = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              if (!ctx.handler().is_read_only()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              return {};
            }},
-          {1,
-           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // call 0, with no read-only flag added.
+      });
+
+  auto contract_middle = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              if (!ctx.handler().is_read_only()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto res = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_addr, 0,
+               return ctx.syscall<SyscallNo::kInvoke>(kAddressLeaf, 0,
                                                       UINT64_MAX, Calldata{},
                                                       std::to_underlying(
                                                           InvokeFlag::None),
@@ -283,12 +293,15 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
              }
              return {};
            }},
-          {2,
-           [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             // call 1, with read-only flag added.
+      });
+
+  auto contract_root = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto res = [&]() {
                RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(native_contract_addr, 1,
+               return ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle, 0,
                                                       UINT64_MAX, Calldata{},
                                                       std::to_underlying(
                                                           InvokeFlag::ReadOnly),
@@ -303,7 +316,9 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, std::move(contract_leaf));
+  contract_map.emplace(1, std::move(contract_middle));
+  contract_map.emplace(2, std::move(contract_root));
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
   auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
@@ -314,10 +329,13 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
           {ContractType::kNative, {native_context.get(), false}},
       });
 
-  auto native_contract_xdr = make_native_contract(0);
-  write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, native_contract_xdr);
-  setup_grant_storage_token(native_contract_addr, 1'000'000'000);
+  ContractAddress addrs[] = {kAddressLeaf, kAddressMiddle, kAddressRoot};
+  for (int i = 0; i < 3; ++i) {
+    auto xdr = make_native_contract(i);
+    write_contract(xdr);
+    write_deployment(addrs[i], xdr);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   {
     auto handler = make_new_system_call_handler(
@@ -325,8 +343,8 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(2),
+                        Invocation{.invoked_address = kAddressRoot,
+                                   .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
@@ -596,6 +614,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
                                  .calldata = {}},
               }},
       *context);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -622,6 +641,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
                           .calldata = {}},
               }},
       *context);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

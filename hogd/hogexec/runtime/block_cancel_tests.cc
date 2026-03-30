@@ -94,22 +94,36 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
 }
 
 // Gracefully handle an error found at try_commit_transaction time.
-// One frame invokes another in try_invoke
+// Caller try_invokes a writer contract (no self-reentrance).
 TEST_F(BlockCancelTest, CancelDuringTryCommit)
 {
-  // Create a contract where method 0 invokes method 1 using try_invoke
-  // Method 1 performs a storage write
-  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract = std::make_unique<NativeContract>(
+  ContractAddress addr_writer = make_contract_address(0);
+  ContractAddress addr_caller = make_contract_address(1);
+
+  auto make_context = [addr_writer]() -> std::unique_ptr<RuntimeContext> {
+    auto contract_writer = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Invoke method 1 using try_invoke
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
+                   std::to_underlying(
+                       StorageDeltaFlags::kStorageDeltaFlagNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               return {};
+             }}});
+
+    auto contract_caller = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
                  RuntimeMemoryLength output_return_buffer_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     ctx.handler().get_current_address(), 1,
-                     ctx.runtime().get_available_gas(),
+                     addr_writer, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::TryInvoke),
                      output_return_buffer_len);
@@ -123,39 +137,29 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                }
 
                return InvokeError{InvokeErrorCode::Abandon};
-             }},
-            {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Perform a storage write
-               auto key = make_storage_key("test");
-               auto [res, _gas] = syscall_BytestringSet_inner(
-                   ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
-               if (!res.has_value() ||
-                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
-
-               return {};
              }}});
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract));
+    contract_map.emplace(0, std::move(contract_writer));
+    contract_map.emplace(1, std::move(contract_caller));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  // Deploy the contract and grant storage tokens
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(kContractAddress, contract);
-  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  ContractAddress addrs[] = {addr_writer, addr_caller};
+  for (int i = 0; i < 2; ++i) {
+    auto contract = make_native_contract(i);
+    write_contract(contract);
+    write_deployment(addrs[i], contract);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
 
   // Create a transaction and call root_invoke()
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = kContractAddress,
+                                Invocation{.invoked_address = addr_caller,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,

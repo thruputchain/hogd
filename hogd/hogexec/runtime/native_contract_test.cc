@@ -167,12 +167,35 @@ TEST_F(NativeContractTest, BasicInstantiate)
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
 }
 
+namespace {
+
+// Distinct deployment addresses for multi-contract tests that do not use
+// NativeContractTestFramework::make_contract_address.
+constexpr ContractAddress
+test_contract_address(uint8_t tag)
+{
+  ContractAddress a{};
+  a[0] = tag;
+  return a;
+}
+
+} // namespace
+
 TEST_F(NativeContractTest, GasCostsAccumulate)
 {
-  NativeContractBuilder builder;
-  constexpr static ContractAddress kAddress{};
+  // Verifies that gas spent in nested invocations is charged to the root
+  // transaction: a leaf contract consumes configurable gas; a middle contract
+  // invokes the leaf three times (100, 200, 150) and checks each delta; an
+  // entry contract invokes the middle once and checks that the nested total
+  // (450) matches the gas consumed for that subtree. The three roles are
+  // deployed as separate native contracts at separate addresses.
 
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+  constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
+  constexpr static ContractAddress kAddressMiddle = test_contract_address(1);
+  constexpr static ContractAddress kAddressEntry = test_contract_address(2);
+
+  NativeContractBuilder builder_consumer;
+  builder_consumer.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeRuntime &runtime,
          uint32_t test_amount) -> InvokeStatus<int32_t> {
@@ -181,14 +204,16 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
         return 0;
       });
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
-        // invoke method 0 three times, with various gas costs
+
+  NativeContractBuilder builder_middle;
+  builder_middle.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+        // Invoke consumer method 0 three times, with various gas costs
         auto r1 = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddress, 0, UINT64_MAX,
+              kAddressConsumer, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(100)
                       .value(),
@@ -207,7 +232,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddress, 0, UINT64_MAX,
+              kAddressConsumer, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(200)
                       .value(),
@@ -226,7 +251,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddress, 0, UINT64_MAX,
+              kAddressConsumer, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(150)
                       .value(),
@@ -244,13 +269,14 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         return 0;
       });
 
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      2, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+  NativeContractBuilder builder_entry;
+  builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         auto r = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
           RuntimeMemoryLength output_return_buffer_len = 0;
           auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-              kAddress, 1, UINT64_MAX, Calldata{},
+              kAddressMiddle, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::None), output_return_buffer_len);
           return std::pair{invoke_status,
                            gas_before - ctx.runtime().get_available_gas()};
@@ -266,33 +292,36 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         return 0;
       });
 
-  auto native_contract = builder.build();
-
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+  contract_map.emplace(0, builder_consumer.build());
+  contract_map.emplace(1, builder_middle.build());
+  contract_map.emplace(2, builder_entry.build());
 
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
-  Contract contract(ContractType::kNative);
-  contract.native_contract_id() =
-      static_cast<HogexecPrecompiledNativeContracts>(0);
-
-  snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(
-      kAddress,
-      DeployedContractHash{.hash = sha256(contract),
-                           .contract_size = 0,
-                           .contract_type = contract.contract_type()});
+  ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressMiddle,
+                                              kAddressEntry};
+  for (int32_t i = 0; i < 3; ++i) {
+    Contract contract(ContractType::kNative);
+    contract.native_contract_id() =
+        static_cast<HogexecPrecompiledNativeContracts>(i);
+    snapshot_server_->impl()->setup_create_contract(contract);
+    snapshot_server_->impl()->setup_create_deployment(
+        deployment_addrs[i],
+        DeployedContractHash{.hash = sha256(contract),
+                             .contract_size = 0,
+                             .contract_type = contract.contract_type()});
+  }
 
   SystemCallHandler handler = make_handler(
       Transaction{
           .invocation =
               {
-                  .invoked_address = kAddress,
-                  .entrypoint = entrypoint_from_method_id(2),
+                  .invoked_address = kAddressEntry,
+                  .entrypoint = entrypoint_from_method_id(0),
                   .gas_limit = UINT64_MAX,
                   .calldata = {},
               },
