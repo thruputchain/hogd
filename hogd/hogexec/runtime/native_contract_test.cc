@@ -207,8 +207,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   NativeContractBuilder builder_middle;
   builder_middle.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0,
-      [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         // Invoke consumer method 0 three times, with various gas costs
         auto r1 = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
