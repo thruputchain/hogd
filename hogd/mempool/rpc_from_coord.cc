@@ -1375,10 +1375,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
       to_remove.push_back(tx_hashes[i]);
     }
   }
-  // The txs are on the runqueue and need to be removed, so we set
-  // [validated_block] to true.
-  co_await scheduler_->remove_from_scheduler(to_remove,
-                                             /*validated_block=*/true);
+  co_await scheduler_->remove_from_scheduler(to_remove);
   auth_data_height_.store(height);
   auth_data_height_.broadcast(&default_threadpool());
 }
