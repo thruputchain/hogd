@@ -10,7 +10,7 @@
       "host_config": {
         "public_ip": "10.100.0.102",
         "private_ip": "10.100.0.102",
-        "agent_port": 11055,
+        "agent_port": 11066,
         "pkg_dir": "/tmp/petar-hogx/pkg",
         "app_dir": "/tmp/petar-hogx/app",
         "var_dir": "/tmp/petar-hogx/var",
