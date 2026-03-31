@@ -391,18 +391,53 @@ private:
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
 
-  x23::Async<void> increment_num_validations_in_progress()
+  x23::Async<bool> increment_num_validations_in_progress()
   {
-    x23::CoroGuard cg;
-    co_await cg(validated_block_cache_lock_);
-    num_validations_in_progress_++;
+    bool admitted = false;
+    num_validations_in_progress_.rmw([&admitted](int64_t &count) {
+      if (count == -1) {
+        return;
+      }
+      ++count;
+      admitted = true;
+    });
+    co_return admitted;
   }
   x23::Async<void> decrement_num_validations_in_progress()
   {
-    x23::CoroGuard cg;
-    co_await cg(validated_block_cache_lock_);
-    CHECK_GT(num_validations_in_progress_, 0UL);
-    num_validations_in_progress_--;
+    num_validations_in_progress_.rmw([](int64_t &count) {
+      CHECK_GT(count, 0L);
+      --count;
+    });
+    num_validations_in_progress_.broadcast();
+  }
+  x23::Async<void> close_validation_gate()
+  {
+    while (true) {
+      int64_t current_validations = num_validations_in_progress_.load();
+      CHECK_GE(current_validations, 0L);
+
+      bool closed = false;
+      num_validations_in_progress_.rmw(
+          [&closed](int64_t &count) {
+            if (count == 0) {
+              count = -1;
+              closed = true;
+            }
+          });
+      if (closed) {
+        co_return;
+      }
+      co_await num_validations_in_progress_.wait(current_validations);
+    }
+  }
+  void open_validation_gate()
+  {
+    num_validations_in_progress_.rmw([](int64_t &count) {
+      CHECK_EQ(count, -1L);
+      count = 0;
+    });
+    num_validations_in_progress_.broadcast();
   }
 
   MempoolDbRpc *db_rpc_;
@@ -420,14 +455,14 @@ private:
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
-  // Protects [validated_block_cache_].
-  x23::CoroLock validated_block_cache_lock_;
-  size_t num_validations_in_progress_ = 0;
   // Ensures that a commit does not occur while txs are being verified. Txs
   // are verified against a certain block height, so if they race with a block
   // commit, we could add txs to the scheduler that are no longer verified as
-  // of the last committed block.
+  // of the last committed block. [num_validations_in_progress_] is a gate:
+  // values > 0 are active validations, 0 means validation is open, and -1
+  // means commit has closed validation admission.
   x23::CoroLock commit_lock_;
+  x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
