@@ -15,6 +15,7 @@ cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 
 # remove /tmp/hogx from prior runs
 rm -rf /tmp/hogx/*
+killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_exec loadgen_server
 
 "$HOGX" config together -a loadgen -t 1
 "$HOGX" start -a loadgen -c c1

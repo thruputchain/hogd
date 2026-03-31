@@ -687,7 +687,7 @@ Scheduler::schedule(size_t num_txs,
 
 x23::Async<void>
 Scheduler::remove_from_scheduler(
-    x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
+    x23::span<const SignedTransactionHash> tx_hashes)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -710,7 +710,6 @@ Scheduler::remove_from_scheduler(
     handles.push_back([](const ChunkRange *chunk,
                          x23::span<const SignedTransactionHash> tx_hashes,
                          SynchronizedMap<ContractAddress, char> &accounts,
-                         bool validated_block,
                          Scheduler &scheduler) noexcept -> x23::Async<size_t> {
       co_await default_coropoll().pool_.bg();
 
@@ -718,44 +717,43 @@ Scheduler::remove_from_scheduler(
           tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
       size_t num_removed_from_runqueue = 0;
       for (const SignedTransactionHash &tx_hash : hash_chunk) {
-        if (validated_block) {
-          // We only need to remove txs from the runqueue when committing a
-          // validated block. Txs in a nominated block were already removed from
-          // the runqueue in [schedule()]. Thus, we can skip this for nominated
-          // blocks to save on overhead.
-          auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-          CHECK_PTR(tx_value_ptr);
+        // Even if the *nominated* block is being committed and thus the txs
+        // have been removed from the runqueue, it is possible that the
+        // coordinator called [submit_unvetted()/submit_vetted()] and passed the
+        // same txs to the mempool again, resulting in the txs being added back
+        // onto the runqueue. Thus, we need to check if the txs are on the
+        // runqueue and remove them. We cannot skip this step and just remove
+        // txs from [txs_], even if the *nominated* block is being committed
+        // rather than a *validated* block.
+        auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
 
-          const SignedTransaction &tx = (*tx_value_ptr)->tx;
-          const ContractAddress &account = tx.tx.invocation.invoked_address;
-          const TxKey key = {.expiry_block_height =
-                                 tx.tx.uniquifier.block_expiry_height,
-                             .tx_hash = tx_hash};
-          {
-            auto [account_state, account_lock] =
-                scheduler.get_account_state(account);
-            std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
-            // The tx may or may not be on the runqueue. If the tx is included
-            // in a block we are *nominating*, then it has already been taken
-            // off of the runqueue. If the tx is included in a block we are
-            // *validating*, then it is still on the runqueue.
-            if (txs.erase(key)) {
-              num_removed_from_runqueue++;
-              accounts.insert(account, 0);
-            }
+        const SignedTransaction &tx = (*tx_value_ptr)->tx;
+        const ContractAddress &account = tx.tx.invocation.invoked_address;
+        const TxKey key = {.expiry_block_height =
+                               tx.tx.uniquifier.block_expiry_height,
+                           .tx_hash = tx_hash};
+        {
+          auto [account_state, account_lock] =
+              scheduler.get_account_state(account);
+          std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
+          // The tx may or may not be on the runqueue. If the tx is included
+          // in a block we are *nominating*, then it has already been taken
+          // off of the runqueue. If the tx is included in a block we are
+          // *validating*, then it is still on the runqueue.
+          if (txs.erase(key)) {
+            num_removed_from_runqueue++;
+            accounts.insert(account, 0);
           }
+        }
 
-          // Careful! We remove the tx from [txs_] at the bottom here because
-          // once we remove it, the references above become invalidated.
-          CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
-        }
-        else {
-          CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
-        }
+        // Careful! We remove the tx from [txs_] at the bottom here because
+        // once we remove it, the references above become invalidated.
+        CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
       }
 
       co_return num_removed_from_runqueue;
-    }(&chunks[i], tx_hashes, accounts, validated_block, *this));
+    }(&chunks[i], tx_hashes, accounts, *this));
   }
   size_t total_removed_from_runqueue = 0;
   // There may be fewer chunks that [kNumThreads], so we iterate through the

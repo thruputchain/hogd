@@ -92,18 +92,20 @@ public:
 
   void reenqueue_txs(const auto &begin, const auto &end)
   {
+    size_t num_inserted = 0;
     for (auto it = begin; it != end; it++) {
       const SignedTransactionHash &tx_hash = *it;
       const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
       CHECK_PTR(tx_value_ptr);
-      CHECK(insert_tx_into_runqueue(tx_hash, *tx_value_ptr));
+      if (insert_tx_into_runqueue(tx_hash, *tx_value_ptr)) {
+        num_inserted++;
+      }
     }
-    size_.fetch_add(std::distance(begin, end), std::memory_order_release);
+    size_.fetch_add(num_inserted, std::memory_order_release);
   }
 
   x23::Async<void>
-  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes,
-                        bool validated_block);
+  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.

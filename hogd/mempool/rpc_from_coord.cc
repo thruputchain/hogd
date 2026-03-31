@@ -970,13 +970,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -989,7 +987,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   if (tx_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1010,7 +1007,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -1037,7 +1033,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     }
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -1067,7 +1062,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       SchedulerValidationResult ret(
           SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       ret.missing_tx_hashes() = missing_tx_hashes;
-      info("validate ret");
       co_return ret;
     }
     x23::XdrVec<NondeterministicProposalData> tx_nominations;
@@ -1092,7 +1086,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1126,7 +1119,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
-    info("validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1154,7 +1146,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
   }
-  info("validate ret");
   co_return result;
 }
 
@@ -1274,13 +1265,18 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // block, so we can optimize this by only returning to the scheduler the
   // txs in the nominated block that are not in the committed block. Then we
   // can remove all of the committed block's txs from the scheduler.
+  //
+  // Importantly, this logic must only look at txs that actually made it into
+  // the nominated block. [nominated_block_cache_.tx_hashes] includes every tx
+  // we attempted during scheduling, including txs that later failed proposal
+  // and were re-added to the scheduler via [failed_txs].
   static std::unordered_set<SignedTransactionHash> return_to_runqueue;
   return_to_runqueue.clear();
   const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler = nullptr;
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // The committed block is the block we nominated.
-    remove_from_scheduler = &nominated_block_cache_.tx_hashes;
+    remove_from_scheduler = &nominated_block_cache_.result_tx_hashes;
   }
   else {
     // The committed block is a block we validated.
@@ -1288,8 +1284,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
         nominated_block_cache_.block_id != block_id) {
       // Return the nominated block's txs to the runqueue so they can be
       // scheduled again.
-      return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
-                                nominated_block_cache_.tx_hashes.end());
+      return_to_runqueue.insert(nominated_block_cache_.result_tx_hashes.begin(),
+                                nominated_block_cache_.result_tx_hashes.end());
     }
     for (const auto &[_, cache] : validated_block_cache_) {
       if (cache.block_id == block_id) {
@@ -1313,9 +1309,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                             return_to_runqueue.cend());
   const size_t remove_from_scheduler_size = remove_from_scheduler->size();
   co_await scheduler_->remove_from_scheduler(
-      x23::span<const SignedTransactionHash>(*remove_from_scheduler),
-      /*validated_block=*/(nominated_block_cache_.block_id == 0UL) ||
-          nominated_block_cache_.block_id != block_id);
+      x23::span<const SignedTransactionHash>(*remove_from_scheduler));
   record_stage(stage_remove_from_scheduler);
 
   for (x23::Async<void> &handle : handles) {
