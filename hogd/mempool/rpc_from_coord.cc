@@ -40,6 +40,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -966,7 +967,12 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
                                                Nomination nomination)
 {
-  co_await increment_num_validations_in_progress();
+  info("schedulercoord_validate, validating block for height = {}",
+       nomination.block_height);
+  if (!(co_await increment_num_validations_in_progress())) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
@@ -1135,17 +1141,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   co_await t_to_parallel_batch(cache.txs, result.block().signed_transactions);
 
   {
-    x23::CoroGuard cg;
-    co_await cg(validated_block_cache_lock_);
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[cache.block_id] = std::move(cache);
-
-    // We already hold [validated_block_cache_lock_], so I decrement
-    // [num_validations_in_progress_] directly rather than call
-    // [decrement_num_validations_in_progress()].
-    CHECK_GT(num_validations_in_progress_, 0UL);
-    num_validations_in_progress_--;
   }
+  co_await decrement_num_validations_in_progress();
   co_return result;
 }
 
@@ -1156,6 +1155,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
+  info("schedulercoord_commit_block, committing block for height = {}, last "
+       "committed block height = {}",
+       last_committed_block_.height + 1, last_committed_block_.height);
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
   auto record_stage = [&](double &stage_out) {
@@ -1164,7 +1166,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     last_stage_ts = now;
   };
   double stage_wait_commit_lock = 0.0;
-  double stage_wait_validated_lock = 0.0;
+  double stage_wait_validations = 0.0;
   double stage_precheck_validations = 0.0;
   double stage_wait_nominated_lock = 0.0;
   double stage_precheck_block_presence = 0.0;
@@ -1177,13 +1179,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
     info("schedulercoord_commit_block() stages: "
-         "wait_commit_lock={:.6f}, wait_validated_lock={:.6f}, "
+         "wait_commit_lock={:.6f}, wait_validations={:.6f}, "
          "precheck_validations={:.6f}, wait_nominated_lock={:.6f}, "
          "precheck_block_presence={:.6f}, build_handles={:.6f}, "
          "compute_reenqueue_set={:.6f}, remove_from_scheduler={:.6f}, "
          "await_handles={:.6f}, finalize={:.6f}, total={:.6f}, outcome={}, "
          "block_id={}, handles={}, reenqueue_size={}, remove_size={}",
-         stage_wait_commit_lock, stage_wait_validated_lock,
+         stage_wait_commit_lock, stage_wait_validations,
          stage_precheck_validations, stage_wait_nominated_lock,
          stage_precheck_block_presence, stage_build_handles,
          stage_compute_reenqueue_set, stage_remove_from_scheduler,
@@ -1199,21 +1201,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   int64_t delta_count = delta_raw.count();
   info("schedulercoord_commit_block, delta = {}", delta_count);
 
-  x23::CoroGuard commit_cg;
-  co_await commit_cg(commit_lock_);
-  record_stage(stage_wait_commit_lock);
-
-  x23::CoroGuard validate_cg;
-  co_await validate_cg(validated_block_cache_lock_);
-  record_stage(stage_wait_validated_lock);
-  if (num_validations_in_progress_) {
-    record_stage(stage_precheck_validations);
-    emit_commit_stats("race", /*handles_size=*/0, /*reenqueue_size=*/0,
-                      /*remove_from_scheduler_size=*/0);
-    last_ = std::chrono::steady_clock::now();
-    co_return SchedulerCommitOutcome::SchedulerCommitRace;
-  }
+  co_await close_validation_gate();
+  x23::Defer reopen_validation_gate([this] { open_validation_gate(); });
+  record_stage(stage_wait_validations);
   record_stage(stage_precheck_validations);
+
   x23::CoroGuard nominate_cg;
   co_await nominate_cg(nominated_block_cache_lock_);
   record_stage(stage_wait_nominated_lock);
@@ -1232,6 +1224,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   record_stage(stage_precheck_block_presence);
 
+  x23::CoroGuard commit_cg;
+  co_await commit_cg(commit_lock_);
+  record_stage(stage_wait_commit_lock);
+
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(validated_block_cache_.size());
   if (nominated_block_cache_.block_id &&
@@ -1239,6 +1235,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // We are committing the block that we nominated.
     handles.push_back(commit_block(nominated_block_cache_));
     last_committed_block_ = nominated_block_cache_.db_tip;
+    info("setting last_committed_block_ height to {}",
+         nominated_block_cache_.db_tip.height);
   }
   else {
     // We are committing a block that we validated.
@@ -1248,6 +1246,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       handles.push_back(abandon_block(nominated_block_cache_));
     }
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
+    info("setting last_committed_block_ height to {}",
+         validated_block_cache_[block_id].db_tip.height);
   }
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {

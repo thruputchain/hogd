@@ -165,7 +165,7 @@ concept is_nullable = requires(T t) {
 // invoked with no argument.  The action will be executed when the
 // Defer is destroyed or when the .reset() method is called, whichever
 // is sooner.  You can also disable the action from being run by
-// calling the .releas() method.
+// calling the .release() method.
 //
 // It is slightly more efficient to construct a Defer directly from a
 // lambda expression, as in:
