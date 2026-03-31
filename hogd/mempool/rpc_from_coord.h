@@ -410,7 +410,7 @@ private:
       CHECK_GT(count, 0L);
       --count;
     });
-    num_validations_in_progress_.broadcast();
+    num_validations_in_progress_.broadcast(&default_threadpool());
     co_return;
   }
 
@@ -440,7 +440,7 @@ private:
       CHECK_EQ(count, -1L);
       count = 0;
     });
-    num_validations_in_progress_.broadcast();
+    num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
   MempoolDbRpc *db_rpc_;
