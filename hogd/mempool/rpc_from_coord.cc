@@ -40,6 +40,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
