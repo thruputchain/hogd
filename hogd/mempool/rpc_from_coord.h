@@ -403,6 +403,7 @@ private:
     });
     co_return admitted;
   }
+
   x23::Async<void> decrement_num_validations_in_progress()
   {
     num_validations_in_progress_.rmw([](int64_t &count) {
@@ -410,7 +411,9 @@ private:
       --count;
     });
     num_validations_in_progress_.broadcast();
+    co_return;
   }
+
   x23::Async<void> close_validation_gate()
   {
     while (true) {
@@ -418,19 +421,19 @@ private:
       CHECK_GE(current_validations, 0L);
 
       bool closed = false;
-      num_validations_in_progress_.rmw(
-          [&closed](int64_t &count) {
-            if (count == 0) {
-              count = -1;
-              closed = true;
-            }
-          });
+      num_validations_in_progress_.rmw([&closed](int64_t &count) {
+        if (count == 0) {
+          count = -1;
+          closed = true;
+        }
+      });
       if (closed) {
         co_return;
       }
       co_await num_validations_in_progress_.wait(current_validations);
     }
   }
+
   void open_validation_gate()
   {
     num_validations_in_progress_.rmw([](int64_t &count) {
