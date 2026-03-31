@@ -461,10 +461,11 @@ private:
   // Ensures that a commit does not occur while txs are being verified. Txs
   // are verified against a certain block height, so if they race with a block
   // commit, we could add txs to the scheduler that are no longer verified as
-  // of the last committed block. [num_validations_in_progress_] is a gate:
-  // values > 0 are active validations, 0 means validation is open, and -1
-  // means commit has closed validation admission.
+  // of the last committed block.
   x23::CoroLock commit_lock_;
+  // [num_validations_in_progress_] is a gate: values > 0 are active
+  // validations, 0 means validation is open, and -1 means commit has closed
+  // validation admission.
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
