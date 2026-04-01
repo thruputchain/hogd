@@ -393,10 +393,9 @@ TEST(Mempool, ValidateEmpty)
 
   MempoolTestInfra server;
 
-  DbTip db_tip{.height = 0, .block_hash = {}, .db_hash = {}, .id = 0};
-  auto res_validate =
-      server.mempool_coord_rpc().schedulercoord_validate(db_tip,
-                                                         Nomination{})();
+  DbTip db_tip{.height = 1, .block_hash = {}, .db_hash = {}, .id = 0};
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
+      db_tip, Nomination{.block_height = 1})();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
