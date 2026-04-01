@@ -103,7 +103,7 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
 
   auto new_lock = storage_view_.try_reserve_storage_delta(
       cost_addrkey, new_storage_delta, storage_lock,
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+      std::to_underlying(StorageDeltaFlags::None));
 
   if (!new_lock) {
     // No need to manually revert the lock on addrkey acquired above;
@@ -151,7 +151,7 @@ BlockState::commit_transaction(TransactionID txid,
 
     auto r = storage_view_.try_reserve_storage_delta(
         cost_addrkey, cost_release_delta, StorageLock(StorageLockType::kNone),
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+        std::to_underlying(StorageDeltaFlags::None));
     assert(r.has_value());
 
     storage_view_.commit_storage_delta(cost_addrkey, cost_release_delta, *r);

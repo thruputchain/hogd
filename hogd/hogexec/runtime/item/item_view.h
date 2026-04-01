@@ -1,18 +1,15 @@
 #pragma once
 
-#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
 #include <optional>
-#include <random>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
@@ -287,9 +284,9 @@ public:
   }
 
   template<typename ItemType>
-  SyscallStatus<void> set(ItemType const &type,
-                          StorageDeltaFlagSet flags = std::to_underlying(
-                              StorageDeltaFlags::kStorageDeltaFlagNone))
+  SyscallStatus<void>
+  set(ItemType const &type,
+      StorageDeltaFlagSet flags = std::to_underlying(StorageDeltaFlags::None))
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -333,8 +330,7 @@ private:
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
                AddressAuthDataItem>
       delta_args_;
-  StorageDeltaFlagSet flags_ =
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone);
+  StorageDeltaFlagSet flags_ = std::to_underlying(StorageDeltaFlags::None);
 
   // There is a niche edge case, in which a contract deletes a queue and then
   // recreates it. In this case we need to know how which entries were

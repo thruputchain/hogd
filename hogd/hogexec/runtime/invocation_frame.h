@@ -19,6 +19,7 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/components/hash_buffers.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
+#include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"

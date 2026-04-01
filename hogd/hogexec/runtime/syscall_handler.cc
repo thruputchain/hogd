@@ -36,6 +36,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -988,8 +989,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
-          input_flags)) {
+  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1099,8 +1099,7 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
-          input_flags)) {
+  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1126,8 +1125,7 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
-          flags)) {
+  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 

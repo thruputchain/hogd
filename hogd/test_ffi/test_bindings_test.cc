@@ -23,6 +23,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "invoke_flag.hh"
 #include "storage_cost.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"

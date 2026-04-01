@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -87,8 +88,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                Bytestring bytestring = make_bytestring("hello");
                auto [write_status, _g2] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span(bytestring)),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write bytestring: " << write_status.error();
@@ -249,8 +249,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                int128_t set_value = 42;
                auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
                    ctx.handler(), key, &set_value, 0,
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write nnint: " << write_status.error();

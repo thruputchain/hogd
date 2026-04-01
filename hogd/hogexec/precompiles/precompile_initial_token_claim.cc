@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -105,8 +106,7 @@ delete_storage_key(NativeSyscallContext &ctx,
                    StorageKeyContractData const &contract_data_key)
 {
   auto r = ctx.syscall<SyscallNo::kDeleteObject>(
-      contract_data_key,
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+      contract_data_key, std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
