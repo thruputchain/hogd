@@ -273,27 +273,6 @@ public:
     co_return;
   }
 
-  bool validation_gate_closed_for_testing()
-  {
-    return num_validations_in_progress_.load() == -1;
-  }
-
-  DbHash nominated_block_db_hash_for_testing() const
-  {
-    return nominated_block_cache_.db_tip.db_hash;
-  }
-
-  void pause_commit_after_validation_gate_close_for_testing()
-  {
-    pause_commit_after_validation_gate_close_.store(true);
-  }
-
-  void resume_commit_after_validation_gate_close_for_testing()
-  {
-    pause_commit_after_validation_gate_close_.store(false);
-    pause_commit_after_validation_gate_close_.broadcast(&default_threadpool());
-  }
-
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -500,7 +479,6 @@ private:
   // validations, 0 means validation is open, and -1 means commit has closed
   // validation admission.
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
-  x23::CoroFutex<bool> pause_commit_after_validation_gate_close_{false};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
