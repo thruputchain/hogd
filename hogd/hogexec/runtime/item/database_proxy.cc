@@ -24,6 +24,7 @@
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/cpumap.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
@@ -146,7 +147,9 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
                           x23::uformat("{}", mock_db.read_port_number_)},
-            false);
+            false, *x23::single_bucket_map);
+        // Uses just one client for local mock testing.
+        // This avoids fd ulimit issues in sdk tests
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);

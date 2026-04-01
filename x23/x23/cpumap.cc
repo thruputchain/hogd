@@ -25,6 +25,7 @@ Unconstructed<const CpuSet> allowed_cpus;
 #endif // HAVE_SCHED_SETAFFINITY
 Unconstructed<const CpuMap> core_map;
 Unconstructed<const CpuMap> llc_map;
+Unconstructed<const CpuMap> single_bucket_map;
 
 std::tuple<>
 init_cpumaps()
@@ -36,6 +37,7 @@ init_cpumaps()
 #endif // HAVE_SCHED_SETAFFINITY
     core_map.construct(make_cpu_map("topology/core_id"));
     llc_map.construct(make_llc_map());
+    single_bucket_map.construct(make_single_bucket_map());
     return std::tuple{};
   }();
   return placeholder;
@@ -225,6 +227,12 @@ try {
   return CpuMap{Vec{0}};
 }
 
+CpuMap
+make_single_bucket_map()
+{
+  return CpuMap{Vec{0}};
+}
+
 #else  // !HAVE_SCHED_GETCPU
 CpuMap
 make_cpu_map(std::string_view /*path*/)
@@ -233,6 +241,11 @@ make_cpu_map(std::string_view /*path*/)
 }
 CpuMap
 make_llc_map()
+{
+  return CpuMap{Vec{0}};
+}
+CpuMap
+make_single_bucket_map()
 {
   return CpuMap{Vec{0}};
 }
