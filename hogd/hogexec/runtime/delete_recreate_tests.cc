@@ -30,6 +30,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
@@ -88,7 +89,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                auto [write_status, _g2] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span(bytestring)),
                    std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                       StorageDeltaFlags::None));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write bytestring: " << write_status.error();
@@ -250,7 +251,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
                    ctx.handler(), key, &set_value, 0,
                    std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                       StorageDeltaFlags::None));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write nnint: " << write_status.error();

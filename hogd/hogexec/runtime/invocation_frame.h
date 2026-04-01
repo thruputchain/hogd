@@ -20,6 +20,7 @@
 #include "hogd/hogexec/components/hash_buffers.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
 #include "storage_item.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"

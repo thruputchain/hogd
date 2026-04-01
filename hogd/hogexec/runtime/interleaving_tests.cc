@@ -57,7 +57,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
            int64_t add_amount) -> InvokeStatus<void> {
           auto r = ctx.handler().set_nnint(
               kKey, set_amount, add_amount,
-              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -68,7 +68,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           auto r = ctx.handler().set_nnint(
               kKey, 35, 0,
-              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }

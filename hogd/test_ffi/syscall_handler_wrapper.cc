@@ -13,6 +13,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "syscall.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"

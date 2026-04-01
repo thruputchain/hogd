@@ -13,6 +13,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "invoke_flag.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -106,7 +107,7 @@ delete_storage_key(NativeSyscallContext &ctx,
 {
   auto r = ctx.syscall<SyscallNo::kDeleteObject>(
       contract_data_key,
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }

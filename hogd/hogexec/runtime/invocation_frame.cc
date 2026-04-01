@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
 #include "storage_item.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -125,7 +126,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
                              .key = StorageKey(StorageKeyType::Metadata)};
     db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
                        std::to_underlying(
-                           StorageDeltaFlags::kStorageDeltaFlagNone));
+                           StorageDeltaFlags::None));
   }
 
   auto res = db_proxy.try_push_current_subtransaction();
@@ -162,7 +163,7 @@ InvocationFrame::collect_storage_deltas(
     out.push_back(FlaggedStorageDelta{
         .addrkey = addrkey,
         .delta = delta,
-        .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone),
+        .flags = std::to_underlying(StorageDeltaFlags::None),
     });
   }
 }

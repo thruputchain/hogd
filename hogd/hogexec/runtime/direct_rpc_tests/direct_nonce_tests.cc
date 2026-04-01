@@ -52,7 +52,7 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
   tx1.add_delta(make_replay_cache_addrkey(contract_addr),
                 make_nonce_delta(
                     Uniquifier{.block_expiry_height = 100, .nonce = 100}),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -65,7 +65,7 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
   tx2.add_delta(make_replay_cache_addrkey(contract_addr),
                 make_nonce_delta(
                     Uniquifier{.block_expiry_height = 100, .nonce = 100}),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
@@ -93,7 +93,7 @@ TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
   tx.add_delta(
       make_replay_cache_addrkey(contract_addr),
       make_nonce_delta(Uniquifier{.block_expiry_height = 1000, .nonce = 42}),
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   EXPECT_FALSE(r.value())

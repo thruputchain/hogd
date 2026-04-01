@@ -82,7 +82,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -133,7 +133,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), contract_b_key,
                  std::as_bytes(std::span(contract_b_data)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -234,7 +234,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -286,7 +286,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), contract_b_key,
                  std::as_bytes(std::span(contract_b_data)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -343,7 +343,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), contract_c_key,
                  std::as_bytes(std::span(contract_c_data)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
@@ -444,7 +444,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), contract_a_key,
                  std::as_bytes(std::span(contract_a_data)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";

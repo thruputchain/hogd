@@ -36,6 +36,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/sockio.h"
@@ -360,7 +361,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         // does, in fact, throw errors if you get_bytestring from the snapshot
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), kBadKey, std::as_bytes(std::span(bstring)),
-            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -471,7 +472,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           // add ops shouldn't query db
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, 100,
-              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -479,7 +480,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, -200,
-              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -501,7 +502,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           int128_t set_value = 100;
           auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, &set_value, 200,
-              std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};

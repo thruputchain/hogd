@@ -18,6 +18,7 @@
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 

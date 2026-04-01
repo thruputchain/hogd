@@ -94,7 +94,7 @@ protected:
                auto key = make_storage_key("rcq0");
                auto res = ctx.handler().delete_object(
                    key, std::to_underlying(
-                            StorageDeltaFlags::kStorageDeltaFlagNone));
+                            StorageDeltaFlags::None));
                if (!res.has_value())
                  return res.error().to_invoke_error();
                return {};
@@ -107,7 +107,7 @@ protected:
                auto res = ctx.handler().set_bytestring(
                    key, std::as_bytes(std::span(cd)),
                    std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                       StorageDeltaFlags::None));
                if (!res.has_value())
                  return res.error().to_invoke_error();
                return {};
@@ -119,7 +119,7 @@ protected:
                auto key = make_storage_key("rcq0");
                auto del = ctx.handler().delete_object(
                    key, std::to_underlying(
-                            StorageDeltaFlags::kStorageDeltaFlagNone));
+                            StorageDeltaFlags::None));
                if (!del.has_value())
                  return del.error().to_invoke_error();
                if (!del.value().has_value())

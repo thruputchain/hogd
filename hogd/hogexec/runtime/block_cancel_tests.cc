@@ -21,6 +21,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -108,7 +109,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span{"hello"}),
                    std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                       StorageDeltaFlags::None));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::Deterministic};

@@ -27,6 +27,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -90,7 +91,7 @@ protected:
       auto key = make_storage_key(k);
       auto [ws, _wg] = syscall_BytestringSet_inner(
           ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))),
-          std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+          std::to_underlying(StorageDeltaFlags::None));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         return InvokeError{InvokeErrorCode::Deterministic};
@@ -292,7 +293,7 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("ok"))),
-            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};

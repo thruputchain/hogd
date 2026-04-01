@@ -84,18 +84,18 @@ TEST(RecoveryTests, RecoveryVaryingItems)
                                   ctx.get_cost_model().get_bytestring_cost(6) +
                                   ctx.get_cost_model().get_balance_cost(),
                               std::to_underlying(
-                                  StorageDeltaFlags::kStorageDeltaFlagNone))
+                                  StorageDeltaFlags::None))
             .has_value());
     ASSERT_TRUE(
         itx->request_nnint128(
                ItemKey(ContractAddress{0}, StorageKeyContractData{0}), 10,
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone))
+               std::to_underlying(StorageDeltaFlags::None))
             .has_value());
     ASSERT_TRUE(
         itx->request_bytes(
                ItemKey(ContractAddress{0}, StorageKeyContractData{1}),
                std::as_bytes(std::span("hello")),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone))
+               std::to_underlying(StorageDeltaFlags::None))
             .has_value());
 
     // invoketx assertions fail if you call the dtor in an invalid state (where

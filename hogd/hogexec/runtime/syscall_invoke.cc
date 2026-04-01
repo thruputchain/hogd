@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"

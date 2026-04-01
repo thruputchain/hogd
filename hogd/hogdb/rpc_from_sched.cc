@@ -347,7 +347,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
             .key = key});
         auto r = itx->request_nnint128(
             item_key, value,
-            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+            std::to_underlying(StorageDeltaFlags::None));
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());
           failure = true;
@@ -399,7 +399,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
 
         auto r = itx->request_auth_data(
             addr, auth_data_change,
-            std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+            std::to_underlying(StorageDeltaFlags::None));
         if (!r.has_value()) {
           error("failed to write genesis block auth data: {}", r.error());
           failure = true;

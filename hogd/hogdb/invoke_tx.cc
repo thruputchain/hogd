@@ -389,7 +389,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
   // nnint128 is valid; now try to request the change.
   auto change = ItemChange(NNInt128{base, delta});
   if (flags &
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(key, std::move(change));
@@ -401,7 +401,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 {
   if (key.is_address_balance()) {
     if (flags &
-        std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+        std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
       return HogDBError(HogDBCode::kConflict);
     }
     request_balance_change(key.get_address(), delta);
@@ -447,7 +447,7 @@ InvokeTX::request_auth_data(Address const &addr,
   }
   auto change = ItemChange(std::move(auth_data_item));
   if (flags &
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(make_address_auth_data_item_key(addr),
@@ -461,7 +461,7 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
   // We do not support setting exclusive locks on replay cache items;
   // consuming a nonce is already a unique event.
   if (flags &
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     return HogDBError(HogDBCode::kConflict);
   }
 
@@ -476,7 +476,7 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
 {
   auto change = ItemChange(RetrocausalQueueIt(delta));
   if (flags &
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(key, std::move(change));

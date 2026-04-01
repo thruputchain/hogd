@@ -201,7 +201,7 @@ InvokeTX::request_bytes(const ItemKey &key, std::span<const std::byte> buf,
 {
   auto change = ItemChange(Bytes{buf});
   if (flags &
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(key, std::move(change));
@@ -212,7 +212,7 @@ InvokeTX::request_deletion(const ItemKey &key, StorageDeltaFlagSet flags)
 {
   auto change = ItemChange(Deletion{});
   if (flags &
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
   return request_change(key, std::move(change));

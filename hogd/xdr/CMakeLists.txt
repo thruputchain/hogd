@@ -22,6 +22,7 @@ add_xdr(
   ../../protocol/genesis.x
   ../../protocol/hogexec_constants.x
   ../../protocol/indexer.x
+  ../../protocol/invoke_flag.x
   ../../protocol/loadgen.x
   ../../protocol/network.x
   ../../protocol/nomination.x

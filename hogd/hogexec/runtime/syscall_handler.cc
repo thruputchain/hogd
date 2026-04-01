@@ -42,6 +42,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
@@ -988,7 +989,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -1099,7 +1100,7 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -1126,7 +1127,7 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 {
   CHECK(!is_read_only());
 
-  if (!validate_flags<StorageDeltaFlags::kStorageDeltaFlagExclusiveLock>(
+  if (!validate_flags<StorageDeltaFlags::ExclusiveLock>(
           flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }

@@ -29,13 +29,13 @@ DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
   // Reject exclusive locks on replay cache items (match HogDB behavior).
   if (delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier &&
       (flags &
-       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock))) {
+       std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
     return false;
   }
   // Reject exclusive locks on balance keys (match HogDB behavior).
   if (addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance &&
       (flags &
-       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock))) {
+       std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
     return false;
   }
   return block_state->try_reserve_storage_delta(tx, addrkey, delta, flags);

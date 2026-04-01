@@ -26,6 +26,7 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
@@ -453,7 +454,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span(calldata)),
                    std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                       StorageDeltaFlags::ExclusiveLock));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring";

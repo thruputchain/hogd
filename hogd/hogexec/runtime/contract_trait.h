@@ -27,6 +27,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "serialize_calldata.h"
 #include "syscall_error.hh"
+#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/debug.h"

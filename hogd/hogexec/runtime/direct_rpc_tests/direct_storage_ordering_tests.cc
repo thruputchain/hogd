@@ -55,17 +55,17 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
   deltas.push_back(FlaggedStorageDelta{
       .addrkey = make_free_native_token_balance_addrkey(contract_addr0),
       .delta = make_nnint_add_delta(-cost_model_->get_nnint_cost()),
-      .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)});
+      .flags = std::to_underlying(StorageDeltaFlags::None)});
   // use the units received in the next delta to write a storage item
   deltas.push_back(FlaggedStorageDelta{
       .addrkey = make_contract_data_addrkey(contract_addr1, "test"),
       .delta = make_nnint_set_add_delta(0, 1),
-      .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)});
+      .flags = std::to_underlying(StorageDeltaFlags::None)});
   // receive the units in contract 1 (from contract 0)
   deltas.push_back(FlaggedStorageDelta{
       .addrkey = make_free_native_token_balance_addrkey(contract_addr1),
       .delta = make_nnint_add_delta(cost_model_->get_nnint_cost()),
-      .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)});
+      .flags = std::to_underlying(StorageDeltaFlags::None)});
 
   auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
   ASSERT_TRUE(r.has_value());
@@ -107,10 +107,10 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
   auto proxy = make_new_per_tx_db_proxy();
   proxy.add_delta(make_free_native_token_balance_addrkey(contract_addr0),
                   make_nnint_add_delta(-cost_model_->get_nnint_cost()),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
   proxy.add_delta(make_free_native_token_balance_addrkey(contract_addr1),
                   make_nnint_add_delta(cost_model_->get_nnint_cost()),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
 
   auto r = proxy.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
@@ -118,15 +118,15 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
 
   proxy.add_delta(make_contract_data_addrkey(contract_addr0, "test"),
                   make_nnint_set_add_delta(0, 1),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
 
   // Undo the transfer
   proxy.add_delta(make_free_native_token_balance_addrkey(contract_addr0),
                   make_nnint_add_delta(0),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
   proxy.add_delta(make_free_native_token_balance_addrkey(contract_addr1),
                   make_nnint_add_delta(0),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
 
   auto r2 = proxy.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
@@ -175,18 +175,18 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
       .addrkey = make_free_native_token_balance_addrkey(contract_addr0),
       .delta = make_nnint_add_delta(-cost_model_->get_nnint_cost() -
                                     cost_model_->get_balance_cost()),
-      .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)});
+      .flags = std::to_underlying(StorageDeltaFlags::None)});
   // use the units received in the next delta to write a storage item
   deltas.push_back(FlaggedStorageDelta{
       .addrkey = make_contract_data_addrkey(contract_addr1, "test"),
       .delta = make_nnint_set_add_delta(0, 1),
-      .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)});
+      .flags = std::to_underlying(StorageDeltaFlags::None)});
   // receive the units in contract 1 (from contract 0)
   deltas.push_back(FlaggedStorageDelta{
       .addrkey = make_free_native_token_balance_addrkey(contract_addr1),
       .delta = make_nnint_add_delta(cost_model_->get_nnint_cost() +
                                     cost_model_->get_balance_cost()),
-      .flags = std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone)});
+      .flags = std::to_underlying(StorageDeltaFlags::None)});
 
   auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
   ASSERT_TRUE(r.has_value());
