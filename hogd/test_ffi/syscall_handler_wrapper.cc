@@ -12,6 +12,7 @@
 #include "hogd/test_ffi/ffi_data_buffer.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "invoke_flag.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"

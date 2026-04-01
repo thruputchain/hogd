@@ -37,7 +37,7 @@ TEST_F(ShutdownTest, AcceptedBlockUAF)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -57,7 +57,7 @@ TEST_F(ShutdownTest, AcceptedBlockUAFUnclosedShutdown)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -74,7 +74,7 @@ TEST_F(ShutdownTest, AbandonNoBlockClose)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -91,7 +91,7 @@ TEST_F(ShutdownTest, RejectedBlockUAF)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());

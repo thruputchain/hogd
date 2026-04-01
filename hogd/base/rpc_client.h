@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/cpumap.h"
 #include "x23/err.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
@@ -128,11 +129,12 @@ make_srpc_client(x23::HostPort host_port, bool retry = false,
 // TODO(geoff): setting max_message_size isn't implemented for multiclient yet
 template<typename RpcService>
 auto
-make_srpc_multiclient(sockaddr_storage &ss, bool retry = false)
+make_srpc_multiclient(sockaddr_storage &ss, bool retry = false,
+                      x23::CpuMap const &map = *x23::llc_map)
 {
   while (true) {
     try {
-      auto client = x23::SRpcMulticlient<x23::RpcLogger>::make(ss);
+      auto client = x23::SRpcMulticlient<x23::RpcLogger>::make(ss, map);
       return client->template client<RpcService>();
     } catch (const std::system_error &e) {
       if (retry && e.code() == std::errc::connection_refused) {
@@ -149,23 +151,24 @@ make_srpc_multiclient(sockaddr_storage &ss, bool retry = false)
 
 template<typename RpcService>
 auto
-make_srpc_multiclient(x23::HostPort host_port, bool retry = false)
+make_srpc_multiclient(x23::HostPort host_port, bool retry = false,
+                      x23::CpuMap const &map = *x23::llc_map)
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
   }
-  return make_srpc_multiclient<RpcService>(*ss, retry);
+  return make_srpc_multiclient<RpcService>(*ss, retry, map);
 }
 
 template<typename RpcService>
 auto
 make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
-                     bool retry = false)
+                     bool retry = false, x23::CpuMap const &map = *x23::llc_map)
 {
   while (true) {
     try {
-      auto client = x23::RpcMulticlient<x23::RpcLogger>::make(cp, ss);
+      auto client = x23::RpcMulticlient<x23::RpcLogger>::make(cp, ss, map);
       return client->template client<RpcService>();
     } catch (const std::system_error &e) {
       if (retry && e.code() == std::errc::connection_refused) {
@@ -182,13 +185,14 @@ make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
 
 template<typename RpcService>
 auto
-make_rpc_multiclient(x23::HostPort host_port, bool retry = false)
+make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
+                     x23::CpuMap const &map = *x23::llc_map)
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
   }
-  return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry);
+  return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map);
 }
 
 } // namespace hogd

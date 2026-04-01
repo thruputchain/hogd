@@ -128,7 +128,7 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   // set_nnint via syscall
   auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
       allow_key, &output_set, new_add,
-      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+      std::to_underlying(StorageDeltaFlags::None));
   if (!r2.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r2.error());
   }

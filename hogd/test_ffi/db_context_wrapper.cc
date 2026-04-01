@@ -14,6 +14,7 @@
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
@@ -21,7 +22,10 @@
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
+#include "types.hh"
+#include "x23/cpumap.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -39,7 +43,8 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = hogdb_wrapper_.exec_port()});
   event_server_proxy_ = std::make_unique<EventServerProxy>(
-      x23::HostPort{"localhost", event_exec_server_.start_server(0)});
+      x23::HostPort{"localhost", event_exec_server_.start_server(0)},
+      *x23::single_bucket_map);
 
   db_sched_client_ = make_srpc_client<DbSched1>(
       x23::HostPort{"localhost", hogdb_wrapper_.coord_port()}, false);
@@ -50,16 +55,10 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   auth_db_server_->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
   auth_db_server_->impl()->set_auth_server(*auth_server_);
   auth_db_server_.start_server(/*port=*/0);
-  auth_mempool_server_->max_message_size_ =
-      hogd::LoadgenRpc::kRpcMaxMessageSize;
-  auth_mempool_server_->impl()->set_auth_server(*auth_server_);
-  auth_mempool_server_.start_server(/*port=*/0);
-
   {
     std::string address_for_db =
         std::format("localhost:{}", auth_db_server_.port());
-    std::string address_for_mempool =
-        std::format("localhost:{}", auth_mempool_server_.port());
+    std::string address_for_mempool = std::format("INVALID");
     AuthCard auth_card = {.protocol = version::kHogdProtocol(),
                           .upid = {},
                           .address_for_db = address_for_db.c_str(),

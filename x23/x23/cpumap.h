@@ -424,9 +424,14 @@ CpuMap make_cpu_map(std::string_view path);
 // cache/index3/shared_cpu_map or cache/index2/shared_cpu_map.
 CpuMap make_llc_map();
 
+// Create a single-bucket mapping that groups all CPUs into a single bucket
+CpuMap make_single_bucket_map();
+
 // Global CPU topology mappings initialized at startup.
 extern Unconstructed<const CpuMap> core_map; // Groups CPUs by physical core
 extern Unconstructed<const CpuMap> llc_map;  // Groups CPUs by last-level cache
+extern Unconstructed<const CpuMap>
+    single_bucket_map; // Groups all CPUs into a single bucket
 
 // Reified type representing a specific CpuMap
 template<const Unconstructed<const CpuMap> &Map> struct cpu_map_t {
@@ -437,6 +442,7 @@ template<const Unconstructed<const CpuMap> &Map> struct cpu_map_t {
 template<typename T> concept is_cpu_map = std::same_as<T, cpu_map_t<T::map>>;
 using CoreMap = cpu_map_t<core_map>;
 using LLCMap = cpu_map_t<llc_map>;
+using SingleBucketMap = cpu_map_t<single_bucket_map>;
 
 // Initialize global CPU topology mappings during static
 // initialization.  Called automatically before main() starts, but can

@@ -72,7 +72,7 @@ TEST_P(DirectBytestringTest, ConcurrentWrites)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -80,7 +80,7 @@ TEST_P(DirectBytestringTest, ConcurrentWrites)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -88,8 +88,7 @@ TEST_P(DirectBytestringTest, ConcurrentWrites)
   auto tx_diff = make_new_per_tx_db_proxy();
   tx_diff.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("different_value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_diff = tx_diff.try_push_current_subtransaction();
   ASSERT_TRUE(r_diff.has_value());
   ASSERT_FALSE(r_diff.value());
@@ -97,7 +96,7 @@ TEST_P(DirectBytestringTest, ConcurrentWrites)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -116,7 +115,7 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr1, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -124,7 +123,7 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   auto tx1_1 = make_new_per_tx_db_proxy();
   tx1_1.add_delta(make_addrkey(contract_addr1, "test"),
                   make_bytestring_delta("value"),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
   auto r1_1 = tx1_1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
@@ -132,7 +131,7 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   auto tx1_2 = make_new_per_tx_db_proxy();
   tx1_2.add_delta(make_addrkey(contract_addr1, "test"),
                   make_bytestring_delta("value"),
-                  std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                  std::to_underlying(StorageDeltaFlags::None));
   auto r1_2 = tx1_2.try_push_current_subtransaction();
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_TRUE(r1_2.value());
@@ -141,7 +140,7 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr2, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -173,7 +172,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -181,7 +180,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -193,7 +192,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(reference_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -217,8 +216,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -234,7 +232,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(make_addrkey(contract_addr, "test"),
                  make_bytestring_delta("much_longer_value"),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     EXPECT_TRUE(r.has_value());
     EXPECT_TRUE(r.value());
@@ -252,8 +250,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("much_longer_value"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -276,8 +273,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("long_initial_value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -292,7 +288,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(make_addrkey(contract_addr, "test"),
                  make_bytestring_delta("v"), // short value
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     EXPECT_TRUE(r.has_value());
     return tx;
@@ -309,8 +305,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("v"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -333,8 +328,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("long_initial_value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -349,7 +343,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(make_addrkey(contract_addr, "test"),
                  make_bytestring_delta("v"), // short value
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     EXPECT_TRUE(r.has_value());
     return tx;
@@ -366,8 +360,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("v"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -388,8 +381,7 @@ TEST_P(DirectBytestringTest, DeletionCost)
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -401,7 +393,7 @@ TEST_P(DirectBytestringTest, DeletionCost)
   auto make_test_call = [&]() {
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     EXPECT_TRUE(r.has_value());
     return tx;
@@ -432,8 +424,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -445,7 +436,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   // tx1 deletes the key
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -453,14 +444,14 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   // tx2 deletes the key
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
   // tx1 deletes the key again
   tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
@@ -491,21 +482,21 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_even_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -516,8 +507,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("value_longer"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -540,21 +530,21 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_even_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -565,8 +555,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("value_longer"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -587,14 +576,14 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
@@ -604,7 +593,7 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()); // should fail because tx1 holds the exclusive lock
@@ -614,7 +603,7 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   // now the exclusive lock is no longer held
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_TRUE(r2_1.value());
@@ -622,7 +611,7 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   // but tx2 cannot write a different value
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_even_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_FALSE(r2_2.value());
@@ -649,14 +638,14 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
@@ -666,7 +655,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -676,8 +665,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("value_longer"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -700,7 +688,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -708,14 +696,14 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_FALSE(r1_1.value());
@@ -727,8 +715,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
                    make_bytestring_delta("value"),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
@@ -751,8 +738,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(make_addrkey(contract_addr, "test"),
                     make_bytestring_delta("value"),
-                    std::to_underlying(
-                        StorageDeltaFlags::kStorageDeltaFlagNone));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -761,8 +747,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   auto tx_init_ref = make_new_per_tx_db_proxy();
   tx_init_ref.add_delta(make_addrkey(reference_addr, "test_new"),
                         make_bytestring_delta("value"),
-                        std::to_underlying(
-                            StorageDeltaFlags::kStorageDeltaFlagNone));
+                        std::to_underlying(StorageDeltaFlags::None));
   auto r_init_ref = tx_init_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_init_ref.has_value());
   ASSERT_TRUE(r_init_ref.value());
@@ -774,7 +759,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   // tx2: just delete the key
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -783,9 +768,9 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test_new"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -813,8 +798,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   auto tx_ref_init = make_new_per_tx_db_proxy();
   tx_ref_init.add_delta(make_addrkey(reference_addr, "test_new"),
                         make_bytestring_delta("value"),
-                        std::to_underlying(
-                            StorageDeltaFlags::kStorageDeltaFlagNone));
+                        std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_ref_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -832,7 +816,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -850,7 +834,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   // tx2: just delete the key
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -859,7 +843,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test_new"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_FALSE(r3.value()); // storage not yet available
@@ -871,7 +855,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   // allow it.
   tx3.add_delta(make_addrkey(contract_addr, "test_new"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3_1 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3_1.has_value());
   ASSERT_TRUE(r3_1.value());
@@ -899,8 +883,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   auto tx_ref_init = make_new_per_tx_db_proxy();
   tx_ref_init.add_delta(make_addrkey(reference_addr, "test_new"),
                         make_bytestring_delta("value"),
-                        std::to_underlying(
-                            StorageDeltaFlags::kStorageDeltaFlagNone));
+                        std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_ref_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
@@ -918,7 +901,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -936,7 +919,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   // tx2: just delete the key
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -946,7 +929,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test_new"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_FALSE(r3.value()); // storage not yet available
@@ -958,7 +941,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   // CONDITIONAL on the delete having the kExclusive flag set.
   tx2.add_delta(make_addrkey(contract_addr, "test_new"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
@@ -984,8 +967,7 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
   auto tx_block = make_new_per_tx_db_proxy();
   tx_block.add_delta(make_addrkey(contract_addr, "test"),
                      make_bytestring_delta("value"),
-                     std::to_underlying(
-                         StorageDeltaFlags::kStorageDeltaFlagNone));
+                     std::to_underlying(StorageDeltaFlags::None));
   auto r_block = tx_block.try_push_current_subtransaction();
   ASSERT_TRUE(r_block.has_value());
   ASSERT_TRUE(r_block.value());
@@ -994,10 +976,10 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test_nonblock"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_different"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_FALSE(r1.value());
@@ -1018,8 +1000,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
     auto tx_init = make_new_per_tx_db_proxy();
     tx_init.add_delta(make_addrkey(contract_addr, "test"),
                       make_bytestring_delta("value"),
-                      std::to_underlying(
-                          StorageDeltaFlags::kStorageDeltaFlagNone));
+                      std::to_underlying(StorageDeltaFlags::None));
     auto r_init = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r_init.has_value());
     ASSERT_TRUE(r_init.value());
@@ -1030,14 +1011,14 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   // Start conflict scenario: two deletes, then one tries to set
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -1045,7 +1026,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   // Attempt to set a new value in tx1 while tx2 still holds a lock
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("new_value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_set = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_set.has_value());
   ASSERT_FALSE(r1_set.value()); // cannot upgrade under shared lock in mockdb
@@ -1056,8 +1037,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   // Reference: just a single delete on another address
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"), make_delete_delta(),
-                   std::to_underlying(
-                       StorageDeltaFlags::kStorageDeltaFlagNone));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   // If key absent, delete is treated as no-op but allowed in mockdb path
@@ -1077,7 +1057,7 @@ TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
   // No prior write to this key; deletion should be a no-op.
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(make_addrkey(contract_addr, "missing_key"), make_delete_delta(),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
@@ -1101,7 +1081,7 @@ TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(make_addrkey(contract_addr, "test"),
                make_bytestring_delta("value_long"),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
@@ -1122,7 +1102,7 @@ TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -1130,7 +1110,7 @@ TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -1160,10 +1140,10 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(make_addrkey(contract_addr, "test1"),
                make_bytestring_delta("short"),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   tx.add_delta(make_addrkey(contract_addr, "test2"),
                make_bytestring_delta("short"),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
@@ -1193,7 +1173,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test1"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -1201,7 +1181,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   // step 2
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
@@ -1209,7 +1189,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   // step 3
   tx2.add_delta(make_addrkey(contract_addr, "test1"),
                 make_bytestring_delta("s"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_TRUE(r2_2.value());
@@ -1217,7 +1197,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   // step 4
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_3 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_3.has_value());
   ASSERT_TRUE(r2_3.value());
@@ -1225,7 +1205,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   // step 5
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value_longer"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_4 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_4.has_value());
   ASSERT_FALSE(r2_4.value());
@@ -1264,10 +1244,10 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(make_addrkey(contract_addr, "test1"),
                make_bytestring_delta("value"),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   tx.add_delta(make_addrkey(contract_addr, "test2"),
                make_bytestring_delta("value"),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
@@ -1280,14 +1260,14 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test1"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
   tx2.add_delta(make_addrkey(contract_addr, "test1"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_TRUE(r2_1.value());
@@ -1299,7 +1279,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -1307,7 +1287,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   // This fails, because tx2 has the costs locked.
   tx3.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value_long2"), // slightly longer
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3_1 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3_1.has_value());
   ASSERT_FALSE(r3_1.value());
@@ -1319,7 +1299,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   //
   // tx3.add_delta(make_addrkey(contract_addr, "test2"),
   // make_bytestring_delta("value_long2"), // slightly longer
-  // std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+  // std::to_underlying(StorageDeltaFlags::None));
 
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 
@@ -1335,21 +1315,21 @@ TEST_P(DirectBytestringTest, ReuseExclusiveLock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value2"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value3"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1_2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_TRUE(r1_2.value());
@@ -1372,24 +1352,21 @@ TEST_P(DirectBytestringTest, ReusePermamentExclusiveLock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value2"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
 
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value3"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1_2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_TRUE(r1_2.value());
@@ -1412,8 +1389,7 @@ TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1422,7 +1398,7 @@ TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
@@ -1444,7 +1420,7 @@ TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1454,8 +1430,7 @@ TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
@@ -1477,7 +1452,7 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1486,7 +1461,7 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
 
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
@@ -1494,7 +1469,7 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
 
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value2"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
@@ -1521,8 +1496,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1532,11 +1506,10 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -1565,8 +1538,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1579,11 +1551,10 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
@@ -1591,16 +1562,16 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
   // This fails, because changing this to a normal change forces us to reacquire
   // the storage costs.
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
 
   // This succeeds, because we stop the test2 write
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx2.add_delta(make_addrkey(contract_addr, "test2"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_TRUE(r2_2.value());
@@ -1612,7 +1583,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -1643,10 +1614,10 @@ TEST_P(DirectBytestringTest,
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx1.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1661,11 +1632,10 @@ TEST_P(DirectBytestringTest,
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
@@ -1674,11 +1644,10 @@ TEST_P(DirectBytestringTest,
   // exclusive lock is held.
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_long"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_TRUE(r2_1.value());
@@ -1687,7 +1656,7 @@ TEST_P(DirectBytestringTest,
   // while insufficient storage costs are available.
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_FALSE(r2_2.value());
@@ -1696,10 +1665,10 @@ TEST_P(DirectBytestringTest,
   // were acquired in this tx.
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_3 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_3.has_value());
   ASSERT_TRUE(r2_3.value());
@@ -1712,10 +1681,10 @@ TEST_P(DirectBytestringTest,
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   tx3.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
@@ -1739,7 +1708,7 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
@@ -1750,22 +1719,21 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
 
   // this lock fails because tx3 already has deleted the item.
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
@@ -1774,11 +1742,10 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
 
   // now tx2 can acquire in exclusive mode
   tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(
-                    StorageDeltaFlags::kStorageDeltaFlagExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   tx2.add_delta(make_addrkey(contract_addr, "test2"),
                 make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r2_2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_TRUE(r2_2.value());
@@ -1805,8 +1772,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
   {
     auto tx_init = make_new_per_tx_db_proxy();
     tx_init.add_delta(key, make_bytestring_delta("existing"),
-                      std::to_underlying(
-                          StorageDeltaFlags::kStorageDeltaFlagNone));
+                      std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -1816,7 +1782,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_nnint_set_add_delta(0, 10),
-                std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value() && r1.value());
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
@@ -1824,7 +1790,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
   // Try NNInt add on the bytestring key
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_nnint_add_delta(10),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
@@ -1848,8 +1814,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
   {
     auto tx_init = make_new_per_tx_db_proxy();
     tx_init.add_delta(key, make_bytestring_delta("existing"),
-                      std::to_underlying(
-                          StorageDeltaFlags::kStorageDeltaFlagNone));
+                      std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -1860,7 +1825,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
   // Try NNInt add on the bytestring key
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_nnint_add_delta(10),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
@@ -1883,7 +1848,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
   {
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(addrkey, make_bytestring_delta("existing_value"),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -1895,7 +1860,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
   {
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(addrkey, make_nnint_add_delta(100),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value() && r.value());
 
@@ -1923,7 +1888,7 @@ TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
 
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(addrkey, make_bytestring_delta(large_str),
-               std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value());
 }

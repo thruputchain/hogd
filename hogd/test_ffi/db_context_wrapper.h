@@ -11,6 +11,7 @@
 #include "event.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
@@ -96,7 +97,6 @@ private:
 
   std::unique_ptr<AuthServer> auth_server_;
   RpcServer<AuthDBRpc> auth_db_server_;
-  RpcServer<AuthMempoolRpc> auth_mempool_server_;
 
   db_sched_client_t db_sched_client_;
 

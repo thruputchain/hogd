@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"

@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -61,7 +62,7 @@ TEST_P(RevertTest, RootFrameReverts)
              // Write the bytestring to storage
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), key, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE()
@@ -229,7 +230,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
             addr_3](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), key1, std::as_bytes(std::span(str_hello)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: Failed to "
@@ -276,7 +277,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
            [str_world, key2](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto [res, _gas] = syscall_BytestringSet_inner(
                  ctx.handler(), key2, std::as_bytes(std::span(str_world)),
-                 std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagNone));
+                 std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: Failed to "

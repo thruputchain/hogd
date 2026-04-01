@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "invoke_flag.hh"
 #include "serialize_calldata.h"
 #include "syscall_error.hh"
 #include "transaction.hh"

@@ -114,6 +114,9 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
 
   std::optional<auth_db_client_t> client = co_await create_client(*addr, card);
   if (!client) {
+    error("AuthChangeSubscriptionManager: Failed to create client for {} on "
+          "address {}",
+          card.address_for_db, x23::show_ipaddr(*addr));
     co_return false;
   }
 

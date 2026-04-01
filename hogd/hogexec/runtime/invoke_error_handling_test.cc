@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"

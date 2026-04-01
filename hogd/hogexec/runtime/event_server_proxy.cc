@@ -8,6 +8,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
+#include "x23/cpumap.h"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -15,16 +16,17 @@ namespace hogd {
 namespace {
 
 auto
-connect_to_event_server(x23::HostPort const &host_port)
+connect_to_event_server(x23::HostPort const &host_port, x23::CpuMap const &map)
 {
   info("Connecting to event server on host port {}", host_port.show());
-  return make_rpc_multiclient<EventExecutor1>(host_port, true);
+  return make_rpc_multiclient<EventExecutor1>(host_port, true, map);
 }
 
 } // namespace
 
-EventServerProxy::EventServerProxy(x23::HostPort const &host_port)
-  : client_(connect_to_event_server(host_port))
+EventServerProxy::EventServerProxy(x23::HostPort const &host_port,
+                                   x23::CpuMap const &map)
+  : client_(connect_to_event_server(host_port, map))
 {}
 
 PerTransactionEventServerProxy::PerTransactionEventServerProxy(
