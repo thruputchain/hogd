@@ -109,6 +109,18 @@ impl WasmtimeGlobalContext {
             .relaxed_simd_deterministic(true)
             .wasm_multi_memory(false)
             .epoch_interruption(false)
+            // Wasmtime 42.0.0 sync stack notes:
+            // - max_wasm_stack is a per-Store wasm limit, not a separate native
+            //   stack allocation (wasmtime-42.0.0/src/runtime/func.rs:1463-1527).
+            // - VMStoreContext::stack_limit defaults to usize::MAX when no wasm
+            //   activation is live (wasmtime-42.0.0/src/runtime/vm/vmcontext.rs:1258-1264).
+            // - same-Store wasm -> host -> wasm recursion reuses the existing
+            //   limit, but fresh Stores recompute from the current SP
+            //   (wasmtime-42.0.0/src/runtime/func.rs:1469-1482,
+            //    wasmtime-42.0.0/src/runtime/func.rs:1518-1527).
+            // This means host-only stack growth is still governed by the native
+            // thread stack; this knob matters for wasm frames and same-Store
+            // reentry.
             .max_wasm_stack(16 * 1024)
             // Configs set as per wasmtime documentation to eliminate vmm in steady state
             // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html

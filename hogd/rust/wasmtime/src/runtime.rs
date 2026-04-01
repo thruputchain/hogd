@@ -58,6 +58,15 @@ impl WasmtimeRuntime {
                 Ok(None) => return Ok(None),
                 Err(code) => return Err(code),
             };
+        // Each WasmtimeRuntime gets a fresh Store. As of Wasmtime 42.0.0 this
+        // means cross-contract nested invokes recompute stack_limit from the
+        // current SP instead of inheriting a caller limit from another Store.
+        // Same-Store recursive reentry is the case that reuses an existing
+        // limit in sync mode.
+        // References:
+        // - wasmtime-42.0.0/src/runtime/func.rs:1469-1482
+        // - wasmtime-42.0.0/src/runtime/func.rs:1518-1527
+        // - wasmtime-42.0.0/src/runtime/vm/vmcontext.rs:1258-1264
         let mut store = Store::new(context.engine(), userctx);
         let instance = match instance_pre.instantiate(&mut store) {
             Ok(instance) => instance,
