@@ -34,6 +34,15 @@ add_library(runtime_objects OBJECT
   transaction_stats.cc
 )
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Arbitrary early-warning threshold for Release host-frame growth.
+  # 1536 is not a safety boundary; it is meant to catch runtime/syscall frames
+  # before they get out of hand. We started lower, but 1024 produced repeated
+  # libc++ std::format noise under clang/LLVM 21.
+  target_compile_options(runtime_objects PRIVATE
+    $<$<CONFIG:Release>:-Wframe-larger-than=1536>)
+endif()
+
 target_link_libraries(
   runtime_objects
   hogd_interface

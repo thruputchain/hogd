@@ -3,6 +3,13 @@ add_library(wasm_runtime_objects OBJECT
   wasmtime_runtime.cc
 )
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Match the runtime_objects warning threshold. This is an arbitrary
+  # Release-only tripwire, not a hard correctness limit.
+  target_compile_options(wasm_runtime_objects PRIVATE
+    $<$<CONFIG:Release>:-Wframe-larger-than=1536>)
+endif()
+
 target_link_libraries(
   wasm_runtime_objects
   hogd_interface
