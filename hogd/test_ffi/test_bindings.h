@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 11
-#define TEST_FFI_VERSION_PATCH 6
+#define TEST_FFI_VERSION_MINOR 12
+#define TEST_FFI_VERSION_PATCH 0
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,

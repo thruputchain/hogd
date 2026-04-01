@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdexcept>
+
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
@@ -7,17 +9,18 @@
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/async.h"
+#include "x23/cpumap.h"
 #include "x23/format.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
-#include <stdexcept>
 
 namespace hogd {
 
 class EventServerProxy {
 public:
-  EventServerProxy(x23::HostPort const &host_port);
+  EventServerProxy(x23::HostPort const &host_port,
+                   x23::CpuMap const &map = *x23::llc_map);
 
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
