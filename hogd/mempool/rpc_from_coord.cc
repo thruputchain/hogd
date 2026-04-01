@@ -986,10 +986,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       // to wait for the mempool to catch up before verifying this block.
       co_await decrement_num_validations_in_progress();
       // If we want to validate a block at height [x], we need to wait for the
-      // block at height [x - 1] to commit. We can reuse the
-      // [wait_for_auth_data()] helper to wait until the block at height [x - 1]
-      // is committed.
-      co_await wait_for_auth_data(nomination.block_height - 1);
+      // block at height [x - 1] to commit.
+      co_await wait_for_block_commit(nomination.block_height - 1);
       // Rather than break out of the loop here, we instead continue to the next
       // iteration of the loop. This prevents a race where a different block at
       // height [x] is committed before we are able to wake up, increment the

@@ -251,6 +251,16 @@ public:
   x23::Async<void> auth_data_changed(BlockHeight height,
                                      KeyChangeBatch key_changes);
 
+  x23::Async<void> wait_for_block_commit(BlockHeight expected_height)
+  {
+    int64_t current_height;
+    while ((current_height = auth_data_height_.load()) <
+           static_cast<int64_t>(expected_height)) {
+      co_await auth_data_height_.wait(current_height);
+    }
+    co_return;
+  }
+
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
