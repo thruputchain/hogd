@@ -990,7 +990,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       // [wait_for_auth_data()] helper to wait until the block at height [x - 1]
       // is committed.
       co_await wait_for_auth_data(nomination.block_height - 1);
-      // Rather than break out the loop here, we instead continue to the next
+      // Rather than break out of the loop here, we instead continue to the next
       // iteration of the loop. This prevents a race where a different block at
       // height [x] is committed before we are able to wake up, increment the
       // [num_validations_in_progress_] futex, and exit the loop. If that race
