@@ -1,5 +1,4 @@
 #include <chrono>
-#include <future>
 #include <gtest/gtest.h>
 #include <set>
 #include <thread>
