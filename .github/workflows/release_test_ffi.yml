@@ -30,7 +30,7 @@ jobs:
             echo "Cleaning up .gitconfig"
             rm -f /home/hogci/.gitconfig
       - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.1
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: |
             ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
@@ -117,7 +117,7 @@ jobs:
 
     steps:
       - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.1
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: |
             ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
@@ -254,7 +254,7 @@ jobs:
 
     steps:
       - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.1
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: |
             ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
@@ -392,7 +392,7 @@ jobs:
   create-release:
     if: ${{ !inputs.dry_run }}
     needs: [build-linux-x86_64, build-linux-arm64, build-macos-arm64]
-    runs-on: self-hosted
+    runs-on: namespace-profile-hogd-linux
     permissions:
       contents: write
       actions: read
