@@ -278,7 +278,7 @@ public:
     return num_validations_in_progress_.load() == -1;
   }
 
-  DbHash nominated_block_db_hash_for_testing()
+  DbHash nominated_block_db_hash_for_testing() const
   {
     return nominated_block_cache_.db_tip.db_hash;
   }

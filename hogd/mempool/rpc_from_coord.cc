@@ -975,7 +975,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
-    // TODO(jhumphri): Replace with [SchedulerValidationTooLateToValidate].
+    // TODO(jhumphri): Replace with [SchedulerValidationTooLateToValidate]. Also
+    // need to have the RPC handler pause for blocks from the future until the
+    // mempool has caught up.
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }

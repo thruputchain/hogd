@@ -701,15 +701,14 @@ TEST(Mempool, ValidateWaitsForCommitOfPreviousHeight)
     EXPECT_TRUE(
         parallel_batch_to_t(next_nomination.transactions_hash, tx_hashes)());
 
-    next_nomination.block_hash =
-        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
-                           .block_height = next_nomination.block_height,
-                           .txset_hash =
-                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
-                           .db_hash = server.mempool_coord_rpc()
-                                          .nominated_block_db_hash_for_testing(),
-                           .events_hash = event_block_hash.root_hash(),
-                           .prev_block_hash = next_nomination.prev_block_hash});
+    next_nomination.block_hash = sha256(BlockHeader{
+        .network_id = MempoolTestInfra::kNetworkId,
+        .block_height = next_nomination.block_height,
+        .txset_hash = MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+        .db_hash =
+            server.mempool_coord_rpc().nominated_block_db_hash_for_testing(),
+        .events_hash = event_block_hash.root_hash(),
+        .prev_block_hash = next_nomination.prev_block_hash});
   }
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
@@ -726,8 +725,8 @@ TEST(Mempool, ValidateWaitsForCommitOfPreviousHeight)
   }
 
   auto validate_future = std::async(std::launch::async, [&]() {
-    return server.mempool_coord_rpc().schedulercoord_validate({},
-                                                              next_nomination)();
+    return server.mempool_coord_rpc().schedulercoord_validate(
+        {}, next_nomination)();
   });
   EXPECT_EQ(validate_future.wait_for(std::chrono::milliseconds(10)),
             std::future_status::timeout);
