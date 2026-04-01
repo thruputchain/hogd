@@ -969,13 +969,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 {
   info("schedulercoord_validate, validating block for height = {}",
        nomination.block_height);
-  if (!(co_await increment_num_validations_in_progress())) {
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  while (!(co_await increment_num_validations_in_progress())) {
+    co_await wait_for_validation_gate_open();
   }
 
   if (last_committed_block_.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
+    // TODO(jhumphri): Replace with [SchedulerValidationTooLateToValidate].
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1204,6 +1204,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await close_validation_gate();
   x23::Defer reopen_validation_gate([this] { open_validation_gate(); });
   record_stage(stage_wait_validations);
+
+  while (pause_commit_after_validation_gate_close_.load()) {
+    co_await pause_commit_after_validation_gate_close_.wait(true);
+  }
   record_stage(stage_precheck_validations);
 
   x23::CoroGuard nominate_cg;

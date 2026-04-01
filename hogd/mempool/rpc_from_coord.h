@@ -273,6 +273,27 @@ public:
     co_return;
   }
 
+  bool validation_gate_closed_for_testing()
+  {
+    return num_validations_in_progress_.load() == -1;
+  }
+
+  DbHash nominated_block_db_hash_for_testing()
+  {
+    return nominated_block_cache_.db_tip.db_hash;
+  }
+
+  void pause_commit_after_validation_gate_close_for_testing()
+  {
+    pause_commit_after_validation_gate_close_.store(true);
+  }
+
+  void resume_commit_after_validation_gate_close_for_testing()
+  {
+    pause_commit_after_validation_gate_close_.store(false);
+    pause_commit_after_validation_gate_close_.broadcast(&default_threadpool());
+  }
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -404,6 +425,18 @@ private:
     co_return admitted;
   }
 
+  x23::Async<void> wait_for_validation_gate_open()
+  {
+    while (true) {
+      int64_t current_validations = num_validations_in_progress_.load();
+      CHECK_GE(current_validations, -1L);
+      if (current_validations != -1) {
+        co_return;
+      }
+      co_await num_validations_in_progress_.wait(current_validations);
+    }
+  }
+
   x23::Async<void> decrement_num_validations_in_progress()
   {
     num_validations_in_progress_.rmw([](int64_t &count) {
@@ -467,6 +500,7 @@ private:
   // validations, 0 means validation is open, and -1 means commit has closed
   // validation admission.
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
+  x23::CoroFutex<bool> pause_commit_after_validation_gate_close_{false};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
