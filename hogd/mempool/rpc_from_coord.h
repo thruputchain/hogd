@@ -251,6 +251,20 @@ public:
   x23::Async<void> auth_data_changed(BlockHeight height,
                                      KeyChangeBatch key_changes);
 
+  x23::Async<void> wait_for_block_commit(BlockHeight expected_height)
+  {
+    int64_t current_height;
+    // [last_committed_block_] is not an [x23::CoroFutex], so we cannot [wait()]
+    // on it until a certain height is reached. However, [auth_data_height_] is
+    // a safe substitute for this, plus [schedulercoord_validate()], which calls
+    // this function, needs to wait for the latest auth data to arrive anyway.
+    while ((current_height = auth_data_height_.load()) <
+           static_cast<int64_t>(expected_height)) {
+      co_await auth_data_height_.wait(current_height);
+    }
+    co_return;
+  }
+
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
@@ -402,6 +416,18 @@ private:
       admitted = true;
     });
     co_return admitted;
+  }
+
+  x23::Async<void> wait_for_validation_gate_open()
+  {
+    while (true) {
+      int64_t current_validations = num_validations_in_progress_.load();
+      CHECK_GE(current_validations, -1L);
+      if (current_validations != -1) {
+        co_return;
+      }
+      co_await num_validations_in_progress_.wait(current_validations);
+    }
   }
 
   x23::Async<void> decrement_num_validations_in_progress()

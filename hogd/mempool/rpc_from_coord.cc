@@ -969,16 +969,41 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 {
   info("schedulercoord_validate, validating block for height = {}",
        nomination.block_height);
-  if (!(co_await increment_num_validations_in_progress())) {
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
 
-  if (last_committed_block_.height + 1 != nomination.block_height) {
-    co_await decrement_num_validations_in_progress();
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  while (true) {
+    while (!(co_await increment_num_validations_in_progress())) {
+      co_await wait_for_validation_gate_open();
+    }
+
+    if (nomination.block_height < last_committed_block_.height + 1) {
+      // This block is too old to validate.
+      co_await decrement_num_validations_in_progress();
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
+    }
+    else if (nomination.block_height > last_committed_block_.height + 1) {
+      // This block is ahead of the current block in the mempool. Thus, we need
+      // to wait for the mempool to catch up before verifying this block.
+      co_await decrement_num_validations_in_progress();
+      // If we want to validate a block at height [x], we need to wait for the
+      // block at height [x - 1] to commit.
+      co_await wait_for_block_commit(nomination.block_height - 1);
+      // Rather than break out of the loop here, we instead continue to the next
+      // iteration of the loop. This prevents a race where a different block at
+      // height [x] is committed before we are able to wake up, increment the
+      // [num_validations_in_progress_] futex, and exit the loop. If that race
+      // could occur, then we would fail the CHECK below. Instead, we go to the
+      // next iteration, increment the [num_validations_in_progress_] futex, and
+      // then either break out of the loop or we return
+      // [SchedulerValidationTooLateToValidate] if a different block at height x
+      // has already been committed.
+    }
+    else {
+      break;
+    }
   }
+  CHECK_EQ(nomination.block_height, last_committed_block_.height + 1);
+
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
