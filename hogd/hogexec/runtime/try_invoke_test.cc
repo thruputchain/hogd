@@ -30,13 +30,13 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_flag.hh"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -237,8 +237,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
@@ -647,10 +646,10 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                // Interpret calldata bytes as int8_t for set_value and add_value
                auto add_value = static_cast<int8_t>(calldata[0]);
 
-               auto system_res = ctx.handler().set_nnint(
-                   key, std::nullopt, add_value,
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+               auto system_res =
+                   ctx.handler().set_nnint(key, std::nullopt, add_value,
+                                           std::to_underlying(
+                                               StorageDeltaFlags::None));
 
                if (!system_res.has_value()) {
                  ADD_FAILURE() << "set_nnint should have succeeded";
@@ -787,8 +786,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span(calldata)),
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring in method 0";
@@ -947,8 +945,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span(calldata)),
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring in method 0";
@@ -1132,10 +1129,10 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Interpret calldata bytes as int8_t for add_value
                auto add_value = static_cast<int8_t>(calldata[0]);
 
-               auto system_res = ctx.handler().set_nnint(
-                   key, std::nullopt, add_value,
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+               auto system_res =
+                   ctx.handler().set_nnint(key, std::nullopt, add_value,
+                                           std::to_underlying(
+                                               StorageDeltaFlags::None));
 
                if (!system_res.has_value()) {
                  // System-level error during async operation
@@ -1399,10 +1396,10 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                auto set_value = static_cast<int8_t>(calldata[0]);
                auto add_value = static_cast<int8_t>(calldata[1]);
 
-               auto system_res = ctx.handler().set_nnint(
-                   key, set_value, add_value,
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+               auto system_res =
+                   ctx.handler().set_nnint(key, set_value, add_value,
+                                           std::to_underlying(
+                                               StorageDeltaFlags::None));
 
                if (!system_res.has_value()) {
                  // System-level error during async operation

@@ -284,9 +284,9 @@ public:
   }
 
   template<typename ItemType>
-  SyscallStatus<void> set(ItemType const &type,
-                          StorageDeltaFlagSet flags = std::to_underlying(
-                              StorageDeltaFlags::None))
+  SyscallStatus<void>
+  set(ItemType const &type,
+      StorageDeltaFlagSet flags = std::to_underlying(StorageDeltaFlags::None))
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -330,8 +330,7 @@ private:
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
                AddressAuthDataItem>
       delta_args_;
-  StorageDeltaFlagSet flags_ =
-      std::to_underlying(StorageDeltaFlags::None);
+  StorageDeltaFlagSet flags_ = std::to_underlying(StorageDeltaFlags::None);
 
   // There is a niche edge case, in which a contract deletes a queue and then
   // recreates it. In this case we need to know how which entries were

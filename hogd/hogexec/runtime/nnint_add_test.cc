@@ -270,8 +270,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                int128_t set_value = 0;
                auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
                    key, &set_value, 200,
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!r.has_value() ||
                    *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::Deterministic};
@@ -283,8 +282,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                auto key = make_storage_key("test");
                auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
                    key, static_cast<int128_t const *>(nullptr), -100,
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!r.has_value() ||
                    *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::Deterministic};

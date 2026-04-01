@@ -571,8 +571,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           auto tx = self->make_new_per_tx_db_proxy();
           tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                        make_auth_data_delta(auth_data1),
-                       std::to_underlying(
-                           StorageDeltaFlags::None));
+                       std::to_underlying(StorageDeltaFlags::None));
           auto r1 = tx.try_push_current_subtransaction();
           if (!r1.has_value() || !r1.value()) {
             throw std::runtime_error(
@@ -588,8 +587,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
 
           tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                        make_auth_data_delta(auth_data2),
-                       std::to_underlying(
-                           StorageDeltaFlags::None));
+                       std::to_underlying(StorageDeltaFlags::None));
           auto r2 = tx.try_push_current_subtransaction();
           if (!r2.has_value() || !r2.value()) {
             throw std::runtime_error(
@@ -619,8 +617,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           auto tx = self->make_new_per_tx_db_proxy();
           tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                        make_auth_data_delta(auth_data3),
-                       std::to_underlying(
-                           StorageDeltaFlags::None));
+                       std::to_underlying(StorageDeltaFlags::None));
           auto r3 = tx.try_push_current_subtransaction();
           if (!r3.has_value() || !r3.value()) {
             throw std::runtime_error(
@@ -674,8 +671,7 @@ TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                make_auth_data_delta(auth_data),
-               std::to_underlying(
-                   StorageDeltaFlags::ExclusiveLock));
+               std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
@@ -683,8 +679,7 @@ TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
   auth_data.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
   tx.add_delta(make_address_auth_data_addrkey(contract_addr),
                make_auth_data_delta(auth_data),
-               std::to_underlying(
-                   StorageDeltaFlags::ExclusiveLock));
+               std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());

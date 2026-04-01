@@ -86,8 +86,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
 
   auto mod_lambda = [&delta, &lock,
                      &flags](auto &v) -> std::optional<MeteredStorageLock> {
-    if (flags &
-        std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
       if (auto r = v->try_acquire_exclusive_lock(
               delta, lock.lock_type(),
               StorageLockType::kPermanentExclusiveLock)) {

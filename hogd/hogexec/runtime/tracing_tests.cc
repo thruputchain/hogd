@@ -22,11 +22,11 @@
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
@@ -453,8 +453,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span(calldata)),
-                   std::to_underlying(
-                       StorageDeltaFlags::ExclusiveLock));
+                   std::to_underlying(StorageDeltaFlags::ExclusiveLock));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  ADD_FAILURE() << "Failed to set bytestring";

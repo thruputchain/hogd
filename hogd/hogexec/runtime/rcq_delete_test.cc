@@ -24,12 +24,12 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -178,8 +178,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -219,8 +218,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -267,8 +265,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -295,8 +292,7 @@ protected:
           // delete -> insert()
           RuntimeMemoryLength written_len = 0;
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -336,8 +332,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -409,8 +404,7 @@ protected:
 
           // delete
           auto r3 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -452,8 +446,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         17, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -494,8 +487,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -538,8 +530,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
@@ -560,8 +551,7 @@ protected:
           }
 
           auto r4 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (second)";
@@ -592,8 +582,7 @@ protected:
            uint32_t consume_c) -> InvokeStatus<void> {
           // first delete
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
@@ -616,8 +605,7 @@ protected:
 
           // second delete
           auto r3 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (second)";
@@ -693,8 +681,7 @@ protected:
 
           // delete
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -742,8 +729,7 @@ protected:
 
           // delete
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -818,8 +804,7 @@ protected:
 
           // delete
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
@@ -840,8 +825,7 @@ protected:
 
           // delete
           auto r4 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
@@ -861,8 +845,7 @@ protected:
 
           // delete
           auto r6 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete nnint";
@@ -912,8 +895,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         25, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1095,8 +1077,7 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t val_a,
            uint32_t val_b) -> InvokeStatus<void> {
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1136,8 +1117,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         31, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1205,8 +1185,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1248,8 +1227,7 @@ protected:
           }
 
           auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1682,8 +1660,7 @@ protected:
            uint32_t concurrent_val) -> InvokeStatus<void> {
           // delete queue
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1704,8 +1681,7 @@ protected:
 
           // delete bytestring
           auto r3 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
@@ -1736,8 +1712,7 @@ protected:
         45, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           // delete queue
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey,
-              std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";

@@ -17,11 +17,11 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -108,8 +108,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                auto key = make_storage_key("test");
                auto [res, _gas] = syscall_BytestringSet_inner(
                    ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::Deterministic};

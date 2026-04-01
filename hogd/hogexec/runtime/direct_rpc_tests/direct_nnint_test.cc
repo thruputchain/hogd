@@ -263,8 +263,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
   {
     auto tx_init = make_new_per_tx_db_proxy();
     tx_init.add_delta(key, make_nnint_set_add_delta(0, 500),
-                      std::to_underlying(
-                          StorageDeltaFlags::None));
+                      std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -350,8 +349,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
   auto tx_ref = make_new_per_tx_db_proxy();
   {
     tx_ref.add_delta(ref_a, make_nnint_set_add_delta(0, 1),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_ref.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -560,8 +558,7 @@ TEST_P(DirectNNIntTest, NNIntCreateCost)
   // reference address
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(key_ref, make_nnint_set_add_delta(500, 100),
-                   std::to_underlying(
-                       StorageDeltaFlags::None));
+                   std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value() && r_ref.value());
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
@@ -669,8 +666,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   // Store INT128_MIN as NNInt
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(key, make_nnint_set_add_delta(kIntMin, 0),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value() && r_init.value());
   ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
@@ -715,8 +711,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
   {
     auto tx_init = make_new_per_tx_db_proxy();
     tx_init.add_delta(key, make_nnint_set_add_delta(0, 100),
-                      std::to_underlying(
-                          StorageDeltaFlags::None));
+                      std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -730,8 +725,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
   // On HogDB, this succeeds but leaks the bounds lock.
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_nnint_add_delta(-50),
-                std::to_underlying(
-                    StorageDeltaFlags::ExclusiveLock));
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value() && r1.value());
 
@@ -790,8 +784,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
 
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_nnint_add_delta(42),
-               std::to_underlying(
-                   StorageDeltaFlags::ExclusiveLock));
+               std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value() && r1.value());
   ASSERT_TRUE(tx.commit_transaction({}).has_value());
@@ -964,8 +957,7 @@ TEST_P(DirectNNIntTest, BugHuntBalanceNNIntAddExclusiveLockRejected)
 
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(balance_key, make_nnint_add_delta(-100),
-               std::to_underlying(
-                   StorageDeltaFlags::ExclusiveLock));
+               std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   EXPECT_FALSE(r.value()) << "Exclusive lock on balance key should be rejected";

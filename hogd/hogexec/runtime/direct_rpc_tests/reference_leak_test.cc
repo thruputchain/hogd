@@ -135,8 +135,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   {
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(
-                                  StorageDeltaFlags::None));
+                              std::to_underlying(StorageDeltaFlags::None));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
     ASSERT_FALSE(r_intermediate.value())
@@ -288,8 +287,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   {
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(
-                                  StorageDeltaFlags::None));
+                              std::to_underlying(StorageDeltaFlags::None));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
     ASSERT_FALSE(r_intermediate.value())

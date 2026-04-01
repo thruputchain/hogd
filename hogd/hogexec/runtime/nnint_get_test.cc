@@ -134,8 +134,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
 
              // Then delete it
              auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-                 key,
-                 std::to_underlying(StorageDeltaFlags::None));
+                 key, std::to_underlying(StorageDeltaFlags::None));
              if (!r2.has_value() ||
                  *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -571,8 +570,7 @@ TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
 
              // Then delete it
              auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-                 key,
-                 std::to_underlying(StorageDeltaFlags::None));
+                 key, std::to_underlying(StorageDeltaFlags::None));
              if (!r2.has_value() ||
                  *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::Deterministic};

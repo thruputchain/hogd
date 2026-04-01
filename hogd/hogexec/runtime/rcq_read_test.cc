@@ -232,15 +232,13 @@ TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
   // Same block: one tx consumes all prior entries, one tx inserts.
   auto tx_consume = make_new_per_tx_db_proxy();
   tx_consume.add_delta(key, make_rcq_consume_delta(2, 0),
-                       std::to_underlying(
-                           StorageDeltaFlags::None));
+                       std::to_underlying(StorageDeltaFlags::None));
   auto r = tx_consume.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx_insert = make_new_per_tx_db_proxy();
   tx_insert.add_delta(key, make_rcq_insert_delta({make_rcq_entry(9)}),
-                      std::to_underlying(
-                          StorageDeltaFlags::None));
+                      std::to_underlying(StorageDeltaFlags::None));
   r = tx_insert.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 

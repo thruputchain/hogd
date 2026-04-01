@@ -91,16 +91,13 @@ TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
   {
     tx_ref.add_delta(make_addrkey(ref_addr, "some_data"),
                      make_bytestring_delta("hello world, this is some data"),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     tx_ref.add_delta(make_free_native_token_balance_addrkey(ref_addr),
                      make_nnint_add_delta(-kTransferAmount),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     tx_ref.add_delta(make_free_native_token_balance_addrkey(ref_recipient),
                      make_nnint_add_delta(kTransferAmount),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_ref.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -182,20 +179,16 @@ TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
   {
     tx_ref.add_delta(make_addrkey(ref_A, "key1"),
                      make_bytestring_delta("data1"),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     tx_ref.add_delta(make_addrkey(ref_A, "key2"),
                      make_bytestring_delta("data2"),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     tx_ref.add_delta(make_free_native_token_balance_addrkey(ref_A),
                      make_nnint_add_delta(-kTransfer),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     tx_ref.add_delta(make_free_native_token_balance_addrkey(ref_B),
                      make_nnint_add_delta(kTransfer),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_ref.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -309,8 +302,7 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
   {
     tx_ref.add_delta(make_addrkey(ref_A, "key1"),
                      make_bytestring_delta("data1"),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_ref.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -318,12 +310,10 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
   {
     tx_ref.add_delta(make_free_native_token_balance_addrkey(ref_A),
                      make_nnint_add_delta(-kTransfer3),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     tx_ref.add_delta(make_free_native_token_balance_addrkey(ref_B),
                      make_nnint_add_delta(kTransfer3),
-                     std::to_underlying(
-                         StorageDeltaFlags::None));
+                     std::to_underlying(StorageDeltaFlags::None));
     auto r = tx_ref.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -368,8 +358,7 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
     auto tx1 = make_new_per_tx_db_proxy();
     {
       tx1.add_delta(make_addrkey(addr_A, "key"), make_bytestring_delta("data"),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
       auto r = tx1.try_push_current_subtransaction();
       ASSERT_TRUE(r.has_value());
       ASSERT_TRUE(r.value());
@@ -378,12 +367,10 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
     {
       tx1.add_delta(make_free_native_token_balance_addrkey(addr_A),
                     make_nnint_add_delta(-kTransfer1),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
       tx1.add_delta(make_free_native_token_balance_addrkey(addr_B),
                     make_nnint_add_delta(kTransfer1),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
       auto r = tx1.try_push_current_subtransaction();
       ASSERT_TRUE(r.has_value());
       ASSERT_TRUE(r.value());
@@ -397,8 +384,7 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
     {
       tx2.add_delta(make_addrkey(addr_C, "key"),
                     make_bytestring_delta("different_data"),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
       auto r = tx2.try_push_current_subtransaction();
       ASSERT_TRUE(r.has_value());
       ASSERT_TRUE(r.value());
@@ -407,12 +393,10 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
     {
       tx2.add_delta(make_free_native_token_balance_addrkey(addr_C),
                     make_nnint_add_delta(-kTransfer2),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
       tx2.add_delta(make_free_native_token_balance_addrkey(addr_D),
                     make_nnint_add_delta(kTransfer2),
-                    std::to_underlying(
-                        StorageDeltaFlags::None));
+                    std::to_underlying(StorageDeltaFlags::None));
       auto r = tx2.try_push_current_subtransaction();
       ASSERT_TRUE(r.has_value());
       ASSERT_TRUE(r.value());

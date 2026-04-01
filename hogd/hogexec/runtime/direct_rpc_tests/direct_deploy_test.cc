@@ -54,8 +54,7 @@ TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
     StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
     delta.deployed_contract_hash() = deployment_hash;
     tx1.add_delta(addrkey, std::move(delta),
-                  std::to_underlying(
-                      StorageDeltaFlags::ExclusiveLock));
+                  std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   }
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
