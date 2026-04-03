@@ -136,6 +136,8 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   }
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
+  std::unordered_set<ContractAddress> already_found;
+  already_found.reserve(accounts.size());
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
@@ -145,14 +147,19 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
       auto [value_ptr, lock] = accounts_.find(account);
       contains = (value_ptr != nullptr);
     }
-    if (!contains) {
+    if (contains) {
+      already_found.insert(account);
+    }
+    else {
       accounts_vec.push_back(account);
     }
   }
   if (accounts_vec.empty()) {
-    co_return ReadAverageHogAgesResult{};
+    co_return ReadAverageHogAgesResult{.found = already_found, .missing = {}};
   }
-  co_return co_await read_average_hog_ages(accounts_vec);
+  ReadAverageHogAgesResult ret = co_await read_average_hog_ages(accounts_vec);
+  ret.found.merge(already_found);
+  co_return ret;
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
@@ -166,6 +173,8 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
   // TODO(jhumphri): This is the same as the code above.
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
+  std::unordered_set<ContractAddress> already_found;
+  already_found.reserve(accounts.size());
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
@@ -175,14 +184,19 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
       auto [value_ptr, lock] = accounts_.find(account);
       contains = (value_ptr != nullptr);
     }
-    if (!contains) {
+    if (contains) {
+      already_found.insert(account);
+    }
+    else {
       accounts_vec.push_back(account);
     }
   }
   if (accounts_vec.empty()) {
-    co_return ReadAverageHogAgesResult{};
+    co_return ReadAverageHogAgesResult{.found = already_found, .missing = {}};
   }
-  co_return co_await read_average_hog_ages(accounts_vec);
+  ReadAverageHogAgesResult ret = co_await read_average_hog_ages(accounts_vec);
+  ret.found.merge(already_found);
+  co_return ret;
 }
 
 Scheduler::AccountKey

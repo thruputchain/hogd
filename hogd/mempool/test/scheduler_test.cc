@@ -57,6 +57,32 @@ TEST(Scheduler, AddVettedTx)
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
+TEST(Scheduler, AddVettedTxFromUnknownAccount)
+{
+  const ContractAddress kUnknownAccount = make_account_address(99);
+
+  fib_client_t fib_client(kUnknownAccount);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+
+  scheduler->add_txs({txs[0]})();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+}
+
 TEST(Scheduler, AddVettedTxDuplicate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
