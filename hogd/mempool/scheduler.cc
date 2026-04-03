@@ -100,23 +100,34 @@ Scheduler::get_account_state(const ContractAddress &address)
   return {value_ptr, std::move(lock)};
 }
 
-x23::Async<void>
+x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 {
-  auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
-  if (res.result() != DbSchedResult::DbSchedResultOK) {
-    info("read_average_hog_ages did not return OK");
-  }
-  CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  for (size_t i = 0; i < res.hog_age_batch().size(); i++) {
-    const HogAge &age = res.hog_age_batch()[i];
+  ReadAverageHogAgesResult ret;
+  ret.found.reserve(accounts.size());
+
+  HogAgeResults results =
+      co_await db_sched_client_->dbsched_get_hog_ages(accounts);
+  CHECK_EQ(results.size(), accounts.size());
+  for (size_t i = 0; i < results.size(); i++) {
+    const HogAgeResult &res = results[i];
+    if (res.result() != DbSchedResult::DbSchedResultOK) {
+      info("read_average_hog_ages did not return OK for address {}",
+           accounts[i]);
+      ret.missing.insert(accounts[i]);
+      continue;
+    }
+
+    const HogAge &age = res.hog_age();
     CHECK_EQ(age.address, accounts[i]);
+    ret.found.insert(age.address);
     auto [account_state, lock] = accounts_[age.address];
     account_state.hog_age = age;
   }
+  co_return ret;
 }
 
-x23::Async<std::unordered_set<ContractAddress>>
+x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -138,14 +149,13 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
       accounts_vec.push_back(account);
     }
   }
-  if (!accounts_vec.empty()) {
-    co_await read_average_hog_ages(accounts_vec);
+  if (accounts_vec.empty()) {
+    co_return ReadAverageHogAgesResult{};
   }
-  cg.reset();
-  co_return accounts;
+  co_return co_await read_average_hog_ages(accounts_vec);
 }
 
-x23::Async<std::unordered_set<ContractAddress>>
+x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -169,11 +179,10 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
       accounts_vec.push_back(account);
     }
   }
-  if (!accounts_vec.empty()) {
-    co_await read_average_hog_ages(accounts_vec);
+  if (accounts_vec.empty()) {
+    co_return ReadAverageHogAgesResult{};
   }
-  cg.reset();
-  co_return accounts;
+  co_return co_await read_average_hog_ages(accounts_vec);
 }
 
 Scheduler::AccountKey
@@ -199,8 +208,8 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
   return account_state->txs.insert({key, tx_value}).second;
 }
 
-// TODO(jhumphri): I think we are allocating a new decorated signature vec below
-// when we do [{.tx = tx}]. Can we make this an array rather than a vec?
+// TODO(jhumphri): I think we are allocating a new decorated signature vec
+// below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
@@ -225,12 +234,11 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
 x23::Async<void>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
-  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot hide
-  // its overhead by removing the [co_await] below, doing other work, and then
-  // calling [co_await] on the handle. We instead need to execute
+  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
+  // hide its overhead by removing the [co_await] below, doing other work, and
+  // then calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  std::unordered_set<ContractAddress> accounts =
-      co_await read_average_hog_ages(txs);
+  const auto &[found, missing] = co_await read_average_hog_ages(txs);
 
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), available_parallelism());
@@ -239,30 +247,36 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   for (const ChunkRange &chunk : chunks) {
     handles.push_back([](const ChunkRange *chunk,
                          const x23::XdrVec<hogd::SignedTransaction> &txs,
+                         const std::unordered_set<ContractAddress> &missing,
                          Scheduler &scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
 
       size_t num_added = 0;
       for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
+        if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
+          // The account for this tx does not exist in our copy of hogdb, so we
+          // silently drop the tx.
+          continue;
+        }
         if (scheduler.add_txs_helper(txs[tx_idx])) {
           num_added++;
         }
       }
       scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
       co_return;
-    }(&chunk, txs, *this));
+    }(&chunk, txs, missing, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
 
   std::vector<AccountKey> account_keys;
-  account_keys.reserve(accounts.size());
+  account_keys.reserve(found.size());
   // [get_account_key()] accesses [ready_accounts_], so we need to protect it
   // with the lock.
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-  for (const ContractAddress &account : accounts) {
+  for (const ContractAddress &account : found) {
     ready_accounts_.insert(get_account_key(account));
   }
 }
@@ -310,8 +324,8 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
     //
     // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
     //    schedule a tx that requires [gas_limit] hogs, but cycling will add
-    //    enough hogs to the group to schedule it. This is the third operand of
-    //    the boolean OR statement.
+    //    enough hogs to the group to schedule it. This is the third operand
+    //    of the boolean OR statement.
     if (already_scheduled_average_older || combined_averages_older ||
         gas_limit > to_schedule) {
       cycle_groups(*hog_age);
@@ -404,8 +418,8 @@ Scheduler::process_transfers_helper(const Delta &delta,
         to_xdr(received_hogs + num_received);
     // See comment above for [compute_average_age()].
     //
-    // Note that [compute_average_age()] will never divide by 0 because we check
-    // that [num_received] is not 0.
+    // Note that [compute_average_age()] will never divide by 0 because we
+    // check that [num_received] is not 0.
     new_averages.average_ages[kHogAgeGroupReceived] =
         compute_average_age(received_hogs, received_age, num_received,
                             block_height);
@@ -443,20 +457,23 @@ Scheduler::process_transfers_helper(const Delta &delta,
     new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
   }
 
-  // I really want [averages] to be a const so that I do not accidentally mutate
-  // it above. Thus, I keep it const and I do a const cast below since I am sure
-  // I want to write it here.
+  // I really want [averages] to be a const so that I do not accidentally
+  // mutate it above. Thus, I keep it const and I do a const cast below since
+  // I am sure I want to write it here.
   *const_cast<HogAge *>(averages) = new_averages;
 }
 
 x23::Async<void>
 Scheduler::process_transfers(const HogsTransferred &transfers)
 {
-  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot hide
-  // its overhead by removing the [co_await] below, doing other work, and then
-  // calling [co_await] on the handle. We instead need to execute
+  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
+  // hide its overhead by removing the [co_await] below, doing other work, and
+  // then calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  co_await read_average_hog_ages(transfers);
+  const auto &[_, missing] = co_await read_average_hog_ages(transfers);
+  if (!transfers.deltas.empty()) {
+    CHECK(missing.empty());
+  }
 
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
@@ -489,8 +506,8 @@ Scheduler::account_is_ready(const ContractAddress &account,
   const TxKey lower_bound{.expiry_block_height = current_block(),
                           .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
-  // We just check if there is a tx to run for this account. We do not check if
-  // the account has enough gas units to run the tx.
+  // We just check if there is a tx to run for this account. We do not check
+  // if the account has enough gas units to run the tx.
   bool ret = (lower_it != txs.end());
   if (remove_expired_txs) {
     for (auto it = txs.begin(); it != lower_it; it++) {
@@ -719,12 +736,12 @@ Scheduler::remove_from_scheduler(
       for (const SignedTransactionHash &tx_hash : hash_chunk) {
         // Even if the *nominated* block is being committed and thus the txs
         // have been removed from the runqueue, it is possible that the
-        // coordinator called [submit_unvetted()/submit_vetted()] and passed the
-        // same txs to the mempool again, resulting in the txs being added back
-        // onto the runqueue. Thus, we need to check if the txs are on the
-        // runqueue and remove them. We cannot skip this step and just remove
-        // txs from [txs_], even if the *nominated* block is being committed
-        // rather than a *validated* block.
+        // coordinator called [submit_unvetted()/submit_vetted()] and passed
+        // the same txs to the mempool again, resulting in the txs being added
+        // back onto the runqueue. Thus, we need to check if the txs are on
+        // the runqueue and remove them. We cannot skip this step and just
+        // remove txs from [txs_], even if the *nominated* block is being
+        // committed rather than a *validated* block.
         auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
         CHECK_PTR(tx_value_ptr);
 

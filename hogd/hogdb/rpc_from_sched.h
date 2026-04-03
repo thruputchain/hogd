@@ -41,7 +41,7 @@ public:
   static x23::Async<void> dbsched_null() { co_return; }
 
   // RPC methods
-  x23::Async<HogAgeResult>
+  x23::Async<HogAgeResults>
   dbsched_get_hog_ages(const ContractAddressBatch &addresses);
 
   x23::Async<DbSchedResult> dbsched_write_hog_ages(const HogAgeBatch &ages);

@@ -25,10 +25,11 @@ public:
   // RPC methods
   static x23::Async<void> dbsched_null() { co_return; }
 
-  static x23::Async<HogAgeResult>
+  static x23::Async<HogAgeResults>
   dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   {
-    co_return HogAgeResult(DbSchedResult::DbSchedResultError);
+    HogAgeResult result(DbSchedResult::DbSchedResultError);
+    co_return x23::Vec<HogAgeResult>(addresses.size(), result);
   }
 
   static x23::Async<DbSchedResult>
