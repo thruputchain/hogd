@@ -115,11 +115,15 @@ public:
 
   void write_all_average_hog_ages_to_db();
 
-  x23::Async<void>
+  struct ReadAverageHogAgesResult {
+    std::unordered_set<ContractAddress> found;
+    std::unordered_set<ContractAddress> missing;
+  };
+  x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
-  x23::Async<std::unordered_set<ContractAddress>>
+  x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
-  x23::Async<std::unordered_set<ContractAddress>>
+  x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const HogsTransferred &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
