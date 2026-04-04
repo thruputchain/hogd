@@ -60,8 +60,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
             SyscallRcqPeekTest::kStorageKey,
             std::as_bytes(std::span(&payload, 1)));
         if (!insert_status.has_value() ||
-            insert_status.value() !=
-                SyscallErrorCode::kSyscallErrorCodeNone) {
+            insert_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 

@@ -80,10 +80,9 @@ syscall_RetrocausalQueueConsume_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_RetrocausalQueuePeekLen_inner(
-    SystemCallHandler &syscall_handler,
-    const StorageKeyContractData &input_key,
-    RuntimeMemoryLength &output_len) noexcept
+syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
+                                      const StorageKeyContractData &input_key,
+                                      RuntimeMemoryLength &output_len) noexcept
 {
 
   auto status =
