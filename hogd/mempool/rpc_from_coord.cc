@@ -804,6 +804,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       db_tip.id != last_committed_block_.id ||
       db_tip.block_hash != last_committed_block_.block_hash) {
     last_ = std::chrono::steady_clock::now();
+    info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -812,6 +813,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
     last_ = std::chrono::steady_clock::now();
+    info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -890,6 +892,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
     last_ = std::chrono::steady_clock::now();
+    info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -937,6 +940,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
        nominated_block_cache_.result_tx_hashes.size(),
        nominated_block_cache_.result_tx_nominations.size());
   last_ = std::chrono::steady_clock::now();
+  info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.nomination_result;
 }
 
@@ -978,6 +982,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     if (nomination.block_height < last_committed_block_.height + 1) {
       // This block is too old to validate.
       co_await decrement_num_validations_in_progress();
+      info("schedulercoord_validate ret");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
     }
@@ -1006,6 +1011,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
 
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1015,12 +1021,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
   CHECK(co_await parallel_batch_to_t(
       nomination.transactions_nondeterministic_data, tx_nominations));
-  if (tx_nominations.empty()) {
-    // Empty nomination.
-    co_await decrement_num_validations_in_progress();
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
 
   // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
   // correctly when we use the helper functions above to send txs to the
@@ -1038,6 +1038,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -1064,6 +1065,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     }
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -1093,6 +1095,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       SchedulerValidationResult ret(
           SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       ret.missing_tx_hashes() = missing_tx_hashes;
+      info("schedulercoord_validate ret");
       co_return ret;
     }
     x23::XdrVec<NondeterministicProposalData> tx_nominations;
@@ -1117,6 +1120,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1150,6 +1154,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -1170,6 +1175,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     validated_block_cache_[cache.block_id] = std::move(cache);
   }
   co_await decrement_num_validations_in_progress();
+  info("schedulercoord_validate ret");
   co_return result;
 }
 
@@ -1245,6 +1251,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     last_ = std::chrono::steady_clock::now();
+    info("schedulercoord_commit_block ret");
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
   record_stage(stage_precheck_block_presence);
@@ -1354,6 +1361,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   emit_commit_stats("ok", handles.size(), return_to_runqueue.size(),
                     remove_from_scheduler_size);
   last_ = std::chrono::steady_clock::now();
+  info("schedulercoord_commit_block ret");
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
