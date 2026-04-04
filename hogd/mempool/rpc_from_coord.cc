@@ -1107,7 +1107,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
                      .nondeterministic_proposal_data = tx_nominations[i]});
     }
   }
-  CHECK(!txs.empty());
 
   // Now execute the txs on the executor.
 
