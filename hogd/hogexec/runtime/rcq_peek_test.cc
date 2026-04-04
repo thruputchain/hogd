@@ -1,0 +1,117 @@
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <unordered_map>
+#include <utility>
+
+#include "exec_result.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/native_syscall_context.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
+#include "rpc_types.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
+#include "transaction.hh"
+#include "types.hh"
+
+namespace hogd {
+
+// Exercises SyscallNo::kRetrocausalQueuePeekLen: after inserting a queue entry,
+// peek-len must report the same byte length as that entry (without consuming).
+class SyscallRcqPeekTest : public ::testing::Test,
+                           public NativeContractTestFramework {
+public:
+  SyscallRcqPeekTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
+
+  static constexpr StorageKeyContractData kStorageKey =
+      NativeContractTestFramework::make_storage_key("rcq_peek");
+};
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Serialized uint32_t payload is 4 bytes; calldata carries the expected len.
+  uint32_t expected_len = sizeof(uint32_t);
+
+  NativeContractBuilder builder;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [](NativeSyscallContext &ctx,
+         uint32_t expected_len) -> InvokeStatus<void> {
+        uint32_t payload = 0xC0FFEEU;
+        auto insert_status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            SyscallRcqPeekTest::kStorageKey,
+            std::as_bytes(std::span(&payload, 1)));
+        if (!insert_status.has_value() ||
+            insert_status.value() !=
+                SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        RuntimeMemoryLength len = 0;
+        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+            SyscallRcqPeekTest::kStorageKey, len);
+        if (!peek_status.has_value() ||
+            peek_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        if (len != expected_len) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        return {};
+      });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          expected_len);
+  ASSERT_TRUE(calldata.has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata.value()}}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
+
+} // namespace hogd
