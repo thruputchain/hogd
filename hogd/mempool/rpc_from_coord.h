@@ -398,9 +398,15 @@ private:
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
+  x23::Async<bool> validate_batch_chunk(
+      BlockID block_id, x23::span<const ProposedTransaction> txs,
+      size_t executor_idx);
+
+  x23::Async<bool> multiplex_large_validation_chunk_across_executors(
+      BlockID block_id, x23::span<const ProposedTransaction> txs);
+
   x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs,
-                                  size_t executor_idx);
+                                  const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);

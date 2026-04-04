@@ -945,17 +945,75 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
 }
 
 x23::Async<bool>
-MempoolCoordinatorRpc::validate_batch(BlockID block_id,
-                                      const x23::Vec<ProposedTransaction> &txs,
-                                      size_t executor_idx)
+MempoolCoordinatorRpc::validate_batch_chunk(
+    BlockID block_id, x23::span<const ProposedTransaction> txs,
+    size_t executor_idx)
 {
+  info("validate_batch, {} txs", txs.size());
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
+  info("validate_batch, {} txs, done with RPC call", txs.size());
   // Validation succeeds only if every entry in the executor response is OK.
   co_return !(std::ranges::any_of(res, [](const ExecResult &r) {
     return r != ExecResult::ExecResultOK;
   }));
+}
+
+x23::Async<bool>
+MempoolCoordinatorRpc::validate_batch(
+    BlockID block_id, const x23::Vec<ProposedTransaction> &txs)
+{
+  // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
+  // from a different coroutine. Each coroutine then further splits the chunk
+  // into smaller RPC-sized chunks and stripes those requests across executors.
+  constexpr size_t kNumBigChunks = 120;
+  const std::vector<ChunkRange> large_chunks =
+      make_chunks(txs.size(), kNumBigChunks);
+
+  x23::Vec<x23::Async<bool>> handles;
+  handles.reserve(large_chunks.size());
+
+  for (size_t i = 0; i < large_chunks.size(); i++) {
+    const ChunkRange &chunk = large_chunks[i];
+    x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
+                                                  txs.begin() + chunk.end);
+    handles.push_back(
+        multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
+  }
+
+  bool validated = true;
+  for (size_t i = 0; i < handles.size(); i++) {
+    validated = (co_await handles[i]) && validated;
+  }
+  co_return validated;
+}
+
+x23::Async<bool>
+MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
+    BlockID block_id, x23::span<const ProposedTransaction> txs)
+{
+  co_await default_coropoll().pool_.bg();
+
+  const std::vector<ChunkRange> chunks =
+      make_chunks_for_max_size(txs.size(), kChunkSize);
+
+  x23::Vec<x23::Async<bool>> handles;
+  handles.reserve(chunks.size());
+
+  for (size_t i = 0; i < chunks.size(); i++) {
+    const ChunkRange &chunk = chunks[i];
+    x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
+                                                  txs.begin() + chunk.end);
+    handles.push_back(validate_batch_chunk(
+        block_id, tx_chunk, /*executor_idx=*/i % exec_clients_.size()));
+  }
+
+  bool validated = true;
+  for (size_t i = 0; i < handles.size(); i++) {
+    validated = (co_await handles[i]) && validated;
+  }
+  co_return validated;
 }
 
 x23::Async<ExecResult>
@@ -1007,6 +1065,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       break;
     }
   }
+  info("schedulercoord_validate here");
   CHECK_EQ(nomination.block_height, last_committed_block_.height + 1);
 
   if (last_committed_block_.block_hash != nomination.prev_block_hash) {
@@ -1016,12 +1075,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
+  info("schedulercoord_validate here");
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
   CHECK(co_await parallel_batch_to_t(
       nomination.transactions_nondeterministic_data, tx_nominations));
 
+  info("schedulercoord_validate here");
   // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
   // correctly when we use the helper functions above to send txs to the
   // executors.
@@ -1030,8 +1091,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
                                      cache.tx_hashes));
 
+  info("schedulercoord_validate here");
   co_await wait_for_transfer_data(nomination.block_height - 1);
+  info("schedulercoord_validate here");
   co_await wait_for_auth_data(nomination.block_height - 1);
+  info("schedulercoord_validate here");
 
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.block_id, cache.block_id,
@@ -1042,7 +1106,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
+  info("schedulercoord_validate here");
   CHECK_EQ(co_await eventsched_open_block(cache.block_id), RPCError::kRPCNone);
+  info("schedulercoord_validate here");
 
   x23::Vec<x23::Async<ExecResult>> open_validation_block_handles;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -1057,6 +1123,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       open_validation_block_success = false;
     }
   }
+  info("schedulercoord_validate here");
   if (!open_validation_block_success) {
     for (size_t i = 0; i < exec_clients_.size(); i++) {
       if (open_validation_block_ret[i] == ExecResult::ExecResultOK) {
@@ -1070,6 +1137,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
 
+  info("schedulercoord_validate here");
   // [nomination] includes the the tx hashes and the nondeterministic proposal
   // data. We need to use these tx hashes to look up the vetted txs in
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
@@ -1107,12 +1175,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
                      .nondeterministic_proposal_data = tx_nominations[i]});
     }
   }
+  info("schedulercoord_validate here");
 
   // Now execute the txs on the executor.
 
   // Careful--[validate_batch()] is calling co_await in its function body.
-  bool validated =
-      co_await validate_batch(cache.block_id, txs, /*executor_idx=*/0);
+  bool validated = co_await validate_batch(cache.block_id, txs);
+  info("schedulercoord_validate here");
   if (!validated) {
     co_await scheduler_->add_txs(cache.txs);
 
@@ -1123,11 +1192,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+  info("schedulercoord_validate here");
   {
     DbBlockResult result = co_await close_snapshot(cache.block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
     cache.db_tip.db_hash = result.db_hash();
   }
+  info("schedulercoord_validate here");
   SHA256Hash events_hash{};
   {
     EventBlockResult result =
@@ -1136,6 +1207,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     events_hash = result.root_hash();
   }
 
+  info("schedulercoord_validate here");
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
@@ -1157,8 +1229,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+  info("schedulercoord_validate here");
   co_await finish_all_executors(cache.block_id);
 
+  info("schedulercoord_validate here");
   cache.db_tip = DbTip{.height = nomination.block_height,
                        .block_hash = nomination.block_hash,
                        .db_hash = cache.db_tip.db_hash,
@@ -1167,13 +1241,16 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       SchedulerValidationOutcome::SchedulerValidationOK);
   result.block().db_tip = cache.db_tip;
   result.block().signed_transactions = {};
+  info("schedulercoord_validate here");
   co_await t_to_parallel_batch(cache.txs, result.block().signed_transactions);
 
+  info("schedulercoord_validate here");
   {
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[cache.block_id] = std::move(cache);
   }
   co_await decrement_num_validations_in_progress();
+  info("schedulercoord_validate here");
   info("schedulercoord_validate ret");
   co_return result;
 }
