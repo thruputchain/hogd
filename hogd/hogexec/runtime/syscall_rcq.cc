@@ -79,4 +79,38 @@ syscall_RetrocausalQueueConsume_inner(
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
+                                      const StorageKeyContractData &input_key,
+                                      RuntimeMemoryLength &output_len) noexcept
+{
+
+  auto status =
+      syscall_handler.retrocausal_queue_consume(input_key, /*peek=*/true);
+  if (!status) {
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+  auto &rcq_syscall_status = *status;
+  if (!rcq_syscall_status) {
+    return {rcq_syscall_status.error().code(), WrappedGasAmount{0}};
+  }
+
+  auto const &queue_entry = *rcq_syscall_status;
+  output_len = queue_entry.size();
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kRetrocausalQueuePeekLen>()) {
+    try {
+      trace_data->outputs.emplace(
+          SyscallRetrocausalQueuePeekLenOutputs{.len = output_len});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}",
+            SyscallNo::kRetrocausalQueuePeekLen, e.what());
+    }
+  }
+
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
 } // namespace hogd
