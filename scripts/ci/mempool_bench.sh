@@ -128,6 +128,7 @@ echo 'launch coordinator (chuckd-rs)'
   --skip 20 \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT
+  --inside-addr "$(hog_ip hog4)":7888
 
 echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT expect_running
