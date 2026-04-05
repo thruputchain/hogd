@@ -949,11 +949,9 @@ MempoolCoordinatorRpc::validate_batch_chunk(
     BlockID block_id, x23::span<const ProposedTransaction> txs,
     size_t executor_idx)
 {
-  info("validate_batch, {} txs", txs.size());
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
-  info("validate_batch, {} txs, done with RPC call", txs.size());
   // Validation succeeds only if every entry in the executor response is OK.
   co_return !(std::ranges::any_of(res, [](const ExecResult &r) {
     return r != ExecResult::ExecResultOK;
@@ -961,8 +959,8 @@ MempoolCoordinatorRpc::validate_batch_chunk(
 }
 
 x23::Async<bool>
-MempoolCoordinatorRpc::validate_batch(
-    BlockID block_id, const x23::Vec<ProposedTransaction> &txs)
+MempoolCoordinatorRpc::validate_batch(BlockID block_id,
+                                      const x23::Vec<ProposedTransaction> &txs)
 {
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
@@ -1005,8 +1003,9 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
     const ChunkRange &chunk = chunks[i];
     x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                   txs.begin() + chunk.end);
-    handles.push_back(validate_batch_chunk(
-        block_id, tx_chunk, /*executor_idx=*/i % exec_clients_.size()));
+    handles.push_back(
+        validate_batch_chunk(block_id, tx_chunk,
+                             /*executor_idx=*/i % exec_clients_.size()));
   }
 
   bool validated = true;
