@@ -972,8 +972,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   x23::Vec<x23::Async<bool>> handles;
   handles.reserve(large_chunks.size());
 
-  for (size_t i = 0; i < large_chunks.size(); i++) {
-    const ChunkRange &chunk = large_chunks[i];
+  for (const ChunkRange &chunk : large_chunks) {
     x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                   txs.begin() + chunk.end);
     handles.push_back(
@@ -981,8 +980,8 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   }
 
   bool validated = true;
-  for (size_t i = 0; i < handles.size(); i++) {
-    validated = (co_await handles[i]) && validated;
+  for (x23::Async<bool> &handle : handles) {
+    validated = (co_await handle) && validated;
   }
   co_return validated;
 }
@@ -1009,8 +1008,8 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   }
 
   bool validated = true;
-  for (size_t i = 0; i < handles.size(); i++) {
-    validated = (co_await handles[i]) && validated;
+  for (x23::Async<bool> &handle : handles) {
+    validated = (co_await handle) && validated;
   }
   co_return validated;
 }
@@ -1145,6 +1144,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   x23::Vec<ProposedTransaction> txs;
   x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
   {
+    info("schedulercoord_validate here");
     for (const SignedTransactionHash &tx_hash : cache.tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
@@ -1154,7 +1154,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       }
       cache.txs.push_back(*tx);
     }
+    info("schedulercoord_validate here");
     if (!missing_tx_hashes.empty()) {
+      info("schedulercoord_validate here");
       co_await finish_all_executors(cache.block_id);
       co_await abandon_block(cache);
       co_await decrement_num_validations_in_progress();
@@ -1165,14 +1167,19 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
       info("schedulercoord_validate ret");
       co_return ret;
     }
+    info("schedulercoord_validate here");
     x23::XdrVec<NondeterministicProposalData> tx_nominations;
+    info("schedulercoord_validate here");
     CHECK(co_await parallel_batch_to_t(
         nomination.transactions_nondeterministic_data, tx_nominations));
+    info("schedulercoord_validate here");
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
+    info("schedulercoord_validate here");
     for (size_t i = 0; i < cache.txs.size(); i++) {
       txs.push_back({.signed_tx = cache.txs[i],
                      .nondeterministic_proposal_data = tx_nominations[i]});
     }
+    info("schedulercoord_validate here");
   }
   info("schedulercoord_validate here");
 
