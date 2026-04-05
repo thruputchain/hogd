@@ -1022,9 +1022,8 @@ MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
       .executorsched_open_validation_block(block_id);
 }
 
-// TODO(jhumphri): Remove [db_tip].
 x23::Async<SchedulerValidationResult>
-MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
+MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
   info("schedulercoord_validate, validating block for height = {}",
@@ -1096,7 +1095,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip /* db_tip */,
   info("schedulercoord_validate here");
 
   if (co_await create_snapshot(
-          /*prev_block_id=*/cache.block_id, cache.block_id,
+          /*prev_block_id=*/db_tip.id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
