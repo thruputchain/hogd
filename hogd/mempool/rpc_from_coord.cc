@@ -434,7 +434,8 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
 
   // Create snapshot.
   x23::Async<DbSchedResult> create_snapshot_handler =
-      create_snapshot(/*prev_block_id=*/cache.db_tip.id, cache.block_id,
+      create_snapshot(/*prev_block_id=*/last_committed_block_.id,
+                      cache.block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
   record_stage(stage_spawn_snapshot);
 
