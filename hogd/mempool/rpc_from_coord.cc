@@ -209,12 +209,6 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-MempoolCoordinatorRpc::eventsched_get_block_hash(BlockID block_id)
-{
-  co_return co_await event_sched_client_->eventsched_get_block_hash(block_id);
-}
-
-x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                               BlockHeight block_height)
 {
@@ -627,9 +621,9 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   double stage_generate_txset_hash = 0.0;
   double stage_serialize_nomination = 0.0;
   double stage_close_snapshot = 0.0;
-  double stage_event_block_hash = 0.0;
-  double stage_generate_block_hash = 0.0;
   double stage_await_finish_calls = 0.0;
+  double stage_close_event_block = 0.0;
+  double stage_generate_block_hash = 0.0;
 
   // Gracefully shut down executor work and send the nomination chunks
   // (including the final block hash) back to the coordinator.
@@ -640,8 +634,6 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   record_stage(stage_spawn_finish_calls);
 
-  x23::Async<EventBlockResult> event_block_hash_handle =
-      eventsched_get_block_hash(cache.block_id);
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
 
@@ -666,12 +658,19 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     cache.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
+
+  for (x23::Async<void> &handle : finish_block_handles) {
+    co_await handle;
+  }
+  record_stage(stage_await_finish_calls);
+
   SHA256Hash events_hash{};
   {
-    EventBlockResult result = co_await event_block_hash_handle;
+    EventBlockResult result =
+        co_await eventsched_close_block(cache.block_id, db_tip.height + 1);
     CHECK_EQ(result.error(), RPCError::kRPCNone);
     events_hash = result.root_hash();
-    record_stage(stage_event_block_hash);
+    record_stage(stage_close_event_block);
   }
   {
     Nomination &nomination =
@@ -689,19 +688,16 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     record_stage(stage_generate_block_hash);
   }
 
-  for (x23::Async<void> &handle : finish_block_handles) {
-    co_await handle;
-  }
-  record_stage(stage_await_finish_calls);
-
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
        "generate_txset_hash={:.6f}, serialize_nomination={:.6f}, "
-       "close_snapshot={:.6f}, event_block_hash={:.6f}, "
-       "generate_block_hash={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
+       "close_snapshot={:.6f}, await_finish_calls={:.6f}, "
+       "close_event_block={:.6f}, "
+       "generate_block_hash={:.6f}, total={:.6f}, "
        "finish_handles={}",
        stage_spawn_finish_calls, stage_generate_txset_hash,
-       stage_serialize_nomination, stage_close_snapshot, stage_event_block_hash,
-       stage_generate_block_hash, stage_await_finish_calls, timer.elapsed(),
+       stage_serialize_nomination, stage_close_snapshot,
+       stage_await_finish_calls, stage_close_event_block,
+       stage_generate_block_hash, timer.elapsed(),
        finish_block_handles.size());
   co_return;
 }
@@ -725,21 +721,12 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     stage_out = now - last_stage_ts;
     last_stage_ts = now;
   };
-  double stage_await_close_block = 0.0;
   double stage_await_commit_snapshot = 0.0;
   double stage_write_average_hog_ages = 0.0;
 
-  x23::Async<EventBlockResult> close_block_handle =
-      eventsched_close_block(cache.block_id, scheduler_->current_block());
-  x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id, cache.db_tip.block_hash);
   {
-    EventBlockResult result = co_await close_block_handle;
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-  }
-  record_stage(stage_await_close_block);
-  {
-    DbBlockResult result = co_await commit_snapshot_handle;
+    DbBlockResult result =
+        co_await commit_snapshot(cache.block_id, cache.db_tip.block_hash);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
   record_stage(stage_await_commit_snapshot);
@@ -747,10 +734,10 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   scheduler_->write_all_average_hog_ages_to_db();
   record_stage(stage_write_average_hog_ages);
 
-  info("commit_block() stages: await_close_block={:.6f}, "
+  info("commit_block() stages: "
        "await_commit_snapshot={:.6f}, write_average_hog_ages={:.6f}, "
        "total={:.6f}, block_id={}",
-       stage_await_close_block, stage_await_commit_snapshot,
+       stage_await_commit_snapshot,
        stage_write_average_hog_ages, timer.elapsed(), cache.block_id);
 }
 
@@ -1206,10 +1193,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     cache.db_tip.db_hash = result.db_hash();
   }
   info("schedulercoord_validate here");
+  co_await finish_all_executors(cache.block_id);
+
   SHA256Hash events_hash{};
   {
     EventBlockResult result =
-        co_await eventsched_get_block_hash(cache.block_id);
+        co_await eventsched_close_block(cache.block_id,
+                                        nomination.block_height);
     CHECK_EQ(result.error(), RPCError::kRPCNone);
     events_hash = result.root_hash();
   }
@@ -1229,15 +1219,15 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   if (block_hash != nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
 
-    co_await finish_all_executors(cache.block_id);
-    co_await abandon_block(cache);
+    // Event block is already closed above, so only abandon the DB snapshot.
+    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
+             DbSchedResult::DbSchedResultOK);
     co_await decrement_num_validations_in_progress();
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   info("schedulercoord_validate here");
-  co_await finish_all_executors(cache.block_id);
 
   info("schedulercoord_validate here");
   cache.db_tip = DbTip{.height = nomination.block_height,
