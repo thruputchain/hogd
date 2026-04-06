@@ -130,7 +130,8 @@ protected:
 
     auto db_commit_res =
         // NOLINTNEXTLINE(bugprone-argument-comment)
-        db_client_.dbsched_commit_snapshot(block_id, /*block_hash=*/{});
+        db_client_.dbsched_commit_snapshot(block_id, /*block_hash=*/{},
+                                           /*events_hash=*/{});
     ASSERT_EQ(db_commit_res.result(), DbSchedResult::DbSchedResultOK);
   }
 };
