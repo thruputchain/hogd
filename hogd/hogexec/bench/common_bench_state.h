@@ -245,9 +245,10 @@ CommonBenchState::advance_block()
   close_event_block(block_number_);
 
   auto r2 =
-      // NOLINTNEXTLINE(bugprone-argument-comment)
+      // NOLINTBEGIN(bugprone-argument-comment)
       coord_client_->dbsched_commit_snapshot(block_number_, /*block_hash=*/{},
                                              /*events_hash=*/{});
+  // NOLINTEND(bugprone-argument-comment)
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
