@@ -55,7 +55,8 @@ public:
                                                     BlockExecutionMode mode);
 
   x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id,
-                                                    BlockHash block_hash);
+                                                    BlockHash block_hash,
+                                                    SHA256Hash events_hash);
   x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
 
@@ -90,6 +91,7 @@ private:
   // There must be an active reference to the blocktx.  This active reference
   // should be the last reference that is open for the btx..
   HogDBStatus<void> commit_block(BlockID id, BlockHash block_hash,
+                                 SHA256Hash events_hash,
                                  PerThreadARC<BlockTX> *btx,
                                  const DbHash &db_hash);
 };

@@ -125,7 +125,8 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
 
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
-                            PerThreadARC<BlockTX> *btx, const DbHash &db_hash)
+                            SHA256Hash events_hash, PerThreadARC<BlockTX> *btx,
+                            const DbHash &db_hash)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -160,7 +161,7 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   // destroy the block TX.
   ctx_.remove_shutdown_block_tx(id);
 
-  ret = ctx_.update_dbtip(id, block_hash, db_hash);
+  ret = ctx_.update_dbtip(id, block_hash, events_hash, db_hash);
   if (!ret)
     return ret.error();
 
@@ -169,8 +170,10 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   if (!lsn)
     return lsn.error();
 
-  info("committed block {}: block_hash='{}' db_hash='{}', height='{}', lsn='{}",
+  info("committed block {}: block_hash='{}' events_hash='{}', db_hash='{}', "
+       "height='{}', lsn='{}",
        id, encode_base64(std::as_bytes(std::span(ctx_.get_tip().block_hash))),
+       encode_base64(std::as_bytes(std::span(ctx_.get_tip().events_hash))),
        encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
        ctx_.get_tip().height, *lsn);
   CHECK_NE(ctx_.get_tip().height, -1);
@@ -195,7 +198,8 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
+HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
+                                       SHA256Hash events_hash)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
@@ -213,7 +217,8 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
 
-  HogDBStatus<void> ret = commit_block(id, block_hash, btx, *db_hash);
+  HogDBStatus<void> ret =
+      commit_block(id, block_hash, events_hash, btx, *db_hash);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
@@ -439,7 +444,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
                            .prev_block_hash = kNullBlockHash};
   auto ret =
       to_db_result(commit_block(kGenesisBlockID, generate_block_hash(header),
-                                r.value(), db_hash));
+                                events_hash, r.value(), db_hash));
   // Just to be safe, we recompute the db hash from scratch and ensure that
   // [db_hash] is equal to it.
   DbHash full_hash = ctx_.get_db().compute_full_db_hash();

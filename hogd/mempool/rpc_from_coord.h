@@ -337,15 +337,17 @@ private:
         // committed yet (including the genesis block).
         last_committed_block_ = {.height = -1,
                                  .block_hash = {},
+                                 .events_hash = {},
                                  .db_hash = {},
                                  .id = 0};
         auth_data_height_.store(-1);
       }
     }
     info("finish_init(), system starting with db tip: height = {}, id = {}, "
-         "block_hash = {}, db_hash = {}",
+         "block_hash = {}, events_hash = {}, db_hash = {}",
          last_committed_block_.height, last_committed_block_.id,
-         last_committed_block_.block_hash, last_committed_block_.db_hash);
+         last_committed_block_.block_hash, last_committed_block_.events_hash,
+         last_committed_block_.db_hash);
 
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.height, db_sched_client_);
@@ -368,7 +370,8 @@ private:
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
                                                       BlockHeight block_height);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
-                                            BlockHash block_hash);
+                                            BlockHash block_hash,
+                                            SHA256Hash events_hash);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
 

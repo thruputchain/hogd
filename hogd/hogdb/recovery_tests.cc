@@ -111,7 +111,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     ASSERT_TRUE(hash_result.has_value());
     db_hash = *hash_result;
     ASSERT_TRUE((btx->get()).commit().has_value());
-    ASSERT_TRUE(ctx.update_dbtip(1, /*block_hash=*/{}, db_hash).has_value());
+    ASSERT_TRUE(
+        ctx.update_dbtip(1, /*block_hash=*/{}, /*events_hash=*/{}, db_hash)
+            .has_value());
 
     ASSERT_TRUE(btx->initiate_shutdown());
     ctx.remove_shutdown_block_tx(1);

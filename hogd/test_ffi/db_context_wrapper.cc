@@ -92,7 +92,8 @@ DBContext::advance_new_block(BlockExecutionMode mode)
     }
 
     res = db_sched_client_.dbsched_commit_snapshot(current_block_id_,
-                                                   /*block_hash=*/{});
+                                                   /*block_hash=*/{},
+                                                   /*events_hash=*/{});
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(
           "advance_new_block: dbsched_commit_block failed");

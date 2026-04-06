@@ -129,8 +129,10 @@ protected:
     ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
 
     auto db_commit_res =
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        db_client_.dbsched_commit_snapshot(block_id, /*block_hash=*/{});
+        // NOLINTBEGIN(bugprone-argument-comment)
+        db_client_.dbsched_commit_snapshot(block_id, /*block_hash=*/{},
+                                           /*events_hash=*/{});
+    // NOLINTEND(bugprone-argument-comment)
     ASSERT_EQ(db_commit_res.result(), DbSchedResult::DbSchedResultOK);
   }
 };
