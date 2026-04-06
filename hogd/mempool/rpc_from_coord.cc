@@ -1337,11 +1337,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       nominated_block_cache_.block_id == block_id) {
     // We are committing the block that we nominated.
     commit_handles.push_back(commit_block(nominated_block_cache_));
-    if (nominated_block_cache_.block_id) {
-      // We nominated a block, so we need to abandon the block.
-      snapshot_handles.push_back(
-          abandon_snapshot(nominated_block_cache_.block_id));
-    }
     last_committed_block_ = nominated_block_cache_.db_tip;
     info("setting last_committed_block_ height to {}",
          nominated_block_cache_.db_tip.height);
@@ -1349,6 +1344,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   else {
     // We are committing a block that we validated.
     commit_handles.push_back(commit_block(validated_block_cache_[block_id]));
+    if (nominated_block_cache_.block_id) {
+      // We nominated a block, so we need to abandon the block.
+      snapshot_handles.push_back(
+          abandon_snapshot(nominated_block_cache_.block_id));
+    }
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
     info("setting last_committed_block_ height to {}",
          validated_block_cache_[block_id].db_tip.height);
