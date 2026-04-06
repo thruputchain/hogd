@@ -13,13 +13,16 @@ git fetch --quiet --depth 1 origin {{ .git_commit }}
 git checkout --quiet {{ .git_commit }}
 git submodule update --init --recursive --quiet
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'install chuckd-rs from registry (fail-fast before long hogd build)'
-cargo install chuckd --registry groundhog 2>&1 || exit 1
+cargo install chuckd --registry groundhog > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
+
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build hogd'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
 cp "$HOME/.cargo/bin/chuckd" release/chuckd.dev
 
@@ -68,8 +71,11 @@ git submodule update --init --recursive --quiet
 
 source ./scripts/ci/prepare_env.sh
 
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+
 echo 'build'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
