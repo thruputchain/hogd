@@ -1329,15 +1329,18 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await commit_cg(commit_lock_);
   record_stage(stage_wait_commit_lock);
 
-  x23::Vec<x23::Async<void>> handles;
-  handles.reserve(validated_block_cache_.size());
+  x23::Vec<x23::Async<void>> commit_handles;
+  commit_handles.reserve(validated_block_cache_.size());
+  x23::Vec<x23::Async<DbSchedResult>> snapshot_handles;
+  snapshot_handles.reserve(validated_block_cache_.size());
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // We are committing the block that we nominated.
-    handles.push_back(commit_block(nominated_block_cache_));
+    commit_handles.push_back(commit_block(nominated_block_cache_));
     if (nominated_block_cache_.block_id) {
       // We nominated a block, so we need to abandon the block.
-      handles.push_back(abandon_snapshot(nominated_block_cache_.block_id));
+      snapshot_handles.push_back(
+          abandon_snapshot(nominated_block_cache_.block_id));
     }
     last_committed_block_ = nominated_block_cache_.db_tip;
     info("setting last_committed_block_ height to {}",
@@ -1345,14 +1348,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   else {
     // We are committing a block that we validated.
-    handles.push_back(commit_block(validated_block_cache_[block_id]));
+    commit_handles.push_back(commit_block(validated_block_cache_[block_id]));
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
     info("setting last_committed_block_ height to {}",
          validated_block_cache_[block_id].db_tip.height);
   }
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {
-      handles.push_back(abandon_snapshot(cache.block_id));
+      snapshot_handles.push_back(abandon_snapshot(cache.block_id));
     }
   }
   record_stage(stage_build_handles);
@@ -1413,8 +1416,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       x23::span<const SignedTransactionHash>(*remove_from_scheduler));
   record_stage(stage_remove_from_scheduler);
 
-  for (x23::Async<void> &handle : handles) {
+  for (x23::Async<void> &handle : commit_handles) {
     co_await handle;
+  }
+  for (x23::Async<DbSchedResult> &handle : snapshot_handles) {
+    CHECK_EQ(co_await handle, DbSchedResult::DbSchedResultOK);
   }
   record_stage(stage_await_handles);
 
@@ -1427,8 +1433,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
   scheduler_->increment_current_block();
   record_stage(stage_finalize);
-  emit_commit_stats("ok", handles.size(), return_to_runqueue.size(),
-                    remove_from_scheduler_size);
+  emit_commit_stats("ok", commit_handles.size() + snapshot_handles.size(),
+                    return_to_runqueue.size(), remove_from_scheduler_size);
   last_ = std::chrono::steady_clock::now();
   info("schedulercoord_commit_block ret");
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
