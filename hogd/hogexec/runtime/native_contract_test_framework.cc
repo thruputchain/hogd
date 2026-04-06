@@ -38,7 +38,7 @@ NativeContractTestFramework::advance_block(
     auto r = coord_wrapper_->client().dbsched_commit_snapshot(
         block_number_,
         // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*block_hash=*/{});
+        /*block_hash=*/{}, /*events_hash=*/{});
     if (r.result() != expected_dbsched_commit_snapshot_result) {
       throw std::runtime_error(std::format(
           "advance_block: mismatching dbsched_commit_snapshot result: {} != {}",

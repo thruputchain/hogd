@@ -42,10 +42,6 @@ public:
   // Returns an error if the block already exists.
   x23::Async<EventStatus<void>> open_block(BlockID block_id);
 
-  // Returns the hash of the events trie for a block.
-  // Returns an error if the block is not open.
-  x23::Async<EventStatus<SHA256Hash>> get_block_hash(BlockID block_id);
-
   // Closes a block.
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.

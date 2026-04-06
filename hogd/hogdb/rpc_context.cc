@@ -88,9 +88,10 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
 
 HogDBStatus<void>
 RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash,
-                         const DbHash &db_hash)
+                         SHA256Hash events_hash, const DbHash &db_hash)
 {
   tip_.block_hash = block_hash;
+  tip_.events_hash = events_hash;
   tip_.db_hash = db_hash;
   tip_.height = tip_.height + 1;
   tip_.id = bid;

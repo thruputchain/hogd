@@ -209,12 +209,6 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-MempoolCoordinatorRpc::eventsched_get_block_hash(BlockID block_id)
-{
-  co_return co_await event_sched_client_->eventsched_get_block_hash(block_id);
-}
-
-x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                               BlockHeight block_height)
 {
@@ -223,10 +217,12 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 }
 
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash,
+                                       SHA256Hash events_hash)
 {
   co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id,
-                                                               block_hash);
+                                                               block_hash,
+                                                               events_hash);
 }
 
 x23::Async<void>
@@ -627,7 +623,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   double stage_generate_txset_hash = 0.0;
   double stage_serialize_nomination = 0.0;
   double stage_close_snapshot = 0.0;
-  double stage_event_block_hash = 0.0;
+  double stage_event_close_block = 0.0;
   double stage_generate_block_hash = 0.0;
   double stage_await_finish_calls = 0.0;
 
@@ -640,10 +636,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   record_stage(stage_spawn_finish_calls);
 
-  x23::Async<EventBlockResult> event_block_hash_handle =
-      eventsched_get_block_hash(cache.block_id);
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
+  x23::Async<EventBlockResult> event_close_block_handle =
+      eventsched_close_block(cache.block_id, db_tip.height + 1);
 
   SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
   record_stage(stage_generate_txset_hash);
@@ -666,12 +662,11 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     cache.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
-  SHA256Hash events_hash{};
   {
-    EventBlockResult result = co_await event_block_hash_handle;
+    EventBlockResult result = co_await event_close_block_handle;
     CHECK_EQ(result.error(), RPCError::kRPCNone);
-    events_hash = result.root_hash();
-    record_stage(stage_event_block_hash);
+    cache.db_tip.events_hash = result.root_hash();
+    record_stage(stage_event_close_block);
   }
   {
     Nomination &nomination =
@@ -682,7 +677,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                        .block_height = nomination.block_height,
                        .txset_hash = txset_hash,
                        .db_hash = cache.db_tip.db_hash,
-                       .events_hash = events_hash,
+                       .events_hash = cache.db_tip.events_hash,
                        .prev_block_hash = db_tip.block_hash};
     nomination.block_hash = sha256(header);
     nomination.prev_block_hash = db_tip.block_hash;
@@ -696,13 +691,13 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
        "generate_txset_hash={:.6f}, serialize_nomination={:.6f}, "
-       "close_snapshot={:.6f}, event_block_hash={:.6f}, "
+       "close_snapshot={:.6f}, event_close_block={:.6f}, "
        "generate_block_hash={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
        "finish_handles={}",
        stage_spawn_finish_calls, stage_generate_txset_hash,
-       stage_serialize_nomination, stage_close_snapshot, stage_event_block_hash,
-       stage_generate_block_hash, stage_await_finish_calls, timer.elapsed(),
-       finish_block_handles.size());
+       stage_serialize_nomination, stage_close_snapshot,
+       stage_event_close_block, stage_generate_block_hash,
+       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
   co_return;
 }
 
@@ -725,19 +720,12 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     stage_out = now - last_stage_ts;
     last_stage_ts = now;
   };
-  double stage_await_close_block = 0.0;
   double stage_await_commit_snapshot = 0.0;
   double stage_write_average_hog_ages = 0.0;
 
-  x23::Async<EventBlockResult> close_block_handle =
-      eventsched_close_block(cache.block_id, scheduler_->current_block());
   x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id, cache.db_tip.block_hash);
-  {
-    EventBlockResult result = co_await close_block_handle;
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-  }
-  record_stage(stage_await_close_block);
+      commit_snapshot(cache.block_id, cache.db_tip.block_hash,
+                      cache.db_tip.events_hash);
   {
     DbBlockResult result = co_await commit_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
@@ -747,11 +735,10 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   scheduler_->write_all_average_hog_ages_to_db();
   record_stage(stage_write_average_hog_ages);
 
-  info("commit_block() stages: await_close_block={:.6f}, "
-       "await_commit_snapshot={:.6f}, write_average_hog_ages={:.6f}, "
-       "total={:.6f}, block_id={}",
-       stage_await_close_block, stage_await_commit_snapshot,
-       stage_write_average_hog_ages, timer.elapsed(), cache.block_id);
+  info("commit_block() stages: await_commit_snapshot={:.6f}, "
+       "write_average_hog_ages={:.6f}, total={:.6f}, block_id={}",
+       stage_await_commit_snapshot, stage_write_average_hog_ages,
+       timer.elapsed(), cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
@@ -788,12 +775,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
-  // TODO(jhumphri): chuckd does not know the current [db_hash], so we only
-  // check the other fields in [db_tip]. Beyond this, I feel like it is
-  // incorrect to have [schedulercoord_nominate()] have the [DbTip] type as a
-  // parameter--I feel like it should only take the latest *block* hash as a
-  // parameter, and maybe we could also have the latest block height as a
-  // parameter if we wanted to have checks that everything is consistent.
+  // TODO(jhumphri): chuckd does not know the current [db_hash] or
+  // [events_hash], so we only check the other fields in [db_tip]. Beyond this,
+  // I feel like it is incorrect to have [schedulercoord_nominate()] have the
+  // [DbTip] type as a parameter--I feel like it should only take the latest
+  // *block* hash as a parameter, and maybe we could also have the latest block
+  // height as a parameter if we wanted to have checks that everything is
+  // consistent.
   //
   // Similarly, for [schedulercoord_validate()], I think we should only take
   // [nomination] as a parameter, which includes the latest block hash and
@@ -924,6 +912,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
                     .nomination.block_height,
       .block_hash = nominated_block_cache_.nomination_result.nominated_block()
                         .nomination.block_hash,
+      .events_hash = nominated_block_cache_.db_tip.events_hash,
       .db_hash = nominated_block_cache_.db_tip.db_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
@@ -1206,12 +1195,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     cache.db_tip.db_hash = result.db_hash();
   }
   info("schedulercoord_validate here");
-  SHA256Hash events_hash{};
   {
     EventBlockResult result =
-        co_await eventsched_get_block_hash(cache.block_id);
+        co_await eventsched_close_block(cache.block_id,
+                                        scheduler_->current_block() + 1);
     CHECK_EQ(result.error(), RPCError::kRPCNone);
-    events_hash = result.root_hash();
+    cache.db_tip.events_hash = result.root_hash();
   }
 
   info("schedulercoord_validate here");
@@ -1223,14 +1212,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                      .block_height = nomination.block_height,
                      .txset_hash = txset_hash,
                      .db_hash = cache.db_tip.db_hash,
-                     .events_hash = events_hash,
+                     .events_hash = cache.db_tip.events_hash,
                      .prev_block_hash = nomination.prev_block_hash};
   SHA256Hash block_hash = sha256(header);
   if (block_hash != nomination.block_hash) {
+    info("schedulercoord_validate failed here");
     co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
-    co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
@@ -1242,6 +1231,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   info("schedulercoord_validate here");
   cache.db_tip = DbTip{.height = nomination.block_height,
                        .block_hash = nomination.block_hash,
+                       .events_hash = cache.db_tip.events_hash,
                        .db_hash = cache.db_tip.db_hash,
                        .id = cache.block_id};
   SchedulerValidationResult result(
@@ -1343,22 +1333,25 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   co_await commit_cg(commit_lock_);
   record_stage(stage_wait_commit_lock);
 
-  x23::Vec<x23::Async<void>> handles;
-  handles.reserve(validated_block_cache_.size());
+  x23::Vec<x23::Async<void>> commit_handles;
+  commit_handles.reserve(validated_block_cache_.size());
+  x23::Vec<x23::Async<DbSchedResult>> snapshot_handles;
+  snapshot_handles.reserve(validated_block_cache_.size());
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // We are committing the block that we nominated.
-    handles.push_back(commit_block(nominated_block_cache_));
+    commit_handles.push_back(commit_block(nominated_block_cache_));
     last_committed_block_ = nominated_block_cache_.db_tip;
     info("setting last_committed_block_ height to {}",
          nominated_block_cache_.db_tip.height);
   }
   else {
     // We are committing a block that we validated.
-    handles.push_back(commit_block(validated_block_cache_[block_id]));
+    commit_handles.push_back(commit_block(validated_block_cache_[block_id]));
     if (nominated_block_cache_.block_id) {
       // We nominated a block, so we need to abandon the block.
-      handles.push_back(abandon_block(nominated_block_cache_));
+      snapshot_handles.push_back(
+          abandon_snapshot(nominated_block_cache_.block_id));
     }
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
     info("setting last_committed_block_ height to {}",
@@ -1366,7 +1359,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   for (const auto &[_, cache] : validated_block_cache_) {
     if (cache.block_id != block_id) {
-      handles.push_back(abandon_block(cache));
+      snapshot_handles.push_back(abandon_snapshot(cache.block_id));
     }
   }
   record_stage(stage_build_handles);
@@ -1427,8 +1420,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       x23::span<const SignedTransactionHash>(*remove_from_scheduler));
   record_stage(stage_remove_from_scheduler);
 
-  for (x23::Async<void> &handle : handles) {
+  for (x23::Async<void> &handle : commit_handles) {
     co_await handle;
+  }
+  for (x23::Async<DbSchedResult> &handle : snapshot_handles) {
+    CHECK_EQ(co_await handle, DbSchedResult::DbSchedResultOK);
   }
   record_stage(stage_await_handles);
 
@@ -1441,8 +1437,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 
   scheduler_->increment_current_block();
   record_stage(stage_finalize);
-  emit_commit_stats("ok", handles.size(), return_to_runqueue.size(),
-                    remove_from_scheduler_size);
+  emit_commit_stats("ok", commit_handles.size() + snapshot_handles.size(),
+                    return_to_runqueue.size(), remove_from_scheduler_size);
   last_ = std::chrono::steady_clock::now();
   info("schedulercoord_commit_block ret");
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
