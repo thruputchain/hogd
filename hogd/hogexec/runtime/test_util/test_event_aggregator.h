@@ -125,11 +125,6 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.open_block(block_id);
   }
 
-  EventBlockResult eventsched_get_block_hash(BlockID block_id)
-  {
-    return event_aggregator_.get_block_hash(block_id);
-  }
-
   EventBlockResult eventsched_close_block(BlockID block_id,
                                           BlockHeight block_height)
   {
