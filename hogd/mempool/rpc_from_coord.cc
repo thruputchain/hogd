@@ -1094,12 +1094,18 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await wait_for_auth_data(nomination.block_height - 1);
   info("schedulercoord_validate here");
 
-  if (co_await create_snapshot(
-          /*prev_block_id=*/db_tip.id, cache.block_id,
-          BlockExecutionMode::kBlockExecutionModeValidation) !=
-      DbSchedResult::DbSchedResultOK) {
+  DbSchedResult snapshot_result = co_await create_snapshot(
+      /*prev_block_id=*/db_tip.id, cache.block_id,
+      BlockExecutionMode::kBlockExecutionModeValidation);
+  if (snapshot_result != DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
+    if (snapshot_result == DbSchedResult::DbSchedResultInvalidParentId) {
+      info("schedulercoord_validate ret");
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
+    }
     info("schedulercoord_validate ret");
+    CHECK_EQ(snapshot_result, DbSchedResult::DbSchedResultError);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
