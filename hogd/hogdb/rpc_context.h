@@ -119,7 +119,7 @@ public:
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
   HogDBStatus<void> update_dbtip(BlockTXID bid, BlockHash block_hash,
-                                 const DbHash &db_hash);
+                                 SHA256Hash events_hash, const DbHash &db_hash);
 
   void cache_db_hash(BlockTXID bid, const DbHash &db_hash)
   {

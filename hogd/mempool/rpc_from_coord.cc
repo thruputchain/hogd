@@ -217,10 +217,12 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 }
 
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, BlockHash block_hash,
+                                       SHA256Hash events_hash)
 {
   co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id,
-                                                               block_hash);
+                                                               block_hash,
+                                                               events_hash);
 }
 
 x23::Async<void>
@@ -722,7 +724,8 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   double stage_write_average_hog_ages = 0.0;
 
   x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id, cache.db_tip.block_hash);
+      commit_snapshot(cache.block_id, cache.db_tip.block_hash,
+                      cache.db_tip.events_hash);
   {
     DbBlockResult result = co_await commit_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);

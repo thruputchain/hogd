@@ -370,7 +370,8 @@ private:
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
                                                       BlockHeight block_height);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
-                                            BlockHash block_hash);
+                                            BlockHash block_hash,
+                                            SHA256Hash events_hash);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
 
