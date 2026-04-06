@@ -187,10 +187,7 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   if (parent_id != ctx_.get_tip().id) {
     error("parent_id {} is not the last committed block {}", parent_id,
           ctx_.get_tip().id);
-    // TODO(jhumphri): This should be an error, but we need to fix the mempool
-    // tests first.
-    // See hogd issue #610
-    // co_return DbSchedResult::DbSchedResultError;
+    co_return DbSchedResult::DbSchedResultInvalidParentId;
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.

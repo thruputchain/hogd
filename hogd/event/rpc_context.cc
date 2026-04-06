@@ -277,11 +277,15 @@ EventRPCContext::get_context_slow(BlockID block_id)
 
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
-    co_return nullptr;
+    // Avoid building an unbounded unlock->resume recursion chain under heavy
+    // lock contention when many coroutines miss in the per-thread cache.
+    co_await g.reset_and_return(nullptr);
+    panic("unreachable");
   }
 
   if (!it->second.try_acquire_reference()) {
-    co_return nullptr;
+    co_await g.reset_and_return(nullptr);
+    panic("unreachable");
   }
 
   // put the context in the threadlocal cache so we do not pay this cost next
@@ -290,7 +294,8 @@ EventRPCContext::get_context_slow(BlockID block_id)
     std::scoped_lock g(cache_->mtx_);
     cache_->contexts_.emplace(block_id, &it->second);
   }
-  co_return &it->second;
+  co_await g.reset_and_return(&it->second);
+  panic("unreachable");
 }
 
 } // namespace hogd
