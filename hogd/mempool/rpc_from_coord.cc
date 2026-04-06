@@ -1174,11 +1174,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_return ret;
     }
     info("schedulercoord_validate here");
-    x23::XdrVec<NondeterministicProposalData> tx_nominations;
-    info("schedulercoord_validate here");
-    CHECK(co_await parallel_batch_to_t(
-        nomination.transactions_nondeterministic_data, tx_nominations));
-    info("schedulercoord_validate here");
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
     info("schedulercoord_validate here");
     for (size_t i = 0; i < cache.txs.size(); i++) {
