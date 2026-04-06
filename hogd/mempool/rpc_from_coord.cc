@@ -1195,7 +1195,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   {
     EventBlockResult result =
         co_await eventsched_close_block(cache.block_id,
-                                        scheduler_->current_block());
+                                        scheduler_->current_block() + 1);
     CHECK_EQ(result.error(), RPCError::kRPCNone);
     cache.db_tip.events_hash = result.root_hash();
   }
@@ -1228,6 +1228,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   info("schedulercoord_validate here");
   cache.db_tip = DbTip{.height = nomination.block_height,
                        .block_hash = nomination.block_hash,
+                       .events_hash = cache.db_tip.events_hash,
                        .db_hash = cache.db_tip.db_hash,
                        .id = cache.block_id};
   SchedulerValidationResult result(
