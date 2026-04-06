@@ -660,11 +660,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     cache.db_tip.db_hash = result.db_hash();
     record_stage(stage_close_snapshot);
   }
-  SHA256Hash events_hash{};
   {
     EventBlockResult result = co_await event_close_block_handle;
     CHECK_EQ(result.error(), RPCError::kRPCNone);
-    events_hash = result.root_hash();
+    cache.db_tip.events_hash = result.root_hash();
     record_stage(stage_event_close_block);
   }
   {
@@ -676,7 +675,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
                        .block_height = nomination.block_height,
                        .txset_hash = txset_hash,
                        .db_hash = cache.db_tip.db_hash,
-                       .events_hash = events_hash,
+                       .events_hash = cache.db_tip.events_hash,
                        .prev_block_hash = db_tip.block_hash};
     nomination.block_hash = sha256(header);
     nomination.prev_block_hash = db_tip.block_hash;
@@ -788,7 +787,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
   // if (db_tip != last_committed_block_) {
   if (db_tip.height != last_committed_block_.height ||
       db_tip.id != last_committed_block_.id ||
-      db_tip.block_hash != last_committed_block_.block_hash) {
+      db_tip.block_hash != last_committed_block_.block_hash ||
+      db_tip.events_hash != last_committed_block_.events_hash) {
     last_ = std::chrono::steady_clock::now();
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
@@ -909,6 +909,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
                     .nomination.block_height,
       .block_hash = nominated_block_cache_.nomination_result.nominated_block()
                         .nomination.block_hash,
+      .events_hash = nominated_block_cache_.db_tip.events_hash,
       .db_hash = nominated_block_cache_.db_tip.db_hash,
       .id =
           nominated_block_cache_.nomination_result.nominated_block().block_id};
@@ -1191,13 +1192,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     cache.db_tip.db_hash = result.db_hash();
   }
   info("schedulercoord_validate here");
-  SHA256Hash events_hash{};
   {
     EventBlockResult result =
         co_await eventsched_close_block(cache.block_id,
                                         scheduler_->current_block());
     CHECK_EQ(result.error(), RPCError::kRPCNone);
-    events_hash = result.root_hash();
+    cache.db_tip.events_hash = result.root_hash();
   }
 
   info("schedulercoord_validate here");
@@ -1209,7 +1209,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                      .block_height = nomination.block_height,
                      .txset_hash = txset_hash,
                      .db_hash = cache.db_tip.db_hash,
-                     .events_hash = events_hash,
+                     .events_hash = cache.db_tip.events_hash,
                      .prev_block_hash = nomination.prev_block_hash};
   SHA256Hash block_hash = sha256(header);
   if (block_hash != nomination.block_hash) {
