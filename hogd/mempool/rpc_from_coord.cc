@@ -1335,6 +1335,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       nominated_block_cache_.block_id == block_id) {
     // We are committing the block that we nominated.
     handles.push_back(commit_block(nominated_block_cache_));
+    if (nominated_block_cache_.block_id) {
+      // We nominated a block, so we need to abandon the block.
+      handles.push_back(abandon_snapshot(nominated_block_cache_));
+    }
     last_committed_block_ = nominated_block_cache_.db_tip;
     info("setting last_committed_block_ height to {}",
          nominated_block_cache_.db_tip.height);
@@ -1345,6 +1349,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
     info("setting last_committed_block_ height to {}",
          validated_block_cache_[block_id].db_tip.height);
+  }
+  for (const auto &[_, cache] : validated_block_cache_) {
+    if (cache.block_id != block_id) {
+      handles.push_back(abandon_snapshot(cache));
+    }
   }
   record_stage(stage_build_handles);
 
