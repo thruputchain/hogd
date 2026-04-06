@@ -209,12 +209,6 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-MempoolCoordinatorRpc::eventsched_get_block_hash(BlockID block_id)
-{
-  co_return co_await event_sched_client_->eventsched_get_block_hash(block_id);
-}
-
-x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                               BlockHeight block_height)
 {
@@ -627,7 +621,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   double stage_generate_txset_hash = 0.0;
   double stage_serialize_nomination = 0.0;
   double stage_close_snapshot = 0.0;
-  double stage_event_block_hash = 0.0;
+  double stage_event_close_block = 0.0;
   double stage_generate_block_hash = 0.0;
   double stage_await_finish_calls = 0.0;
 
@@ -640,8 +634,8 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   record_stage(stage_spawn_finish_calls);
 
-  x23::Async<EventBlockResult> event_block_hash_handle =
-      eventsched_get_block_hash(cache.block_id);
+  x23::Async<EventBlockResult> event_close_block_handle =
+      eventsched_close_block(cache.block_id, db_tip.height + 1);
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
 
@@ -668,10 +662,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   SHA256Hash events_hash{};
   {
-    EventBlockResult result = co_await event_block_hash_handle;
+    EventBlockResult result = co_await event_close_block_handle;
     CHECK_EQ(result.error(), RPCError::kRPCNone);
     events_hash = result.root_hash();
-    record_stage(stage_event_block_hash);
+    record_stage(stage_event_close_block);
   }
   {
     Nomination &nomination =
@@ -696,13 +690,13 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
        "generate_txset_hash={:.6f}, serialize_nomination={:.6f}, "
-       "close_snapshot={:.6f}, event_block_hash={:.6f}, "
+       "close_snapshot={:.6f}, event_close_block={:.6f}, "
        "generate_block_hash={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
        "finish_handles={}",
        stage_spawn_finish_calls, stage_generate_txset_hash,
-       stage_serialize_nomination, stage_close_snapshot, stage_event_block_hash,
-       stage_generate_block_hash, stage_await_finish_calls, timer.elapsed(),
-       finish_block_handles.size());
+       stage_serialize_nomination, stage_close_snapshot,
+       stage_event_close_block, stage_generate_block_hash,
+       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
   co_return;
 }
 
@@ -725,19 +719,11 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     stage_out = now - last_stage_ts;
     last_stage_ts = now;
   };
-  double stage_await_close_block = 0.0;
   double stage_await_commit_snapshot = 0.0;
   double stage_write_average_hog_ages = 0.0;
 
-  x23::Async<EventBlockResult> close_block_handle =
-      eventsched_close_block(cache.block_id, scheduler_->current_block());
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.block_hash);
-  {
-    EventBlockResult result = co_await close_block_handle;
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-  }
-  record_stage(stage_await_close_block);
   {
     DbBlockResult result = co_await commit_snapshot_handle;
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
@@ -747,11 +733,10 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   scheduler_->write_all_average_hog_ages_to_db();
   record_stage(stage_write_average_hog_ages);
 
-  info("commit_block() stages: await_close_block={:.6f}, "
-       "await_commit_snapshot={:.6f}, write_average_hog_ages={:.6f}, "
-       "total={:.6f}, block_id={}",
-       stage_await_close_block, stage_await_commit_snapshot,
-       stage_write_average_hog_ages, timer.elapsed(), cache.block_id);
+  info("commit_block() stages: await_commit_snapshot={:.6f}, "
+       "write_average_hog_ages={:.6f}, total={:.6f}, block_id={}",
+       stage_await_commit_snapshot, stage_write_average_hog_ages,
+       timer.elapsed(), cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
@@ -1209,7 +1194,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   SHA256Hash events_hash{};
   {
     EventBlockResult result =
-        co_await eventsched_get_block_hash(cache.block_id);
+        co_await eventsched_close_block(cache.block_id,
+                                        scheduler_->current_block());
     CHECK_EQ(result.error(), RPCError::kRPCNone);
     events_hash = result.root_hash();
   }

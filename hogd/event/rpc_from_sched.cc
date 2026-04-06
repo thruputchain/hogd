@@ -49,18 +49,6 @@ EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-EventMempoolRpc::eventsched_get_block_hash(BlockID block_id)
-{
-  auto r = co_await ctx_.get_block_hash(block_id);
-  if (!r) {
-    co_return EventBlockResult{to_rpc_error(r.error().code())};
-  }
-  EventBlockResult result(RPCError::kRPCNone);
-  result.root_hash() = r.value();
-  co_return result;
-}
-
-x23::Async<EventBlockResult>
 EventMempoolRpc::eventsched_close_block(BlockID block_id,
                                         BlockHeight block_height)
 {
