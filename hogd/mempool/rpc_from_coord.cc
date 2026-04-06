@@ -634,10 +634,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   }
   record_stage(stage_spawn_finish_calls);
 
-  x23::Async<EventBlockResult> event_close_block_handle =
-      eventsched_close_block(cache.block_id, db_tip.height + 1);
   x23::Async<DbBlockResult> close_snapshot_handle =
       close_snapshot(cache.block_id);
+  x23::Async<EventBlockResult> event_close_block_handle =
+      eventsched_close_block(cache.block_id, db_tip.height + 1);
 
   SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
   record_stage(stage_generate_txset_hash);
@@ -1213,10 +1213,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                      .prev_block_hash = nomination.prev_block_hash};
   SHA256Hash block_hash = sha256(header);
   if (block_hash != nomination.block_hash) {
+    info("schedulercoord_validate failed here");
     co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
-    co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
@@ -1342,18 +1342,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   else {
     // We are committing a block that we validated.
     handles.push_back(commit_block(validated_block_cache_[block_id]));
-    if (nominated_block_cache_.block_id) {
-      // We nominated a block, so we need to abandon the block.
-      handles.push_back(abandon_block(nominated_block_cache_));
-    }
     last_committed_block_ = validated_block_cache_[block_id].db_tip;
     info("setting last_committed_block_ height to {}",
          validated_block_cache_[block_id].db_tip.height);
-  }
-  for (const auto &[_, cache] : validated_block_cache_) {
-    if (cache.block_id != block_id) {
-      handles.push_back(abandon_block(cache));
-    }
   }
   record_stage(stage_build_handles);
 
