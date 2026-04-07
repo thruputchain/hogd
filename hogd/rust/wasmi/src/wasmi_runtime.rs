@@ -58,69 +58,86 @@ impl WasmiRuntime {
         hash: &[u8; 32],
         context: &mut WasmiContext,
         userctx: *mut c_void,
-    ) -> Option<WasmiRuntime> {
+    ) -> Result<Option<WasmiRuntime>, SystemErrorCode> {
         let (module, linker) = if context.has_module_cache() {
             if let Some(module) = context.get_cached_module(hash) {
                 (module.module, module.linker)
             } else {
                 let linker = context.linker();
 
-                let module =
-                    unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                        .inspect_err(|_e| {
-                            debug_log!(eprintln!(
-                                "Module new_unchecked error: {_e}"
-                            ))
-                        })
-                        .ok()?;
+                let module = match unsafe {
+                    Module::new_unchecked(linker.engine(), bytes)
+                } {
+                    Ok(m) => m,
+                    Err(_e) => {
+                        debug_log!(eprintln!(
+                            "Module new_unchecked error: {_e}"
+                        ));
+                        return Ok(None);
+                    }
+                };
 
                 if !check_memory_limit(&module) {
                     debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
-                    return None;
+                    return Ok(None);
                 }
                 context.put_cached_module(hash, &module, &linker);
                 (module, linker)
             }
         } else {
             let linker = context.linker();
-            let module =
-                unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                    .inspect_err(|_e| {
-                        debug_log!(eprintln!(
-                            "Module new_unchecked error: {_e}"
-                        ))
-                    })
-                    .ok()?;
+            let module = match unsafe {
+                Module::new_unchecked(linker.engine(), bytes)
+            } {
+                Ok(m) => m,
+                Err(_e) => {
+                    debug_log!(eprintln!(
+                        "Module new_unchecked error: {_e}"
+                    ));
+                    return Ok(None);
+                }
+            };
 
             if !check_memory_limit(&module) {
                 debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
-                return None;
+                return Ok(None);
             }
             (module, linker)
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = linker
-            .instantiate(&mut store, &module)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error instantiating store: {_e}"))
-            })
-            .ok()?;
+        let instance_result = match linker.instantiate(&mut store, &module) {
+            Ok(r) => r,
+            Err(_e) => {
+                debug_log!(eprintln!("Error instantiating store: {_e}"));
+                return Ok(None);
+            }
+        };
 
-        let instance = instance_result
-            .ensure_no_start(&mut store)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error ensuring no start: {_e}"))
-            })
-            .ok()?;
-        if let Some(stack_limit_global) =
-            instance.get_global(&store, "__groundhog_stack_limit")
+        let instance = match instance_result.ensure_no_start(&mut store) {
+            Ok(i) => i,
+            Err(_e) => {
+                debug_log!(eprintln!("Error ensuring no start: {_e}"));
+                return Ok(None);
+            }
+        };
+        let stack_limit_global = match instance
+            .get_global(&store, "__groundhog_stack_limit")
         {
-            stack_limit_global
-                .set(&mut store, wasmi::Val::I64(4096))
-                .expect("__groundhog_stack_limit must be a mutable i64 global");
+            Some(g) => g,
+            None => {
+                eprintln!("Unrecoverable: instrumented module missing __groundhog_stack_limit");
+                return Err(SystemErrorCode::kSystemUnrecoverable);
+            }
+        };
+        if stack_limit_global
+            .set(&mut store, wasmi::Val::I64(4096))
+            .is_err()
+        {
+            eprintln!("Unrecoverable: failed to set __groundhog_stack_limit");
+            return Err(SystemErrorCode::kSystemUnrecoverable);
         }
-        Some(Self { store, instance })
+        Ok(Some(Self { store, instance }))
     }
 
     fn invoke(&mut self, method: &str) -> WasmiInvokeResult {
@@ -243,9 +260,12 @@ pub unsafe extern "C" fn new_wasmi_runtime(
     };
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
-        Some(res) => Box::new(res),
-        None => {
+        Ok(Some(res)) => Box::new(res),
+        Ok(None) => {
             return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
+        }
+        Err(code) => {
+            return NewWasmiRuntimeResult::new(Err(code));
         }
     };
 
