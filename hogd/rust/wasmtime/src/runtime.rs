@@ -98,12 +98,13 @@ impl WasmtimeRuntime {
                 return Err(SystemErrorCode::kSystemUnrecoverable);
             }
         };
-        let stack_limit_global = instance
-            .get_global(&mut store, "__groundhog_stack_limit")
-            .expect("instrumented module must export __groundhog_stack_limit");
-        stack_limit_global
-            .set(&mut store, wasmtime::Val::I64(4096))
-            .expect("__groundhog_stack_limit must be a mutable i64 global");
+        if let Some(stack_limit_global) =
+            instance.get_global(&mut store, "__groundhog_stack_limit")
+        {
+            stack_limit_global
+                .set(&mut store, wasmtime::Val::I64(4096))
+                .expect("__groundhog_stack_limit must be a mutable i64 global");
+        }
         Ok(Some(Self { store, instance }))
     }
 
