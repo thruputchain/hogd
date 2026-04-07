@@ -1,5 +1,9 @@
 #include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
 #include <utility>
 
 #include "hogd/rust/wasm_meter/bindings.h"
