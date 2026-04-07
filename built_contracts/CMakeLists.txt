@@ -10,6 +10,7 @@ add_library(contract_loader
 target_link_libraries(contract_loader
   x23
   protocol
+  unified_lib
 )
 
 target_include_directories(contract_loader PUBLIC
