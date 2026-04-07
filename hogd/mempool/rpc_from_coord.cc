@@ -687,9 +687,10 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
        "generate_txset_hash={:.6f}, serialize_nomination={:.6f}, "
        "close_snapshot={:.6f}, event_close_block={:.6f}, "
        "generate_block_hash={:.6f}, await_finish_calls={:.6f}, "
-       "total={:.6f}" stage_spawn_finish_calls,
-       stage_generate_txset_hash, stage_serialize_nomination,
-       stage_close_snapshot, stage_event_close_block, stage_generate_block_hash,
+       "total={:.6f}",
+       stage_spawn_finish_calls, stage_generate_txset_hash,
+       stage_serialize_nomination, stage_close_snapshot,
+       stage_event_close_block, stage_generate_block_hash,
        stage_await_finish_calls, timer.elapsed());
   co_return;
 }
