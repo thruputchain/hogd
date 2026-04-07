@@ -1179,23 +1179,29 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   info("schedulercoord_validate here");
+  x23::Async<void> finish_block_handle = finish_all_executors(cache.block_id);
   {
-    DbBlockResult result = co_await close_snapshot(cache.block_id);
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    cache.db_tip.db_hash = result.db_hash();
-  }
-  info("schedulercoord_validate here");
-  ElapsedTimer timer;
-  {
-    EventBlockResult result =
-        co_await eventsched_close_block(cache.block_id,
-                                        scheduler_->current_block() + 1);
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-    cache.db_tip.events_hash = result.root_hash();
-  }
+    x23::Async<DbBlockResult> close_snapshot_handle =
+        close_snapshot(cache.block_id);
+    x23::Async<EventBlockResult> event_close_block_handle =
+        eventsched_close_block(cache.block_id, scheduler_->current_block() + 1);
 
-  info("schedulercoord_validate here, eventsched_close_block took {}s",
-       timer.elapsed());
+    {
+      DbBlockResult result = co_await close_snapshot_handle;
+      CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+      cache.db_tip.db_hash = result.db_hash();
+    }
+
+    info("schedulercoord_validate here");
+    {
+      ElapsedTimer timer;
+      EventBlockResult result = co_await event_close_block_handle;
+      CHECK_EQ(result.error(), RPCError::kRPCNone);
+      cache.db_tip.events_hash = result.root_hash();
+      info("schedulercoord_validate here, eventsched_close_block took {}s",
+           timer.elapsed());
+    }
+  }
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
@@ -1211,14 +1217,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     info("schedulercoord_validate failed here");
     co_await scheduler_->add_txs(cache.txs);
 
-    co_await finish_all_executors(cache.block_id);
+    co_await finish_block_handle;
     co_await decrement_num_validations_in_progress();
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   info("schedulercoord_validate here");
-  co_await finish_all_executors(cache.block_id);
+  co_await finish_block_handle;
 
   info("schedulercoord_validate here");
   cache.db_tip = DbTip{.height = nomination.block_height,
