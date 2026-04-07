@@ -117,10 +117,7 @@ impl WasmiRuntime {
             .get_global(&store, "__groundhog_stack_limit")
             .expect("instrumented module must export __groundhog_stack_limit");
         stack_limit_global
-            .set(
-                &mut store,
-                wasmi::Val::I64(4096),
-            )
+            .set(&mut store, wasmi::Val::I64(4096))
             .expect("__groundhog_stack_limit must be a mutable i64 global");
         Some(Self { store, instance })
     }

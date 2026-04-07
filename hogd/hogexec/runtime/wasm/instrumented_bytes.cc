@@ -7,8 +7,7 @@
 namespace hogd {
 
 InstrumentedBytes::InstrumentedBytes(uint8_t *data, size_t len)
-  : data_(data)
-  , len_(len)
+  : data_(data), len_(len)
 {}
 
 InstrumentedBytes::~InstrumentedBytes()
@@ -19,8 +18,8 @@ InstrumentedBytes::~InstrumentedBytes()
 }
 
 InstrumentedBytes::InstrumentedBytes(InstrumentedBytes &&other) noexcept
-  : data_(std::exchange(other.data_, nullptr))
-  , len_(std::exchange(other.len_, 0))
+  : data_(std::exchange(other.data_, nullptr)),
+    len_(std::exchange(other.len_, 0))
 {}
 
 InstrumentedBytes &
