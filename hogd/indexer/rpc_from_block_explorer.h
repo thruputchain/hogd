@@ -38,6 +38,17 @@ public:
     co_return ret;
   }
 
+  x23::Async<IdentifiedEventBatch>
+  get_contract_events(const ContractAddress &address, BlockHeight start_height,
+                      BlockHeight end_height)
+  {
+    auto status = db_.get_contract_events(start_height, end_height, address);
+    if (!status) {
+      co_return IdentifiedEventBatch{};
+    }
+    co_return IdentifiedEventBatch(std::from_range, std::move(*status));
+  }
+
 private:
   IndexDB &db_;
 };
