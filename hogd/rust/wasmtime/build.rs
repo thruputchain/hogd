@@ -21,7 +21,9 @@ fn convert_wat_to_wasm(
 
     // Instrument with stack limiting
     let wasm_bytes = groundhog_wasm_meter::instrument(&wasm_bytes)
-        .unwrap_or_else(|e| panic!("Failed to instrument {}: {}", wat_filename, e));
+        .unwrap_or_else(|e| {
+            panic!("Failed to instrument {}: {}", wat_filename, e)
+        });
 
     // Write the WASM file to the build output directory
     fs::write(&wasm_path, wasm_bytes)
