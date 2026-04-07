@@ -239,8 +239,13 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 {
   // Best-effort cleanup helper used when we need to shut down/finish a block
   // across all executor clients in a uniform way.
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
-    co_await finish_block(block_id, /*executor_idx=*/i);
+    handles.push_back(finish_block(block_id, /*executor_idx=*/i));
+  }
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
   }
 }
 
@@ -476,12 +481,7 @@ MempoolCoordinatorRpc::initialize_block(const PendingBlock &cache)
     }
     CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
              RPCError::kRPCNone);
-    for (size_t i = 0; i < open_proposal_block_handler_ret.size(); i++) {
-      if (open_proposal_block_handler_ret[i] == ExecResult::ExecResultOK) {
-        co_await finish_block(cache.block_id,
-                              /*executor_idx=*/i);
-      }
-    }
+    co_await finish_all_executors(cache.block_id);
     record_stage(stage_cleanup_failures);
     record_stage(stage_finalize);
 
@@ -629,11 +629,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
 
   // Gracefully shut down executor work and send the nomination chunks
   // (including the final block hash) back to the coordinator.
-  x23::Vec<x23::Async<void>> finish_block_handles;
-  for (size_t i = 0; i < exec_clients_.size(); i++) {
-    finish_block_handles.push_back(
-        finish_block(cache.block_id, /*executor_idx=*/i));
-  }
+  x23::Async<void> finish_block_handle = finish_all_executors(cache.block_id);
   record_stage(stage_spawn_finish_calls);
 
   x23::Async<DbBlockResult> close_snapshot_handle =
@@ -684,20 +680,18 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
     record_stage(stage_generate_block_hash);
   }
 
-  for (x23::Async<void> &handle : finish_block_handles) {
-    co_await handle;
-  }
+  co_await finish_block_handle;
   record_stage(stage_await_finish_calls);
 
   info("finish_nominating_block() stages: spawn_finish_calls={:.6f}, "
        "generate_txset_hash={:.6f}, serialize_nomination={:.6f}, "
        "close_snapshot={:.6f}, event_close_block={:.6f}, "
-       "generate_block_hash={:.6f}, await_finish_calls={:.6f}, total={:.6f}, "
-       "finish_handles={}",
+       "generate_block_hash={:.6f}, await_finish_calls={:.6f}, "
+       "total={:.6f}",
        stage_spawn_finish_calls, stage_generate_txset_hash,
        stage_serialize_nomination, stage_close_snapshot,
        stage_event_close_block, stage_generate_block_hash,
-       stage_await_finish_calls, timer.elapsed(), finish_block_handles.size());
+       stage_await_finish_calls, timer.elapsed());
   co_return;
 }
 
@@ -1118,11 +1112,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   }
   info("schedulercoord_validate here");
   if (!open_validation_block_success) {
-    for (size_t i = 0; i < exec_clients_.size(); i++) {
-      if (open_validation_block_ret[i] == ExecResult::ExecResultOK) {
-        co_await finish_block(cache.block_id, /*executor_idx=*/i);
-      }
-    }
+    co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
     info("schedulercoord_validate ret");
@@ -1189,21 +1179,29 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   info("schedulercoord_validate here");
+  x23::Async<void> finish_block_handle = finish_all_executors(cache.block_id);
   {
-    DbBlockResult result = co_await close_snapshot(cache.block_id);
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-    cache.db_tip.db_hash = result.db_hash();
-  }
-  info("schedulercoord_validate here");
-  {
-    EventBlockResult result =
-        co_await eventsched_close_block(cache.block_id,
-                                        scheduler_->current_block() + 1);
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-    cache.db_tip.events_hash = result.root_hash();
-  }
+    x23::Async<DbBlockResult> close_snapshot_handle =
+        close_snapshot(cache.block_id);
+    x23::Async<EventBlockResult> event_close_block_handle =
+        eventsched_close_block(cache.block_id, scheduler_->current_block() + 1);
 
-  info("schedulercoord_validate here");
+    {
+      DbBlockResult result = co_await close_snapshot_handle;
+      CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+      cache.db_tip.db_hash = result.db_hash();
+    }
+
+    info("schedulercoord_validate here");
+    {
+      ElapsedTimer timer;
+      EventBlockResult result = co_await event_close_block_handle;
+      CHECK_EQ(result.error(), RPCError::kRPCNone);
+      cache.db_tip.events_hash = result.root_hash();
+      info("schedulercoord_validate here, eventsched_close_block took {}s",
+           timer.elapsed());
+    }
+  }
   // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
   // because we already checked above that all of these hashes correspond to
   // vetted txs.
@@ -1219,14 +1217,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     info("schedulercoord_validate failed here");
     co_await scheduler_->add_txs(cache.txs);
 
-    co_await finish_all_executors(cache.block_id);
+    co_await finish_block_handle;
     co_await decrement_num_validations_in_progress();
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   info("schedulercoord_validate here");
-  co_await finish_all_executors(cache.block_id);
+  co_await finish_block_handle;
 
   info("schedulercoord_validate here");
   cache.db_tip = DbTip{.height = nomination.block_height,
