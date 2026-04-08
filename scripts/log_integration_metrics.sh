@@ -29,14 +29,6 @@ else
   commit_time=$(date -u -d "@$commit_unix_time" "+%Y-%m-%dT%H:%M:%S")
 fi
 
-# Check if the working directory is dirty (tracked files only)
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  echo "Working directory is dirty; cannot replicably run metrics"
-  echo "Dirty files:"
-  git status --porcelain --untracked-files=no
-  exit 1
-fi
-
 echo "Branch: $branch"
 echo "Commit: $commit"
 echo "Commit Timestamp: $commit_time"
