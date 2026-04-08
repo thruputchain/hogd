@@ -91,9 +91,7 @@ impl WasmiRuntime {
             } {
                 Ok(m) => m,
                 Err(_e) => {
-                    debug_log!(eprintln!(
-                        "Module new_unchecked error: {_e}"
-                    ));
+                    debug_log!(eprintln!("Module new_unchecked error: {_e}"));
                     return Ok(None);
                 }
             };
