@@ -22,7 +22,7 @@ wasmtime = { version = "42.0.0", features = ["winch", "runtime", "cranelift", "p
 siphasher = { version = "1.0.1", default-features = false }
 hogexec-internal = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git", package = "hogexec-internal" }
 groundhog-xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git", features = ["xdrs"] }
-groundhog-wasm-meter = { version = "0.1.1", registry = "groundhog" }
+groundhog-wasm-meter = { version = "0.1.2", registry = "groundhog" }
 
 # Shared optimization profiles
 [profile.release]
