@@ -265,12 +265,14 @@ EventRPCContext::get_context_slow(BlockID block_id)
   if (it == event_block_contexts_.end()) {
     // Avoid building an unbounded unlock->resume recursion chain under heavy
     // lock contention when many coroutines miss in the per-thread cache.
-    co_await g.reset_and_return(nullptr);
+    // Prefer resuming the awaiting caller inline so this hot path avoids an
+    // extra thread-pool handoff on return.
+    co_await g.reset_and_return_prefer_caller(nullptr);
     panic("unreachable");
   }
 
   if (!it->second.try_acquire_reference()) {
-    co_await g.reset_and_return(nullptr);
+    co_await g.reset_and_return_prefer_caller(nullptr);
     panic("unreachable");
   }
 
@@ -280,7 +282,7 @@ EventRPCContext::get_context_slow(BlockID block_id)
     std::scoped_lock g(cache_->mtx_);
     cache_->contexts_.emplace(block_id, &it->second);
   }
-  co_await g.reset_and_return(&it->second);
+  co_await g.reset_and_return_prefer_caller(&it->second);
   panic("unreachable");
 }
 

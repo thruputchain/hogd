@@ -174,6 +174,7 @@ private:
   };
 
   template<typename T> struct AwaitReleaseAndReturn;
+  template<typename T> struct AwaitReleaseAndReturnPreferCaller;
 
 public:
   // Release the lock and immediately destroy the invoking coroutine,
@@ -187,6 +188,11 @@ public:
   template<typename T>
   [[nodiscard]] AwaitReleaseAndReturn<T> unlock_and_return(LockerState *ls,
                                                            T t);
+  [[nodiscard]] AwaitReleaseAndReturnPreferCaller<void>
+  unlock_and_return_prefer_caller(LockerState *ls);
+  template<typename T>
+  [[nodiscard]] AwaitReleaseAndReturnPreferCaller<T>
+  unlock_and_return_prefer_caller(LockerState *ls, T t);
 
   // True while lock is held
   bool busy() const { return last_.load(std::memory_order_acquire) != nullptr; }
@@ -282,6 +288,66 @@ struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn
   }
 };
 
+template<>
+struct [[nodiscard]] CoroLock::AwaitReleaseAndReturnPreferCaller<void> {
+  AwaitReleaseAndReturnPreferCaller(CoroLock &lk, LockerState *ls)
+    : lk_(lk), ls_(ls)
+  {}
+  bool await_ready() noexcept { return false; }
+  template<typename Promise>
+  auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
+  {
+    Promise &p = moriturus.promise();
+    p.return_void(); // Coroutine must return void
+    return finish_suspend(moriturus);
+  }
+  void await_resume() noexcept { std::unreachable(); }
+
+protected:
+  template<typename Promise>
+  std::coroutine_handle<>
+  finish_suspend(std::coroutine_handle<Promise> moriturus) noexcept
+  {
+    std::coroutine_handle<> next_locker = lk_.next(ls_);
+    std::coroutine_handle<> next_coro = nullptr;
+    if constexpr (requires {
+                    next_coro = detail::emulate_final_suspend(moriturus);
+                  })
+      next_coro = detail::emulate_final_suspend(moriturus);
+    else
+      detail::emulate_final_suspend(moriturus);
+    if (!next_locker)
+      return next_coro ? next_coro : std::noop_coroutine();
+    if (!next_coro)
+      return next_locker;
+    // Preserve bounded stack growth, but keep the awaiting caller on the
+    // current thread so hot async return paths do not pay a thread-pool hop.
+    detail::resume_in_another_thread(CoroHandle{next_locker, nullptr});
+    return next_coro;
+  }
+
+private:
+  CoroLock &lk_;
+  LockerState *ls_;
+};
+template<typename T>
+struct [[nodiscard]] CoroLock::AwaitReleaseAndReturnPreferCaller
+  : CoroLock::AwaitReleaseAndReturnPreferCaller<void> {
+  using super = CoroLock::AwaitReleaseAndReturnPreferCaller<void>;
+  T t_;
+
+  AwaitReleaseAndReturnPreferCaller(CoroLock &lk, LockerState *ls, T t)
+    : super(lk, ls), t_(std::move(t))
+  {}
+  template<typename Promise>
+  auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
+  {
+    Promise &p = moriturus.promise();
+    p.return_value(std::move(t_));
+    return this->finish_suspend(moriturus);
+  }
+};
+
 inline CoroLock::AwaitReleaseAndReturn<void>
 CoroLock::unlock_and_return(CoroLock::LockerState *ls)
 {
@@ -292,6 +358,17 @@ inline CoroLock::AwaitReleaseAndReturn<T>
 CoroLock::unlock_and_return(LockerState *ls, T t)
 {
   return AwaitReleaseAndReturn<T>{*this, ls, std::move(t)};
+}
+inline CoroLock::AwaitReleaseAndReturnPreferCaller<void>
+CoroLock::unlock_and_return_prefer_caller(CoroLock::LockerState *ls)
+{
+  return AwaitReleaseAndReturnPreferCaller<void>{*this, ls};
+}
+template<typename T>
+inline CoroLock::AwaitReleaseAndReturnPreferCaller<T>
+CoroLock::unlock_and_return_prefer_caller(LockerState *ls, T t)
+{
+  return AwaitReleaseAndReturnPreferCaller<T>{*this, ls, std::move(t)};
 }
 
 // A CoroGuard is similar to a lock_guard for a CoroLock.  However,
@@ -350,6 +427,17 @@ struct CoroGuard : CoroLock::LockerState {
     x23assert(lkp_);
     return std::exchange(lkp_, nullptr)
         ->unlock_and_return(this, std::forward<decltype(t)>(t));
+  }
+  [[nodiscard]] auto reset_and_return_prefer_caller()
+  {
+    x23assert(lkp_);
+    return std::exchange(lkp_, nullptr)->unlock_and_return_prefer_caller(this);
+  }
+  [[nodiscard]] auto reset_and_return_prefer_caller(auto &&t)
+  {
+    x23assert(lkp_);
+    return std::exchange(lkp_, nullptr)
+        ->unlock_and_return_prefer_caller(this, std::forward<decltype(t)>(t));
   }
 };
 
