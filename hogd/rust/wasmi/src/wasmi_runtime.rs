@@ -128,6 +128,7 @@ impl WasmiRuntime {
                 return Err(SystemErrorCode::kSystemUnrecoverable);
             }
         };
+        // 4096 = 1/4 of max_wasm_stack (16KB) configured in global_context.rs
         if stack_limit_global
             .set(&mut store, wasmi::Val::I64(4096))
             .is_err()

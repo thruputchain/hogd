@@ -51,7 +51,7 @@ pub unsafe extern "C" fn wasm_meter_instrument(
 /// Must not be called more than once for the same allocation.
 #[no_mangle]
 pub unsafe extern "C" fn wasm_meter_free(ptr: *mut u8, len: usize) {
-    if !ptr.is_null() && len > 0 {
+    if !ptr.is_null() {
         unsafe {
             drop(Box::from_raw(slice::from_raw_parts_mut(ptr, len)));
         }

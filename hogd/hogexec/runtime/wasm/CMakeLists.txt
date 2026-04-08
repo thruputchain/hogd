@@ -42,6 +42,11 @@ target_link_libraries(
   hogd_interface
 )
 
+add_dependencies(
+  wasm_runtime_test_objects
+  generate_wasm_meter_ffi_h
+)
+
 target_include_directories(
   wasm_runtime_test_objects
   PRIVATE
