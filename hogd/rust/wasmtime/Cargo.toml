@@ -10,9 +10,11 @@ wasmtime = { workspace = true }
 common = {path = "../common"}
 libc = "0.2"
 synchronized_map = { path = "../synchronized_map" }
+groundhog-wasm-meter = { workspace = true }
 
 [build-dependencies]
 wat = "1.219.1"
+groundhog-wasm-meter = { workspace = true }
 
 [features]
 debug_logging = []

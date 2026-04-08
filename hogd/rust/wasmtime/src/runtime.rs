@@ -98,6 +98,23 @@ impl WasmtimeRuntime {
                 return Err(SystemErrorCode::kSystemUnrecoverable);
             }
         };
+        let stack_limit_global = match instance
+            .get_global(&mut store, "__groundhog_stack_limit")
+        {
+            Some(g) => g,
+            None => {
+                eprintln!("Unrecoverable: instrumented module missing __groundhog_stack_limit");
+                return Err(SystemErrorCode::kSystemUnrecoverable);
+            }
+        };
+        // 4096 = 1/4 of max_wasm_stack (16KB) configured in global_context.rs
+        if stack_limit_global
+            .set(&mut store, wasmtime::Val::I64(4096))
+            .is_err()
+        {
+            eprintln!("Unrecoverable: failed to set __groundhog_stack_limit");
+            return Err(SystemErrorCode::kSystemUnrecoverable);
+        }
         Ok(Some(Self { store, instance }))
     }
 

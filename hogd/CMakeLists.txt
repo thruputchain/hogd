@@ -69,6 +69,7 @@ add_dependencies(
   generate_wasmtime_ffi_h
   generate_contract_types_ffi_h
   generate_crypto_ffi_h
+  generate_wasm_meter_ffi_h
   roundtrip_hh
   xdrtest
 )

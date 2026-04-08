@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <stdexcept>
+
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -69,21 +71,12 @@ TEST_P(InstantiateTest, InstantiateUnexportedMemory)
   EXPECT_FALSE(runtime.value());
 }
 
+// Modules with a start section are now rejected at instrumentation time
+// by wasm_meter (which cannot set the stack budget before start runs).
 TEST_P(InstantiateTest, InstantiateNoStart)
 {
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() = test::load_wasm_from_file("test_no_start.wasm");
-  make_syscall_handler(contract);
-  auto deployed_contract_hash = DeployedContractHash{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler());
-  ASSERT_TRUE(runtime.has_value());
-  EXPECT_FALSE(runtime.value());
+  EXPECT_THROW(test::load_wasm_from_file("test_no_start.wasm"),
+               std::runtime_error);
 }
 
 // Regression test for audit issue #1: instantiation of a module with an

@@ -42,8 +42,33 @@ target_link_libraries(
   hogd_interface
 )
 
+add_dependencies(
+  wasm_runtime_test_objects
+  generate_wasm_meter_ffi_h
+)
+
 target_include_directories(
   wasm_runtime_test_objects
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_library(wasm_meter_objects OBJECT
+  instrumented_bytes.cc
+)
+
+target_link_libraries(
+  wasm_meter_objects
+  hogd_interface
+)
+
+add_dependencies(
+  wasm_meter_objects
+  generate_wasm_meter_ffi_h
+)
+
+target_include_directories(
+  wasm_meter_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
@@ -52,6 +77,7 @@ add_executable(
   wasm_runtime_test
   wasm_runtime_test_main.cc
   $<TARGET_OBJECTS:wasm_runtime_test_objects>
+  $<TARGET_OBJECTS:wasm_meter_objects>
 )
 
 target_link_libraries(
