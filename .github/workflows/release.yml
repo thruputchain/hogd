@@ -88,6 +88,11 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: groundhog-go/chuckd/go.mod
+
       - name: Configure Environment
         run: |
           echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
