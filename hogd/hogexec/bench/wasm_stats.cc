@@ -49,7 +49,7 @@ load_wasm_file(std::string const &filename)
     throw std::runtime_error("Failed to instrument WASM file: " + filename);
   }
   contents.clear();
-  contents.append_range(instrumented->data());
+  contents.insert(contents.end(), instrumented->data().begin(), instrumented->data().end());
 
   return contents;
 }
