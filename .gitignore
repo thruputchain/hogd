@@ -1,5 +1,6 @@
 **/.DS_STORE
 *.a
+*.codex
 *.combined
 *.core
 *.d
