@@ -88,6 +88,11 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: groundhog-go/chuckd/go.mod
+
       - name: Configure Environment
         run: |
           echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
@@ -103,7 +108,20 @@ jobs:
         run: ./scripts/fetch.sh
 
       - name: Build GCC Release
-        run: ./scripts/build.sh -d build/release -t Release -c gcc
+        run: |
+          ./scripts/build.sh \
+            -d build/release \
+            -t Release \
+            -c gcc \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec
+
+      - name: Build Go coordinator artifacts
+        run: |
+          pushd build/release >/dev/null
+          ../../groundhog-go/chuckd/scripts/build_chuckd.sh
+          ../../groundhog-go/chuckd/scripts/build_scpd.sh
+          popd >/dev/null
 
       - name: Prepare artifacts
         run: |
@@ -114,6 +132,8 @@ jobs:
           cp build/release/hogd/auth/auth_exec artifacts/
           cp build/release/hogd/event/event_exec artifacts/
           cp build/release/hogd/indexer/indexer_exec artifacts/
+          cp build/release/chuckd.dev artifacts/
+          cp build/release/scpd.dev artifacts/
           chmod +x artifacts/*
           cd artifacts && sha256sum * > SHA256SUMS
 
