@@ -115,19 +115,25 @@ elseif(UNIX)
   target_link_options(test_ffi PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
-# Set rpath so test_ffi can find the Rust cdylib in the same directory.
-# Windows doesn't need this - it searches the DLL's directory by default.
-if(APPLE)
-  set_target_properties(test_ffi PROPERTIES
-    BUILD_RPATH "@loader_path"
-    INSTALL_RPATH "@loader_path"
-  )
-elseif(UNIX)
-  set_target_properties(test_ffi PROPERTIES
-    BUILD_RPATH "$ORIGIN"
-    INSTALL_RPATH "$ORIGIN"
-  )
-endif()
+# Embed the test_ffi version into the shared library.
+# macOS: sets Mach-O compatibility/current version fields.
+# Linux: sets ELF soname and creates the .so symlink chain.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/test_bindings.h _ver_lines
+     REGEX "#define TEST_FFI_VERSION_(MAJOR|MINOR|PATCH)")
+foreach(_line IN LISTS _ver_lines)
+  if(_line MATCHES "VERSION_MAJOR +([0-9]+)")
+    set(_ver_major ${CMAKE_MATCH_1})
+  elseif(_line MATCHES "VERSION_MINOR +([0-9]+)")
+    set(_ver_minor ${CMAKE_MATCH_1})
+  elseif(_line MATCHES "VERSION_PATCH +([0-9]+)")
+    set(_ver_patch ${CMAKE_MATCH_1})
+  endif()
+endforeach()
+set_target_properties(test_ffi PROPERTIES
+  VERSION "${_ver_major}.${_ver_minor}.${_ver_patch}"
+  SOVERSION "${_ver_major}"
+)
+message(STATUS "test_ffi version: ${_ver_major}.${_ver_minor}.${_ver_patch}")
 
 # Tests link against the object files directly so they can reach internal
 # C++ symbols that the dylib intentionally hides.
