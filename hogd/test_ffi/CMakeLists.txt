@@ -115,29 +115,6 @@ elseif(UNIX)
   target_link_options(test_ffi PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
-# Embed the test_ffi version into the shared library.
-# macOS: sets Mach-O compatibility/current version fields.
-# Linux: sets ELF soname and creates the .so symlink chain.
-file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/test_bindings.h _ver_lines
-     REGEX "#define TEST_FFI_VERSION_(MAJOR|MINOR|PATCH)")
-foreach(_line IN LISTS _ver_lines)
-  if(_line MATCHES "VERSION_MAJOR +([0-9]+)")
-    set(_ver_major ${CMAKE_MATCH_1})
-  elseif(_line MATCHES "VERSION_MINOR +([0-9]+)")
-    set(_ver_minor ${CMAKE_MATCH_1})
-  elseif(_line MATCHES "VERSION_PATCH +([0-9]+)")
-    set(_ver_patch ${CMAKE_MATCH_1})
-  endif()
-endforeach()
-if(NOT DEFINED _ver_major OR NOT DEFINED _ver_minor OR NOT DEFINED _ver_patch)
-  message(FATAL_ERROR "Failed to parse TEST_FFI_VERSION_* from test_bindings.h")
-endif()
-set_target_properties(test_ffi PROPERTIES
-  VERSION "${_ver_major}.${_ver_minor}.${_ver_patch}"
-  SOVERSION "${_ver_major}"
-)
-message(STATUS "test_ffi version: ${_ver_major}.${_ver_minor}.${_ver_patch}")
-
 # Tests link against the object files directly so they can reach internal
 # C++ symbols that the dylib intentionally hides.
 add_executable(

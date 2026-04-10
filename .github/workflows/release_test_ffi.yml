@@ -88,10 +88,10 @@ jobs:
 
       - name: Package Library
         run: |
-          cp -P build/hogd/test_ffi/libtest_ffi.so* release_artifacts/
+          cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so* test_bindings.h bindings.rs
+          tar -czf libtest_ffi-linux-x86_64.tar.gz libtest_ffi.so test_bindings.h bindings.rs
           sha256sum libtest_ffi-linux-x86_64.tar.gz > libtest_ffi-linux-x86_64.tar.gz.sha256
 
       - name: Show ccache stats
@@ -224,10 +224,10 @@ jobs:
 
       - name: Package Library
         run: |
-          cp -P build/hogd/test_ffi/libtest_ffi.so* release_artifacts/
+          cp build/hogd/test_ffi/libtest_ffi.so release_artifacts/
           cp hogd/test_ffi/test_bindings.h release_artifacts/
           cd release_artifacts
-          tar -czf libtest_ffi-linux-arm64.tar.gz libtest_ffi.so* test_bindings.h bindings.rs
+          tar -czf libtest_ffi-linux-arm64.tar.gz libtest_ffi.so test_bindings.h bindings.rs
           sha256sum libtest_ffi-linux-arm64.tar.gz > libtest_ffi-linux-arm64.tar.gz.sha256
 
       - name: Show ccache stats
