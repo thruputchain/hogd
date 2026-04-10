@@ -129,6 +129,9 @@ foreach(_line IN LISTS _ver_lines)
     set(_ver_patch ${CMAKE_MATCH_1})
   endif()
 endforeach()
+if(NOT DEFINED _ver_major OR NOT DEFINED _ver_minor OR NOT DEFINED _ver_patch)
+  message(FATAL_ERROR "Failed to parse TEST_FFI_VERSION_* from test_bindings.h")
+endif()
 set_target_properties(test_ffi PROPERTIES
   VERSION "${_ver_major}.${_ver_minor}.${_ver_patch}"
   SOVERSION "${_ver_major}"
