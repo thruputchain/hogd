@@ -54,10 +54,14 @@ def generate_header(
             return_type = map_type_from_typespec(return_typespec)
             err_type = None
             if "err" in method:
-                err_type = method[
-                    "err"
-                ]  # Possible TODO(geoff): swap the error type to a typespec, instead of a string
-                forward_decls.append(f"class {err_type};")
+                err = method["err"]
+                # err may be a list of error type names or a single string
+                if isinstance(err, list):
+                    err_type = err[0] if err else None
+                else:
+                    err_type = err
+                if err_type:
+                    forward_decls.append(f"class {err_type};")
 
             args = []
             for arg in method["args"]:
