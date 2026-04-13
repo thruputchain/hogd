@@ -10,15 +10,17 @@ print_usage() {
   printf "usage: scripts/build-pkg.sh [OPTION]...\n"
   printf -- "  -c sets the compiler (e.g., 'gcc', 'clang')\n"
   printf -- "  -d sets the build directory (default is 'build')\n"
+  printf -- "  -j sets the number of build jobs\n"
   printf -- "  -t sets the build type (can be 'Release' or 'Debug')\n"
 }
 
-while getopts 'c:d:t:' flag; do
+while getopts 'c:d:j:t:' flag; do
   case "${flag}" in
   c)
     COMPILER_FLAG="${OPTARG}"
     ;;
   d) BUILD_DIR_FLAG="${OPTARG}" ;;
+  j) BUILD_JOBS_FLAG="${OPTARG}" ;;
   t)
     if [[ "${OPTARG}" == "Debug" || "${OPTARG}" == "Release" ]]; then
       BUILD_TYPE_FLAG="${OPTARG}"
@@ -56,6 +58,10 @@ if [[ -n "${BUILD_TYPE_FLAG}" ]]; then
 fi
 BUILD_ARGS+=(-t "${BUILD_TYPE}")
 
+if [[ -n "${BUILD_JOBS_FLAG}" ]]; then
+  BUILD_ARGS+=(-j "${BUILD_JOBS_FLAG}")
+fi
+
 echo "building in ${BUILD_DIR}"
 
 # build
@@ -63,7 +69,7 @@ echo "building in ${BUILD_DIR}"
 # source ${HOGD_ROOT}/scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'building hogd'
-NPROC=$(nproc) ${SCRIPT_DIR}/build.sh "${BUILD_ARGS[@]}"
+${SCRIPT_DIR}/build.sh "${BUILD_ARGS[@]}"
 
 echo 'building chuckd & scpd'
 # These build scripts place the binaries in the current working directory, so we
