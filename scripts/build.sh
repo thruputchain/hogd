@@ -46,19 +46,21 @@ BUILD_DIR=build
 BUILD_TYPE=Release
 CMAKE_FLAGS=()
 DISABLE_CCACHE=
+BUILD_JOBS=
 
 print_usage() {
   printf "usage: scripts/build.sh [OPTION]...\n"
   printf -- "  -c sets the compiler (e.g., 'gcc', 'clang')\n"
   printf -- "  -f sets compiler flags (e.g., '-Werror')\n"
   printf -- "  -d sets the build directory (default is 'build')\n"
+  printf -- "  -j sets the number of make jobs (default is NPROC)\n"
   printf -- "  -t sets the build type (can be 'Release' or 'Debug')\n"
   printf -- "  -x sets cmake additional flags\n"
   printf -- "  -n configure but don't run make\n"
   printf -- "  -h disable ccache\n"
 }
 
-while getopts 'c:f:d:t:x:nh' flag; do
+while getopts 'c:f:d:j:t:x:nh' flag; do
   case "${flag}" in
   c)
     if [[ "${OPTARG}" == "gcc" ]]; then
@@ -71,6 +73,7 @@ while getopts 'c:f:d:t:x:nh' flag; do
     ;;
   f) CXX_FLAGS="${OPTARG}" ;;
   d) BUILD_DIR="${OPTARG}" ;;
+  j) BUILD_JOBS="${OPTARG}" ;;
   t)
     if [[ "${OPTARG}" == "Debug" || "${OPTARG}" == "Release" ]]; then
       BUILD_TYPE="${OPTARG}"
@@ -111,5 +114,9 @@ CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   "$ROOT_DIR"
 
 if test -z "$NO_MAKE"; then
-  exec make -j "$NPROC" -C "$BUILD_DIR" "$@"
+  if test -z "$BUILD_JOBS"; then
+    BUILD_JOBS="$NPROC"
+  fi
+
+  exec make -j "$BUILD_JOBS" -C "$BUILD_DIR" "$@"
 fi
