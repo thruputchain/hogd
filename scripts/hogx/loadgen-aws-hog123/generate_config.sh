@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_ip=96
-
 mkdir -p .hogx/cluster
 
 for cluster in 0 1; do
@@ -18,8 +16,15 @@ for cluster in 0 1; do
 
     first=true
     for i in $(seq "$start" "$end"); do
-      ip=$((base_ip + i))
-      full_ip="10.64.0.$ip"
+      if [ "$cluster" -eq 0 ]; then
+        # aws-hog0..7 → 10.64.0.96..103
+        ip=$((96 + i))
+        full_ip="10.64.0.$ip"
+      else
+        # aws-hog8..15 → 10.64.16.104..111
+        ip=$((104 + (i - 8)))
+        full_ip="10.64.16.$ip"
+      fi
 
       if [ "$first" = true ]; then
         first=false
