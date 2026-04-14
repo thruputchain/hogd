@@ -23,7 +23,7 @@ for i in $(seq 0 15); do
 done
 wait
 
-"$HOGX" -m 16 config together -a loadgen -t 2
-"$HOGX" -m 16 start -a loadgen --network-id 1
+"$HOGX" -m 2 config together -a loadgen -t 2
+"$HOGX" -m 2 start -a loadgen --network-id 1
 
 echo "using: export HOGX_HOME=${HOGX_HOME}"

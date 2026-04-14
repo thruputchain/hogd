@@ -3,19 +3,31 @@ set -euo pipefail
 
 base_ip=96
 
-# Create directories
 mkdir -p .hogx/cluster
 
-for i in $(seq 0 15); do
-  dir=".hogx/cluster/$i"
+for cluster in 0 1; do
+  dir=".hogx/cluster/$cluster"
   mkdir -p "$dir"
 
-  ip=$((base_ip + i))
-  full_ip="10.64.0.$ip"
+  start=$((cluster * 8))
+  end=$((start + 7))
 
-  cat > "$dir/cluster.json" <<EOF
-{
-  "host_defs": [
+  {
+    echo '{'
+    echo '  "host_defs": ['
+
+    first=true
+    for i in $(seq "$start" "$end"); do
+      ip=$((base_ip + i))
+      full_ip="10.64.0.$ip"
+
+      if [ "$first" = true ]; then
+        first=false
+      else
+        echo '    ,'
+      fi
+
+      cat <<EOF
     {
       "host_id": "aws-hog$i",
       "host_tags": [],
@@ -33,8 +45,11 @@ for i in $(seq 0 15); do
         "tmp_dir": "/tmp/hogx/tmp"
       }
     }
-  ],
-  "assembly_defs": []
-}
 EOF
+    done
+
+    echo '  ],'
+    echo '  "assembly_defs": []'
+    echo '}'
+  } > "$dir/cluster.json"
 done
