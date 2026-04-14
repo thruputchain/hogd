@@ -56,5 +56,5 @@ EOF
     echo '  ],'
     echo '  "assembly_defs": []'
     echo '}'
-  } > "$dir/cluster.json"
+  } >"$dir/cluster.json"
 done
