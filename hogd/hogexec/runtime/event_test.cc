@@ -183,7 +183,7 @@ TEST_F(EventTest, EventSuccess)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
@@ -296,12 +296,14 @@ TEST_F(EventTest, BadEventInputs)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
   auto tx_event_log = get_tx_event_log(tx_id);
-  ASSERT_FALSE(tx_event_log.has_value());
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log.value().exec_result, ExecResult::ExecResultOK);
+  ASSERT_TRUE(tx_event_log.value().events.empty());
 }
 
 TEST_F(EventTest, EventLengthIncludesTopics)
@@ -376,7 +378,7 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
@@ -662,7 +664,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   // Part 2: manual-revert entry alone
   EphemeralTxIdentifier tx_id_2;
@@ -683,7 +685,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto r2 = handler2.try_commit_transaction();
   ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
-  ASSERT_TRUE(handler2.emit_events()());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted)());
 
   advance_block();
 
@@ -714,7 +717,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
             make_vec<kMaxEventLength>("third_event"));
 
   auto tx_event_log_2 = get_tx_event_log(tx_id_2);
-  ASSERT_FALSE(tx_event_log_2.has_value());
+  ASSERT_TRUE(tx_event_log_2.has_value());
+  ASSERT_EQ(tx_event_log_2.value().exec_result,
+            ExecResult::ExecResultTxRootFrameReverted);
+  ASSERT_TRUE(tx_event_log_2.value().events.empty());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

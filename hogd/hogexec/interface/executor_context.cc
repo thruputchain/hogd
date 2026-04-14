@@ -138,7 +138,9 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
     break;
   }
 
-  if (exec_res == ExecResult::ExecResultOK) {
+  if (exec_res == ExecResult::ExecResultOK ||
+      exec_res == ExecResult::ExecResultTxDeterministicError ||
+      exec_res == ExecResult::ExecResultTxRootFrameReverted) {
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
@@ -155,7 +157,7 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
     //
     // Hence, when we go to await_event_return(), we know that this event call
     // will be awaited before this ExecutorContext is destroyed.
-    syscall_handler.emit_events()(
+    syscall_handler.emit_events(exec_res)(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return;
@@ -180,11 +182,13 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
-  if (exec_res == ExecResult::ExecResultOK) {
+  if (exec_res == ExecResult::ExecResultOK ||
+      exec_res == ExecResult::ExecResultTxDeterministicError ||
+      exec_res == ExecResult::ExecResultTxRootFrameReverted) {
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
-    syscall_handler.emit_events()(
+    syscall_handler.emit_events(exec_res)(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return void();

@@ -504,7 +504,8 @@ try_commit_transaction(void *syscall_handler) noexcept
     auto res = context->to_handler().try_commit_transaction();
     context->mark_committed_or_aborted();
     if (res == ExecResult::ExecResultOK) {
-      auto events_res = context->to_handler().emit_events()();
+      auto events_res =
+          context->to_handler().emit_events(ExecResult::ExecResultOK)();
       if (!events_res.has_value()) {
         error("failed to emit events: {}", events_res.error());
         return ForeignTryCommitResult{

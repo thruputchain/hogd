@@ -131,7 +131,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   // Advance block to commit the transaction
   advance_block();
@@ -230,7 +230,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
   auto commit_res1 = handler1.try_commit_transaction();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler1.emit_events()());
+  ASSERT_TRUE(handler1.emit_events(ExecResult::ExecResultOK)());
 
   // Second transaction in the same block: transfer to same receiver
   auto handler2 = make_new_system_call_handler(
@@ -248,7 +248,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
   auto commit_res2 = handler2.try_commit_transaction();
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler2.emit_events()());
+  ASSERT_TRUE(handler2.emit_events(ExecResult::ExecResultOK)());
 
   // Advance block to commit both transactions
   advance_block();
@@ -401,7 +401,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   // Advance block to commit the transaction
   advance_block();

@@ -230,7 +230,7 @@ protected:
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -266,7 +266,7 @@ protected:
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -295,7 +295,7 @@ protected:
     EXPECT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
 
     // Compute and return the channel ID (same algorithm as the contract)
@@ -329,7 +329,7 @@ protected:
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events()());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     }
     if (advance_after) {
       advance_block();
@@ -360,7 +360,7 @@ protected:
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events()());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     }
     if (advance_after) {
       advance_block();
@@ -391,7 +391,7 @@ protected:
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events()());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     }
     if (advance_after) {
       advance_block();
@@ -417,7 +417,7 @@ protected:
     }
     auto commit_res = handler.try_commit_transaction();
     if (commit_res == ExecResult::ExecResultOK) {
-      EXPECT_TRUE(handler.emit_events()());
+      EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     }
     if (advance_after) {
       advance_block();
@@ -542,7 +542,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -599,7 +599,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -657,7 +657,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -705,7 +705,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -754,7 +754,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -806,7 +806,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -862,7 +862,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 
@@ -912,7 +912,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
     advance_block();
   }
 

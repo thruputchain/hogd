@@ -768,18 +768,15 @@ SystemCallHandler::get_proposal_data() const
 }
 
 x23::Async<SystemStatus<void>>
-SystemCallHandler::emit_events()
+SystemCallHandler::emit_events(ExecResult exec_result)
 {
-  assert(last_frame_.has_value());
-  assert(cumulative_invoke_result_.is_root_success());
-  assert(root_invoke_succeeded_);
-  auto events = last_frame_.value().extract_events();
-  if (events.empty()) {
-    trace("No events to emit, skipping emit_events RPC");
-    co_return SystemStatus<void>{};
-  }
+  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded_);
+  auto events = (root_invoke_succeeded_ && last_frame_.has_value())
+                    ? last_frame_.value().extract_events()
+                    : x23::Vec<TxEmittedEvent>{};
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_source_tx_hash(),
+      .exec_result = exec_result,
       .events = std::move(events),
   });
 }
