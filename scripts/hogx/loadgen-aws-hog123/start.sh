@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -ex
 
@@ -13,13 +13,17 @@ rm -rf $HOGX_HOME
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 
-# remove /tmp/hogx from prior runs on all hosts
-for host in aws-hog0 aws-hog1 aws-hog2; do
-  ssh $host "rm -rf /tmp/hogx/*"
-  ssh $host "killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_exec loadgen_server || true"
+# remove /tmp/hogx from prior runs on all hosts in parallel
+for i in $(seq 0 15); do
+  host="aws-hog$i"
+  ssh "$host" '
+    rm -rf /tmp/hogx/* &&
+    killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_exec loadgen_server || true
+  ' &
 done
+wait
 
-"$HOGX" -m 3 config together -a loadgen -t 2
-"$HOGX" -m 3 start -a loadgen --network-id 1
+"$HOGX" -m 2 config together -a loadgen -t 2
+"$HOGX" -m 2 start -a loadgen --network-id 1
 
 echo "using: export HOGX_HOME=${HOGX_HOME}"
