@@ -202,8 +202,7 @@ public:
   ExecResult try_commit_transaction();
   SystemStatus<void> abort_transaction();
   // If the transaction succeeds, the events can be emitted to the event server.
-  x23::Async<SystemStatus<void>>
-  emit_events(ExecResult exec_result);
+  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result);
 
   // Get the proposal data.
   // Can only be called after root_invoke()
