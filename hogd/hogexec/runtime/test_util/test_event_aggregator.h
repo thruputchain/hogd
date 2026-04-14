@@ -35,6 +35,10 @@ public:
   x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
                                   TxEventLog event_log);
 
+  // Executor handle tracking (mirrors real event server behavior).
+  void executor_open_block(BlockID block_id);
+  void executor_close_block(BlockID block_id);
+
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
 
@@ -56,8 +60,10 @@ public:
 private:
   ThreadCheckedMutex<std::mutex> mtx_;
   x23::CoroFutex<bool> should_block_futex_{false};
-  // Track opened/closed blocks
+  // Track opened/closed blocks (from sched side)
   std::map<BlockID, int32_t> block_refcounts_;
+  // Track executor handles per block (from exec side)
+  std::map<BlockID, int32_t> executor_handle_refcounts_;
 
   RPCError do_emit_event(BlockID block_id, TransactionID tx_id,
                          TxEventLog event_log);
@@ -81,13 +87,15 @@ struct TestEventAggregatorExecRpc {
 
   static void eventexecutor_null() {}
 
-  static x23::Async<RPCError> eventexecutor_open_block(BlockID /*block_id*/)
+  x23::Async<RPCError> eventexecutor_open_block(BlockID block_id)
   {
+    event_aggregator_.executor_open_block(block_id);
     co_return RPCError::kRPCNone;
   }
 
-  static x23::Async<RPCError> eventexecutor_close_block(BlockID /*block_id*/)
+  x23::Async<RPCError> eventexecutor_close_block(BlockID block_id)
   {
+    event_aggregator_.executor_close_block(block_id);
     co_return RPCError::kRPCNone;
   }
 
