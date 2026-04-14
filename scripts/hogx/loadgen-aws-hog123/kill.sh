@@ -1,8 +1,13 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -ex
 
-for host in aws-hog{0..15}; do
-  ssh $host "killall hogx-agent"
-  ssh $host "pkill -f '^/tmp/hogx/pkg'"
+# kill everything on all hosts in parallel
+for i in $(seq 0 15); do
+  host="aws-hog$i"
+  ssh "$host" '
+    killall hogx-agent &&
+    pkill -f "^/tmp/hogx/pkg" || true
+  ' &
 done
+wait
