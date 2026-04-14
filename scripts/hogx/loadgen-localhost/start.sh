@@ -14,7 +14,7 @@ rm -rf $HOGX_HOME
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
 
 rm -rf ~/.hogx
-cp -R $SCRIPT_DIR/.hogx ~
+cp -R $HOGX_HOME/.hogx ~
 
 # remove /tmp/hogx from prior runs
 rm -rf /tmp/hogx/*
