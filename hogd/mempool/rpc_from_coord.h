@@ -187,11 +187,6 @@ public:
     co_return ret;
   }
 
-  x23::Async<BlockHeight> schedcoord_pending_transaction_count()
-  {
-    co_return static_cast<BlockHeight>(scheduler_->size());
-  }
-
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
