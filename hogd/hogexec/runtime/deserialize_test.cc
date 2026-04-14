@@ -149,6 +149,14 @@ template<size_t N> struct DeserializeBranch<std::array<uint8_t, N>> {
   }
 };
 
+template<x23::is_xdr_enum T> struct DeserializeBranch<T> {
+  static x23::Buf branch(model::RunnableActionSet &set, bool &exists_failure)
+  {
+    // Enums serialize as uint32_t on the wire
+    return DeserializeBranch<uint32_t>::branch(set, exists_failure);
+  }
+};
+
 template<x23::is_xdr_struct T> struct DeserializeBranch<T> {
 
   static x23::Buf branch(model::RunnableActionSet &set, bool &exists_failure)
