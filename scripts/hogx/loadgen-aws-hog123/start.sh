@@ -12,6 +12,8 @@ export HOGX_HOME=/tmp/.hogx-loadgen-hog123
 rm -rf $HOGX_HOME
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
+rm -rf ~/.hogx
+cp -R $SCRIPT_DIR/.hogx ~
 
 # remove /tmp/hogx from prior runs on all hosts in parallel
 for i in $(seq 0 15); do

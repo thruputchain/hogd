@@ -12,6 +12,8 @@ export HOGX_HOME=/tmp/.hogx-loadgen-localhost
 rm -rf $HOGX_HOME
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
+rm -rf ~/.hogx
+cp -R $SCRIPT_DIR/.hogx ~
 
 # remove /tmp/hogx from prior runs
 rm -rf /tmp/hogx/*
