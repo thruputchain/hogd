@@ -774,10 +774,6 @@ SystemCallHandler::emit_events(ExecResult exec_result)
       (root_invoke_succeeded_ && last_frame_.has_value())
           ? last_frame_.value().extract_events()
           : x23::Vec<TxEmittedEvent>{};
-  if (events.empty() && exec_result == ExecResult::ExecResultOK) {
-    trace("No events to emit, skipping emit_events RPC");
-    co_return SystemStatus<void>{};
-  }
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_source_tx_hash(),
       .exec_result = exec_result,
