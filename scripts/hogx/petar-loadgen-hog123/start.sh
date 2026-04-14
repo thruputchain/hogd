@@ -12,6 +12,7 @@ export HOGX_HOME=/tmp/.petar-hogx-loadgen-hog123
 rm -rf $HOGX_HOME
 
 cp -R $SCRIPT_DIR/.hogx $HOGX_HOME
+
 rm -rf ~/.hogx
 cp -R $SCRIPT_DIR/.hogx ~
 
