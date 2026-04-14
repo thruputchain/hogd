@@ -770,9 +770,10 @@ SystemCallHandler::get_proposal_data() const
 x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events(ExecResult exec_result)
 {
-  assert(last_frame_.has_value());
-  auto events = root_invoke_succeeded_ ? last_frame_.value().extract_events()
-                                       : x23::Vec<TxEmittedEvent>{};
+  auto events =
+      (root_invoke_succeeded_ && last_frame_.has_value())
+          ? last_frame_.value().extract_events()
+          : x23::Vec<TxEmittedEvent>{};
   if (events.empty() && exec_result == ExecResult::ExecResultOK) {
     trace("No events to emit, skipping emit_events RPC");
     co_return SystemStatus<void>{};

@@ -127,7 +127,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   // Commit the transaction
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
