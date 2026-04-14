@@ -770,6 +770,7 @@ SystemCallHandler::get_proposal_data() const
 x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events(ExecResult exec_result)
 {
+  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded_);
   auto events = (root_invoke_succeeded_ && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
