@@ -43,14 +43,14 @@ public:
   // Imported functions functions have a signature of
   // HostFnResult
   // function(HostCallContext* context, uint64_t arg0,...);
-  template<typename Fn> requires SupportedHostFnPtr<Fn>
+  template<typename Fn> requires supported_host_fn_ptr<Fn>
   bool link_fn(std::string_view module_name, std::string_view fn_name, Fn f)
   {
     auto erased = reinterpret_cast<ErasedFnPtr>(f);
     if (!RuntimeContext::validate_link_fn_params(module_name, fn_name, erased))
       return false;
     return link_fn_nargs(module_name, fn_name, erased,
-                         HostFnTraits<std::remove_cvref_t<Fn>>::nargs);
+                         HostFnTraits<std::remove_cvref_t<Fn>>::kNargs);
   }
 
 private:

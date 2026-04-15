@@ -95,23 +95,23 @@ engine_has_eager_link_guards(RuntimeEngine engine)
 }
 
 extern "C" {
-typedef TrampolineResult HostFn0(HostCallContext *) noexcept;
-typedef TrampolineResult HostFn1(HostCallContext *, uint64_t) noexcept;
-typedef TrampolineResult HostFn2(HostCallContext *, uint64_t,
+using HostFn0 = TrampolineResult(HostCallContext *) noexcept;
+using HostFn1 = TrampolineResult(HostCallContext *, uint64_t) noexcept;
+using HostFn2 = TrampolineResult(HostCallContext *, uint64_t,
                                  uint64_t) noexcept;
-typedef TrampolineResult HostFn3(HostCallContext *, uint64_t, uint64_t,
+using HostFn3 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t) noexcept;
-typedef TrampolineResult HostFn4(HostCallContext *, uint64_t, uint64_t,
+using HostFn4 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t) noexcept;
-typedef TrampolineResult HostFn5(HostCallContext *, uint64_t, uint64_t,
+using HostFn5 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t, uint64_t) noexcept;
-typedef TrampolineResult HostFn6(HostCallContext *, uint64_t, uint64_t,
+using HostFn6 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t, uint64_t,
                                  uint64_t) noexcept;
-typedef TrampolineResult HostFn7(HostCallContext *, uint64_t, uint64_t,
+using HostFn7 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t, uint64_t, uint64_t,
                                  uint64_t) noexcept;
-typedef TrampolineResult HostFn8(HostCallContext *, uint64_t, uint64_t,
+using HostFn8 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t, uint64_t, uint64_t,
                                  uint64_t, uint64_t) noexcept;
 }
@@ -126,44 +126,44 @@ using ErasedFnPtr = void (*)();
 template<typename Fn> struct HostFnTraits;
 
 template<> struct HostFnTraits<HostFn0 *> {
-  static constexpr uint8_t nargs = 0;
+  static constexpr uint8_t kNargs = 0;
 };
 
 template<> struct HostFnTraits<HostFn1 *> {
-  static constexpr uint8_t nargs = 1;
+  static constexpr uint8_t kNargs = 1;
 };
 
 template<> struct HostFnTraits<HostFn2 *> {
-  static constexpr uint8_t nargs = 2;
+  static constexpr uint8_t kNargs = 2;
 };
 
 template<> struct HostFnTraits<HostFn3 *> {
-  static constexpr uint8_t nargs = 3;
+  static constexpr uint8_t kNargs = 3;
 };
 
 template<> struct HostFnTraits<HostFn4 *> {
-  static constexpr uint8_t nargs = 4;
+  static constexpr uint8_t kNargs = 4;
 };
 
 template<> struct HostFnTraits<HostFn5 *> {
-  static constexpr uint8_t nargs = 5;
+  static constexpr uint8_t kNargs = 5;
 };
 
 template<> struct HostFnTraits<HostFn6 *> {
-  static constexpr uint8_t nargs = 6;
+  static constexpr uint8_t kNargs = 6;
 };
 
 template<> struct HostFnTraits<HostFn7 *> {
-  static constexpr uint8_t nargs = 7;
+  static constexpr uint8_t kNargs = 7;
 };
 
 template<> struct HostFnTraits<HostFn8 *> {
-  static constexpr uint8_t nargs = 8;
+  static constexpr uint8_t kNargs = 8;
 };
 
 template<typename Fn>
-concept SupportedHostFnPtr =
-    requires { HostFnTraits<std::remove_cvref_t<Fn>>::nargs; };
+concept supported_host_fn_ptr =
+    requires { HostFnTraits<std::remove_cvref_t<Fn>>::kNargs; };
 
 // Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list
