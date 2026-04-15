@@ -56,7 +56,7 @@ struct StorageCostModel {
       return 0;
     }
     return kBaseContractDeploymentCost +
-           hash.contract_size * kContractDeploymentCostPerByte;
+           (hash.contract_size * kContractDeploymentCostPerByte);
   }
 
   constexpr int128_t get_auth_data_cost(size_t num_keys) const
