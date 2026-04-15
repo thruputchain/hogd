@@ -40,7 +40,8 @@ protected:
   static AuthClaim make_weight_key_claim(uint32_t key_id, Weight weight)
   {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
-    claim.invoked_address_signed_weight().accepted_keys = 1 << key_id;
+    claim.invoked_address_signed_weight().accepted_keys =
+        static_cast<uint32_t>(1) << key_id;
     claim.invoked_address_signed_weight().required_weight = weight;
     return claim;
   }
