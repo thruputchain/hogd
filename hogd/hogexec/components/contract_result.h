@@ -59,7 +59,7 @@ struct ContractErrorType {
 public:
   ContractErrorType(ReturnBuffer &&abort_buffer)
   {
-    CHECK_EQ(kLibraryExceptionSelector, calculate_selector("1", "LibraryExn", "sdk"));
+    CHECK_EQ(kLibraryExceptionSelector, calculate_selector("1", "sdk", "LibraryExn"));
     try {
       uint64_t selector = 0;
       size_t used_bytes = x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});

@@ -206,14 +206,8 @@ public:
   }
 
   // Returns nullopt if decoding fails.
-  // TODO(geoff): Right now, this decode_return is only used via invoke_opt,
-  // which is only used in tests.
-  // If we ever want to use this from non-test code, we would
-  // want to more carefully handle the library errors in the SDK
-  // and probably directly mirror the CrossExn structure in the SDK as our
-  // own XDR type.
-  // Leaving the error messages here as error, instead of trace,
-  // to make test failures clear (again, this is only used in tests).
+  // Currently only used via invoke_opt (tests).
+  // Error messages are at error level to make test failures clear.
   template<StringLiteral Name>
   static auto decode_return(std::span<const std::byte> data,
                             bool manually_reverted)
