@@ -10,4 +10,5 @@ cd "${ROOT_DIR}/hogd/rust" && cargo fetch
 set -ex
 
 echo "Installing groundhog-cli..."
-cargo install --index sparse+https://groundhog.dev/crates/api/v1/crates/ groundhog-cli@0.2.2
+CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
+  cargo install --registry groundhog groundhog-cli@0.2.2
