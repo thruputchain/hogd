@@ -94,12 +94,14 @@ def generate_header(
     methods = interface["methods"]
     throws = interface.get("throws", [])
 
-    # Error type: use first throw type name if any
-    err_type = None
-    if throws:
-        err_ty = throws[0].get("type", {})
+    # Build list of ContractException<Type, Selector> for each throw
+    exception_types = []
+    for throw_entry in throws:
+        selector = throw_entry.get("selector", "")
+        err_ty = throw_entry.get("type", {})
         if err_ty.get("kind") == "named":
-            err_type = err_ty["name"]
+            name = err_ty["name"]
+            exception_types.append(f"ContractException<{name}, {selector}ULL>")
 
     # Method names and entrypoint IDs
     export_names = [m["name"] for m in methods]
@@ -116,8 +118,9 @@ def generate_header(
         return_type = map_type(method["return_type"])
         args = [map_type(arg["ty"]) for arg in method["args"]]
 
-        if err_type:
-            return_type = f"Result<{return_type}, {err_type}>"
+        if exception_types:
+            exn_args = ", ".join(exception_types)
+            return_type = f"Result<{return_type}, {exn_args}>"
 
         if args:
             sig = f"{return_type}(*)({', '.join(args)})"
