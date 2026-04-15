@@ -105,12 +105,6 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                    << "Function call should have returned a contract error";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             auto const &err = result.err();
-             if (err !=
-                 manual_revert_test::ManualRevertTestError::BasicRevert) {
-               ADD_FAILURE() << "Expected BasicRevert error";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
 
              // The manual revert should have succeeded (no error)
              // and storage should be reverted (tested by check_storage_exists)

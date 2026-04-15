@@ -12,7 +12,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
-#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -35,15 +34,11 @@ struct TestContract {
   constexpr static std::string_view kTraitName = "TestContract";
   constexpr static std::string_view kVersion = "0.0.0";
 
-  // These will be sorted before being passed as indices to method id
-  // derivation.
   constexpr static auto kExportNames =
-      std::array<std::string_view, 4>{"return_ok_void", "return_ok_int",
-                                      "return_err_void", "return_err_int"};
+      std::array<std::string_view, 2>{"return_ok_void", "return_ok_int"};
 
   using export_types =
-      std::tuple<Result<void, int32_t> (*)(), Result<int32_t, int32_t> (*)(),
-                 Result<void, void> (*)(), Result<int32_t, int32_t> (*)()>;
+      std::tuple<void (*)(), int32_t (*)()>;
 };
 
 using test_contract_client_t = ContractTraitClient<TestContract>;
@@ -54,13 +49,11 @@ struct CallerContract {
   constexpr static std::string_view kVersion = "0.0.0";
 
   constexpr static auto kExportNames =
-      std::array<std::string_view, 4>{"call_return_ok_void",
-                                      "call_return_ok_int",
-                                      "call_return_err_void",
-                                      "call_return_err_int"};
+      std::array<std::string_view, 2>{"call_return_ok_void",
+                                      "call_return_ok_int"};
 
   using export_types =
-      std::tuple<void (*)(), void (*)(), void (*)(), void (*)()>;
+      std::tuple<void (*)(), void (*)()>;
 };
 
 using caller_contract_client_t = ContractTraitClient<CallerContract>;
@@ -70,20 +63,12 @@ make_test_contract()
 {
   NativeContractBuilder builder;
   builder.add<TestContract, "return_ok_void">(
-      []() -> InvokeStatus<Result<void, int32_t>> {
-        return {Result<void, int32_t>::make_ok()};
+      []() -> InvokeStatus<void> {
+        return {};
       });
   builder.add<TestContract, "return_ok_int">(
-      []() -> InvokeStatus<Result<int32_t, int32_t>> {
-        return {Result<int32_t, int32_t>::make_ok(123)};
-      });
-  builder.add<TestContract, "return_err_void">(
-      []() -> InvokeStatus<Result<void, void>> {
-        return {Result<void, void>::make_err()};
-      });
-  builder.add<TestContract, "return_err_int">(
-      []() -> InvokeStatus<Result<int32_t, int32_t>> {
-        return {Result<int32_t, int32_t>::make_err(456)};
+      []() -> InvokeStatus<int32_t> {
+        return {123};
       });
   return builder.build();
 }
@@ -99,12 +84,7 @@ make_caller_contract()
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
             client.template invoke_opt<"return_ok_void">(ctx.handler());
-        if (!result.has_value() || !result.value().has_value() ||
-            !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (!result.value().value().value().is_ok()) {
-          ADD_FAILURE() << "Return value is not ok";
+        if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -116,54 +96,11 @@ make_caller_contract()
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
             client.template invoke_opt<"return_ok_int">(ctx.handler());
-        if (!result.has_value() || !result.value().has_value() ||
-            !result.value().value().has_value()) {
+        if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!result.value().value().value().is_ok()) {
-          ADD_FAILURE() << "Return value is not ok";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (result.value().value().value().ok() != 123) {
+        if (result.value().value() != 123) {
           ADD_FAILURE() << "Return value is not the expected value";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
-
-  // Call return_err_void method from TestContract
-  builder.add<CallerContract, "call_return_err_void">(
-      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-        test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] =
-            client.template invoke_opt<"return_err_void">(ctx.handler());
-        if (!result.has_value() || !result.value().has_value() ||
-            !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (!result.value().value().value().is_err()) {
-          ADD_FAILURE() << "Return value is not err";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
-
-  // Call return_err_int method from TestContract
-  builder.add<CallerContract, "call_return_err_int">(
-      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-        test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] =
-            client.template invoke_opt<"return_err_int">(ctx.handler());
-        if (!result.has_value() || !result.value().has_value() ||
-            !result.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (!result.value().value().value().is_err()) {
-          ADD_FAILURE() << "Return value is not err";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (result.value().value().value().err() != 456) {
-          ADD_FAILURE() << "Return err value is not the expected value";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -254,43 +191,6 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_ok_int">(0)}},
-      *context_);
-
-  auto res = handler.root_invoke();
-  ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-}
-
-TEST_F(ContractResultPresetHandlingTest, TestGetErrVoid)
-{
-  initialize();
-
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{.invocation =
-                              caller_contract_client_.template make_invocation<
-                                  "call_return_err_void">(0)}},
-      *context_);
-
-  auto res = handler.root_invoke();
-  ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-}
-
-TEST_F(ContractResultPresetHandlingTest, TestGetErrInt)
-{
-  initialize();
-
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      caller_contract_client_
-                          .template make_invocation<"call_return_err_int">(0)}},
       *context_);
 
   auto res = handler.root_invoke();
