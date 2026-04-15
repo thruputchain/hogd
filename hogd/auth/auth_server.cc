@@ -233,7 +233,7 @@ AuthServer::verify_transactions(BlockHeight height,
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
+           const std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -244,8 +244,9 @@ AuthServer::verify_transactions(BlockHeight height,
             }
 
             const ContractAddress &account = tx.tx.invocation.invoked_address;
-            CHECK(auth_data.contains(account));
-            AddressAuthData &source_auth_data = auth_data[account];
+            const auto account_it = auth_data.find(account);
+            CHECK(account_it != auth_data.end());
+            const AddressAuthData &source_auth_data = account_it->second;
 
             // Get the relevant contracts.
             std::unordered_set<ContractAddress> relevant_contracts =
@@ -253,8 +254,9 @@ AuthServer::verify_transactions(BlockHeight height,
             std::unordered_map<ContractAddress, const AddressAuthData *>
                 aux_auth_data;
             for (const ContractAddress &contract : relevant_contracts) {
-              CHECK(auth_data.contains(contract));
-              aux_auth_data[contract] = &auth_data[contract];
+              const auto contract_it = auth_data.find(contract);
+              CHECK(contract_it != auth_data.end());
+              aux_auth_data[contract] = &contract_it->second;
             }
 
             AuthVerifyStatus<void> verify_result =
