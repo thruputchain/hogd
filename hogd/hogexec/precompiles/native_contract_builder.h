@@ -178,11 +178,11 @@ public:
         return {};
       };
 
-      // Precompile contracts don't throw typed exceptions — they only return ok.
-      // If this path is reached, it's unexpected.
-      auto do_revert = [&ctx](auto const &) -> InvokeStatus<void> {
-        error("do_revert called on precompile — precompiles should not throw typed exceptions");
-        return InvokeError{InvokeErrorCode::Unrecoverable};
+      // Serialize error as (u64 selector, CXS body) and set as revert buffer.
+      auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
+        auto buf = err_value.serialize();
+        ctx.handler().set_return_buffer(std::move(buf), true);
+        return {};
       };
 
       if constexpr (is_contract_result_type<return_t>) {
