@@ -35,13 +35,13 @@ unexpected()
   return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity0(HostCallContext * /*unused*/) noexcept
 {
   return expected(100);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity1(HostCallContext * /*unused*/, uint64_t arg0) noexcept
 {
   if (arg0 != 1) {
@@ -50,7 +50,7 @@ arity1(HostCallContext * /*unused*/, uint64_t arg0) noexcept
   return expected(101);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1) noexcept
 {
   if (arg0 != 1 || arg1 != 2) {
@@ -59,7 +59,7 @@ arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1) noexcept
   return expected(102);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2) noexcept
 {
@@ -69,7 +69,7 @@ arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return expected(103);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3) noexcept
 {
@@ -79,7 +79,7 @@ arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return expected(104);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4) noexcept
 {
@@ -89,7 +89,7 @@ arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return expected(105);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5) noexcept
 {
@@ -100,7 +100,7 @@ arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return expected(106);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
        uint64_t arg6) noexcept
@@ -112,7 +112,7 @@ arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return expected(107);
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
        uint64_t arg6, uint64_t arg7) noexcept

@@ -33,7 +33,7 @@ make_err(SystemErrorCode err)
                            .data_len = 0};
 }
 
-ContractGetResult
+extern "C" ContractGetResult
 wasmi_contract_get_fn(void *host_call_context_ptr,
                       const uint8_t *hash_ptr) noexcept
 {
