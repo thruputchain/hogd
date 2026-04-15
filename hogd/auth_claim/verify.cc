@@ -59,7 +59,7 @@ bitmap_accepts_key(BitMap bitmap, size_t idx)
   if (idx >= 32) {
     return false;
   }
-  return (bitmap & (static_cast<uint32_t>(1) << idx)) != 0;
+  return (bitmap & (uint32_t{1} << idx)) != 0;
 }
 
 static_assert(valid_pk_claim(0));

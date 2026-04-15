@@ -1,5 +1,7 @@
-#include <cassert>
 #include <gtest/gtest.h>
+
+#include <cassert>
+#include <limits>
 #include <utility>
 
 #include "address_auth.hh"
@@ -312,8 +314,9 @@ TEST_F(AuthClaimTests, PublicKeyIdMaxValueRejected)
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});
-  DecoratedSignature sig = make_signature(sk, tx, /*auth_claim_idx=*/0,
-                                          /*public_key_id=*/UINT32_MAX);
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0,
+                     /*public_key_id=*/std::numeric_limits<uint32_t>::max());
 
   SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
