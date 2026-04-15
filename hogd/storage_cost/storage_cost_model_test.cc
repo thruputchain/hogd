@@ -61,4 +61,23 @@ TEST(StorageCostModelTest, GetBytestringCostLargeLen)
   EXPECT_EQ(actual, expected);
 }
 
+TEST(StorageCostModelTest, ContractDeploymentCostIncludesBase)
+{
+  StorageCostModelXdr xdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = ::hogd::to_xdr(int128_t{5000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{10}),
+      .auth_per_key_cost = ::hogd::to_xdr(int128_t{1111}),
+      .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{8}),
+      .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
+      .balance_cost = ::hogd::to_xdr(int128_t{1234}),
+  };
+  StorageCostModel model(xdr);
+
+  EXPECT_EQ(model.get_deployment_cost(100), int128_t{13000});
+  EXPECT_EQ(model.get_deployment_cost(0), int128_t{12000});
+}
+
 } // namespace hogd

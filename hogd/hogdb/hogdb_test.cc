@@ -322,7 +322,7 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
       addr3,
       DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
   int128_t cost =
-      cost_model_.get_contract_size_cost(10) + cost_model_.get_balance_cost();
+      cost_model_.get_deployment_cost(10) + cost_model_.get_balance_cost();
   CHECK(cost < 100000); // for the test, given the above constant
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr3), -cost,

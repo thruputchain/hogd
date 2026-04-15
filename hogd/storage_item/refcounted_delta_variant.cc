@@ -584,7 +584,7 @@ DeployedContractArgs::get_current_committed_cost(
       warn("Redeploying a contract; that's not supposed to happen");
       assert(base_item->deployed_contract_hash() == deployed_contract_hash_);
     }
-    return cost_model->get_contract_size_cost(
+    return cost_model->get_deployment_cost(
         deployed_contract_hash_.contract_size);
   }
   if (base_item) {
@@ -600,7 +600,7 @@ DeployedContractArgs::get_marginal_cost_upper_bound(
     StorageItemWrapper const * /*unused*/)
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeDeployContract);
-  return cost_model->get_contract_size_cost(
+  return cost_model->get_deployment_cost(
       delta.deployed_contract_hash().contract_size);
 }
 

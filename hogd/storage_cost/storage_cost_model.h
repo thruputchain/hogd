@@ -49,9 +49,10 @@ struct StorageCostModel {
   int128_t get_retrocausal_queue_cost(int64_t active_queue_size) const;
   int128_t get_replay_cache_cost(size_t replay_cache_size) const;
 
-  constexpr int128_t get_contract_size_cost(size_t contract_size) const
+  constexpr int128_t get_deployment_cost(size_t contract_size) const
   {
-    return contract_size * kContractDeploymentCostPerByte;
+    return kBaseContractDeploymentCost +
+           contract_size * kContractDeploymentCostPerByte;
   }
 
   constexpr int128_t get_auth_data_cost(size_t num_keys) const

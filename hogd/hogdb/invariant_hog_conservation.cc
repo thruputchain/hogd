@@ -113,7 +113,7 @@ HogConservationInvariant::handle_address_metadata_item_change(
       assert(false);
       return 0;
     }
-    return cost_model_.get_contract_size_cost(
+    return cost_model_.get_deployment_cost(
         deployed_contract_hash.contract_size);
   };
   auto before_storage_cost = get_storage_cost(before);

@@ -28,7 +28,7 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
     return HogDBError{HogDBCode::kConflict};
   }
 
-  return ctx.cost_model->get_contract_size_cost(
+  return ctx.cost_model->get_deployment_cost(
       deployed_contract_hash_.contract_size);
 }
 
@@ -38,7 +38,7 @@ NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
                                  const StorageCostModel *cost_model) const
 {
   if (did_finalize) {
-    return cost_model->get_contract_size_cost(
+    return cost_model->get_deployment_cost(
                deployed_contract_hash_.contract_size) -
            snapshot_cost;
   }
