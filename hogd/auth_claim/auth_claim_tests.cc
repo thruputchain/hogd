@@ -261,6 +261,66 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
   }
 }
 
+// Regression test for issue #1443: public_key_id >= 32 caused UB in
+// bitmap_accepts_key via 1 << idx with out-of-range idx.
+TEST_F(AuthClaimTests, PublicKeyIdShiftUB)
+{
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
+  claim.invoked_address_signed_weight().accepted_keys = 0x1;
+  claim.invoked_address_signed_weight().required_weight = 1;
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction({claim});
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/32);
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+// Verify that a weighted claim rejects public_key_id that is within bitmap
+// range but not set in accepted_keys.
+TEST_F(AuthClaimTests, WeightedClaimRejectsUnacceptedKey)
+{
+  // accepted_keys bitmap only has bit 0 set
+  AuthClaim claim = make_weight_key_claim(0, Weight{1});
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction({claim});
+  // Sign with public_key_id=5, which is valid range but not in accepted_keys
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/5);
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+// Verify that very large public_key_id values (UINT32_MAX) are rejected
+// cleanly without UB.
+TEST_F(AuthClaimTests, PublicKeyIdMaxValueRejected)
+{
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
+  claim.invoked_address_signed_weight().accepted_keys = 0x1;
+  claim.invoked_address_signed_weight().required_weight = 1;
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction({claim});
+  DecoratedSignature sig = make_signature(sk, tx, /*auth_claim_idx=*/0,
+                                          /*public_key_id=*/UINT32_MAX);
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
 } // namespace hogd
 
 int

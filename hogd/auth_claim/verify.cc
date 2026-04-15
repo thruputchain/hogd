@@ -53,10 +53,13 @@ valid_pk_bitmap(BitMap bitmap)
   return (bitmap & (0xFFFF'FFFF << (kMaxSigners))) == 0;
 }
 
-constexpr bool
+[[nodiscard]] constexpr bool
 bitmap_accepts_key(BitMap bitmap, size_t idx)
 {
-  return (bitmap & (1 << idx)) != 0;
+  if (idx >= 32) {
+    return false;
+  }
+  return (bitmap & (static_cast<uint32_t>(1) << idx)) != 0;
 }
 
 static_assert(valid_pk_claim(0));
