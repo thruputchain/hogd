@@ -321,9 +321,8 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   DeployedContractHash deployed_hash{.hash = sha256(contract),
                                      .contract_size = 10};
   ASSERT_TRUE(invoke_tx.request_deploy_contract(addr3, deployed_hash));
-  int128_t cost =
-      cost_model_.get_deployment_cost(deployed_hash) +
-      cost_model_.get_balance_cost();
+  int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
+                  cost_model_.get_balance_cost();
   CHECK(cost < 100000); // for the test, given the above constant
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr3), -cost,
