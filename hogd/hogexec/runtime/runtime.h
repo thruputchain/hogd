@@ -114,6 +114,8 @@ using HostFn7 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
 using HostFn8 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t, uint64_t, uint64_t,
                                  uint64_t, uint64_t) noexcept;
+using ErasedHostFn = void();
+using ErasedFnPtr = ErasedHostFn *;
 }
 
 // Erased C-ABI function-pointer type for syscall trampoline dispatch.
@@ -121,8 +123,6 @@ using HostFn8 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
 // Using a function-pointer type (not void*) keeps the cast chain within
 // the guaranteed fn-ptr <-> fn-ptr reinterpret_cast
 // ([expr.reinterpret.cast]/6).
-using ErasedFnPtr = void (*)();
-
 template<typename Fn> struct HostFnTraits;
 
 template<> struct HostFnTraits<HostFn0 *> {
