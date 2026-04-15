@@ -109,7 +109,7 @@ WasmiGlobalContext::operator=(WasmiGlobalContext &&other) noexcept
 
 bool
 WasmiGlobalContext::link_fn_nargs(std::string_view module_name,
-                                  std::string_view fn_name, void *fn_ptr,
+                                  std::string_view fn_name, ErasedFnPtr fn_ptr,
                                   uint8_t nargs)
 {
   assert(global_context_ptr_ != nullptr);
@@ -117,7 +117,7 @@ WasmiGlobalContext::link_fn_nargs(std::string_view module_name,
       global_context_ptr_,
       reinterpret_cast<const uint8_t *>(module_name.data()), module_name.size(),
       reinterpret_cast<const uint8_t *>(fn_name.data()), fn_name.size(),
-      reinterpret_cast<void (*)()>(fn_ptr), nargs);
+      fn_ptr, nargs);
 }
 
 WasmiContext::WasmiContext(WasmiGlobalContext &global_context)

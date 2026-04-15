@@ -175,8 +175,8 @@ WasmtimeContext::verify_contract(Contract const &contract) const
 
 bool
 WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
-                                     std::string_view fn_name, void *fn_ptr,
-                                     uint8_t nargs)
+                                     std::string_view fn_name,
+                                     ErasedFnPtr fn_ptr, uint8_t nargs)
 {
   assert(global_context_ptr_ != nullptr);
   return wasmtime_global_link_nargs(
@@ -185,7 +185,7 @@ WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
       static_cast<uint32_t>(module_name.size()),
       reinterpret_cast<uint8_t const *>(fn_name.data()),
       static_cast<uint32_t>(fn_name.size()),
-      reinterpret_cast<void (*)()>(fn_ptr), nargs);
+      fn_ptr, nargs);
 }
 
 std::span<std::byte>
