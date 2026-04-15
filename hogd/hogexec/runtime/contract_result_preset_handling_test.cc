@@ -12,7 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
-#include "hogd/hogexec/runtime/contract_result.h"
+#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
