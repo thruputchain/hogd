@@ -19,13 +19,13 @@ killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_e
 
 "$HOGX" config together -a loadgen -t 1
 
+rm -rf ~/.hogx
 # [$HOGX config together] generates additional config files in
 # [$HOGX_HOME/.hogx]. Thus, we wait until after running that command to copy
 # [.hogx] to the home directory. Additionally, due to these additional config
 # files that are generated, we have to copy from [$HOGX_HOME] rather than from
 # [$SCRIPT_DIR].
-rm -rf ~/.hogx
-cp -R $HOGX_HOME/.hogx ~
+cp -R $HOGX_HOME/ ~/.hogx
 
 "$HOGX" start -a loadgen -c c1
 
