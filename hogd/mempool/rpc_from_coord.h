@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -307,6 +308,32 @@ private:
     x23::XdrVec<SignedTransaction> failed_txs;
   };
 
+  struct NominationTelemetry {
+    bool attempted = false;
+    bool succeeded = false;
+    BlockID block_id = 0;
+    BlockHeight block_height = -1;
+    double duration = 0.0;
+    size_t scheduled_tx_count = 0;
+    size_t nominated_tx_count = 0;
+    size_t failed_tx_count = 0;
+  };
+
+  struct ValidationTelemetry {
+    BlockID block_id = 0;
+    BlockHeight block_height = -1;
+    std::string outcome;
+    double duration = 0.0;
+    size_t tx_count = 0;
+  };
+
+  struct CommitWindowTelemetry {
+    size_t submitted_vetted = 0;
+    size_t submitted_unvetted = 0;
+    NominationTelemetry nomination;
+    std::vector<ValidationTelemetry> validations;
+  };
+
   x23::Async<void> finish_init()
   {
     coord_client_ =
@@ -414,6 +441,13 @@ private:
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
 
+  void record_submitted_vetted(size_t count);
+  void record_submitted_unvetted(size_t count);
+  void record_nomination_attempt(const NominationTelemetry &telemetry);
+  void record_validation_attempt(ValidationTelemetry telemetry);
+  CommitWindowTelemetry snapshot_commit_window_telemetry() const;
+  void reset_commit_window_telemetry();
+
   x23::Async<bool> increment_num_validations_in_progress()
   {
     bool admitted = false;
@@ -514,6 +548,11 @@ private:
 
   std::chrono::steady_clock::time_point last_ =
       std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point last_commit_ =
+      std::chrono::steady_clock::now();
+
+  mutable std::mutex telemetry_mutex_;
+  CommitWindowTelemetry commit_window_telemetry_;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
