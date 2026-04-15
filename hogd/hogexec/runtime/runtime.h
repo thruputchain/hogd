@@ -11,10 +11,12 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 
 namespace hogd {
 
@@ -92,12 +94,76 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   return detail::get_engine_info(engine).has_eager_link_guards;
 }
 
-// Erased function-pointer type for syscall trampoline dispatch.
+extern "C" {
+typedef TrampolineResult HostFn0(HostCallContext *) noexcept;
+typedef TrampolineResult HostFn1(HostCallContext *, uint64_t) noexcept;
+typedef TrampolineResult HostFn2(HostCallContext *, uint64_t,
+                                 uint64_t) noexcept;
+typedef TrampolineResult HostFn3(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t) noexcept;
+typedef TrampolineResult HostFn4(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t) noexcept;
+typedef TrampolineResult HostFn5(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t) noexcept;
+typedef TrampolineResult HostFn6(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t,
+                                 uint64_t) noexcept;
+typedef TrampolineResult HostFn7(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t, uint64_t,
+                                 uint64_t) noexcept;
+typedef TrampolineResult HostFn8(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t, uint64_t,
+                                 uint64_t, uint64_t) noexcept;
+}
+
+// Erased C-ABI function-pointer type for syscall trampoline dispatch.
 // Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
 // Using a function-pointer type (not void*) keeps the cast chain within
 // the guaranteed fn-ptr <-> fn-ptr reinterpret_cast
 // ([expr.reinterpret.cast]/6).
 using ErasedFnPtr = void (*)();
+
+template<typename Fn> struct HostFnTraits;
+
+template<> struct HostFnTraits<HostFn0 *> {
+  static constexpr uint8_t nargs = 0;
+};
+
+template<> struct HostFnTraits<HostFn1 *> {
+  static constexpr uint8_t nargs = 1;
+};
+
+template<> struct HostFnTraits<HostFn2 *> {
+  static constexpr uint8_t nargs = 2;
+};
+
+template<> struct HostFnTraits<HostFn3 *> {
+  static constexpr uint8_t nargs = 3;
+};
+
+template<> struct HostFnTraits<HostFn4 *> {
+  static constexpr uint8_t nargs = 4;
+};
+
+template<> struct HostFnTraits<HostFn5 *> {
+  static constexpr uint8_t nargs = 5;
+};
+
+template<> struct HostFnTraits<HostFn6 *> {
+  static constexpr uint8_t nargs = 6;
+};
+
+template<> struct HostFnTraits<HostFn7 *> {
+  static constexpr uint8_t nargs = 7;
+};
+
+template<> struct HostFnTraits<HostFn8 *> {
+  static constexpr uint8_t nargs = 8;
+};
+
+template<typename Fn>
+concept SupportedHostFnPtr =
+    requires { HostFnTraits<std::remove_cvref_t<Fn>>::nargs; };
 
 // Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list

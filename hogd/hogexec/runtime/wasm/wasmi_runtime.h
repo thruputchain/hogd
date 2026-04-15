@@ -43,22 +43,19 @@ public:
   // Imported functions functions have a signature of
   // HostFnResult
   // function(HostCallContext* context, uint64_t arg0,...);
-  template<std::same_as<uint64_t>... Args>
-  bool link_fn(std::string_view module_name, std::string_view fn_name,
-               TrampolineResult (*f)(HostCallContext *, Args...) noexcept)
+  template<typename Fn> requires SupportedHostFnPtr<Fn>
+  bool link_fn(std::string_view module_name, std::string_view fn_name, Fn f)
   {
     auto erased = reinterpret_cast<ErasedFnPtr>(f);
     if (!RuntimeContext::validate_link_fn_params(module_name, fn_name, erased))
       return false;
     return link_fn_nargs(module_name, fn_name, erased,
-                         (kArgCount<Args>() + ... + 0));
+                         HostFnTraits<std::remove_cvref_t<Fn>>::nargs);
   }
 
 private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      ErasedFnPtr fn_ptr, uint8_t nargs);
-
-  template<typename T> constexpr static auto kArgCount = [] { return 1; };
   void *global_context_ptr_ = nullptr;
 };
 
