@@ -10,7 +10,7 @@ namespace hogd {
 
 class ReplayCache {
 public:
-  ReplayCache(BlockHeight expired_height) : expired_height_(expired_height) {}
+  ReplayCache(BlockHeight expired_height) : expired_height_(expired_height), committed_size_(0) {}
 
   ReplayCache(std::vector<Uniquifier> uniquifiers, BlockHeight expired_height)
     : uniquifiers_(std::move(uniquifiers)), expired_height_(expired_height)
