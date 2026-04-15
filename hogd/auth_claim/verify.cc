@@ -186,7 +186,8 @@ verify_weight_key_claim_internal(
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
     if (have_prev_key_id && sig->public_key_id <= prev_key_id) {
-      trace("Auth malformed: weighted-claim signer ids must be strictly increasing");
+      trace("Auth malformed: weighted-claim signer ids must be strictly "
+            "increasing");
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
     prev_key_id = sig->public_key_id;
@@ -341,8 +342,9 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
     }
     for (size_t config_idx = 0; config_idx < auth_data.gas_permissions.size();
          config_idx++) {
-      if (!bitmap_accepts_key(auth_data.gas_permissions[config_idx].accepted_keys,
-                              sig.public_key_id)) {
+      if (!bitmap_accepts_key(
+              auth_data.gas_permissions[config_idx].accepted_keys,
+              sig.public_key_id)) {
         continue;
       }
       if ((seen_keys[config_idx] & (uint32_t{1} << sig.public_key_id)) != 0) {

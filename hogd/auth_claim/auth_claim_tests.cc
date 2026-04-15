@@ -375,8 +375,8 @@ TEST_F(AuthClaimTests, NonceCountsSignerOnceAcrossClaims)
   AddressAuthData auth_data{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .nonce_config = NonceConfig{.accepted_keys = 1 << 0,
-                                  .required_weight = 2},
+      .nonce_config =
+          NonceConfig{.accepted_keys = 1 << 0, .required_weight = 2},
   };
 
   auto lightweight = lightweight_validate_auth_claims(stx, auth_data, {});
@@ -423,7 +423,8 @@ TEST_F(AuthClaimTests, GasPermissionCountsSignerOncePerConfig)
   };
 
   auto lightweight =
-      lightweight_validate_auth_claims(stx, source_data, {{aux_contract, &aux_data}});
+      lightweight_validate_auth_claims(stx, source_data,
+                                       {{aux_contract, &aux_data}});
   EXPECT_FALSE(lightweight.has_value());
   EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
