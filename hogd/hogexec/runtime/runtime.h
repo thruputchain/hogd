@@ -95,7 +95,8 @@ engine_has_eager_link_guards(RuntimeEngine engine)
 // Erased function-pointer type for syscall trampoline dispatch.
 // Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
 // Using a function-pointer type (not void*) keeps the cast chain within
-// the guaranteed fn-ptr <-> fn-ptr reinterpret_cast ([expr.reinterpret.cast]/6).
+// the guaranteed fn-ptr <-> fn-ptr reinterpret_cast
+// ([expr.reinterpret.cast]/6).
 using ErasedFnPtr = void (*)();
 
 // Abstract class that wraps the context associated with a sandbox runtime.

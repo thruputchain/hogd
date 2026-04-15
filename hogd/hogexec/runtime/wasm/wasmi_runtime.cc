@@ -116,8 +116,8 @@ WasmiGlobalContext::link_fn_nargs(std::string_view module_name,
   return wasmi_global_link_nargs(
       global_context_ptr_,
       reinterpret_cast<const uint8_t *>(module_name.data()), module_name.size(),
-      reinterpret_cast<const uint8_t *>(fn_name.data()), fn_name.size(),
-      fn_ptr, nargs);
+      reinterpret_cast<const uint8_t *>(fn_name.data()), fn_name.size(), fn_ptr,
+      nargs);
 }
 
 WasmiContext::WasmiContext(WasmiGlobalContext &global_context)

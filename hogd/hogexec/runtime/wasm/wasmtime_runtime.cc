@@ -184,8 +184,7 @@ WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
       reinterpret_cast<uint8_t const *>(module_name.data()),
       static_cast<uint32_t>(module_name.size()),
       reinterpret_cast<uint8_t const *>(fn_name.data()),
-      static_cast<uint32_t>(fn_name.size()),
-      fn_ptr, nargs);
+      static_cast<uint32_t>(fn_name.size()), fn_ptr, nargs);
 }
 
 std::span<std::byte>
