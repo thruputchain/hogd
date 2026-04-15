@@ -271,6 +271,7 @@ validate_nonce(const SignedTransaction &stx, const AddressAuthData &auth_data,
 {
   assert(stx.tx.auth_claims.size() == stx.signatures.size());
   Weight total_weight = 0;
+  BitMap seen_keys = 0;
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
     const DecoratedSignature &sig = stx.signatures[i];
@@ -284,6 +285,10 @@ validate_nonce(const SignedTransaction &stx, const AddressAuthData &auth_data,
       if (!bitmap_accepts_key(nonce_config.accepted_keys, sig.public_key_id)) {
         return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
+      if ((seen_keys & (uint32_t{1} << sig.public_key_id)) != 0) {
+        break;
+      }
+      seen_keys |= uint32_t{1} << sig.public_key_id;
       total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
       break;
     case AuthClaimType::kOtherAddressSignature:
@@ -309,6 +314,8 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
   assert(stx.tx.auth_claims.size() == stx.signatures.size());
   x23::Vec<Weight, kMaxGasConfigs> gas_weights(auth_data.gas_permissions.size(),
                                                0);
+  x23::Vec<BitMap, kMaxGasConfigs> seen_keys(auth_data.gas_permissions.size(),
+                                             0);
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
     const DecoratedSignature &sig = stx.signatures[i];
@@ -332,13 +339,19 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
     if (claim_addr != gas_claim.sponsored_contract) {
       continue;
     }
-    for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
-      if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
+    for (size_t config_idx = 0; config_idx < auth_data.gas_permissions.size();
+         config_idx++) {
+      if (!bitmap_accepts_key(auth_data.gas_permissions[config_idx].accepted_keys,
                               sig.public_key_id)) {
         continue;
       }
+      if ((seen_keys[config_idx] & (uint32_t{1} << sig.public_key_id)) != 0) {
+        continue;
+      }
+      seen_keys[config_idx] |= uint32_t{1} << sig.public_key_id;
       assert(has_public_key(auth_data, sig.public_key_id));
-      gas_weights[i] += auth_data.public_keys[sig.public_key_id]->max_weight;
+      gas_weights[config_idx] +=
+          auth_data.public_keys[sig.public_key_id]->max_weight;
     }
   }
   GasAmount approved_amount = 0;
