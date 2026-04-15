@@ -82,13 +82,8 @@ def map_type(ty):
         return kind
 
 
-def generate_header(
-    json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None
-):
-    with open(json_file, "r") as f:
-        spec = json.load(f)
-
-    interface = spec["interfaces"][0]
+def generate_interface_struct(interface, wasm_file=None):
+    """Generate a single C++ struct for one contract interface."""
     interface_name = interface["name"]
     version = interface["version"]
     methods = interface["methods"]
@@ -130,13 +125,44 @@ def generate_header(
 
     signatures_str = ",\n             ".join(function_signatures)
 
-    namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
-    namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
     wasm_str = (
         f'constexpr static std::string_view kWasmFile = "{wasm_file}";'
         if wasm_file
         else ""
     )
+
+    return f"""
+struct {interface_name} {{
+    constexpr static std::string_view kTraitName = "{interface_name}";
+    constexpr static std::string_view kVersion = "{version}";
+    {wasm_str}
+
+    constexpr static std::string_view kSerializationFormat = "cxs";
+
+    // These will be sorted before being passed as indices to method id derivation.
+    constexpr static auto kExportNames = std::array<std::string_view, {len(export_names)}>{{
+            {export_names_str}
+        }};
+
+    constexpr static auto kEntrypoints = std::array<uint64_t, {len(entrypoints)}>{{
+            {entrypoints_str}
+        }};
+
+    using export_types = std::tuple<{signatures_str}>;
+}};
+"""
+
+
+def generate_header(
+    json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None
+):
+    with open(json_file, "r") as f:
+        spec = json.load(f)
+
+    interfaces = spec["interfaces"]
+
+    namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
+    namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
 
     if extra_includes:
         extra_includes_str = "\n".join(
@@ -144,6 +170,12 @@ def generate_header(
         )
     else:
         extra_includes_str = ""
+
+    # Generate a struct for each interface; wasm_file goes on the first one
+    structs = []
+    for i, iface in enumerate(interfaces):
+        wf = wasm_file if i == 0 else None
+        structs.append(generate_interface_struct(iface, wf))
 
     header_content = f"""#pragma once
 
@@ -166,26 +198,7 @@ using namespace hogd;
 {extra_includes_str}
 
 {namespace_forward}
-
-struct {interface_name} {{
-    constexpr static std::string_view kTraitName = "{interface_name}";
-    constexpr static std::string_view kVersion = "{version}";
-    {wasm_str}
-
-    constexpr static std::string_view kSerializationFormat = "cxs";
-
-    // These will be sorted before being passed as indices to method id derivation.
-    constexpr static auto kExportNames = std::array<std::string_view, {len(export_names)}>{{
-            {export_names_str}
-        }};
-
-    constexpr static auto kEntrypoints = std::array<uint64_t, {len(entrypoints)}>{{
-            {entrypoints_str}
-        }};
-
-    using export_types = std::tuple<{signatures_str}>;
-}};
-
+{"".join(structs)}
 {namespace_close}
 
 """
