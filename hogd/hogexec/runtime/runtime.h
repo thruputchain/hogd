@@ -92,6 +92,12 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   return detail::get_engine_info(engine).has_eager_link_guards;
 }
 
+// Erased function-pointer type for syscall trampoline dispatch.
+// Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
+// Using a function-pointer type (not void*) keeps the cast chain within
+// the guaranteed fn-ptr <-> fn-ptr reinterpret_cast ([expr.reinterpret.cast]/6).
+using ErasedFnPtr = void (*)();
+
 // Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list
 // of function pointers to link, or an environment allocator).
@@ -123,7 +129,8 @@ public:
   //
   // Validate link_fn parameters. Returns false if any parameter is invalid.
   static bool validate_link_fn_params(std::string_view module_name,
-                                      std::string_view fn_name, void *fn_ptr)
+                                      std::string_view fn_name,
+                                      ErasedFnPtr fn_ptr)
   {
     return !module_name.empty() && !fn_name.empty() && (fn_ptr != nullptr);
   }
