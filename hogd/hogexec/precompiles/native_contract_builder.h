@@ -178,18 +178,11 @@ public:
         return {};
       };
 
-      // Wrap an error in CrossExn envelope, matching SDK behavior.
-      // Layout: CXS i32 discriminant + Format-encoded E.
-      auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
-        auto body = Serializer<Format>::serialize(err_value);
-        if (!body.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        }
-        x23::Buf buf;
-        x23::store_cxs_int<int32_t>(buf, kCrossExnContractDiscriminant);
-        buf.append(body->begin(), body->end());
-        ctx.handler().set_return_buffer(std::move(buf), true);
-        return {};
+      // Precompile contracts don't throw typed exceptions — they only return ok.
+      // If this path is reached, it's unexpected.
+      auto do_revert = [&ctx](auto const &) -> InvokeStatus<void> {
+        error("do_revert called on precompile — precompiles should not throw typed exceptions");
+        return InvokeError{InvokeErrorCode::Unrecoverable};
       };
 
       if constexpr (is_contract_result_type<return_t>) {
@@ -204,12 +197,7 @@ public:
             return do_return(r.ok());
           }
         }
-        if constexpr (std::is_same_v<decltype(r.err()), void>) {
-          return do_revert(std::tuple<>{});
-        }
-        else {
-          return do_revert(r.err());
-        }
+        return do_revert(r.err());
       }
       else {
         // otherwise, return the received value
