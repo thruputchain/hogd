@@ -1060,6 +1060,47 @@ MempoolCoordinatorRpc::lookup_validation_chunk_txs(
   co_return found_txs;
 }
 
+x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
+MempoolCoordinatorRpc::prepare_validation_chunk(
+    x23::span<const SignedTransactionHash> tx_hashes,
+    x23::span<const NondeterministicProposalData> tx_nominations)
+{
+  PreparedValidationChunk prepared;
+  prepared.txs.reserve(tx_hashes.size());
+  prepared.proposed_txs.reserve(tx_hashes.size());
+
+  {
+    ElapsedTimer timer;
+    std::vector<std::shared_ptr<const SignedTransaction>> found_txs =
+        co_await lookup_validation_chunk_txs(tx_hashes);
+    prepared.lookup_duration = timer.elapsed();
+
+    for (size_t i = 0; i < found_txs.size(); i++) {
+      if (!found_txs[i]) {
+        prepared.missing_tx_hashes.push_back(tx_hashes[i]);
+        continue;
+      }
+      prepared.txs.push_back(*found_txs[i]);
+    }
+  }
+
+  if (!prepared.missing_tx_hashes.empty()) {
+    co_return prepared;
+  }
+
+  {
+    ElapsedTimer timer;
+    for (size_t i = 0; i < prepared.txs.size(); i++) {
+      prepared.proposed_txs.push_back(
+          {.signed_tx = prepared.txs[i],
+           .nondeterministic_proposal_data = tx_nominations[i]});
+    }
+    prepared.build_duration = timer.elapsed();
+  }
+
+  co_return prepared;
+}
+
 x23::Async<bool>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
@@ -1298,44 +1339,37 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     const std::vector<ChunkRange> validation_chunks =
         make_chunks_for_max_size(cache.tx_hashes.size(),
                                  kNumTxsPerNominationChunk);
-    x23::Vec<x23::Vec<ProposedTransaction>> proposed_tx_chunks;
-    proposed_tx_chunks.reserve(validation_chunks.size());
+    x23::Vec<x23::Async<PreparedValidationChunk>> prepare_handles;
+    prepare_handles.reserve(validation_chunks.size());
     x23::Vec<x23::Async<bool>> validation_handles;
     validation_handles.reserve(validation_chunks.size());
 
     for (const ChunkRange &chunk : validation_chunks) {
-      ElapsedTimer lookup_timer;
-      size_t txs_before_chunk = cache.txs.size();
-      proposed_tx_chunks.emplace_back();
-      x23::Vec<ProposedTransaction> &tx_chunk = proposed_tx_chunks.back();
-      tx_chunk.reserve(chunk.end - chunk.start);
       x23::span<const SignedTransactionHash> tx_hashes_span(
           cache.tx_hashes.begin() + chunk.start,
           cache.tx_hashes.begin() + chunk.end);
-      std::vector<std::shared_ptr<const SignedTransaction>> found_txs =
-          co_await lookup_validation_chunk_txs(tx_hashes_span);
+      x23::span<const NondeterministicProposalData> tx_nominations_span(
+          tx_nominations.begin() + chunk.start,
+          tx_nominations.begin() + chunk.end);
+      prepare_handles.push_back(
+          prepare_validation_chunk(tx_hashes_span, tx_nominations_span));
+    }
 
-      for (size_t i = 0; i < found_txs.size(); i++) {
-        if (!found_txs[i]) {
-          missing_tx_hashes.push_back(cache.tx_hashes[chunk.start + i]);
-          continue;
-        }
-        cache.txs.push_back(*found_txs[i]);
-      }
-      stage_lookup_txs += lookup_timer.elapsed();
+    x23::Vec<x23::Vec<ProposedTransaction>> proposed_tx_chunks;
+    proposed_tx_chunks.reserve(validation_chunks.size());
+    for (x23::Async<PreparedValidationChunk> &handle : prepare_handles) {
+      PreparedValidationChunk prepared = co_await handle;
+      stage_lookup_txs += prepared.lookup_duration;
+      stage_build_proposed_txs += prepared.build_duration;
+      missing_tx_hashes += prepared.missing_tx_hashes;
+      cache.txs += prepared.txs;
+      proposed_tx_chunks.push_back(std::move(prepared.proposed_txs));
+    }
 
-      if (!missing_tx_hashes.empty()) {
-        break;
+    if (missing_tx_hashes.empty()) {
+      for (x23::Vec<ProposedTransaction> &tx_chunk : proposed_tx_chunks) {
+        validation_handles.push_back(validate_batch(cache.block_id, tx_chunk));
       }
-
-      ElapsedTimer build_timer;
-      for (size_t i = chunk.start; i < chunk.end; i++) {
-        tx_chunk.push_back(
-            {.signed_tx = cache.txs[txs_before_chunk + i - chunk.start],
-             .nondeterministic_proposal_data = tx_nominations[i]});
-      }
-      stage_build_proposed_txs += build_timer.elapsed();
-      validation_handles.push_back(validate_batch(cache.block_id, tx_chunk));
     }
 
     ElapsedTimer validate_timer;

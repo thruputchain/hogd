@@ -327,6 +327,14 @@ private:
     size_t tx_count = 0;
   };
 
+  struct PreparedValidationChunk {
+    x23::XdrVec<SignedTransaction> txs;
+    x23::Vec<ProposedTransaction> proposed_txs;
+    x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+    double lookup_duration = 0.0;
+    double build_duration = 0.0;
+  };
+
   struct CommitWindowTelemetry {
     size_t submitted_vetted = 0;
     size_t submitted_unvetted = 0;
@@ -434,6 +442,10 @@ private:
 
   x23::Async<std::vector<std::shared_ptr<const SignedTransaction>>>
   lookup_validation_chunk_txs(x23::span<const SignedTransactionHash> tx_hashes);
+
+  x23::Async<PreparedValidationChunk> prepare_validation_chunk(
+      x23::span<const SignedTransactionHash> tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations);
 
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
