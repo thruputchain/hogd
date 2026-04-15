@@ -79,8 +79,12 @@ add_custom_command(
 add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
 # Build all WASM contracts via groundhog-cli
-# Each invocation of build_wasm.sh produces both <name>.wasm and <name>_spec.json
+# Usage: add_wasm_builds(SPEC_CONTRACTS c1 c2 ... RAW_CONTRACTS c3 c4 ...)
+# SPEC_CONTRACTS produce both .wasm and _spec.json
+# RAW_CONTRACTS produce only .wasm (no #[contract] macro, no embedded spec)
 function(add_wasm_builds)
+  cmake_parse_arguments(ARG "" "" "SPEC_CONTRACTS;RAW_CONTRACTS" ${ARGN})
+
   # Common dependencies (use stamp file to ensure roundtrip.rs files exist)
   set(common_depends
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
@@ -95,16 +99,14 @@ function(add_wasm_builds)
   # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
 
-  set(all_wasms "")
-  set(all_specs "")
+  set(all_outputs "")
   set(all_depends ${common_depends})
   set(build_commands "")
 
-  foreach(target_name ${ARGN})
-    list(APPEND all_wasms ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
-    list(APPEND all_specs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+  foreach(target_name ${ARG_SPEC_CONTRACTS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
 
-    # Get all .rs files but filter out generated roundtrip.rs
     file(GLOB target_rs_files
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
     list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
@@ -113,7 +115,6 @@ function(add_wasm_builds)
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
       ${target_rs_files})
 
-    # build_wasm.sh <target_name> <build_dir> [cargo flags...]
     list(APPEND build_commands
       COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
         ${target_name}
@@ -121,16 +122,34 @@ function(add_wasm_builds)
         "${WASM_FLAGS}")
   endforeach()
 
-  # Single custom command that builds all WASMs + specs
+  foreach(target_name ${ARG_RAW_CONTRACTS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+
+    file(GLOB target_rs_files
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+
+    list(APPEND all_depends
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${target_rs_files})
+
+    list(APPEND build_commands
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
+        --no-spec
+        ${target_name}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        "${WASM_FLAGS}")
+  endforeach()
+
   add_custom_command(
-    OUTPUT ${all_wasms} ${all_specs}
+    OUTPUT ${all_outputs}
     ${build_commands}
     DEPENDS ${all_depends}
     COMMENT "Building all WASM contracts via groundhog-cli"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
-  add_custom_target(all_wasms_built DEPENDS ${all_wasms} ${all_specs})
+  add_custom_target(all_wasms_built DEPENDS ${all_outputs})
   add_dependencies(all_wasm_contracts all_wasms_built)
 endfunction()
 
@@ -184,29 +203,38 @@ endfunction()
 
 # Build all WASMs (and specs) via groundhog-cli
 add_wasm_builds(
-  fibonacci
-  fibonacci_call
-  cxs_roundtrip
-  txs_roundtrip
-  read_only_test
-  manual_revert_test
-  manual_revert_caller
-  simple_wallet
-  simple_wallet_authclaim
-  sha256_wrapper
-  initial_token_claim
-  itc_erc20
-  authclaim_test
-  hash_bug
-  htlc
-  payment_channel
-  return_fault_test
-  tuple_return
-  no_syscall_test
-  syscall_misc_tests
-  syscall_parse_hardening_test
-  nnint_output_fault_test
-  output_alias_test
+  SPEC_CONTRACTS
+    fibonacci
+    fibonacci_call
+    cxs_roundtrip
+    txs_roundtrip
+    read_only_test
+    manual_revert_test
+    manual_revert_caller
+    simple_wallet
+    simple_wallet_authclaim
+    sha256_wrapper
+    initial_token_claim
+    itc_erc20
+    authclaim_test
+    htlc
+    payment_channel
+    return_fault_test
+    tuple_return
+    no_syscall_test
+    syscall_misc_tests
+    syscall_parse_hardening_test
+    nnint_output_fault_test
+    output_alias_test
+    calldata_wrapper
+    delegate_call_test
+    ed25519_verify_wrapper
+  RAW_CONTRACTS
+    hash_bug
+    calldata_raw
+    sha256_raw
+    fibonacci_raw
+    nocontract_wallet
 )
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types

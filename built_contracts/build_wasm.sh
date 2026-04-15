@@ -1,10 +1,10 @@
 #!/bin/sh
 # Build a WASM contract via groundhog-cli
-# Usage: build_wasm.sh <target_name> <target_dir> [additional cargo flags...]
+# Usage: build_wasm.sh [--no-spec] <target_name> <target_dir> [additional cargo flags...]
 #
 # Produces:
 #   <target_dir>/<target_name>.wasm
-#   <target_dir>/<target_name>_spec.json
+#   <target_dir>/<target_name>_spec.json  (unless --no-spec)
 
 set -e
 
@@ -16,11 +16,17 @@ if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
     exit 1
 fi
 
+EXPECT_SPEC=1
+if [ "$1" = "--no-spec" ]; then
+    EXPECT_SPEC=0
+    shift
+fi
+
 TARGET_NAME="$1"
 TARGET_DIR="$2"
 
 if [ -z "$TARGET_NAME" ] || [ -z "$TARGET_DIR" ]; then
-    echo "Usage: build_wasm.sh <target_name> <target_dir> [additional cargo flags...]" >&2
+    echo "Usage: build_wasm.sh [--no-spec] <target_name> <target_dir> [additional cargo flags...]" >&2
     exit 1
 fi
 
@@ -33,7 +39,6 @@ export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # Build with groundhog-cli
 # Pass remaining args (e.g. -F features) through to cargo
-# Redirect stderr so cargo output doesn't corrupt the JSON
 OUTPUT=$(groundhog build -p "${TARGET_NAME}" --optimize --json -- --frozen --offline "$@")
 
 # Parse output paths from JSON
@@ -49,4 +54,11 @@ fi
 # Copy outputs to build directory
 mkdir -p "${TARGET_DIR}"
 cp "${WASM_PATH}" "${TARGET_DIR}/${TARGET_NAME}.wasm"
-cp "${SPEC_PATH}" "${TARGET_DIR}/${TARGET_NAME}_spec.json"
+
+if [ "$EXPECT_SPEC" = "1" ]; then
+    if [ -z "$SPEC_PATH" ] || [ "$SPEC_PATH" = "null" ]; then
+        echo "error: groundhog build did not produce a spec for ${TARGET_NAME}" >&2
+        exit 1
+    fi
+    cp "${SPEC_PATH}" "${TARGET_DIR}/${TARGET_NAME}_spec.json"
+fi
