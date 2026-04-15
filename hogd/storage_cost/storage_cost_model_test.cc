@@ -76,8 +76,22 @@ TEST(StorageCostModelTest, ContractDeploymentCostIncludesBase)
   };
   StorageCostModel model(xdr);
 
-  EXPECT_EQ(model.get_deployment_cost(100), int128_t{13000});
-  EXPECT_EQ(model.get_deployment_cost(0), int128_t{12000});
+  DeployedContractHash wasm_hash{
+      .hash = {}, .contract_size = 100, .contract_type = ContractType::kWasmi};
+  EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{13000});
+
+  wasm_hash.contract_size = 0;
+  EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{12000});
+
+  DeployedContractHash native_hash{
+      .hash = {}, .contract_size = 0, .contract_type = ContractType::kNative};
+  EXPECT_EQ(model.get_deployment_cost(native_hash), int128_t{0});
+
+  DeployedContractHash mock_hash{
+      .hash = {},
+      .contract_size = 100,
+      .contract_type = ContractType::kMockTest};
+  EXPECT_EQ(model.get_deployment_cost(mock_hash), int128_t{0});
 }
 
 } // namespace hogd

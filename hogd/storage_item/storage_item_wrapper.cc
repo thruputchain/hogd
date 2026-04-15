@@ -162,7 +162,7 @@ int128_t
 StorageItemWrapper::DeployedContractHashWrapper::storage_cost(
     StorageCostModel const *cost_model) const
 {
-  return cost_model->get_deployment_cost(deployed_contract_hash_.contract_size);
+  return cost_model->get_deployment_cost(deployed_contract_hash_);
 }
 int128_t
 StorageItemWrapper::storage_cost(StorageCostModel const *cost_model) const

@@ -557,7 +557,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         return HogDBError(HogDBCode::kInternal);
       }
       return std::make_pair(cost_model->get_deployment_cost(
-                                deployed_contract_hash.contract_size),
+                                deployed_contract_hash),
                             ItemLockCacheData::from_none());
     }
   case ItemKeyType::kItemKeyTypeContractData:
