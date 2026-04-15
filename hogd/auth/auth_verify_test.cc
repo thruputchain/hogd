@@ -213,8 +213,9 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
   }
 
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(
-      0, mock_db().get_key_changes_at_height(0))();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
 
   x23::Vec<SignedTransaction> stx_vec;
   for (size_t i = 0; i < kTotalTxs; i++) {
@@ -226,8 +227,7 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 
     SignedTransaction stx{};
     stx.tx = tx;
-    stx.signatures.push_back(
-        make_signature(keys[addr_idx].second, tx, 0, 0));
+    stx.signatures.push_back(make_signature(keys[addr_idx].second, tx, 0, 0));
     stx_vec.push_back(std::move(stx));
   }
 

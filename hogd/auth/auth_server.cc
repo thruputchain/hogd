@@ -233,7 +233,8 @@ AuthServer::verify_transactions(BlockHeight height,
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           const std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
+           const std::unordered_map<ContractAddress, AddressAuthData>
+               &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
