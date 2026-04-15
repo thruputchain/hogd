@@ -304,6 +304,57 @@ TEST_F(AuthClaimTests, WeightedClaimRejectsUnacceptedKey)
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
 }
 
+TEST_F(AuthClaimTests, WeightedClaimRejectsDuplicateSignerInBucket)
+{
+  AuthClaim real_claim(AuthClaimType::kInvokedAddressSignedWeight);
+  real_claim.invoked_address_signed_weight().accepted_keys = 1 << 0;
+  real_claim.invoked_address_signed_weight().required_weight = 1;
+
+  AuthClaim dummy_claim(AuthClaimType::kInvokedAddressSignedWeight);
+  dummy_claim.invoked_address_signed_weight().accepted_keys = 0;
+  dummy_claim.invoked_address_signed_weight().required_weight = 0;
+
+  auto [ignored_pk, sk] = make_key_pair();
+  auto tx = make_transaction({real_claim, dummy_claim});
+
+  DecoratedSignature sig0 =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+  DecoratedSignature sig1 = sig0;
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
+TEST_F(AuthClaimTests, WeightedClaimRejectsOutOfOrderSignerInBucket)
+{
+  AuthClaim real_claim(AuthClaimType::kInvokedAddressSignedWeight);
+  real_claim.invoked_address_signed_weight().accepted_keys =
+      (1 << 0) | (1 << 1);
+  real_claim.invoked_address_signed_weight().required_weight = 2;
+
+  AuthClaim dummy_claim(AuthClaimType::kInvokedAddressSignedWeight);
+  dummy_claim.invoked_address_signed_weight().accepted_keys = 0;
+  dummy_claim.invoked_address_signed_weight().required_weight = 0;
+
+  auto [ignored_pk0, sk0] = make_key_pair();
+  auto [ignored_pk1, sk1] = make_key_pair();
+  auto tx = make_transaction({real_claim, dummy_claim});
+
+  DecoratedSignature sig1 =
+      make_signature(sk1, tx, /*auth_claim_idx=*/0, /*public_key_id=*/1);
+  DecoratedSignature sig0 =
+      make_signature(sk0, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig1, sig0}};
+
+  auto result = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
 // Verify that very large public_key_id values (UINT32_MAX) are rejected
 // cleanly without UB.
 TEST_F(AuthClaimTests, PublicKeyIdMaxValueRejected)

@@ -179,10 +179,18 @@ verify_weight_key_claim_internal(
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
+  uint32_t prev_key_id = 0;
+  bool have_prev_key_id = false;
   for (const DecoratedSignature *sig : sigs) {
     if (!bitmap_accepts_key(accepted_keys, sig->public_key_id)) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
+    if (have_prev_key_id && sig->public_key_id <= prev_key_id) {
+      trace("Auth malformed: weighted-claim signer ids must be strictly increasing");
+      return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+    }
+    prev_key_id = sig->public_key_id;
+    have_prev_key_id = true;
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
