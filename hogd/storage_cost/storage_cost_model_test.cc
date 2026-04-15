@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
