@@ -556,8 +556,8 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         error("failed to deserialize deployed contract hash: {}", e.what());
         return HogDBError(HogDBCode::kInternal);
       }
-      return std::make_pair(cost_model->get_contract_size_cost(
-                                deployed_contract_hash.contract_size),
+      return std::make_pair(cost_model->get_deployment_cost(
+                                deployed_contract_hash),
                             ItemLockCacheData::from_none());
     }
   case ItemKeyType::kItemKeyTypeContractData:
