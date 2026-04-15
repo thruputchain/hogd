@@ -1188,6 +1188,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_lookup_txs = 0.0;
   double stage_build_proposed_txs = 0.0;
   double stage_validate_batch = 0.0;
+  double stage_block_execution = 0.0;
   double stage_close_snapshot = 0.0;
   double stage_close_event_block = 0.0;
   double stage_verify_block_hash = 0.0;
@@ -1328,6 +1329,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   }
 
   info("schedulercoord_validate here");
+  ElapsedTimer block_execution_timer;
   // [nomination] includes the the tx hashes and the nondeterministic proposal
   // data. We need to use these tx hashes to look up the vetted txs in
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
@@ -1393,6 +1395,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
   }
+  stage_block_execution = block_execution_timer.elapsed();
 
   if (!validated) {
     co_await scheduler_->add_txs(cache.txs);
@@ -1480,6 +1483,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        "create_snapshot={:.6f}, open_event_block={:.6f}, "
        "open_validation_blocks={:.6f}, lookup_txs={:.6f}, "
        "build_proposed_txs={:.6f}, validate_batch={:.6f}, "
+       "block_execution={:.6f}, "
        "close_snapshot={:.6f}, close_event_block={:.6f}, "
        "verify_block_hash={:.6f}, finish_executors={:.6f}, "
        "serialize_result={:.6f}, cache_validated_block={:.6f}, "
@@ -1488,11 +1492,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        stage_deserialize_nomination_data, stage_deserialize_tx_hashes,
        stage_wait_transfers, stage_wait_auth_data, stage_create_snapshot,
        stage_open_event_block, stage_open_validation_blocks, stage_lookup_txs,
-       stage_build_proposed_txs, stage_validate_batch, stage_close_snapshot,
-       stage_close_event_block, stage_verify_block_hash, stage_finish_executors,
-       stage_serialize_result, stage_cache_validated_block, stage_finalize,
-       timer.elapsed(), cache.block_id, nomination.block_height,
-       validation_telemetry.tx_count);
+       stage_build_proposed_txs, stage_validate_batch, stage_block_execution,
+       stage_close_snapshot, stage_close_event_block, stage_verify_block_hash,
+       stage_finish_executors, stage_serialize_result,
+       stage_cache_validated_block, stage_finalize, timer.elapsed(),
+       cache.block_id, nomination.block_height, validation_telemetry.tx_count);
   info("schedulercoord_validate ret");
   co_return result;
 }
