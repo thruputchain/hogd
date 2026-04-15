@@ -37,9 +37,6 @@
 
 namespace hogd {
 
-// SDK CrossExn<E> discriminant for the Contract(E) variant.
-constexpr int32_t kCrossExnContractDiscriminant = 0;
-
 // Common utilities for building preset contracts
 
 ContractEntrypointID
@@ -226,37 +223,12 @@ public:
     return [data, manually_reverted] -> std::optional<return_type> {
       if constexpr (is_contract_result_type<return_type>) {
         if (manually_reverted) {
-          // Abort buffers contain CXS-encoded CrossExn<E>.
-          // Layout: i32 discriminant (0=Contract, 1=Library, 2=Unknown)
-          // followed by the CXS-encoded variant payload.
-          std::span<const uint8_t> data_u8(reinterpret_cast<const uint8_t *>(
-                                               data.data()),
-                                           data.size());
-          int32_t discriminant;
-          try {
-            discriminant = x23::load_cxs_int<int32_t>(data_u8);
-          } catch (const x23::XdrException &e) {
-            error("Decode Return Failed: Could not parse CrossExn "
-                  "discriminant: {}",
-                  e.what());
-            return std::nullopt;
-          }
-          if (discriminant != kCrossExnContractDiscriminant) {
-            error("Decode Return: CrossExn discriminant {} is not Contract({})",
-                  discriminant, kCrossExnContractDiscriminant);
-            return std::nullopt;
-          }
-          std::span<const std::byte> remaining(
-              reinterpret_cast<const std::byte *>(data_u8.data()),
-              data_u8.size());
-          auto out = Serializer<kSerializationFormat>::template deserialize<
-              typename return_type::err_type>(remaining);
-          if (!out.has_value()) {
-            error("Decode Return Failed: Failed to deserialize return error "
-                  "type");
-            return std::nullopt;
-          }
-          return return_type::make_err(*out);
+          // New format: abort buffer contains CXS-encoded (u64 selector, Buf body).
+          // ContractErrorType parses selector+body and dispatches internally.
+          ReturnBuffer abort_buf(
+              reinterpret_cast<const uint8_t *>(data.data()),
+              reinterpret_cast<const uint8_t *>(data.data()) + data.size());
+          return return_type::make_err(std::move(abort_buf));
         }
         // ok type
         auto out = Serializer<kSerializationFormat>::template deserialize<
