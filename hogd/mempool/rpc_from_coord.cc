@@ -8,6 +8,7 @@
 #include <ctime>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <sstream>
 #include <unordered_set>
@@ -1028,6 +1029,37 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   }));
 }
 
+x23::Async<std::vector<std::shared_ptr<const SignedTransaction>>>
+MempoolCoordinatorRpc::lookup_validation_chunk_txs(
+    x23::span<const SignedTransactionHash> tx_hashes)
+{
+  std::vector<std::shared_ptr<const SignedTransaction>> found_txs(
+      tx_hashes.size());
+  const std::vector<ChunkRange> lookup_chunks =
+      make_chunks(tx_hashes.size(), available_parallelism());
+  x23::Vec<x23::Async<void>> lookup_handles;
+  lookup_handles.reserve(lookup_chunks.size());
+
+  for (const ChunkRange &lookup_chunk : lookup_chunks) {
+    lookup_handles.push_back(
+        [](const ChunkRange *lookup_chunk,
+           x23::span<const SignedTransactionHash> tx_hashes,
+           std::vector<std::shared_ptr<const SignedTransaction>> &found_txs,
+           std::shared_ptr<Scheduler> scheduler) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+
+          for (size_t i = lookup_chunk->start; i < lookup_chunk->end; i++) {
+            found_txs[i] = scheduler->find_tx(tx_hashes[i]);
+          }
+          co_return;
+        }(&lookup_chunk, tx_hashes, found_txs, scheduler_));
+  }
+  for (x23::Async<void> &handle : lookup_handles) {
+    co_await handle;
+  }
+  co_return found_txs;
+}
+
 x23::Async<bool>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
@@ -1277,16 +1309,18 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       proposed_tx_chunks.emplace_back();
       x23::Vec<ProposedTransaction> &tx_chunk = proposed_tx_chunks.back();
       tx_chunk.reserve(chunk.end - chunk.start);
+      x23::span<const SignedTransactionHash> tx_hashes_span(
+          cache.tx_hashes.begin() + chunk.start,
+          cache.tx_hashes.begin() + chunk.end);
+      std::vector<std::shared_ptr<const SignedTransaction>> found_txs =
+          co_await lookup_validation_chunk_txs(tx_hashes_span);
 
-      for (size_t i = chunk.start; i < chunk.end; i++) {
-        const SignedTransactionHash &tx_hash = cache.tx_hashes[i];
-        std::shared_ptr<const SignedTransaction> tx =
-            scheduler_->find_tx(tx_hash);
-        if (!tx) {
-          missing_tx_hashes.push_back(tx_hash);
+      for (size_t i = 0; i < found_txs.size(); i++) {
+        if (!found_txs[i]) {
+          missing_tx_hashes.push_back(cache.tx_hashes[chunk.start + i]);
           continue;
         }
-        cache.txs.push_back(*tx);
+        cache.txs.push_back(*found_txs[i]);
       }
       stage_lookup_txs += lookup_timer.elapsed();
 
@@ -1441,7 +1475,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   {
     std::chrono::steady_clock::duration delta =
         commit_started_at - last_commit_;
-    std::chrono::milliseconds delta_raw =
+    auto delta_raw =
         std::chrono::duration_cast<std::chrono::milliseconds>(delta);
     info("schedulercoord_commit_block, committing block for height = {}, last "
          "committed block height = {}, delta between end of last commit and "

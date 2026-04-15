@@ -432,6 +432,9 @@ private:
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
 
+  x23::Async<std::vector<std::shared_ptr<const SignedTransaction>>>
+  lookup_validation_chunk_txs(x23::span<const SignedTransactionHash> tx_hashes);
+
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
 
