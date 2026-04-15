@@ -7,6 +7,8 @@ cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std
 cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target wasm32-unknown-unknown
 cd "${ROOT_DIR}/hogd/rust" && cargo fetch
 
+set -ex
+
 echo "Installing groundhog-cli..."
 # cd for the .cargo config for the registry
 cd "${ROOT_DIR}/built_contracts" && cargo install --registry groundhog groundhog-cli@0.2.2
