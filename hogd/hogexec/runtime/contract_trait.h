@@ -217,8 +217,9 @@ public:
     return [data, manually_reverted] -> std::optional<return_type> {
       if constexpr (is_contract_result_type<return_type>) {
         if (manually_reverted) {
-          // New format: abort buffer contains CXS-encoded (u64 selector, Buf body).
-          // ContractErrorType parses selector+body and dispatches internally.
+          // New format: abort buffer contains CXS-encoded (u64 selector, Buf
+          // body). ContractErrorType parses selector+body and dispatches
+          // internally.
           ReturnBuffer abort_buf(
               reinterpret_cast<const uint8_t *>(data.data()),
               reinterpret_cast<const uint8_t *>(data.data()) + data.size());

@@ -37,8 +37,7 @@ struct TestContract {
   constexpr static auto kExportNames =
       std::array<std::string_view, 2>{"return_ok_void", "return_ok_int"};
 
-  using export_types =
-      std::tuple<void (*)(), int32_t (*)()>;
+  using export_types = std::tuple<void (*)(), int32_t (*)()>;
 };
 
 using test_contract_client_t = ContractTraitClient<TestContract>;
@@ -52,8 +51,7 @@ struct CallerContract {
       std::array<std::string_view, 2>{"call_return_ok_void",
                                       "call_return_ok_int"};
 
-  using export_types =
-      std::tuple<void (*)(), void (*)()>;
+  using export_types = std::tuple<void (*)(), void (*)()>;
 };
 
 using caller_contract_client_t = ContractTraitClient<CallerContract>;
@@ -63,13 +61,9 @@ make_test_contract()
 {
   NativeContractBuilder builder;
   builder.add<TestContract, "return_ok_void">(
-      []() -> InvokeStatus<void> {
-        return {};
-      });
+      []() -> InvokeStatus<void> { return {}; });
   builder.add<TestContract, "return_ok_int">(
-      []() -> InvokeStatus<int32_t> {
-        return {123};
-      });
+      []() -> InvokeStatus<int32_t> { return {123}; });
   return builder.build();
 }
 

@@ -21,8 +21,8 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/utilities.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/components/contract_result.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
@@ -37,7 +37,8 @@
 
 namespace hogd {
 
-using ERC20Exception = ContractException<itc_erc20::ERC20Error, 0xb19947acb2fa14ffULL>;
+using ERC20Exception =
+    ContractException<itc_erc20::ERC20Error, 0xb19947acb2fa14ffULL>;
 
 namespace {
 
