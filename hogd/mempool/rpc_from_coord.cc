@@ -8,8 +8,8 @@
 #include <ctime>
 #include <future>
 #include <memory>
-#include <sstream>
 #include <span>
+#include <sstream>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -985,7 +985,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
       nominated_block_cache_.tx_hashes.size();
   nomination_telemetry.nominated_tx_count =
       nominated_block_cache_.result_tx_hashes.size();
-  nomination_telemetry.failed_tx_count = nominated_block_cache_.failed_txs.size();
+  nomination_telemetry.failed_tx_count =
+      nominated_block_cache_.failed_txs.size();
   nominated_block_cache_.db_tip = DbTip{
       .height = nominated_block_cache_.nomination_result.nominated_block()
                     .nomination.block_height,
@@ -1121,12 +1122,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_serialize_result = 0.0;
   double stage_cache_validated_block = 0.0;
   double stage_finalize = 0.0;
-  ValidationTelemetry validation_telemetry{
-      .block_id = 0,
-      .block_height = nomination.block_height,
-      .outcome = "unknown",
-      .duration = 0.0,
-      .tx_count = 0};
+  ValidationTelemetry validation_telemetry{.block_id = 0,
+                                           .block_height =
+                                               nomination.block_height,
+                                           .outcome = "unknown",
+                                           .duration = 0.0,
+                                           .tx_count = 0};
   x23::Defer record_validation_stats([&] {
     validation_telemetry.duration = timer.elapsed();
     record_validation_attempt(std::move(validation_telemetry));
@@ -1259,19 +1260,56 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
-  x23::Vec<ProposedTransaction> txs;
   x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+  bool validated = true;
   {
-    for (const SignedTransactionHash &tx_hash : cache.tx_hashes) {
-      std::shared_ptr<const SignedTransaction> tx =
-          scheduler_->find_tx(tx_hash);
-      if (!tx) {
-        missing_tx_hashes.push_back(tx_hash);
-        continue;
+    const std::vector<ChunkRange> validation_chunks =
+        make_chunks_for_max_size(cache.tx_hashes.size(),
+                                 kNumTxsPerNominationChunk);
+    x23::Vec<x23::Vec<ProposedTransaction>> proposed_tx_chunks;
+    proposed_tx_chunks.reserve(validation_chunks.size());
+    x23::Vec<x23::Async<bool>> validation_handles;
+    validation_handles.reserve(validation_chunks.size());
+
+    for (const ChunkRange &chunk : validation_chunks) {
+      ElapsedTimer lookup_timer;
+      size_t txs_before_chunk = cache.txs.size();
+      proposed_tx_chunks.emplace_back();
+      x23::Vec<ProposedTransaction> &tx_chunk = proposed_tx_chunks.back();
+      tx_chunk.reserve(chunk.end - chunk.start);
+
+      for (size_t i = chunk.start; i < chunk.end; i++) {
+        const SignedTransactionHash &tx_hash = cache.tx_hashes[i];
+        std::shared_ptr<const SignedTransaction> tx =
+            scheduler_->find_tx(tx_hash);
+        if (!tx) {
+          missing_tx_hashes.push_back(tx_hash);
+          continue;
+        }
+        cache.txs.push_back(*tx);
       }
-      cache.txs.push_back(*tx);
+      stage_lookup_txs += lookup_timer.elapsed();
+
+      if (!missing_tx_hashes.empty()) {
+        break;
+      }
+
+      ElapsedTimer build_timer;
+      for (size_t i = chunk.start; i < chunk.end; i++) {
+        tx_chunk.push_back(
+            {.signed_tx = cache.txs[txs_before_chunk + i - chunk.start],
+             .nondeterministic_proposal_data = tx_nominations[i]});
+      }
+      stage_build_proposed_txs += build_timer.elapsed();
+      validation_handles.push_back(validate_batch(cache.block_id, tx_chunk));
     }
-    record_stage(stage_lookup_txs);
+
+    ElapsedTimer validate_timer;
+    for (x23::Async<bool> &handle : validation_handles) {
+      validated = (co_await handle) && validated;
+    }
+    stage_validate_batch = validate_timer.elapsed();
+
     if (!missing_tx_hashes.empty()) {
       co_await finish_all_executors(cache.block_id);
       co_await abandon_block(cache);
@@ -1286,18 +1324,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_return ret;
     }
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
-    for (size_t i = 0; i < cache.txs.size(); i++) {
-      txs.push_back({.signed_tx = cache.txs[i],
-                     .nondeterministic_proposal_data = tx_nominations[i]});
-    }
-    record_stage(stage_build_proposed_txs);
   }
 
-  // Now execute the txs on the executor.
-
-  // Careful--[validate_batch()] is calling co_await in its function body.
-  bool validated = co_await validate_batch(cache.block_id, txs);
-  record_stage(stage_validate_batch);
   if (!validated) {
     co_await scheduler_->add_txs(cache.txs);
 
@@ -1391,12 +1419,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        stage_wait_validation_gate, stage_precheck,
        stage_deserialize_nomination_data, stage_deserialize_tx_hashes,
        stage_wait_transfers, stage_wait_auth_data, stage_create_snapshot,
-       stage_open_event_block, stage_open_validation_blocks,
-       stage_lookup_txs, stage_build_proposed_txs, stage_validate_batch,
-       stage_close_snapshot, stage_close_event_block, stage_verify_block_hash,
-       stage_finish_executors, stage_serialize_result,
-       stage_cache_validated_block, stage_finalize, timer.elapsed(),
-       cache.block_id, nomination.block_height, validation_telemetry.tx_count);
+       stage_open_event_block, stage_open_validation_blocks, stage_lookup_txs,
+       stage_build_proposed_txs, stage_validate_batch, stage_close_snapshot,
+       stage_close_event_block, stage_verify_block_hash, stage_finish_executors,
+       stage_serialize_result, stage_cache_validated_block, stage_finalize,
+       timer.elapsed(), cache.block_id, nomination.block_height,
+       validation_telemetry.tx_count);
   info("schedulercoord_validate ret");
   co_return result;
 }
@@ -1411,7 +1439,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   const std::chrono::steady_clock::time_point commit_started_at =
       std::chrono::steady_clock::now();
   {
-    std::chrono::steady_clock::duration delta = commit_started_at - last_commit_;
+    std::chrono::steady_clock::duration delta =
+        commit_started_at - last_commit_;
     std::chrono::milliseconds delta_raw =
         std::chrono::duration_cast<std::chrono::milliseconds>(delta);
     info("schedulercoord_commit_block, committing block for height = {}, last "
@@ -1603,8 +1632,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       snapshot_commit_window_telemetry();
   std::ostringstream validation_summary;
   for (size_t i = 0; i < commit_window_stats.validations.size(); i++) {
-    const ValidationTelemetry &validation =
-        commit_window_stats.validations[i];
+    const ValidationTelemetry &validation = commit_window_stats.validations[i];
     if (i != 0) {
       validation_summary << "; ";
     }
@@ -1615,11 +1643,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                        << ", txs=" << validation.tx_count << "}";
   }
   const size_t scheduler_size = scheduler_->size();
-  const size_t total_submitted =
-      commit_window_stats.submitted_vetted +
-      commit_window_stats.submitted_unvetted;
-  const auto since_last_commit_ms = std::chrono::duration_cast<
-      std::chrono::milliseconds>(commit_started_at - last_commit_);
+  const size_t total_submitted = commit_window_stats.submitted_vetted +
+                                 commit_window_stats.submitted_unvetted;
+  const auto since_last_commit_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(commit_started_at -
+                                                            last_commit_);
   if (commit_window_stats.nomination.attempted) {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
          "commit_duration={:.6f}, scheduler_size={}, submitted_total={}, "
