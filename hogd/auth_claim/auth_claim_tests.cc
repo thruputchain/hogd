@@ -433,6 +433,34 @@ TEST_F(AuthClaimTests, GasPermissionCountsSignerOncePerConfig)
   EXPECT_EQ(full.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
+TEST_F(AuthClaimTests, SameSignerAcrossClaimsPassesWhenDedupMeetsThreshold)
+{
+  AuthClaim claim0 = make_individual_key_claim(0);
+  AuthClaim claim1 = make_individual_key_claim(0);
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction({claim0, claim1});
+
+  DecoratedSignature sig0 =
+      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+  DecoratedSignature sig1 = sig0;
+  sig1.auth_claim_idx = 1;
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1}};
+
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+
+  AddressAuthData auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
+      .nonce_config =
+          NonceConfig{.accepted_keys = 1 << 0, .required_weight = 1},
+  };
+
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data, {}).has_value());
+  EXPECT_TRUE(verify_auth(stx, auth_data, {}).has_value());
+}
+
 // Verify that very large public_key_id values (UINT32_MAX) are rejected
 // cleanly without UB.
 TEST_F(AuthClaimTests, PublicKeyIdMaxValueRejected)
