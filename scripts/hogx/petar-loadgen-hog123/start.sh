@@ -26,7 +26,7 @@ rm -rf ~/.hogx
 # [.hogx] to the home directory. Additionally, due to these additional config
 # files that are generated, we have to copy from [$HOGX_HOME] rather than from
 # [$SCRIPT_DIR].
-cp -R $HOGX_HOME/.hogx ~
+cp -R $HOGX_HOME/ ~/.hogx
 
 "$HOGX" -m 3 start -a loadgen --network-id 1
 
