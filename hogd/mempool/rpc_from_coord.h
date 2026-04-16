@@ -335,6 +335,15 @@ private:
     double build_duration = 0.0;
   };
 
+  struct PreparedAndValidatedChunk {
+    x23::XdrVec<SignedTransaction> txs;
+    x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+    double lookup_duration = 0.0;
+    double build_duration = 0.0;
+    double validate_duration = 0.0;
+    bool validated = true;
+  };
+
   struct CommitWindowTelemetry {
     size_t submitted_vetted = 0;
     size_t submitted_unvetted = 0;
@@ -445,6 +454,10 @@ private:
 
   x23::Async<PreparedValidationChunk> prepare_validation_chunk(
       x23::span<const SignedTransactionHash> tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations);
+
+  x23::Async<PreparedAndValidatedChunk> prepare_and_validate_chunk(
+      BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
       x23::span<const NondeterministicProposalData> tx_nominations);
 
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(

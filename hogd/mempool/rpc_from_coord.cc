@@ -1105,6 +1105,32 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
   co_return prepared;
 }
 
+x23::Async<MempoolCoordinatorRpc::PreparedAndValidatedChunk>
+MempoolCoordinatorRpc::prepare_and_validate_chunk(
+    BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
+    x23::span<const NondeterministicProposalData> tx_nominations)
+{
+  PreparedValidationChunk prepared =
+      co_await prepare_validation_chunk(tx_hashes, tx_nominations);
+
+  PreparedAndValidatedChunk ret{
+      .txs = std::move(prepared.txs),
+      .missing_tx_hashes = std::move(prepared.missing_tx_hashes),
+      .lookup_duration = prepared.lookup_duration,
+      .build_duration = prepared.build_duration,
+      .validate_duration = 0.0,
+      .validated = true,
+  };
+  if (!ret.missing_tx_hashes.empty()) {
+    co_return ret;
+  }
+
+  ElapsedTimer validate_timer;
+  ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
+  ret.validate_duration = validate_timer.elapsed();
+  co_return ret;
+}
+
 x23::Async<bool>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
@@ -1349,10 +1375,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     const std::vector<ChunkRange> validation_chunks =
         make_chunks_for_max_size(cache.tx_hashes.size(),
                                  kNumTxsPerNominationChunk);
-    x23::Vec<x23::Async<PreparedValidationChunk>> prepare_handles;
-    prepare_handles.reserve(validation_chunks.size());
-    x23::Vec<x23::Async<bool>> validation_handles;
-    validation_handles.reserve(validation_chunks.size());
+    x23::Vec<x23::Async<PreparedAndValidatedChunk>> chunk_handles;
+    chunk_handles.reserve(validation_chunks.size());
 
     for (const ChunkRange &chunk : validation_chunks) {
       x23::span<const SignedTransactionHash> tx_hashes_span(
@@ -1361,22 +1385,29 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       x23::span<const NondeterministicProposalData> tx_nominations_span(
           tx_nominations.begin() + chunk.start,
           tx_nominations.begin() + chunk.end);
-      prepare_handles.push_back(
-          prepare_validation_chunk(tx_hashes_span, tx_nominations_span));
+      chunk_handles.push_back(prepare_and_validate_chunk(cache.block_id,
+                                                         tx_hashes_span,
+                                                         tx_nominations_span));
     }
 
-    x23::Vec<x23::Vec<ProposedTransaction>> proposed_tx_chunks;
-    proposed_tx_chunks.reserve(validation_chunks.size());
-    for (x23::Async<PreparedValidationChunk> &handle : prepare_handles) {
-      PreparedValidationChunk prepared = co_await handle;
-      stage_lookup_txs += prepared.lookup_duration;
-      stage_build_proposed_txs += prepared.build_duration;
-      missing_tx_hashes += prepared.missing_tx_hashes;
-      cache.txs += prepared.txs;
-      proposed_tx_chunks.push_back(std::move(prepared.proposed_txs));
+    x23::Vec<PreparedAndValidatedChunk> chunk_results;
+    chunk_results.reserve(chunk_handles.size());
+    for (x23::Async<PreparedAndValidatedChunk> &handle : chunk_handles) {
+      chunk_results.push_back(co_await handle);
     }
-    stage_lookup_txs /= prepare_handles.size();
-    stage_build_proposed_txs /= prepare_handles.size();
+    for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
+      stage_lookup_txs += chunk_result.lookup_duration;
+      stage_build_proposed_txs += chunk_result.build_duration;
+      stage_validate_batch += chunk_result.validate_duration;
+      validated = chunk_result.validated && validated;
+      missing_tx_hashes += chunk_result.missing_tx_hashes;
+      cache.txs += chunk_result.txs;
+    }
+    if (!chunk_results.empty()) {
+      stage_lookup_txs /= chunk_results.size();
+      stage_build_proposed_txs /= chunk_results.size();
+      stage_validate_batch /= chunk_results.size();
+    }
 
     if (!missing_tx_hashes.empty()) {
       co_await finish_all_executors(cache.block_id);
@@ -1392,16 +1423,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_return ret;
     }
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
-
-    for (x23::Vec<ProposedTransaction> &tx_chunk : proposed_tx_chunks) {
-      validation_handles.push_back(validate_batch(cache.block_id, tx_chunk));
-    }
-
-    ElapsedTimer validate_timer;
-    for (x23::Async<bool> &handle : validation_handles) {
-      validated = (co_await handle) && validated;
-    }
-    stage_validate_batch = validate_timer.elapsed();
   }
   record_stage(stage_block_execution);
 
