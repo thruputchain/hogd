@@ -1065,6 +1065,8 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
     x23::span<const SignedTransactionHash> tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
+  co_await default_coropoll().pool_.bg();
+
   PreparedValidationChunk prepared;
   prepared.txs.reserve(tx_hashes.size());
   prepared.proposed_txs.reserve(tx_hashes.size());
@@ -1074,6 +1076,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
     std::vector<std::shared_ptr<const SignedTransaction>> found_txs =
         co_await lookup_validation_chunk_txs(tx_hashes);
     prepared.lookup_duration = timer.elapsed();
+    info("this lookup took {}", prepared.lookup_duration);
 
     for (size_t i = 0; i < found_txs.size(); i++) {
       if (!found_txs[i]) {
@@ -1096,6 +1099,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
            .nondeterministic_proposal_data = tx_nominations[i]});
     }
     prepared.build_duration = timer.elapsed();
+    info("this build took {}", prepared.build_duration);
   }
 
   co_return prepared;
@@ -1176,6 +1180,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     stage_out = now - last_stage_ts;
     last_stage_ts = now;
   };
+  auto accumulate_stage = [&](double &stage_out) {
+    const double now = timer.elapsed();
+    stage_out += now - last_stage_ts;
+    last_stage_ts = now;
+  };
   double stage_wait_validation_gate = 0.0;
   double stage_precheck = 0.0;
   double stage_deserialize_nomination_data = 0.0;
@@ -1213,7 +1222,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     while (!(co_await increment_num_validations_in_progress())) {
       co_await wait_for_validation_gate_open();
     }
-    record_stage(stage_wait_validation_gate);
+    accumulate_stage(stage_wait_validation_gate);
 
     if (nomination.block_height < last_committed_block_.height + 1) {
       // This block is too old to validate.
@@ -1329,7 +1338,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   }
 
   info("schedulercoord_validate here");
-  ElapsedTimer block_execution_timer;
   // [nomination] includes the the tx hashes and the nondeterministic proposal
   // data. We need to use these tx hashes to look up the vetted txs in
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
@@ -1367,6 +1375,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       cache.txs += prepared.txs;
       proposed_tx_chunks.push_back(std::move(prepared.proposed_txs));
     }
+    stage_lookup_txs /= prepare_handles.size();
+    stage_build_proposed_txs /= prepare_handles.size();
 
     if (missing_tx_hashes.empty()) {
       for (x23::Vec<ProposedTransaction> &tx_chunk : proposed_tx_chunks) {
@@ -1395,7 +1405,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
   }
-  stage_block_execution = block_execution_timer.elapsed();
+  record_stage(stage_block_execution);
 
   if (!validated) {
     co_await scheduler_->add_txs(cache.txs);
