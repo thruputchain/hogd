@@ -33,9 +33,9 @@ calculate_selector(std::string_view major_version, std::string_view crate,
 {
   x23::Buf buf;
   buf.append_range(major_version);
-  buf.append_range("::");
+  buf.append_range(std::string_view("::"));
   buf.append_range(crate);
-  buf.append_range("::");
+  buf.append_range(std::string_view("::"));
   buf.append_range(type_name);
   auto hash = sha256(buf);
   // First 8 digest bytes as big-endian u64 (matches contract SDK).
