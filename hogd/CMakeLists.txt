@@ -58,11 +58,12 @@ endif()
 
 add_custom_target(tidy_targets)
 add_dependencies(
-  tidy_targets 
-  all_wasm_headers 
+  tidy_targets
+  all_wasm_headers
   protocol
   x23
   hogd_interface
+  components_library_exception
   generate_syscall_inner_h
   generate_syscall_meta_h
   generate_wasmi_ffi_h
