@@ -75,6 +75,8 @@ def map_type(ty):
         return f"x23::Ptr<{inner}>"
     elif kind == "tuple":
         items = [map_type(item) for item in ty["items"]]
+        if len(items) == 1:
+            return items[0]
         return f"std::tuple<{', '.join(items)}>"
     elif kind == "named":
         return ty["name"]

@@ -175,14 +175,14 @@ protected:
         .channel_id = channel_id,
         .balance_a =
             {
-                .unnamed_0 = static_cast<int64_t>(balance_a >> 64),
-                .unnamed_1 =
+                .highbits = static_cast<int64_t>(balance_a >> 64),
+                .lowbits =
                     static_cast<uint64_t>(balance_a & 0xffffffffffffffffULL),
             },
         .balance_b =
             {
-                .unnamed_0 = static_cast<int64_t>(balance_b >> 64),
-                .unnamed_1 =
+                .highbits = static_cast<int64_t>(balance_b >> 64),
+                .lowbits =
                     static_cast<uint64_t>(balance_b & 0xffffffffffffffffULL),
             },
         .nonce = state_nonce,
