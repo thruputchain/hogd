@@ -9,7 +9,6 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/manual_revert_test.h"
-#include "built_contracts/manual_revert_test.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
