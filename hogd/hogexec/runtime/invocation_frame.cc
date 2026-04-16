@@ -25,9 +25,10 @@
 namespace hogd {
 
 InvocationFrame::InvocationFrame(ContractAddress const &address,
-                                 Calldata &&calldata, InvokeFlagSet flags)
+                                 Calldata &&calldata, InvokeFlagSet flags,
+                                 size_t event_count)
   : address_(address), calldata_(std::forward<Calldata>(calldata)),
-    flags_(flags)
+    flags_(flags), event_count_(event_count)
 {}
 
 void
@@ -41,6 +42,7 @@ void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
   child_return_output_ = std::move(frame.to_return_output_);
+  event_count_ = frame.event_count_;
 
   events_.reserve(events_.size() + frame.events_.size());
   events_.append_range(
@@ -88,6 +90,7 @@ InvocationFrame::commit_failed_child_frame()
 void
 InvocationFrame::log_event(TxEmittedEvent event)
 {
+  event_count_++;
   events_.emplace_back(std::move(event));
 }
 
@@ -171,17 +174,10 @@ void
 InvocationFrameStack::start_frame(ContractAddress const &address,
                                   Calldata &&calldata, InvokeFlagSet flags)
 {
-  frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags);
-}
-
-size_t
-InvocationFrameStack::event_count() const
-{
-  size_t total = 0;
-  for (auto const &frame : frame_stack_) {
-    total += frame.get_events().size();
-  }
-  return total;
+  size_t event_count =
+      frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
+  frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
+                            event_count);
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>
