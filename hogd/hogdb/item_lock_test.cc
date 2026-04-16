@@ -643,7 +643,8 @@ TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
       while (!finalized_ready.load(std::memory_order_relaxed)) {
       }
       auto ctx = make_dummy_context();
-      (void)lock.try_atomic_change_lock(nullptr, &change_b, ctx);
+      auto ignored = lock.try_atomic_change_lock(nullptr, &change_b, ctx);
+      (void)ignored;
     });
 
     thread_a.join();
