@@ -72,7 +72,13 @@ impl WasmtimeGlobalContext {
             % self.engine_count
     }
 
-    fn new_engine() -> Engine {
+    /// Build the production Wasmtime Config used by the hogd runtime.
+    ///
+    /// Public so tests can pin a target triple / CPU features on top of
+    /// the same base config, keeping test-side engines in lockstep with
+    /// production without hand-copying every knob. Production code
+    /// constructs engines via `new_engine()`.
+    pub fn new_config() -> Config {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
         let num_slots: u32 = 1024;
         let table_size: usize = 64;
@@ -106,6 +112,17 @@ impl WasmtimeGlobalContext {
             .debug_info(false)
             .cranelift_opt_level(wasmtime::OptLevel::Speed)
             .cranelift_nan_canonicalization(true) // deterministic nan
+            // Disable SIMD. Winch's x86_64 SIMD lowering is gated on
+            // runtime-detected AVX, and its aarch64 backend leaves SIMD
+            // unimplemented. Leaving SIMD enabled would make contract
+            // validity and runtime-creation success host-CPU dependent,
+            // producing consensus divergence (audit #1469 / H002). With
+            // wasm_simd(false), wasmparser rejects v128 operators at
+            // validation uniformly across every host. wasm_relaxed_simd
+            // is disabled for defense in depth — relaxed-SIMD requires
+            // SIMD, so this is redundant but explicit.
+            .wasm_simd(false)
+            .wasm_relaxed_simd(false)
             .relaxed_simd_deterministic(true)
             .wasm_multi_memory(false)
             .epoch_interruption(false)
@@ -155,7 +172,11 @@ impl WasmtimeGlobalContext {
 
         //config.with_custom_code_memory(Some(Arc::new(MprotectCodeMemory::new())));
 
-        Engine::new(&config).unwrap()
+        config
+    }
+
+    fn new_engine() -> Engine {
+        Engine::new(&Self::new_config()).unwrap()
     }
 
     pub fn new(

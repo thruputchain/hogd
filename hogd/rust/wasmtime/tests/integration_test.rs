@@ -783,3 +783,145 @@ fn test_pool_exhaustion_returns_system_error() {
         let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
+
+// ===========================================================================
+// Regression tests for audit issue #1469 (H002):
+// Winch SIMD contract validity depends on host AVX support.
+//
+// Root cause: the production Wasmtime config in global_context.rs selects
+// Strategy::Winch but leaves wasm_simd() at the default (enabled). Winch's
+// x86_64 SIMD lowering is gated by runtime-detected AVX features, and its
+// aarch64 backend has SIMD unimplemented entirely. An attacker-crafted
+// module containing any v128 operator therefore:
+//   - verifies and executes on x86_64 + AVX validators, but
+//   - fails Module::new on x86_64 no-AVX or aarch64 validators, which
+//     maps to SystemErrorCode::kSystemUnrecoverable in get_instance_pre.
+// Fix: disable the SIMD feature in the production Config. Wasmtime then
+// rejects v128 operators deterministically at the wasmparser validation
+// layer, regardless of host CPU.
+// ===========================================================================
+
+unsafe extern "C" fn test_get_simd_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let wasm_bytes = load_wasm_file("simd_v128.wasm");
+
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    if hash_slice.iter().any(|&b| b != 4) {
+        return ContractGetResult::new(
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            &[],
+        );
+    }
+    ContractGetResult::new(0, wasm_bytes)
+}
+
+// Directly asserts that the production Wasmtime Config disables the SIMD
+// feature at the wasmparser validation layer. This is the property that
+// makes SIMD rejection deterministic across hosts, independent of Winch's
+// AVX-gated x86_64 SIMD lowering and its unimplemented aarch64 backend.
+//
+// Before the fix, wasm_simd defaults to true: Module::new either compiles
+// the module (x86_64 + AVX host) or fails at codegen with "AVX support"
+// or "unimplemented masm instruction" errors (no-AVX / aarch64 hosts) —
+// neither path produces wasmparser's "SIMD support is not enabled"
+// validation error, so the assertion fails uniformly pre-fix.
+//
+// After the fix, Module::new fails at validation with exactly that
+// message on every host. That is the deterministic rejection we want.
+#[test]
+fn test_h002_production_config_rejects_simd_at_validation() {
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+    let simd_bytes = load_wasm_file("simd_v128.wasm");
+
+    let err = wasmtime::Module::new(&engine, simd_bytes).err().expect(
+        "production config must disable SIMD so v128 modules are rejected \
+         at validation on every host",
+    );
+
+    // anyhow's plain Display (`{err}` / `err.to_string()`) prints only the
+    // top-level message ("failed to compile: ..."), dropping the nested
+    // "SIMD support is not enabled" cause we need to assert on. Alternate
+    // Display (`{err:#}`) prints the full chain on one line without the
+    // Debug backtrace noise, which is what we want here.
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("SIMD support is not enabled"),
+        "expected wasmparser validation rejection \"SIMD support is not \
+         enabled\", got host-dependent codegen error instead: {err:#}"
+    );
+}
+
+// Regression test using the real production FFI path. With wasm_simd
+// disabled in global_context.rs the wasmparser validator rejects any
+// module with v128 operators before Winch is consulted, so verification
+// returns false on every host. Prior to the fix this test passed
+// coincidentally on aarch64 hosts (Winch aarch64 can't compile SIMD so
+// Module::new failed at codegen) and failed on x86_64 + AVX hosts (Winch
+// successfully compiled SIMD, so verify returned true).
+#[test]
+fn test_h002_verify_contract_rejects_simd_module() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let wasm_bytes = load_wasm_file("simd_v128.wasm");
+        let result = wasmtime_verify_contract(
+            context,
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len(),
+        );
+
+        assert!(
+            !result,
+            "SIMD-bearing contracts must be rejected by \
+             wasmtime_verify_contract on every host"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+// Documents the downstream kSystemUnrecoverable that the audit issue is
+// actually about. If any path (verify bypass, cache prime, legacy stored
+// contract) ever delivers SIMD bytes to get_instance_pre, Module::new
+// fails and the runtime path maps the failure to kSystemUnrecoverable.
+// With wasm_simd(false) this now happens deterministically at validation,
+// uniformly across hosts, rather than depending on runtime-detected CPU
+// features.
+#[test]
+fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(test_get_simd_contract_get_fn, global_context);
+        let contract_hash = [4u8; 32];
+
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
+        let result =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context);
+
+        assert!(
+            result.get().is_none(),
+            "SIMD contract must not yield a runtime"
+        );
+        assert_eq!(
+            result.err_code(),
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            "Module::new failure on SIMD bytes must map to kSystemUnrecoverable"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
+    }
+}
