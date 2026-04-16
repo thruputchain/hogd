@@ -171,11 +171,10 @@ def generate_header(
     else:
         extra_includes_str = ""
 
-    # Generate a struct for each interface; wasm_file goes on the first one
+    # Generate a struct for each interface
     structs = []
-    for i, iface in enumerate(interfaces):
-        wf = wasm_file if i == 0 else None
-        structs.append(generate_interface_struct(iface, wf))
+    for iface in interfaces:
+        structs.append(generate_interface_struct(iface, wasm_file))
 
     header_content = f"""#pragma once
 

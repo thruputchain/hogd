@@ -4,26 +4,95 @@
 import argparse
 import json
 import sys
+from typing import Any
 
 
-def emit_enum(name, variants):
-    lines = [f"enum {name} {{"]
+def map_xdr_type(ty: dict[str, Any]) -> str:
+    """Map a spec type to an XDR type string for use in struct fields."""
+    kind: str = ty["kind"]
+    if kind == "u32":
+        return "unsigned int"
+    elif kind == "i32":
+        return "int"
+    elif kind == "u64":
+        return "unsigned hyper"
+    elif kind == "i64":
+        return "hyper"
+    elif kind == "u128":
+        return "uint128_xdr"
+    elif kind == "i128":
+        return "int128_xdr"
+    elif kind == "bool":
+        return "bool"
+    elif kind == "address":
+        return "ContractAddress"
+    elif kind == "named":
+        return ty["name"]
+    elif kind == "vec":
+        inner: dict[str, Any] = ty["inner"]
+        max_len: int = ty["max_len"]
+        if inner["kind"] == "u8":
+            return f"opaque<{max_len}>"
+        return f"{map_xdr_type(inner)}<{max_len}>"
+    elif kind == "array":
+        inner = ty["element"]
+        length: int = ty["len"]
+        if inner["kind"] == "u8":
+            return f"opaque[{length}]"
+        return f"{map_xdr_type(inner)}[{length}]"
+    elif kind == "u8":
+        raise ValueError("bare u8 cannot appear in XDR — must be inside vec/array as opaque")
+    else:
+        raise ValueError(f"unmapped XDR type kind '{kind}'")
+
+
+def emit_enum(name: str, variants: list[dict[str, Any]]) -> str:
+    lines: list[str] = [f"enum {name} {{"]
     for v in variants:
         lines.append(f"\t{v['name']} = {v['value']},")
     lines.append("};")
     return "\n".join(lines)
 
 
-def emit_type_def(td):
-    kind = td["kind"]
+def emit_struct(name: str, fields: list[dict[str, Any]]) -> str:
+    lines: list[str] = [f"struct {name} {{"]
+    for f in fields:
+        xdr_type = map_xdr_type(f["ty"])
+        lines.append(f"\t{xdr_type} {f['name']};")
+    lines.append("};")
+    return "\n".join(lines)
+
+
+def emit_type_def(td: dict[str, Any]) -> str | None:
+    kind: str = td["kind"]
     if kind == "enum":
         return emit_enum(td["name"], td["variants"])
+    elif kind == "struct":
+        return emit_struct(td["name"], td["fields"])
     else:
         print(f"warning: unsupported type_def kind '{kind}', skipping", file=sys.stderr)
         return None
 
 
-def main():
+def generate_xdr(type_defs: list[dict[str, Any]], namespace: str) -> str:
+    """Generate XDR .x content from type_defs."""
+    if not type_defs:
+        return f"namespace {namespace} {{\n\n}} // namespace\n"
+
+    body_parts: list[str] = []
+    for td in type_defs:
+        result = emit_type_def(td)
+        if result:
+            body_parts.append(result)
+
+    out = f"%#include \"types.hh\"\n\n"
+    out += f"namespace {namespace} {{\n\n"
+    out += "\n\n".join(body_parts)
+    out += f"\n\n\n}} // namespace\n"
+    return out
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="Generate .x from spec JSON type_defs")
     parser.add_argument("spec_json", help="Path to spec JSON file")
     parser.add_argument("-o", "--output", required=True, help="Output .x file")
@@ -31,25 +100,12 @@ def main():
     args = parser.parse_args()
 
     with open(args.spec_json) as f:
-        spec = json.load(f)
+        spec: dict[str, Any] = json.load(f)
 
-    type_defs = spec.get("type_defs", [])
-    if not type_defs:
-        # Write empty file with namespace
-        with open(args.output, "w") as f:
-            f.write(f"namespace {args.namespace} {{\n\n}} // namespace\n")
-        return
-
-    body_parts = []
-    for td in type_defs:
-        result = emit_type_def(td)
-        if result:
-            body_parts.append(result)
+    content = generate_xdr(spec.get("type_defs", []), args.namespace)
 
     with open(args.output, "w") as f:
-        f.write(f"namespace {args.namespace} {{\n\n")
-        f.write("\n\n".join(body_parts))
-        f.write(f"\n\n\n}} // namespace\n")
+        f.write(content)
 
     print(f"Generated {args.output}")
 
