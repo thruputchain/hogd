@@ -358,40 +358,42 @@ static_assert(is_DBAuth1<BlockingIntroDBAuthRpc *, x23::Async>);
 
 TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
 {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  RpcServer<BlockingIntroDBAuthRpc> db_server;
+  const uint16_t db_port = db_server.start_server(0);
+  const std::string db_address = std::format("localhost:{}", db_port);
+  dbauth_client_t dbauth_client = make_dbauth_client(db_address)();
+  AuthServer race_auth_server(std::move(dbauth_client), 16);
 
-  EXPECT_DEATH(
-      ([] {
-        RpcServer<BlockingIntroDBAuthRpc> db_server;
-        const uint16_t db_port = db_server.start_server(0);
-        const std::string db_address = std::format("localhost:{}", db_port);
-        dbauth_client_t dbauth_client = make_dbauth_client(db_address)();
-        AuthServer race_auth_server(std::move(dbauth_client), 16);
+  AuthCard auth_card{.protocol = {},
+                     .upid = {},
+                     .address_for_db = "",
+                     .address_for_mempool = ""};
 
-        AuthCard auth_card{.protocol = {},
-                           .upid = {},
-                           .address_for_db = "",
-                           .address_for_mempool = ""};
+  std::jthread subscribe_thread([&] {
+    race_auth_server.subscribe_to_auth_data_changes(auth_card)();
+  });
 
-        std::jthread subscribe_thread([&] {
-          race_auth_server.subscribe_to_auth_data_changes(auth_card)();
-        });
+  db_server->impl()->wait_for_intro();
 
-        db_server->impl()->wait_for_intro();
+  x23::Ptr<AddressAuthData> auth_data_ptr;
+  auth_data_ptr.emplace(make_test_auth_data(1));
 
-        x23::Ptr<AddressAuthData> auth_data_ptr;
-        auth_data_ptr.emplace(make_test_auth_data(1));
+  KeyChangeBatch key_changes;
+  key_changes.push_back(KeyChange{.address = make_test_address(99),
+                                  .auth_data = std::move(auth_data_ptr)});
+  race_auth_server.register_auth_data_updates(1, std::move(key_changes))();
 
-        KeyChangeBatch key_changes;
-        key_changes.push_back(KeyChange{.address = make_test_address(99),
-                                        .auth_data = std::move(auth_data_ptr)});
-        race_auth_server.register_auth_data_updates(1,
-                                                    std::move(key_changes))();
+  db_server->impl()->release_intro(1);
+  subscribe_thread.join();
 
-        db_server->impl()->release_intro(1);
-        subscribe_thread.join();
-      }()),
-      "");
+  // The racing update should have won initialization — verify by checking
+  // that a lookup at height 1 succeeds (futex is at height 1).
+  auto result =
+      race_auth_server.lookup_auth_data(1, make_test_address(99))();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 1);
+  ASSERT_TRUE(result.value()->second.has_value());
 }
 
 } // namespace hogd
