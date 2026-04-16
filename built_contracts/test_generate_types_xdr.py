@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Tests for generate_types_xdr.py"""
+"""Tests for generate_types_xdr.py
+
+Run from built_contracts/:
+    python3 -m unittest test_generate_types_xdr -v
+"""
 
 import unittest
 from generate_types_xdr import map_xdr_type, emit_enum, emit_struct, generate_xdr
