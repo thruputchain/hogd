@@ -1378,18 +1378,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     stage_lookup_txs /= prepare_handles.size();
     stage_build_proposed_txs /= prepare_handles.size();
 
-    if (missing_tx_hashes.empty()) {
-      for (x23::Vec<ProposedTransaction> &tx_chunk : proposed_tx_chunks) {
-        validation_handles.push_back(validate_batch(cache.block_id, tx_chunk));
-      }
-    }
-
-    ElapsedTimer validate_timer;
-    for (x23::Async<bool> &handle : validation_handles) {
-      validated = (co_await handle) && validated;
-    }
-    stage_validate_batch = validate_timer.elapsed();
-
     if (!missing_tx_hashes.empty()) {
       co_await finish_all_executors(cache.block_id);
       co_await abandon_block(cache);
@@ -1404,6 +1392,16 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_return ret;
     }
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
+
+    for (x23::Vec<ProposedTransaction> &tx_chunk : proposed_tx_chunks) {
+      validation_handles.push_back(validate_batch(cache.block_id, tx_chunk));
+    }
+
+    ElapsedTimer validate_timer;
+    for (x23::Async<bool> &handle : validation_handles) {
+      validated = (co_await handle) && validated;
+    }
+    stage_validate_batch = validate_timer.elapsed();
   }
   record_stage(stage_block_execution);
 
