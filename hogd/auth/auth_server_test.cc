@@ -369,9 +369,8 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
                      .address_for_db = "",
                      .address_for_mempool = ""};
 
-  std::jthread subscribe_thread([&] {
-    race_auth_server.subscribe_to_auth_data_changes(auth_card)();
-  });
+  std::jthread subscribe_thread(
+      [&] { race_auth_server.subscribe_to_auth_data_changes(auth_card)(); });
 
   db_server->impl()->wait_for_intro();
 
@@ -388,8 +387,7 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
 
   // The racing update should have won initialization — verify by checking
   // that a lookup at height 1 succeeds (futex is at height 1).
-  auto result =
-      race_auth_server.lookup_auth_data(1, make_test_address(99))();
+  auto result = race_auth_server.lookup_auth_data(1, make_test_address(99))();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, 1);

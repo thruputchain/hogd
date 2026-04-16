@@ -159,12 +159,14 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
     if (initialized) {
       info("initializing auth server to height {}", current_height);
       current_height_futex_.broadcast(&default_threadpool());
-    } else {
+    }
+    else {
       info("auth server already initialized to height {} by concurrent "
            "update, intro height was {}",
            current_height_futex_.load(), current_height);
     }
-  } else {
+  }
+  else {
     info("not initializing auth server height");
   }
   co_return;
