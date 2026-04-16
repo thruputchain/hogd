@@ -12,6 +12,7 @@
 #include "x23/async.h"
 
 #include <format>
+#include <utility>
 
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
