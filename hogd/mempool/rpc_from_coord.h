@@ -472,7 +472,7 @@ private:
   void record_submitted_vetted(size_t count);
   void record_submitted_unvetted(size_t count);
   void record_nomination_attempt(const NominationTelemetry &telemetry);
-  void record_validation_attempt(ValidationTelemetry telemetry);
+  void record_validation_attempt(ValidationTelemetry telemetry) noexcept;
   CommitWindowTelemetry snapshot_commit_window_telemetry() const;
   void reset_commit_window_telemetry();
 

@@ -35,6 +35,7 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/mempool/scheduler.h"
 #include "nomination.hh"
 #include "parallel.hh"
 #include "rpc_types.hh"
@@ -116,10 +117,15 @@ MempoolCoordinatorRpc::record_nomination_attempt(
 }
 
 void
-MempoolCoordinatorRpc::record_validation_attempt(ValidationTelemetry telemetry)
+MempoolCoordinatorRpc::record_validation_attempt(
+    ValidationTelemetry telemetry) noexcept
 {
   std::scoped_lock lock(telemetry_mutex_);
-  commit_window_telemetry_.validations.push_back(std::move(telemetry));
+  try {
+    commit_window_telemetry_.validations.push_back(std::move(telemetry));
+  } catch (...) {
+    // Telemetry collection is best-effort and must not escape deferred cleanup.
+  }
 }
 
 auto
@@ -1497,9 +1503,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await t_to_parallel_batch(cache.txs, result.block().signed_transactions);
   record_stage(stage_serialize_result);
 
+  const BlockID block_id = cache.block_id;
   {
     CHECK(!validated_block_cache_.contains(cache.block_id));
-    validated_block_cache_[cache.block_id] = std::move(cache);
+    validated_block_cache_[block_id] = std::move(cache);
   }
   record_stage(stage_cache_validated_block);
   co_await decrement_num_validations_in_progress();
@@ -1524,8 +1531,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        stage_build_proposed_txs, stage_validate_batch, stage_block_execution,
        stage_close_snapshot, stage_close_event_block, stage_verify_block_hash,
        stage_finish_executors, stage_serialize_result,
-       stage_cache_validated_block, stage_finalize, timer.elapsed(),
-       cache.block_id, nomination.block_height, validation_telemetry.tx_count);
+       stage_cache_validated_block, stage_finalize, timer.elapsed(), block_id,
+       nomination.block_height, validation_telemetry.tx_count);
   info("schedulercoord_validate ret");
   co_return result;
 }
