@@ -21,8 +21,8 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/utilities.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
-#include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
@@ -36,6 +36,9 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+using ERC20Exception =
+    ContractException<itc_erc20::ERC20Error, 0xb19947acb2fa14ffULL>;
 
 namespace {
 
@@ -143,7 +146,7 @@ using difference_t = std::tuple<int64_t, uint64_t>;
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
 
 // implementation functions
-InvokeStatus<Result<void, itc_erc20::ERC20Error>>
+InvokeStatus<Result<void, ERC20Exception>>
 transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
               amount_t amount)
 {
@@ -200,10 +203,10 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     return err.error();
   }
 
-  return {Result<void, itc_erc20::ERC20Error>::make_ok()};
+  return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<void, itc_erc20::ERC20Error>>
+InvokeStatus<Result<void, ERC20Exception>>
 transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
                    ContractAddress receiver, amount_t amount)
 {
@@ -268,10 +271,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return err.error();
   }
 
-  return {Result<void, itc_erc20::ERC20Error>::make_ok()};
+  return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<void, itc_erc20::ERC20Error>>
+InvokeStatus<Result<void, ERC20Exception>>
 adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
                       difference_t amount)
 {
@@ -309,10 +312,10 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     return err.error();
   }
 
-  return {Result<void, itc_erc20::ERC20Error>::make_ok()};
+  return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>>
+InvokeStatus<Result<amount_t, ERC20Exception>>
 get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
                    ContractAddress spender)
 {
@@ -346,7 +349,7 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return InvokeError{InvokeErrorCode::Deterministic};
   }
   uint128_t utotal = std::max<int128_t>(total, 0);
-  return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+  return {Result<amount_t, ERC20Exception>::make_ok(
       std::make_tuple(utotal >> 64, utotal & 0xffffffffffffffffULL))};
 }
 
@@ -376,7 +379,7 @@ make_native_token_contract()
   // get_balance_of
   builder.add<itc_erc20::ERC20, "get_balance_of">(
       [](NativeSyscallContext &ctx, ContractAddress contract_address)
-          -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
+          -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
         if (!ctx.runtime().consume_gas(1)) {
@@ -391,14 +394,14 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+        return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
 
   // get_balance
   builder.add<itc_erc20::ERC20, "get_balance">(
       [](NativeSyscallContext &ctx)
-          -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
+          -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance");
         if (!ctx.runtime().consume_gas(1)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
@@ -418,7 +421,7 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+        return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
 
@@ -433,7 +436,7 @@ make_native_token_contract()
   // total_supply
   builder.add<itc_erc20::ERC20, "total_supply">(
       [](NativeRuntime &runtime)
-          -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
+          -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token total_supply");
         // TODO(geoff): gas costs
         if (!runtime.consume_gas(1)) {
@@ -441,7 +444,7 @@ make_native_token_contract()
         }
         uint128_t total_supply =
             uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
-        return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+        return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(total_supply >> 64,
                             total_supply & 0xffffffffffffffffULL))};
       });

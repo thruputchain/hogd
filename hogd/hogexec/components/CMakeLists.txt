@@ -1,9 +1,19 @@
+add_xdr(
+  components_library_exception
+  library_exception.x
+)
+add_dependencies(build_components_library_exception protocol)
+
 add_library(components_objects OBJECT
   execution_mode.cc
   hash_buffers.cc
   ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/contract_trait.cc
 )
-target_link_libraries(components_objects hogd_interface)
+target_link_libraries(
+  components_objects
+  hogd_interface
+  components_library_exception
+)
 target_include_directories(components_objects PRIVATE ${CMAKE_BINARY_DIR})
 add_library(components STATIC $<TARGET_OBJECTS:components_objects>)
 target_link_libraries(components crypto hogexec_common)
@@ -14,12 +24,19 @@ add_library(components_test_objects OBJECT
   execution_mode_test.cc
   hash_buffers_test.cc
 )
-target_link_libraries(components_test_objects GTest::gtest hogd_interface)
+target_link_libraries(
+  components_test_objects
+  GTest::gtest
+  hogd_interface
+  components_library_exception
+)
 target_include_directories(components_test_objects PRIVATE ${CMAKE_BINARY_DIR})
 
 add_executable(components_test $<TARGET_OBJECTS:components_test_objects>)
-target_link_libraries(components_test
+target_link_libraries(
+  components_test
   components
+  components_library_exception
   hogexec_common
   hogd
   GTest::gtest

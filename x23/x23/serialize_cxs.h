@@ -680,6 +680,16 @@ struct CxsDeserializer
 };
 
 template<is_xdr_type T>
+size_t
+deserialize_cxs_from(T *value, std::span<const uint8_t> data)
+{
+  size_t initial_size = data.size();
+  CxsDeserializer<contains_recursive_xdr<T>> d(data);
+  d.go(*value);
+  return initial_size - data.size();
+}
+
+template<is_xdr_type T>
 void
 deserialize_cxs(T *value, std::span<const uint8_t> data)
 {
