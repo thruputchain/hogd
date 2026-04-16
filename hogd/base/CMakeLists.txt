@@ -38,7 +38,8 @@ add_library(base_test_objects OBJECT
 target_link_libraries(
   base_test_objects
   GTest::gtest
-  hogd_interface
+  built_headers_interface
+  protocol
 )
 
 # create base module test binary
