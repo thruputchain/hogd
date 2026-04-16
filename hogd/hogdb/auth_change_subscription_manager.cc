@@ -148,8 +148,8 @@ AuthChangeSubscriptionManager::erase_client_if_stale(
   x23::CoroGuard guard;
   co_await guard(lock_);
   auto it = auth_db_clients_.find(card);
-  if (it != auth_db_clients_.end()
-      && it->second.__send_call.get() == expected_client_id) {
+  if (it != auth_db_clients_.end() &&
+      it->second.__send_call.get() == expected_client_id) {
     auth_db_clients_.erase(it);
   }
 }

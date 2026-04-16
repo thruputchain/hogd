@@ -56,8 +56,9 @@ private:
   // whose underlying RpcStream was `expected_client_id`. The identity check
   // prevents a post-RPC-failure erase from silently deleting a healthy client
   // that a concurrent add_full_auth_change_subscriber inserted in the meantime.
-  x23::Async<void> erase_client_if_stale(const AuthCard &card,
-                                         const rpc_stream_t *expected_client_id);
+  x23::Async<void>
+  erase_client_if_stale(const AuthCard &card,
+                        const rpc_stream_t *expected_client_id);
 
   // Under lock_: replace-or-insert one client.
   x23::Async<void> insert_client(AuthCard card, auth_db_client_t client);
