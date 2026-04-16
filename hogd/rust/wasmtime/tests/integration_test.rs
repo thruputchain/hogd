@@ -832,7 +832,8 @@ unsafe extern "C" fn test_get_simd_contract_get_fn(
 // message on every host. That is the deterministic rejection we want.
 #[test]
 fn test_h002_production_config_rejects_simd_at_validation() {
-    let config = wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
     let engine = wasmtime::Engine::new(&config)
         .expect("production config should produce a valid host engine");
     let simd_bytes = load_wasm_file("simd_v128.wasm");
