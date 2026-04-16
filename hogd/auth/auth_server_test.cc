@@ -11,11 +11,16 @@
 #include "types.hh"
 #include "x23/async.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <format>
+#include <string>
 #include <utility>
 
-#include "hogd/base/rpc_client.h"
+#include "auth_card.hh"
+#include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_server.h"
+#include "x23/refcnt.h"
 
 namespace hogd {
 
@@ -311,13 +316,15 @@ class BlockingIntroDBAuthRpc {
 public:
   using rpc_service = DBAuth1;
 
-  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight, ContractAddress)
+  static x23::Async<DBAuthResult>
+  authdb_get_auth_data(BlockHeight /*height*/, ContractAddress /*address*/)
   {
     co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
   }
 
-  x23::Async<DBAuthResultBatch>
-  authdb_get_auth_data_batch(BlockHeight, ContractAddressBatch const &addresses)
+  static x23::Async<DBAuthResultBatch>
+  authdb_get_auth_data_batch(BlockHeight /*height*/,
+                             ContractAddressBatch const &addresses)
   {
     DBAuthResultBatch result;
     result.reserve(addresses.size());
@@ -327,7 +334,7 @@ public:
     co_return result;
   }
 
-  x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard)
+  x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard /*card*/)
   {
     intro_started_.store(true);
     intro_started_.notify_all();
