@@ -566,6 +566,23 @@ unsafe extern "C" fn test_get_oob_data_segment_contract_get_fn(
     ContractGetResult::new(0, wasm_bytes)
 }
 
+unsafe extern "C" fn test_get_param_entrypoint_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let wasm_bytes = load_wasm_file("param_entrypoint.wasm");
+
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    if hash_slice.iter().any(|&b| b != 4) {
+        return ContractGetResult::new(
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            &[],
+        );
+    }
+
+    ContractGetResult::new(0, wasm_bytes)
+}
+
 unsafe extern "C" fn test_get_oob_element_segment_contract_get_fn(
     _userctx: *mut c_void,
     hash: *const u8,
@@ -777,6 +794,61 @@ fn test_pool_exhaustion_returns_system_error() {
         for runtime_ptr in runtimes {
             free_wasmtime_runtime(runtime_ptr);
         }
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
+    }
+}
+
+// Regression test for issue #1472: a valid method-name export with the wrong
+// ABI currently passes verification and runtime creation, so invoke-time
+// defense in depth must classify the signature mismatch as deterministic.
+#[test]
+fn test_param_entrypoint_signature_mismatch_is_deterministic() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context = new_wasmtime_context(
+            test_get_param_entrypoint_contract_get_fn,
+            global_context,
+        );
+        let contract_hash = [4u8; 32];
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
+        let wasm_bytes = load_wasm_file("param_entrypoint.wasm");
+        let verified = wasmtime_verify_contract(
+            context,
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len(),
+        );
+        assert!(
+            verified,
+            "verify_contract currently accepts a method export with the wrong ABI"
+        );
+
+        let runtime =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
+                .get()
+                .unwrap();
+        assert!(
+            !runtime.is_null(),
+            "runtime creation should not reject the bad entrypoint ABI yet"
+        );
+
+        wasmtime_set_available_gas(runtime, 1_000_000);
+
+        let fn_name = b"0000000000000001";
+        let result =
+            wasmtime_invoke(runtime, fn_name.as_ptr(), fn_name.len() as u32);
+
+        assert_eq!(
+            result.error,
+            common::InvokeErrorCode::kInvokeDeterministic as i32,
+            "invoke-time signature mismatch should be classified as deterministic"
+        );
+
+        free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
 

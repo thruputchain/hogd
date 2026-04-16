@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <stdexcept>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
@@ -169,6 +172,37 @@ TEST_P(InstantiateTest, WrongImportTypeSignatureMismatch)
   ASSERT_TRUE(runtime.has_value())
       << "type-mismatched import caused a SystemError";
   EXPECT_FALSE(runtime.value());
+}
+
+// Regression test for issue #1472: both engines currently allow a method-name
+// export with the wrong ABI through verification and instantiation, so the
+// invoke path must classify the signature mismatch as deterministic instead of
+// unrecoverable.
+TEST_P(InstantiateTest, ParamEntryPointSignatureMismatchIsDeterministic)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_param_entrypoint.wasm");
+  EXPECT_TRUE(get_context()->verify_contract(contract));
+
+  auto deployed_contract_hash = DeployedContractHash{
+      .hash = sha256(contract),
+      .contract_size =
+          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+      .contract_type = ContractType::kWasmi,
+  };
+
+  make_syscall_handler(contract);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 get_syscall_handler());
+  ASSERT_TRUE(runtime.has_value()) << "bad entrypoint ABI caused a SystemError";
+  ASSERT_TRUE(runtime.value());
+
+  auto result = runtime.value()->invoke(Runtime::invoke_name(1), UINT64_MAX);
+
+  ASSERT_FALSE(result.result_);
+  EXPECT_EQ(result.result_.error(),
+            InvokeError{InvokeErrorCode::Deterministic});
 }
 
 // Wrong-import-kind tests (global, table, memory instead of func) are not
