@@ -49,16 +49,12 @@ AuthChangeSubscriptionManager::publish_auth_changes(
 
   std::vector<AuthCard> to_erase;
   for (auto &[card, future] : futures) {
-    bool failed = false;
     try {
       co_await future;
     } catch (const x23::XdrException &e) {
       error("AuthChangeSubscriptionManager: Bad response from auth server {}: "
             "{}.  Closing connection.",
             x23::show(card), e.what());
-      failed = true;
-    }
-    if (failed) {
       to_erase.push_back(card);
     }
   }
