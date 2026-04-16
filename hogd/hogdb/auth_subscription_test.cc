@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <format>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "address_auth.hh"
@@ -405,4 +408,126 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   EXPECT_NE(received->at(0).auth_data, nullptr);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+namespace {
+
+// Mirrors AuthServer's strict ordered-height gate: refuses to complete
+// authdb_forward_key_changes(H) until H-1 has been processed. Used to
+// demonstrate that concurrent publishes must not be serialized on the
+// client side while one is parked on the server-side gate.
+class HeightOrderedMockAuthDBRpc {
+public:
+  using rpc_service = AuthDB1;
+
+  x23::Async<void> authdb_forward_key_changes(BlockHeight height,
+                                              KeyChangeBatch /*key_changes*/)
+  {
+    active_calls_.fetch_add(1, std::memory_order_release);
+    arrivals_.fetch_add(1, std::memory_order_release);
+    last_arrived_height_.store(height, std::memory_order_release);
+
+    while (processed_height_.load(std::memory_order_acquire) + 1 != height) {
+      if (shutdown_.load(std::memory_order_acquire)) {
+        active_calls_.fetch_sub(1, std::memory_order_release);
+        co_return;
+      }
+      co_await default_threadpool().bg();
+    }
+
+    processed_height_.store(height, std::memory_order_release);
+    completed_.fetch_add(1, std::memory_order_release);
+    active_calls_.fetch_sub(1, std::memory_order_release);
+  }
+
+  int arrivals() const { return arrivals_.load(std::memory_order_acquire); }
+  int completed() const { return completed_.load(std::memory_order_acquire); }
+  int active_calls() const
+  {
+    return active_calls_.load(std::memory_order_acquire);
+  }
+  BlockHeight last_arrived_height() const
+  {
+    return last_arrived_height_.load(std::memory_order_acquire);
+  }
+  void shutdown() { shutdown_.store(true, std::memory_order_release); }
+
+private:
+  std::atomic<BlockHeight> processed_height_{0};
+  std::atomic<BlockHeight> last_arrived_height_{0};
+  std::atomic<int> arrivals_{0};
+  std::atomic<int> completed_{0};
+  std::atomic<int> active_calls_{0};
+  std::atomic<bool> shutdown_{false};
+};
+
+static_assert(is_AuthDB1<HeightOrderedMockAuthDBRpc *, x23::MaybeAsync>);
+
+class HeightOrderedMockAuthDBServer
+  : public RpcServer<HeightOrderedMockAuthDBRpc> {
+public:
+  HeightOrderedMockAuthDBServer() : RpcServer(default_coropoll()) {}
+};
+
+} // namespace
+
+TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
+{
+  HeightOrderedMockAuthDBServer mock_server;
+  uint16_t port = mock_server.start_server(0);
+  std::string server_address = std::format("localhost:{}", port);
+  AuthCard ordered_auth_card = AuthCard{.protocol = version::kHogdProtocol(),
+                                        .upid = {},
+                                        .address_for_db = server_address.c_str(),
+                                        .address_for_mempool = ""};
+  ASSERT_TRUE(
+      subscription_manager_.add_full_auth_change_subscriber(ordered_auth_card)());
+
+  // Publish height 2 first. The mock will park it on its ordered-height gate
+  // (since processed_height_ is still 0).
+  {
+    PerThread<KeyChangeBatch> key_changes;
+    subscription_manager_.detached_publish_auth_changes(2, std::move(key_changes));
+  }
+
+  auto arrive_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (mock_server.impl()->arrivals() < 1) {
+    ASSERT_LT(std::chrono::steady_clock::now(), arrive_deadline)
+        << "height 2 never reached the auth server";
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(mock_server.impl()->last_arrived_height(), 2);
+
+  // Now publish height 1. Before the fix, height 1 cannot enter
+  // publish_auth_changes because height 2 holds lock_ while parked on the
+  // server's gate, and the test will time out below.
+  {
+    PerThread<KeyChangeBatch> key_changes;
+    subscription_manager_.detached_publish_auth_changes(1, std::move(key_changes));
+  }
+
+  auto complete_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (mock_server.impl()->completed() < 2) {
+    ASSERT_LT(std::chrono::steady_clock::now(), complete_deadline)
+        << "auth publishes deadlocked: arrivals="
+        << mock_server.impl()->arrivals()
+        << " completed=" << mock_server.impl()->completed();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  EXPECT_EQ(mock_server.impl()->arrivals(), 2);
+  EXPECT_EQ(mock_server.impl()->completed(), 2);
+
+  // Post-condition safety net: flush any lingering coroutines (none expected
+  // after completed == 2) before the server tears down.
+  mock_server.impl()->shutdown();
+  auto cleanup_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (mock_server.impl()->active_calls() != 0) {
+    ASSERT_LT(std::chrono::steady_clock::now(), cleanup_deadline)
+        << "timed out waiting for detached publishers to exit during cleanup";
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+}
 } // namespace hogd
