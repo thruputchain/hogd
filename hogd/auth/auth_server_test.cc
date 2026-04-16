@@ -12,7 +12,6 @@
 #include "x23/async.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <format>
 #include <string>
 #include <utility>
@@ -20,7 +19,9 @@
 #include "auth_card.hh"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_server.h"
-#include "x23/refcnt.h"
+#include "hogd/base/types.h"
+#include "rpc_types.hh"
+#include "x23/x23.h"
 
 namespace hogd {
 
