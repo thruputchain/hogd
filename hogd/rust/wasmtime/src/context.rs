@@ -132,13 +132,17 @@ impl WasmtimeContext {
                     // Import type mismatch: the linker has a definition for
                     // the import name, but the module declares it as a
                     // different entity kind or with an incompatible
-                    // signature.  Wasmtime wraps every per-import type
-                    // check failure with this context string (see
-                    // wasmtime/src/runtime/instance.rs typecheck() and
-                    // wasmtime/src/runtime/types/matching.rs).
-                    // Deterministic contract rejection.
+                    // signature.  Deterministic contract rejection.
+                    //
+                    // WASMTIME-VERSION-SENSITIVE (v42.0.0): this prefix is
+                    // emitted by wasmtime/src/runtime/instance.rs::typecheck()
+                    // via .with_context(|| format!("incompatible import type
+                    // for `{name}::{field}`")).  There is no typed error for
+                    // this case; re-verify this string on wasmtime upgrades.
+                    const INCOMPATIBLE_IMPORT_MSG: &str =
+                        "incompatible import type";
                     let msg = e.to_string();
-                    if msg.contains("incompatible import type") {
+                    if msg.contains(INCOMPATIBLE_IMPORT_MSG) {
                         return Ok(None);
                     }
                     debug_log!(eprintln!(

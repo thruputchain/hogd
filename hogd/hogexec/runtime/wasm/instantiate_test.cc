@@ -141,6 +141,12 @@ dummy_syscall_8args(HostCallContext * /*unused*/, uint64_t /*unused*/,
 // under the correct module and function names but with the wrong Wasm function
 // type should be treated as a deterministic invalid contract (null runtime),
 // not escalated into kSystemUnrecoverable.
+//
+// Both engines are exercised: wasmi already handles type mismatches correctly
+// in linker.instantiate() (returns Ok(None) for all instantiation errors —
+// see wasmi_runtime.rs:107-112).  The fix was only needed for wasmtime, where
+// instantiate_pre() errors other than UnknownImportError were escalated to
+// kSystemUnrecoverable.
 TEST_P(InstantiateTest, WrongImportTypeSignatureMismatch)
 {
   ASSERT_TRUE(link_fn("marmot", "syscall", &dummy_syscall_8args));
