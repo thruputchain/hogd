@@ -197,6 +197,7 @@ public:
     return self.frame_stack_.back();
   }
   bool empty() const { return frame_stack_.empty(); }
+  size_t event_count() const;
 
   void start_frame(ContractAddress const &address, Calldata &&calldata,
                    InvokeFlagSet flags);

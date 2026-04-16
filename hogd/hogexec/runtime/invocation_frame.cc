@@ -174,6 +174,16 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
   frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags);
 }
 
+size_t
+InvocationFrameStack::event_count() const
+{
+  size_t total = 0;
+  for (auto const &frame : frame_stack_) {
+    total += frame.get_events().size();
+  }
+  return total;
+}
+
 SystemStatus<std::pair<InvokeResult, bool>>
 InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                                    ExecutionModeData &execution_mode_data)
