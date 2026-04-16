@@ -148,6 +148,12 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_large_memory.wasm
 )
 
+wat2wasm_target(
+  test_wrong_import_type_wasm
+  wat/test_wrong_import_type.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_wrong_import_type.wasm
+)
+
 add_dependencies(
   wasm_runtime_test_objects
   all_wasm_headers
@@ -164,5 +170,6 @@ add_dependencies(
   test_no_start_wasm
   test_oob_data_segment_wasm
   test_oob_element_segment_wasm
+  test_wrong_import_type_wasm
   all_wasm_contracts
 )

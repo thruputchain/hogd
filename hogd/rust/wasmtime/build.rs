@@ -20,7 +20,8 @@ fn convert_wat_to_wasm(
         .unwrap_or_else(|e| panic!("Failed to parse {}: {}", wat_filename, e));
 
     // Instrument with stack limiting
-    let wasm_bytes = groundhog_wasm_meter::instrument(&wasm_bytes)
+    let config = groundhog_wasm_meter::Config::default();
+    let wasm_bytes = groundhog_wasm_meter::instrument(&wasm_bytes, &config)
         .unwrap_or_else(|e| {
             panic!("Failed to instrument {}: {}", wat_filename, e)
         });

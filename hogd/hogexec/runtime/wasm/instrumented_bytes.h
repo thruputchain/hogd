@@ -7,12 +7,16 @@
 
 namespace hogd {
 
+// Production limit: contracts may only import marmot::syscall.
+inline constexpr uint32_t kMaxImportedFunctions = 1;
+
 // Owns bytes returned by wasm_meter_instrument(). Move-only.
 class InstrumentedBytes {
 public:
   // Returns nullopt on instrumentation failure.
   static std::optional<InstrumentedBytes>
-  instrument(std::span<const uint8_t> wasm);
+  instrument(std::span<const uint8_t> wasm,
+             uint32_t max_imported_functions = kMaxImportedFunctions);
 
   std::span<const uint8_t> data() const;
 

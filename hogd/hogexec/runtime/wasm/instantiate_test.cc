@@ -121,6 +121,51 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
   EXPECT_FALSE(runtime.value());
 }
 
+namespace {
+
+TrampolineResult
+dummy_syscall_8args(HostCallContext * /*unused*/, uint64_t, uint64_t, uint64_t,
+                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) noexcept
+{
+  return {0, 0};
+}
+
+} // namespace
+
+// Regression test for issue #1464: a contract that imports marmot::syscall
+// under the correct module and function names but with the wrong Wasm function
+// type should be treated as a deterministic invalid contract (null runtime),
+// not escalated into kSystemUnrecoverable.
+TEST_P(InstantiateTest, WrongImportTypeSignatureMismatch)
+{
+  ASSERT_TRUE(link_fn("marmot", "syscall", &dummy_syscall_8args));
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_wrong_import_type.wasm");
+  EXPECT_TRUE(get_context()->verify_contract(contract));
+
+  auto deployed_contract_hash = DeployedContractHash{
+      .hash = sha256(contract),
+      .contract_size =
+          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+      .contract_type = ContractType::kWasmi,
+  };
+
+  make_syscall_handler(contract);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 get_syscall_handler());
+  ASSERT_TRUE(runtime.has_value())
+      << "type-mismatched import caused a SystemError";
+  EXPECT_FALSE(runtime.value());
+}
+
+// Wrong-import-kind tests (global, table, memory instead of func) are not
+// needed: wasm-meter 0.2.0 rejects all non-function imports at instrumentation
+// and verification time ("only function imports are allowed"), so the
+// entity-kind mismatch error paths in wasmtime's typecheck are unreachable
+// for deployed contracts.
+
 INSTANTIATE_TEST_SUITE_P(WasmEngines, InstantiateTest,
                          ::testing::Values(WasmEngine::kWasmi,
                                            WasmEngine::kWasmtime),

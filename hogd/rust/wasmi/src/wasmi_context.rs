@@ -269,7 +269,8 @@ impl WasmiContext {
             );
             return false;
         }
-        if let Err(e) = groundhog_wasm_meter::verify(contract_data) {
+        let config = groundhog_wasm_meter::Config::default();
+        if let Err(e) = groundhog_wasm_meter::verify(contract_data, &config) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: wasm-meter: {e}");
             return false;

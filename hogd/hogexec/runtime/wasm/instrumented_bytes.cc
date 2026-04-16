@@ -40,9 +40,11 @@ InstrumentedBytes::operator=(InstrumentedBytes &&other) noexcept
 }
 
 std::optional<InstrumentedBytes>
-InstrumentedBytes::instrument(std::span<const uint8_t> wasm)
+InstrumentedBytes::instrument(std::span<const uint8_t> wasm,
+                              uint32_t max_imported_functions)
 {
-  auto result = wasm_meter_instrument(wasm.data(), wasm.size());
+  auto result =
+      wasm_meter_instrument(wasm.data(), wasm.size(), max_imported_functions);
   if (!result.success) {
     return std::nullopt;
   }
