@@ -843,11 +843,16 @@ fn test_h002_production_config_rejects_simd_at_validation() {
          at validation on every host",
     );
 
-    let msg = format!("{err:?}");
+    // anyhow's plain Display (`{err}` / `err.to_string()`) prints only the
+    // top-level message ("failed to compile: ..."), dropping the nested
+    // "SIMD support is not enabled" cause we need to assert on. Alternate
+    // Display (`{err:#}`) prints the full chain on one line without the
+    // Debug backtrace noise, which is what we want here.
+    let msg = format!("{err:#}");
     assert!(
         msg.contains("SIMD support is not enabled"),
         "expected wasmparser validation rejection \"SIMD support is not \
-         enabled\", got host-dependent codegen error instead: {err:?}"
+         enabled\", got host-dependent codegen error instead: {err:#}"
     );
 }
 
