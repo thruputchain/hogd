@@ -11,6 +11,11 @@
 #include "types.hh"
 #include "x23/async.h"
 
+#include <format>
+
+#include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
+
 namespace hogd {
 
 class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
@@ -298,5 +303,95 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+namespace {
+
+class BlockingIntroDBAuthRpc {
+public:
+  using rpc_service = DBAuth1;
+
+  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight, ContractAddress)
+  {
+    co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
+  }
+
+  x23::Async<DBAuthResultBatch>
+  authdb_get_auth_data_batch(BlockHeight, ContractAddressBatch const &addresses)
+  {
+    DBAuthResultBatch result;
+    result.reserve(addresses.size());
+    for (size_t i = 0; i < addresses.size(); ++i) {
+      result.emplace_back(DBAuthError::kDBAuthNotFound);
+    }
+    co_return result;
+  }
+
+  x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard)
+  {
+    intro_started_.store(true);
+    intro_started_.notify_all();
+    release_intro_.wait(false);
+
+    DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
+    ret.current_height() = return_height_;
+    co_return ret;
+  }
+
+  void wait_for_intro() { intro_started_.wait(false); }
+
+  void release_intro(BlockHeight return_height)
+  {
+    return_height_ = return_height;
+    release_intro_.store(true);
+    release_intro_.notify_all();
+  }
+
+private:
+  std::atomic<bool> intro_started_ = false;
+  std::atomic<bool> release_intro_ = false;
+  BlockHeight return_height_ = -1;
+};
+
+static_assert(is_DBAuth1<BlockingIntroDBAuthRpc *, x23::Async>);
+
+} // namespace
+
+TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
+  EXPECT_DEATH(
+      ([] {
+        RpcServer<BlockingIntroDBAuthRpc> db_server;
+        const uint16_t db_port = db_server.start_server(0);
+        const std::string db_address = std::format("localhost:{}", db_port);
+        dbauth_client_t dbauth_client = make_dbauth_client(db_address)();
+        AuthServer race_auth_server(std::move(dbauth_client), 16);
+
+        AuthCard auth_card{.protocol = {},
+                           .upid = {},
+                           .address_for_db = "",
+                           .address_for_mempool = ""};
+
+        std::jthread subscribe_thread([&] {
+          race_auth_server.subscribe_to_auth_data_changes(auth_card)();
+        });
+
+        db_server->impl()->wait_for_intro();
+
+        x23::Ptr<AddressAuthData> auth_data_ptr;
+        auth_data_ptr.emplace(make_test_auth_data(1));
+
+        KeyChangeBatch key_changes;
+        key_changes.push_back(KeyChange{.address = make_test_address(99),
+                                        .auth_data = std::move(auth_data_ptr)});
+        race_auth_server.register_auth_data_updates(1,
+                                                    std::move(key_changes))();
+
+        db_server->impl()->release_intro(1);
+        subscribe_thread.join();
+      }()),
+      "");
+}
 
 } // namespace hogd
