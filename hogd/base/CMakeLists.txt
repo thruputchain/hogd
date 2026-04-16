@@ -33,10 +33,12 @@ add_library(base_test_objects OBJECT
   unique_function_test.cc
   wide_integral_test.cc
   worker_pool_test.cc
+  xdr_util_test.cc
 )
 target_link_libraries(
   base_test_objects
   GTest::gtest
+  hogd_interface
 )
 
 # create base module test binary

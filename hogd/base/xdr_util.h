@@ -2,12 +2,14 @@
 
 #pragma once
 
+#include <bit>
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string_view>
+#include <span>
 #include <vector>
 #include <version>
 
@@ -47,6 +49,29 @@ constexpr uint128_t
 from_xdr(uint128_xdr value)
 {
   return (uint128_t{value.highbits} << 64) + value.lowbits;
+}
+
+inline std::array<std::byte, sizeof(int128_xdr)>
+int128_to_xdr_bytes(int128_t value)
+{
+  int128_xdr xdr = to_xdr(value);
+  std::array<std::byte, sizeof(int128_xdr)> out{};
+  auto *raw = reinterpret_cast<uint8_t *>(out.data());
+
+  x23::putbe(raw, std::bit_cast<uint64_t>(xdr.highbits));
+  x23::putbe(raw + sizeof(uint64_t), xdr.lowbits);
+  return out;
+}
+
+inline int128_t
+int128_from_xdr_bytes(std::span<const std::byte, sizeof(int128_xdr)> bytes)
+{
+  auto const *raw = reinterpret_cast<uint8_t const *>(bytes.data());
+  int128_xdr xdr = {
+      .highbits = std::bit_cast<int64_t>(x23::getbe<uint64_t>(raw)),
+      .lowbits = x23::getbe<uint64_t>(raw + sizeof(uint64_t)),
+  };
+  return from_xdr(xdr);
 }
 
 template<typename T>
