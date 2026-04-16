@@ -14,8 +14,11 @@
 #include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
@@ -475,18 +478,20 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
   HeightOrderedMockAuthDBServer mock_server;
   uint16_t port = mock_server.start_server(0);
   std::string server_address = std::format("localhost:{}", port);
-  AuthCard ordered_auth_card = AuthCard{.protocol = version::kHogdProtocol(),
-                                        .upid = {},
-                                        .address_for_db = server_address.c_str(),
-                                        .address_for_mempool = ""};
-  ASSERT_TRUE(
-      subscription_manager_.add_full_auth_change_subscriber(ordered_auth_card)());
+  AuthCard ordered_auth_card =
+      AuthCard{.protocol = version::kHogdProtocol(),
+               .upid = {},
+               .address_for_db = server_address.c_str(),
+               .address_for_mempool = ""};
+  ASSERT_TRUE(subscription_manager_.add_full_auth_change_subscriber(
+      ordered_auth_card)());
 
   // Publish height 2 first. The mock will park it on its ordered-height gate
   // (since processed_height_ is still 0).
   {
     PerThread<KeyChangeBatch> key_changes;
-    subscription_manager_.detached_publish_auth_changes(2, std::move(key_changes));
+    subscription_manager_.detached_publish_auth_changes(2,
+                                                        std::move(key_changes));
   }
 
   auto arrive_deadline =
@@ -503,7 +508,8 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
   // server's gate, and the test will time out below.
   {
     PerThread<KeyChangeBatch> key_changes;
-    subscription_manager_.detached_publish_auth_changes(1, std::move(key_changes));
+    subscription_manager_.detached_publish_auth_changes(1,
+                                                        std::move(key_changes));
   }
 
   auto complete_deadline =
