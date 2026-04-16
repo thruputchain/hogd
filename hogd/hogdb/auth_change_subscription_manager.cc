@@ -45,37 +45,26 @@ AuthChangeSubscriptionManager::publish_auth_changes(
     });
   }
 
-  x23::CoroGuard guard;
-  co_await guard(lock_);
+  auto futures = co_await start_forward_key_changes(height, combined_batch);
 
-  std::vector<std::pair<AuthCard, x23::Async<void>>> futures;
-  futures.reserve(auth_db_clients_.size());
-  for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
-    auto &client = it->second;
-    try {
-      futures.emplace_back(it->first,
-                           client.authdb_forward_key_changes(height,
-                                                             combined_batch));
-    } catch (x23::XdrException &e) {
-      error("AuthChangeSubscriptionManager: Failed to forward key changes to "
-            "auth server {}: {}.  Closing connection.",
-            x23::show(it->first), e.what());
-      it = auth_db_clients_.erase(it);
-      continue;
-    }
-    ++it;
-  }
-
+  std::vector<AuthCard> to_erase;
   for (auto &[card, future] : futures) {
+    bool failed = false;
     try {
       co_await future;
     } catch (const x23::XdrException &e) {
       error("AuthChangeSubscriptionManager: Bad response from auth server {}: "
             "{}.  Closing connection.",
             x23::show(card), e.what());
-      auth_db_clients_.erase(card);
-      continue;
+      failed = true;
     }
+    if (failed) {
+      to_erase.push_back(card);
+    }
+  }
+
+  for (auto &card : to_erase) {
+    co_await erase_client(card);
   }
 }
 
@@ -120,14 +109,55 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
     co_return false;
   }
 
+  co_await insert_client(std::move(card), std::move(*client));
+  co_return true;
+}
+
+x23::Async<std::vector<std::pair<AuthCard, x23::Async<void>>>>
+AuthChangeSubscriptionManager::start_forward_key_changes(
+    BlockHeight height, const KeyChangeBatch &batch)
+{
+  std::vector<std::pair<AuthCard, x23::Async<void>>> futures;
+
   x23::CoroGuard guard;
   co_await guard(lock_);
 
+  futures.reserve(auth_db_clients_.size());
+  for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
+    auto &client = it->second;
+    try {
+      futures.emplace_back(it->first,
+                           client.authdb_forward_key_changes(height, batch));
+      ++it;
+    } catch (x23::XdrException &e) {
+      error("AuthChangeSubscriptionManager: Failed to forward key changes to "
+            "auth server {}: {}.  Closing connection.",
+            x23::show(it->first), e.what());
+      it = auth_db_clients_.erase(it);
+    }
+  }
+  co_return futures;
+}
+
+x23::Async<void>
+AuthChangeSubscriptionManager::erase_client(const AuthCard &card)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+  auth_db_clients_.erase(card);
+}
+
+x23::Async<void>
+AuthChangeSubscriptionManager::insert_client(AuthCard card,
+                                             auth_db_client_t client)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
   auth_db_clients_.erase(card);
   [[maybe_unused]] auto [_, inserted] =
-      auth_db_clients_.emplace(card, std::move(*client));
+      auth_db_clients_.emplace(std::move(card), std::move(client));
   assert(inserted);
-  co_return true;
+  co_return;
 }
 
 } // namespace hogd
