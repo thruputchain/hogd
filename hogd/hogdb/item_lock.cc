@@ -51,7 +51,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   auto ctx_with_snapshot = ctx;
   ctx_with_snapshot.item_lock_snapshot_cost = snapshot_cost_;
 
-  auto lock_state = lock_state_.load(std::memory_order_relaxed);
+  auto lock_state = lock_state_.load(std::memory_order_acquire);
 
   if (lock_state == kFinalized) {
     return handle_try_atomic_from_finalized(before, after, ctx_with_snapshot);
