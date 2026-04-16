@@ -74,4 +74,10 @@ fn main() {
         "test_param_entrypoint.wat",
         "param_entrypoint.wasm",
     );
+    convert_wat_to_wasm(
+        &manifest_dir,
+        &out_dir,
+        "test_simd_v128.wat",
+        "simd_v128.wasm",
+    );
 }

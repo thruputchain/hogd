@@ -248,6 +248,10 @@ impl NewWasmtimeRuntimeResult {
         }
         Some(self.runtime_pointer)
     }
+
+    pub fn err_code(&self) -> i32 {
+        self.err_code
+    }
 }
 
 /// # Safety
