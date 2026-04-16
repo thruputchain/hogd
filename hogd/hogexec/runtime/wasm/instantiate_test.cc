@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
