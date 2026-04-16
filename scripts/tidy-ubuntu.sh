@@ -28,14 +28,12 @@ done
 
 BUILD_DIR=$(readlink -f "$BUILD_DIR")
 
-# Run clippy
-{
-  set -ex
-  cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings
-} &
-CLIPPY_PID=$!
+# Run clippy (serialized with clang-tidy to avoid OOM)
+set -e
+cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
+cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
+cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings
+set +e
 
 # Run clang-tidy (using -extra-arg to pass flags to clang-tidy directly)
 cd ${ROOT_DIR}
@@ -48,13 +46,6 @@ find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
     -extra-arg=-Werror ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then
-  exit 1
-fi
-
-wait $CLIPPY_PID
-CLIPPY_RESULT=$?
-if [ $CLIPPY_RESULT -ne 0 ]; then
-  printf "clippy failed!\n"
   exit 1
 fi
 
