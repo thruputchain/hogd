@@ -5,6 +5,8 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 
@@ -124,10 +126,13 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
 namespace {
 
 TrampolineResult
-dummy_syscall_8args(HostCallContext * /*unused*/, uint64_t, uint64_t, uint64_t,
-                    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) noexcept
+dummy_syscall_8args(HostCallContext * /*unused*/, uint64_t /*unused*/,
+                    uint64_t /*unused*/, uint64_t /*unused*/,
+                    uint64_t /*unused*/, uint64_t /*unused*/,
+                    uint64_t /*unused*/, uint64_t /*unused*/,
+                    uint64_t /*unused*/) noexcept
 {
-  return {0, 0};
+  return {.result = 0, .panic = 0};
 }
 
 } // namespace
