@@ -186,6 +186,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   else if (this_tx_already_consumed) {
     // Update removed the consume.
     consumed_.store(false, std::memory_order_relaxed);
+    // NOTE: this undo is defensive. Today this branch is only reachable via
+    // pop_subtransactions, whose lock call has new_entries <=
+    // previous_entries (shrink) and thus never hits the overflow check -
+    // no failure path exists downstream. RetrocausalQueueIt::narrow() in
+    // item_change.cc blocks forward drops. The undo preserves the
+    // "ScopedUndo owns rollback" invariant so any future edit that adds a
+    // fallible step after this point stays correct automatically.
     undo.push([this] { consumed_.store(true, std::memory_order_relaxed); });
   }
 
@@ -232,6 +239,10 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
         previous_entries_count - new_entries_count;
     reserved_entry_count_.fetch_sub(entries_to_unreserve,
                                     std::memory_order_relaxed);
+    // NOTE: same defensive-undo rationale as the else-if consumed_ branch
+    // above. The only shrink caller today is pop_subtransactions, which
+    // cannot fail downstream. Kept to preserve the ScopedUndo "owns
+    // rollback" invariant across future edits.
     undo.push([this, entries_to_unreserve] {
       reserved_entry_count_.fetch_add(entries_to_unreserve,
                                       std::memory_order_relaxed);
