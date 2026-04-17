@@ -33,14 +33,16 @@ private:
   using auth_db_client_t =
       decltype(make_rpc_client<AuthDB1>(x23::HostPort{})());
   using rpc_stream_t = x23::RpcStream<x23::RpcLogger>;
+  using client_ref_t = rpc_stream_t::ClientRef;
 
-  // One in-flight forward-RPC: (card, client_id, future). `client_id` is the
-  // address of the RpcStream that served this call, captured under lock_ for
-  // use in post-await identity-equality erase. The Async<void> holds a
-  // ClientRef to the same stream, keeping `client_id` valid-as-a-pointer for
-  // as long as the tuple lives.
+  // One in-flight forward-RPC: (card, client_ref, future). The ClientRef is
+  // copied from the map entry under lock_ to keep the RpcStream alive for the
+  // lifetime of this tuple — the returned Async<void> holds only a raw
+  // RpcStream* in its coroutine frame, so we cannot rely on the future alone
+  // to preserve identity. client_ref.get() is the stream address used for
+  // post-await identity-equality comparison in erase_client_if_stale.
   using pending_publish_t =
-      std::tuple<AuthCard, const rpc_stream_t *, x23::Async<void>>;
+      std::tuple<AuthCard, client_ref_t, x23::Async<void>>;
 
   static x23::Async<std::optional<auth_db_client_t>>
   create_client(const sockaddr_storage &address, const AuthCard &card);
