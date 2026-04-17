@@ -26,11 +26,11 @@
 #include "storage_item.hh"
 #include "types.hh"
 
-#include "hogd/base/bits.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_types.h"
@@ -133,13 +133,13 @@ HogDBDAO::read_cost_model()
 HogDBStatus<int128_t>
 HogDBDAO::read_address_balance(const Address &addr)
 {
-  int128_t val;
+  std::array<std::byte, sizeof(int128_xdr)> encoded{};
   auto key = make_address_key(addr, Prefix::kBalance);
-  HogDBStatus<void> ret = db_.get_if_type(std::as_bytes(std::span(key)),
-                                          kNNInt128, writable_byte_view(val));
+  HogDBStatus<void> ret =
+      db_.get_if_type(std::as_bytes(std::span(key)), kNNInt128, encoded);
   if (!ret)
     return ret.error();
-  return le_to_cpu(val);
+  return int128_from_xdr_bytes(encoded);
 }
 
 HogDBStatus<HogAge>
@@ -248,13 +248,13 @@ HogDBDAO::read_nnint128(const ItemKey &key)
   if (key.is_address_balance())
     return read_address_balance(key.get_address());
 
-  int128_t val;
+  std::array<std::byte, sizeof(int128_xdr)> encoded{};
   HogDBStatus<void> ret =
       db_.get_if_type(make_contract_data_key(key.as_bytes()), kNNInt128,
-                      writable_byte_view(val));
+                      encoded);
   if (!ret)
     return ret.error();
-  return le_to_cpu(val);
+  return int128_from_xdr_bytes(encoded);
 }
 
 HogDBStatus<OwningSpan<const std::byte>>
@@ -268,8 +268,8 @@ HogDBDAO::write_address_balance(const Address &addr, int128_t val)
 {
   auto key = make_address_key(addr, Prefix::kBalance);
   auto before_item = get_before_item(key);
-  auto ret = db_.put(std::as_bytes(std::span(key)), kNNInt128,
-                     byte_view(cpu_to_le(val)));
+  auto encoded = int128_to_xdr_bytes(val);
+  auto ret = db_.put(std::as_bytes(std::span(key)), kNNInt128, encoded);
 
   update_invariants_post(key, before_item);
   return ret;
@@ -470,7 +470,8 @@ HogDBDAO::write_nnint128(const ItemKey &key, int128_t val)
 
   auto db_key = make_contract_data_key(key.as_bytes());
   auto before_item = get_before_item(db_key);
-  auto ret = db_.put(db_key, kNNInt128, byte_view(cpu_to_le(val)));
+  auto encoded = int128_to_xdr_bytes(val);
+  auto ret = db_.put(db_key, kNNInt128, encoded);
   update_invariants_post(db_key, before_item);
   return ret;
 }
@@ -572,10 +573,10 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
     switch (item.value().type) {
     case kNNInt128:
     {
-      int128_t base_value;
-      CHECK(item.value().value.size() == sizeof(int128_t));
-      std::memcpy(&base_value, item.value().value.data(), sizeof(int128_t));
-      int128_t out = le_to_cpu(base_value);
+      CHECK(item.value().value.size() == sizeof(int128_xdr));
+      auto encoded = std::span<const std::byte, sizeof(int128_xdr)>(
+          item.value().value.data(), sizeof(int128_xdr));
+      int128_t out = int128_from_xdr_bytes(encoded);
 
       return std::make_pair(cost_model->get_nnint_cost(),
                             ItemLockCacheData::from_nnint128_base(out));
