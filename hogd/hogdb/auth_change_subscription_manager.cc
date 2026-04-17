@@ -48,20 +48,20 @@ AuthChangeSubscriptionManager::publish_auth_changes(
   auto pending = co_await start_forward_key_changes(height, combined_batch);
 
   std::vector<std::pair<AuthCard, const rpc_stream_t *>> to_erase;
-  for (auto &p : pending) {
+  for (auto &[card, client_id, future] : pending) {
     try {
-      co_await p.future;
+      co_await future;
     } catch (const x23::XdrException &e) {
       error("AuthChangeSubscriptionManager: Bad response from auth server {}: "
             "{}.  Closing connection.",
-            x23::show(p.card), e.what());
-      to_erase.emplace_back(p.card, p.client_id);
+            x23::show(card), e.what());
+      to_erase.emplace_back(card, client_id);
     }
   }
 
-  // `pending` must outlive this loop: each PendingPublish's ClientRef keeps
-  // the RpcStream alive so p.client_id remains a valid pointer for
-  // identity-equality comparison in erase_client_if_stale.
+  // `pending` must outlive this loop: each tuple's future holds a ClientRef to
+  // the RpcStream, keeping `client_id` a valid pointer for identity-equality
+  // comparison in erase_client_if_stale.
   for (auto &[card, client_id] : to_erase) {
     co_await erase_client_if_stale(card, client_id);
   }
@@ -112,11 +112,11 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   co_return true;
 }
 
-x23::Async<std::vector<AuthChangeSubscriptionManager::PendingPublish>>
+x23::Async<std::vector<AuthChangeSubscriptionManager::pending_publish_t>>
 AuthChangeSubscriptionManager::start_forward_key_changes(
     BlockHeight height, const KeyChangeBatch &batch)
 {
-  std::vector<PendingPublish> pending;
+  std::vector<pending_publish_t> pending;
 
   x23::CoroGuard guard;
   co_await guard(lock_);
@@ -125,11 +125,8 @@ AuthChangeSubscriptionManager::start_forward_key_changes(
   for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
     auto &client = it->second;
     try {
-      pending.push_back(PendingPublish{
-          .card = it->first,
-          .client_id = client.__send_call.get(),
-          .future = client.authdb_forward_key_changes(height, batch),
-      });
+      pending.emplace_back(it->first, client.__send_call.get(),
+                           client.authdb_forward_key_changes(height, batch));
       ++it;
     } catch (x23::XdrException &e) {
       error("AuthChangeSubscriptionManager: Failed to forward key changes to "
