@@ -47,8 +47,7 @@ public:
     for (auto &action : std::ranges::reverse_view(actions_)) {
       try {
         action();
-      }
-      catch (...) {
+      } catch (...) {
         panic("ScopedUndo rollback action threw; cannot safely recover");
       }
     }
