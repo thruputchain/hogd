@@ -3801,12 +3801,12 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   // fresh RCQ (max_live_block_num=0). Cumulative inserts = 300 (first 100
   // are sub1's, narrow's prefix check passes). Must fail at lock-time
   // consume validation.
-  tx1.add_delta(key,
-                make_rcq_consume_insert_delta(1, 0, {}, entries_300),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, entries_300),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value())
-      << "sub2 should fail with kInvalidExecutorBehavior (max_fully > max_live)";
+      << "sub2 should fail with kInvalidExecutorBehavior (max_fully > "
+         "max_live)";
 
   // Commit tx1. Sub2 never pushed, so only sub1's work persists.
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
@@ -3814,8 +3814,7 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   // A separate tx consumes one of sub1's current-block entries. Succeeds
   // iff sub2's CAS undo restored consumed_ to false.
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key,
-                make_rcq_consume_delta(0, 0, {entries_100[0]}),
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {entries_100[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
@@ -3893,8 +3892,7 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   // Sub2: valid consume + 300 cumulative inserts. additional = 200.
   // fetch_add would push reservation to 1100 > 1000 cap. Overflow returns
   // kConflict (r.has_value() && !r.value() pattern).
-  tx1.add_delta(key,
-                make_rcq_consume_insert_delta(0, 0, {}, entries_300),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, entries_300),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value())
@@ -3905,8 +3903,7 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   // Verify consumed_ was restored: another tx can consume a current-block
   // entry from sub1. With a leaked CAS, this would return kConflict.
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key,
-                make_rcq_consume_delta(0, 0, {entries_100[0]}),
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {entries_100[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
@@ -3944,8 +3941,7 @@ TEST_F(DirectRCQTests,
   auto tx1 = make_new_per_tx_db_proxy();
 
   // Sub1: valid consume_insert, 100 inserts. consumed_=true, reservation=100.
-  tx1.add_delta(key,
-                make_rcq_consume_insert_delta(0, 0, {}, entries_100),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, entries_100),
                 std::to_underlying(StorageDeltaFlags::None));
   auto r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 consume_insert must succeed";
@@ -3955,8 +3951,7 @@ TEST_F(DirectRCQTests,
   // lock: this_tx_already_consumed=true so no new CAS. fetch_add(200)
   // runs, undo pushed. Consume validation trips kInvalidExecutorBehavior.
   // Only the reservation undo fires.
-  tx1.add_delta(key,
-                make_rcq_consume_insert_delta(1, 0, {}, entries_300),
+  tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, entries_300),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value())
@@ -4007,8 +4002,9 @@ TEST_F(DirectRCQTests, PopConsumeAddingSubReleasesConsumerBit)
   // the prefix check at lock line ~160 passes. Consume is valid (max_fully
   // = 0 on a fresh RCQ). consumed_ becomes true.
   tx1.add_delta(key,
-                make_rcq_consume_insert_delta(
-                    0, 0, {}, {make_rcq_entry({0}), make_rcq_entry({1})}),
+                make_rcq_consume_insert_delta(0, 0, {},
+                                              {make_rcq_entry({0}),
+                                               make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub2 consume_insert must succeed";
@@ -4024,8 +4020,7 @@ TEST_F(DirectRCQTests, PopConsumeAddingSubReleasesConsumerBit)
   // A separate tx consumes entry A from current block. With the else-if
   // CLEAR working, consumed_ was released and the CAS here succeeds.
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key,
-                make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
+  tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value())
