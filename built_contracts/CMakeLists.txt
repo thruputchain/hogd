@@ -42,13 +42,9 @@ else()
   message(STATUS "WASM contracts: release build (minimal size, no backtraces)")
 endif()
 
-# Tell CMake to clean cargo build directories
+# Tell CMake to clean the cargo/groundhog intermediate build directory.
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown"
-  "${CMAKE_CURRENT_BINARY_DIR}/release"
-  "${CMAKE_CURRENT_BINARY_DIR}/debug"
-  "${CMAKE_CURRENT_BINARY_DIR}/.fingerprint"
-  "${CMAKE_CURRENT_BINARY_DIR}/incremental"
+  "${CMAKE_CURRENT_BINARY_DIR}/cargo-target"
 )
 
 set(generated_rs_files)
