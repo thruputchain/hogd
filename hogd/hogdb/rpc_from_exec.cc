@@ -1,6 +1,5 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <set>
@@ -24,7 +23,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"

@@ -20,9 +20,11 @@
 #include "transaction.hh"
 #include "types.hh"
 
+#include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"

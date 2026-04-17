@@ -2,11 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <span>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
-#include "types.hh"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "x23/serialize.h"
 
 namespace hogd {

@@ -4,12 +4,10 @@
 #include <cstddef>
 
 #include "db_sched.hh"
-#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"

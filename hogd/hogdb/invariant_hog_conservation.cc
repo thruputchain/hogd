@@ -1,24 +1,22 @@
 #include "hogd/hogdb/invariant_hog_conservation.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <iterator>
 #include <span>
 #include <utility>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
-#include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
