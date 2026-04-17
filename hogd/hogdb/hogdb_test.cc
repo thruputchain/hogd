@@ -361,8 +361,9 @@ TEST_F(HogDBTest, NNIntAndBalancePersistenceUseCanonicalXdrBytes)
   ASSERT_TRUE(db_.write_address_balance(kBalanceAddr, kBalanceValue));
 
   auto balance_key = make_address_key(kBalanceAddr, Prefix::kBalance);
-  auto raw_balance = db_.get_ramdb().get_if_type(std::as_bytes(std::span(balance_key)),
-                                                 kNNInt128);
+  auto raw_balance =
+      db_.get_ramdb().get_if_type(std::as_bytes(std::span(balance_key)),
+                                  kNNInt128);
   ASSERT_TRUE(raw_balance);
   ASSERT_EQ(raw_balance->size(), sizeof(int128_xdr));
 
@@ -873,12 +874,14 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
   DbHash base_hash = db_.compute_full_db_hash();
   constexpr int128_t kInitialBalance = 10'000'000;
 
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
-  ASSERT_TRUE(invoke_tx.request_nnint128(
-      key, 321, std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(
+      invoke_tx.request_nnint128(key, 321,
+                                 std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();
@@ -924,12 +927,14 @@ TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
 
   db_.enable_debug_invariants(cost_model_);
 
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
-  ASSERT_TRUE(invoke_tx.request_nnint128(
-      key, 321, std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(
+      invoke_tx.request_nnint128(key, 321,
+                                 std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(invoke_tx.sync_balance_locks());
   invoke_tx.commit();
   invoke_tx.release_blocktx_reference();

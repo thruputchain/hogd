@@ -273,8 +273,9 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
   {
     out.type(StorageItemType::kItemTypeNonnegativeInt);
     CHECK(item->value.size() == sizeof(int128_xdr));
-    auto encoded = std::span<const std::byte, sizeof(int128_xdr)>(
-        item->value.data(), sizeof(int128_xdr));
+    auto encoded =
+        std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
+                                                       sizeof(int128_xdr));
     out.nnint() = to_xdr(int128_from_xdr_bytes(encoded));
     break;
   }

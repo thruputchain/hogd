@@ -2,14 +2,14 @@
 
 #pragma once
 
-#include <bit>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <string_view>
 #include <span>
+#include <string_view>
 #include <vector>
 #include <version>
 
