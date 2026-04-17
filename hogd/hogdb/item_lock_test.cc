@@ -653,6 +653,7 @@ TEST(ItemLockTest, FinalizeExclusive)
             (std::pair<int128_t, int128_t>(200, 20)));
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(ItemLockTest, ConcurrentRCQReadReturnsNulloptUntilCommit)
 {
   ItemLock lock(0);
@@ -725,6 +726,7 @@ TEST(ItemLockTest, ConcurrentRCQReadDoesNotTouchUncommittedVariant)
     ASSERT_FALSE(writer_failed.load(std::memory_order_relaxed));
   }
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
 {
