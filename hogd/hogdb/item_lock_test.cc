@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
-#include <span>
 #include <optional>
+#include <span>
 #include <thread>
 #include <unordered_map>
 #include <utility>
