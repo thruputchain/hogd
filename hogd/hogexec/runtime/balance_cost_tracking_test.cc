@@ -509,6 +509,12 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+
+  // HogDB's commit-time balance-lock must still reject the transaction because
+  // the sender's persisted balance would go negative; try_commit_transaction
+  // internally aborts on failure.
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_NE(commit_res, ExecResult::ExecResultOK);
 }
 
 // Companion to NegativeBalanceReadbackReturnsDeterministic that exercises the
@@ -599,6 +605,9 @@ TEST_F(BalanceCostTrackingTest,
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_NE(commit_res, ExecResult::ExecResultOK);
 }
 
 // Regression guard: non-overspending transfer followed by get_balance must
@@ -687,6 +696,10 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
