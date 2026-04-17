@@ -3619,9 +3619,9 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
   std::vector<QueueEntry> entries_900;
   entries_900.reserve(900);
   for (int i = 0; i < 900; ++i) {
-    entries_900.push_back(make_rcq_entry(
-        {static_cast<uint8_t>(i & 0xFF),
-         static_cast<uint8_t>((i >> 8) & 0xFF)}));
+    entries_900.push_back(
+        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
+                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
   }
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta(entries_900),
@@ -3635,15 +3635,15 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
   std::vector<QueueEntry> entries_200;
   entries_200.reserve(200);
   for (int i = 0; i < 200; ++i) {
-    entries_200.push_back(make_rcq_entry(
-        {static_cast<uint8_t>((i + 100) & 0xFF),
-         static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
+    entries_200.push_back(
+        make_rcq_entry({static_cast<uint8_t>((i + 100) & 0xFF),
+                        static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
   }
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(
-      key,
-      make_rcq_consume_insert_delta(0, 0, {entries_900[0]}, entries_200),
-      std::to_underlying(StorageDeltaFlags::None));
+  tx2.add_delta(key,
+                make_rcq_consume_insert_delta(0, 0, {entries_900[0]},
+                                              entries_200),
+                std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && !r.value())
       << "TX2 consume+insert 200 should fail (aggregate > 1000)";
@@ -3664,8 +3664,7 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
 // Sibling leak: a consume that trips kInvalidExecutorBehavior after the
 // consumed_ CAS must not leak the single-consumer bit to a subsequent
 // legitimate consume in the same block.
-TEST_F(DirectRCQTests,
-       InvalidExecutorConsumeDoesNotPoisonConsumerBit)
+TEST_F(DirectRCQTests, InvalidExecutorConsumeDoesNotPoisonConsumerBit)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key =
@@ -3687,7 +3686,8 @@ TEST_F(DirectRCQTests,
   tx2.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
-  // kInvalidExecutorBehavior surfaces as !r.has_value(), distinct from kConflict.
+  // kInvalidExecutorBehavior surfaces as !r.has_value(), distinct from
+  // kConflict.
   ASSERT_FALSE(r.has_value())
       << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
   ASSERT_TRUE(tx2.abort_transaction().has_value());
@@ -3716,9 +3716,9 @@ TEST_F(DirectRCQTests,
   std::vector<QueueEntry> entries_500;
   entries_500.reserve(500);
   for (int i = 0; i < 500; ++i) {
-    entries_500.push_back(make_rcq_entry(
-        {static_cast<uint8_t>(i & 0xFF),
-         static_cast<uint8_t>((i >> 8) & 0xFF)}));
+    entries_500.push_back(
+        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
+                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
   }
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta(entries_500),
@@ -3733,15 +3733,13 @@ TEST_F(DirectRCQTests,
   std::vector<QueueEntry> entries_400;
   entries_400.reserve(400);
   for (int i = 0; i < 400; ++i) {
-    entries_400.push_back(make_rcq_entry(
-        {static_cast<uint8_t>((i + 200) & 0xFF),
-         static_cast<uint8_t>(((i + 200) >> 8) & 0xFF)}));
+    entries_400.push_back(
+        make_rcq_entry({static_cast<uint8_t>((i + 200) & 0xFF),
+                        static_cast<uint8_t>(((i + 200) >> 8) & 0xFF)}));
   }
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(
-      key,
-      make_rcq_consume_insert_delta(1, 0, {}, entries_400),
-      std::to_underlying(StorageDeltaFlags::None));
+  tx2.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, entries_400),
+                std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value())
       << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
@@ -3752,9 +3750,9 @@ TEST_F(DirectRCQTests,
   std::vector<QueueEntry> entries_200;
   entries_200.reserve(200);
   for (int i = 0; i < 200; ++i) {
-    entries_200.push_back(make_rcq_entry(
-        {static_cast<uint8_t>((i + 700) & 0xFF),
-         static_cast<uint8_t>(((i + 700) >> 8) & 0xFF)}));
+    entries_200.push_back(
+        make_rcq_entry({static_cast<uint8_t>((i + 700) & 0xFF),
+                        static_cast<uint8_t>(((i + 700) >> 8) & 0xFF)}));
   }
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_insert_delta(entries_200),

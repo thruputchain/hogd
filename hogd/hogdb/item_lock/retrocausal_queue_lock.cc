@@ -34,7 +34,7 @@ namespace {
 // disarm() has been called. Not copyable, not movable: instances are strictly
 // function-local and should not escape.
 class ScopedUndo {
- public:
+public:
   ScopedUndo() = default;
   ~ScopedUndo()
   {
@@ -42,15 +42,15 @@ class ScopedUndo {
       return;
     }
     // Run in reverse, mirroring stack-unwind semantics.
-    for (auto& action : std::ranges::reverse_view(actions_)) {
+    for (auto &action : std::ranges::reverse_view(actions_)) {
       action();
     }
   }
 
-  ScopedUndo(const ScopedUndo&) = delete;
-  ScopedUndo& operator=(const ScopedUndo&) = delete;
-  ScopedUndo(ScopedUndo&&) = delete;
-  ScopedUndo& operator=(ScopedUndo&&) = delete;
+  ScopedUndo(const ScopedUndo &) = delete;
+  ScopedUndo &operator=(const ScopedUndo &) = delete;
+  ScopedUndo(ScopedUndo &&) = delete;
+  ScopedUndo &operator=(ScopedUndo &&) = delete;
 
   void push(std::function<void()> action)
   {
@@ -59,7 +59,7 @@ class ScopedUndo {
 
   void disarm() { armed_ = false; }
 
- private:
+private:
   std::vector<std::function<void()>> actions_;
   bool armed_ = true;
 };
@@ -174,17 +174,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       if (!consumed_.compare_exchange_strong(expected, true)) {
         return HogDBError{HogDBCode::kConflict};
       }
-      undo.push([this] {
-        consumed_.store(false, std::memory_order_relaxed);
-      });
+      undo.push([this] { consumed_.store(false, std::memory_order_relaxed); });
     }
   }
   else if (this_tx_already_consumed) {
     // Update removed the consume.
     consumed_.store(false, std::memory_order_relaxed);
-    undo.push([this] {
-      consumed_.store(true, std::memory_order_relaxed);
-    });
+    undo.push([this] { consumed_.store(true, std::memory_order_relaxed); });
   }
 
   auto r = get_meta(&ctx);
