@@ -618,7 +618,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   constexpr static ContractAddress kSenderAddr = make_contract_address(164);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(165);
 
-  constexpr int128_t kInitialBalance = 1000;
+  constexpr int128_t kInitialBalance = 1'000'000;
   constexpr int128_t kTransferAmount = 100;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
