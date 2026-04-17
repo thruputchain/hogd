@@ -3703,5 +3703,67 @@ TEST_F(DirectRCQTests,
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
+// Sibling leak: a consume+insert that trips kInvalidExecutorBehavior after
+// the entry-count fetch_add must not leak the reservation.
+TEST_F(DirectRCQTests,
+       InvalidExecutorConsumeInsertDoesNotPoisonEntryReservation)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_invalid_leak_res");
+
+  // TX1: reserve 500 entries.
+  std::vector<QueueEntry> entries_500;
+  entries_500.reserve(500);
+  for (int i = 0; i < 500; ++i) {
+    entries_500.push_back(make_rcq_entry(
+        {static_cast<uint8_t>(i & 0xFF),
+         static_cast<uint8_t>((i >> 8) & 0xFF)}));
+  }
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta(entries_500),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // TX2: consume_insert with 400 entries + invalid consume. Reservation
+  // 500 + 400 = 900 passes the 1000 cap, then kInvalidExecutorBehavior
+  // fires in the consume-validation block, leaking the 400-entry reservation.
+  std::vector<QueueEntry> entries_400;
+  entries_400.reserve(400);
+  for (int i = 0; i < 400; ++i) {
+    entries_400.push_back(make_rcq_entry(
+        {static_cast<uint8_t>((i + 200) & 0xFF),
+         static_cast<uint8_t>(((i + 200) >> 8) & 0xFF)}));
+  }
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(
+      key,
+      make_rcq_consume_insert_delta(1, 0, {}, entries_400),
+      std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value())
+      << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  // TX3: legitimate insert of 200 entries. Total 500 + 200 = 700 <= 1000,
+  // must succeed. With the leak it becomes 500 + 400 + 200 = 1100 and fails.
+  std::vector<QueueEntry> entries_200;
+  entries_200.reserve(200);
+  for (int i = 0; i < 200; ++i) {
+    entries_200.push_back(make_rcq_entry(
+        {static_cast<uint8_t>((i + 700) & 0xFF),
+         static_cast<uint8_t>(((i + 700) >> 8) & 0xFF)}));
+  }
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_insert_delta(entries_200),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "TX3 insert 200 must succeed after TX2's reservation is rolled back";
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
