@@ -123,8 +123,9 @@ MempoolCoordinatorRpc::record_validation_attempt(
   std::scoped_lock lock(telemetry_mutex_);
   try {
     commit_window_telemetry_.validations.push_back(std::move(telemetry));
-  } catch (...) {
+  } catch (std::exception &e) {
     // Telemetry collection is best-effort and must not escape deferred cleanup.
+    info("could not collect telemetry due to exception thrown: {}", e.what());
   }
 }
 
