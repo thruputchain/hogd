@@ -3661,5 +3661,47 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
+// Sibling leak: a consume that trips kInvalidExecutorBehavior after the
+// consumed_ CAS must not leak the single-consumer bit to a subsequent
+// legitimate consume in the same block.
+TEST_F(DirectRCQTests,
+       InvalidExecutorConsumeDoesNotPoisonConsumerBit)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_invalid_leak_cbit");
+
+  // TX1: insert one entry so TX3 has something to consume.
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // TX2: consume with max_fully_consumed_block_number = 1 on a fresh RCQ
+  // (max_live_block_num = 0). This trips
+  // retrocausal_queue_lock.cc line ~197 and returns kInvalidExecutorBehavior
+  // AFTER consumed_ was already CASed to true.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_consume_delta(1, 0, {}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  // kInvalidExecutorBehavior surfaces as !r.has_value(), distinct from kConflict.
+  ASSERT_FALSE(r.has_value())
+      << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  // TX3: legitimate pure consume of the current-block entry. Should succeed
+  // once consumed_ is rolled back by the guard.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "TX3 pure consume must succeed after TX2's kInvalidExecutorBehavior";
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
