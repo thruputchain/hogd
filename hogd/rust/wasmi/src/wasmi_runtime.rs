@@ -150,6 +150,16 @@ impl WasmiRuntime {
             }
         };
 
+        let func_type = func.ty(&self.store);
+        if !func_type.params().is_empty() || !func_type.results().is_empty() {
+            debug_log!(eprintln!(
+                "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
+            ));
+            return WasmiInvokeResult::error(
+                InvokeErrorCode::kInvokeDeterministic,
+            );
+        }
+
         match func.call(&mut self.store, &[], &mut []) {
             Ok(_) => WasmiInvokeResult::success(),
             Err(err) => {

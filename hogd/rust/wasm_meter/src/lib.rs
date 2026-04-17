@@ -14,6 +14,7 @@ pub struct WasmMeterInstrumentResult {
 pub unsafe extern "C" fn wasm_meter_instrument(
     wasm_ptr: *const u8,
     wasm_len: usize,
+    max_imported_functions: u32,
 ) -> WasmMeterInstrumentResult {
     if wasm_ptr.is_null() {
         return WasmMeterInstrumentResult {
@@ -23,7 +24,11 @@ pub unsafe extern "C" fn wasm_meter_instrument(
         };
     }
     let wasm = unsafe { slice::from_raw_parts(wasm_ptr, wasm_len) };
-    match groundhog_wasm_meter::instrument(wasm) {
+    let config = groundhog_wasm_meter::Config {
+        max_imported_functions,
+        ..groundhog_wasm_meter::Config::default()
+    };
+    match groundhog_wasm_meter::instrument(wasm, &config) {
         Ok(bytes) => {
             let mut boxed = bytes.into_boxed_slice();
             let data = boxed.as_mut_ptr();

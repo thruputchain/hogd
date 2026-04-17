@@ -18,7 +18,7 @@ namespace {
 
 SystemCallHandler *ctx_check = nullptr;
 
-TrampolineResult
+extern "C" TrampolineResult
 foo(HostCallContext *ctx, uint64_t value) noexcept
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);

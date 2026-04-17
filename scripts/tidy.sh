@@ -25,14 +25,11 @@ done
 
 BUILD_DIR=$(readlink -f "$BUILD_DIR")
 
-# Run clippy
-{
-  cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnings
-} &
-CLIPPY_PID=$!
+# Run clippy (serialized with clang-tidy to avoid OOM)
+cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings || exit 1
+cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings || exit 1
+cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings || exit 1
+cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnings || exit 1
 
 # Run clang-tidy
 cd ${ROOT_DIR}
@@ -41,13 +38,6 @@ find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then
-  exit 1
-fi
-
-wait $CLIPPY_PID
-CLIPPY_RESULT=$?
-if [ $CLIPPY_RESULT -ne 0 ]; then
-  printf "clippy failed!\n"
   exit 1
 fi
 

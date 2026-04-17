@@ -1,86 +1,131 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import json
-import sys
 import os
-import re
-import traceback
+import struct
+import sys
 
 
-def generate_header(
-    json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None
-):
-    """Generate a C++ header file from a JSON contract spec."""
+def major_version(version_str):
+    """Extract major version matching sdk_rs/contract-util/src/semver.rs.
 
-    with open(json_file, "r") as f:
-        content = f.read()
+    - "1.2.3" -> "1"
+    - "0.9.2" -> "0.9"
+    - "0.0.2" -> "0.0.2"
+    """
+    parts = version_str.split(".")
+    major = int(parts[0]) if len(parts) > 0 else 0
+    minor = int(parts[1]) if len(parts) > 1 else 0
+    patch = int(parts[2].split("-")[0]) if len(parts) > 2 else 0
+    if major > 0:
+        return str(major)
+    elif minor > 0:
+        return f"{major}.{minor}"
+    elif patch > 0:
+        return f"{major}.{minor}.{patch}"
+    else:
+        return version_str
 
-    # Fix the malformed JSON by properly escaping the typespec values
-    # Replace the problematic typespec patterns
-    content = re.sub(r'"typespec": "([^"]*)"', r'"typespec": "\1"', content)
 
-    try:
-        spec = json.loads(content)
-    except json.JSONDecodeError as e:
-        # Show which file failed and context around the error
-        lines = content.split("\n")
-        error_line = e.lineno - 1  # JSONDecodeError uses 1-based indexing
-        start_line = max(0, error_line - 4)
-        end_line = min(len(lines), error_line + 5)
-        context = "\n".join(
-            f"{i+1:4d}: {lines[i]}" for i in range(start_line, end_line)
-        )
-        error_msg = f"Failed to parse {json_file} at line {e.lineno}, column {e.colno}:\n{context}\n\nOriginal error: {e}"
-        raise ValueError(error_msg) from e
+def compute_entrypoint_id(interface_name, version_str, method_name):
+    """Compute entrypoint ID: sha256(interface_name || major_ver || method_name)[0:8]."""
+    mv = major_version(version_str)
+    h = hashlib.sha256()
+    h.update(interface_name.encode())
+    h.update(mv.encode())
+    h.update(method_name.encode())
+    return struct.unpack(">Q", h.digest()[:8])[0]
 
-    interface_name = spec["interface"]
-    version = spec["version"]
-    methods = spec["methods"]
 
-    # Generate export names
-    export_names = [method["name"] for method in methods]
-    entrypoints = [method["entrypoint"] for method in methods]
+def map_type(ty):
+    """Map a spec type descriptor to a C++ type string."""
+    kind = ty["kind"]
+    if kind == "u8":
+        return "uint8_t"
+    elif kind == "u32":
+        return "uint32_t"
+    elif kind == "i32":
+        return "int32_t"
+    elif kind == "u64":
+        return "uint64_t"
+    elif kind == "i64":
+        return "int64_t"
+    elif kind == "u128":
+        return "std::tuple<uint64_t, uint64_t>"
+    elif kind == "i128":
+        return "std::tuple<int64_t, uint64_t>"
+    elif kind == "bool":
+        return "bool"
+    elif kind == "void":
+        return "void"
+    elif kind == "address":
+        return "ContractAddress"
+    elif kind == "vec":
+        inner = map_type(ty["inner"])
+        max_len = ty["max_len"]
+        return f"x23::Vec<{inner}, {max_len}>"
+    elif kind == "array":
+        inner = map_type(ty["element"])
+        length = ty["len"]
+        return f"std::array<{inner}, {length}>"
+    elif kind == "option":
+        inner = map_type(ty["inner"])
+        return f"x23::Ptr<{inner}>"
+    elif kind == "tuple":
+        items = [map_type(item) for item in ty["items"]]
+        if len(items) == 1:
+            return items[0]
+        return f"std::tuple<{', '.join(items)}>"
+    elif kind == "named":
+        return ty["name"]
+    else:
+        return kind
+
+
+def generate_interface_struct(interface, wasm_file=None):
+    """Generate a single C++ struct for one contract interface."""
+    interface_name = interface["name"]
+    version = interface["version"]
+    methods = interface["methods"]
+    throws = interface.get("throws", [])
+
+    # Build list of ContractException<Type, Selector> for each throw
+    exception_types = []
+    for throw_entry in throws:
+        selector = throw_entry.get("selector", "")
+        err_ty = throw_entry.get("type", {})
+        if err_ty.get("kind") == "named":
+            name = err_ty["name"]
+            exception_types.append(f"ContractException<{name}, {selector}ULL>")
+
+    # Method names and entrypoint IDs
+    export_names = [m["name"] for m in methods]
+    entrypoints = [
+        compute_entrypoint_id(interface_name, version, name) for name in export_names
+    ]
+
     export_names_str = ",\n            ".join(f'"{name}"' for name in export_names)
-    entrypoints_str = ",\n            ".join(f"{ep}ULL" for ep in entrypoints)
+    entrypoints_str = ",\n            ".join(f"0x{ep:016x}ULL" for ep in entrypoints)
 
-    # Generate function signatures
+    # Function signatures
     function_signatures = []
-    forward_decls = []
     for method in methods:
-        try:
-            # Map JSON types to C++ types
-            return_typespec = method["return"]
-            return_type = map_type_from_typespec(return_typespec)
-            err_type = None
-            if "err" in method:
-                err_type = method[
-                    "err"
-                ]  # Possible TODO(geoff): swap the error type to a typespec, instead of a string
-                forward_decls.append(f"class {err_type};")
+        return_type = map_type(method["return_type"])
+        args = [map_type(arg["ty"]) for arg in method["args"]]
 
-            args = []
-            for arg in method["args"]:
-                arg_type = map_type_from_typespec(arg["typespec"])
-                args.append(arg_type)
+        if exception_types:
+            exn_args = ", ".join(exception_types)
+            return_type = f"Result<{return_type}, {exn_args}>"
 
-            if err_type:
-                return_type = f"Result<{return_type}, {err_type}>"
-
-            if args:
-                signature = f"{return_type}(*)({', '.join(args)})"
-            else:
-                signature = f"{return_type}(*)()"
-            function_signatures.append(signature)
-        except Exception as e:
-            print(f"Error processing method {method}: {e}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            raise
+        if args:
+            sig = f"{return_type}(*)({', '.join(args)})"
+        else:
+            sig = f"{return_type}(*)()"
+        function_signatures.append(sig)
 
     signatures_str = ",\n             ".join(function_signatures)
-
-    namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
-    namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
 
     wasm_str = (
         f'constexpr static std::string_view kWasmFile = "{wasm_file}";'
@@ -88,36 +133,7 @@ def generate_header(
         else ""
     )
 
-    if extra_includes:
-        extra_includes_str = "\n".join(
-            f'#include "{include}"' for include in extra_includes
-        )
-    else:
-        extra_includes_str = ""
-
-    # Generate the header content
-    header_content = f"""#pragma once
-
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <string_view>
-#include <tuple>
-
-#include "x23/vec.h"
-#include "x23/x23.h"
-#include "types.hh"
-#include "hogd/hogexec/runtime/contract_result.h"
-
-// Auto-generated from contract spec
-// DO NOT EDIT
-
-using namespace hogd;
-
-{extra_includes_str}
-
-{namespace_forward}
-
+    return f"""
 struct {interface_name} {{
     constexpr static std::string_view kTraitName = "{interface_name}";
     constexpr static std::string_view kVersion = "{version}";
@@ -136,7 +152,54 @@ struct {interface_name} {{
 
     using export_types = std::tuple<{signatures_str}>;
 }};
+"""
 
+
+def generate_header(
+    json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None
+):
+    with open(json_file, "r") as f:
+        spec = json.load(f)
+
+    interfaces = spec["interfaces"]
+
+    namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
+    namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
+
+    if extra_includes:
+        extra_includes_str = "\n".join(
+            f'#include "{include}"' for include in extra_includes
+        )
+    else:
+        extra_includes_str = ""
+
+    # Generate a struct for each interface
+    structs = []
+    for iface in interfaces:
+        structs.append(generate_interface_struct(iface, wasm_file))
+
+    header_content = f"""#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <tuple>
+
+#include "x23/vec.h"
+#include "x23/x23.h"
+#include "types.hh"
+#include "hogd/hogexec/components/contract_result.h"
+
+// Auto-generated from contract spec
+// DO NOT EDIT
+
+using namespace hogd;
+
+{extra_includes_str}
+
+{namespace_forward}
+{"".join(structs)}
 {namespace_close}
 
 """
@@ -149,146 +212,28 @@ struct {interface_name} {{
         print(header_content)
 
 
-def map_type_from_typespec(typespec):
-    """Map typespec JSON strings to C++ types.
-
-    Args:
-        typespec: The typespec dict to map
-    """
-
-    t = typespec["type"]
-    if t == "unsigned":
-        return "uint32_t"
-    elif t == "signed":
-        return "int32_t"
-    elif t == "unsigned hyper":
-        return "uint64_t"
-    elif t == "hyper":
-        return "int64_t"
-    elif t == "bool":
-        return "bool"
-    elif t == "variable opaque":
-        max_len = typespec["max"]
-        return f"x23::Vec<uint8_t, {max_len}>"
-    elif t == "fixed opaque":
-        max_len = typespec["len"]
-        return f"std::array<uint8_t, {max_len}>"
-    elif t == "fixed array":
-        max_len = typespec["len"]
-        elem_type = map_type_from_typespec(typespec["element_type"])
-        return f"std::array<{elem_type}, {max_len}>"
-    elif t == "variable array":
-        max_len = typespec["max"]
-        elem_type = map_type_from_typespec(typespec["element_type"])
-        return f"x23::Vec<{elem_type}, {max_len}>"
-    elif t == "optional":
-        elem_type = map_type_from_typespec(typespec["element_type"])
-        return f"x23::Ptr<{elem_type}>"
-    elif t == "void":
-        return "void"
-    elif t == "struct":
-        # Check if this is a tuple (all fields named "unnamed_N" or "unnamed_optional")
-        fields = typespec.get("fields", [])
-        if is_tuple_struct(fields):
-            # Special case: single-element struct is used as wrapper for array dimensions or optionals
-            # For nested arrays like [[u8; 4]; 5], xdrs wraps each dimension in a single-element struct with "unnamed_0"
-            # For optional arrays like [Option<u64>; 2], xdrs wraps optionals in struct with "unnamed_0"
-            if len(fields) == 1 and fields[0]["name"] in ("unnamed_0"):
-                field_typespec = fields[0]["element_type"]
-                return map_type_from_typespec(field_typespec)
-
-            # Multi-element tuple OR single-element tuple at top level: Map to std::tuple<...>
-            field_types = []
-            for field in fields:
-                field_typespec = field["element_type"]
-                field_types.append(map_type_from_typespec(field_typespec))
-            return f"std::tuple<{', '.join(field_types)}>"
-        else:
-            # Named struct shouldn't appear in return types
-            raise ValueError(f"Named structs not supported in return types: {typespec}")
-    else:
-        return t
-
-
-def is_tuple_struct(fields):
-    """Check if struct fields match tuple pattern (unnamed_0, unnamed_1, ...) or wrapper patterns (unnamed_optional)."""
-    if not fields:
-        return False
-
-    # Single-element wrapper patterns: unnamed_0 (array dimension) or unnamed_optional (optional in array)
-    if len(fields) == 1 and fields[0].get("name") in ("unnamed_0", "unnamed_optional"):
-        return True
-
-    # Multi-element tuple pattern: unnamed_0, unnamed_1, unnamed_2, ...
-    for i, field in enumerate(fields):
-        expected_name = f"unnamed_{i}"
-        if field.get("name") != expected_name:
-            return False
-
-    return True
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Generate a C++ header file from a JSON contract spec.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  %(prog)s contract.json
-  %(prog)s contract.json -o contract.h
-  %(prog)s contract.json --output contract.h --namespace mycontract
-        """,
     )
-
-    parser.add_argument(
-        "json_spec_file", help="Path to the JSON contract specification file"
-    )
-
-    parser.add_argument(
-        "-o",
-        "--output",
-        dest="output_file",
-        help="Output header file path (if not specified, prints to stdout)",
-    )
-
-    parser.add_argument(
-        "-n", "--namespace", help="C++ namespace to wrap the generated code"
-    )
-
-    parser.add_argument(
-        "-w",
-        "--wasm",
-        dest="wasm_file",
-        help="WASM file to include in the generated header",
-    )
-
-    parser.add_argument(
-        "-i",
-        "--include",
-        dest="extra_includes",
-        action="append",
-        help="Additional header files to include (can be specified multiple times)",
-    )
-
+    parser.add_argument("json_spec_file", help="Path to the JSON contract spec file")
+    parser.add_argument("-o", "--output", dest="output_file")
+    parser.add_argument("-n", "--namespace")
+    parser.add_argument("-w", "--wasm", dest="wasm_file")
+    parser.add_argument("-i", "--include", dest="extra_includes", action="append")
     args = parser.parse_args()
 
     if not os.path.exists(args.json_spec_file):
-        print(
-            f"Error: JSON spec file '{args.json_spec_file}' not found", file=sys.stderr
-        )
+        print(f"Error: JSON spec file '{args.json_spec_file}' not found", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        generate_header(
-            args.json_spec_file,
-            args.output_file,
-            args.namespace,
-            args.extra_includes,
-            args.wasm_file,
-        )
-    except Exception as e:
-        print(f"Error generating header: {e}", file=sys.stderr)
-        sys.exit(1)
+    generate_header(
+        args.json_spec_file,
+        args.output_file,
+        args.namespace,
+        args.extra_includes,
+        args.wasm_file,
+    )
 
 
 if __name__ == "__main__":

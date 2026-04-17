@@ -129,6 +129,16 @@ impl WasmtimeRuntime {
             }
         };
 
+        let func_type = func.ty(&self.store);
+        if func_type.params().len() != 0 || func_type.results().len() != 0 {
+            debug_log!(eprintln!(
+                "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
+            ));
+            return WasmtimeInvokeResult::error(
+                InvokeErrorCode::kInvokeDeterministic,
+            );
+        }
+
         match func.call(&mut self.store, &[], &mut []) {
             Ok(_) => WasmtimeInvokeResult::success(),
             Err(err) => {
@@ -237,6 +247,10 @@ impl NewWasmtimeRuntimeResult {
             return None;
         }
         Some(self.runtime_pointer)
+    }
+
+    pub fn err_code(&self) -> i32 {
+        self.err_code
     }
 }
 

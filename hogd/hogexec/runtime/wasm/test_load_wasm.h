@@ -33,9 +33,13 @@ load_raw_file(std::string_view filename)
   }
   std::fclose(f);
 
-  auto instrumented = InstrumentedBytes::instrument(std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(contents.wasm.data()),
-      contents.wasm.size()));
+  // Test WATs may import multiple host functions; use a permissive limit.
+  constexpr uint32_t kTestMaxImportedFunctions = 16;
+  auto instrumented = InstrumentedBytes::instrument(
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
+                                   contents.wasm.data()),
+                               contents.wasm.size()),
+      kTestMaxImportedFunctions);
   if (!instrumented) {
     throw std::runtime_error("failed to instrument wasm file: " + file);
   }

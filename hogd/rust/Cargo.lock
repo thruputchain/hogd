@@ -607,9 +607,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "groundhog-wasm-meter"
-version = "0.1.2"
+version = "0.2.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "d6124165147df5283538f1f03c2f3ae24dc48fa7e86d17003a72910c9a500ef9"
+checksum = "473cfc33a83c278bbb6cae354fa5e41ab20c10a00a36e1512a470201acb0d3c6"
 dependencies = [
  "wasm-encoder 0.246.2",
  "wasmparser 0.246.2",

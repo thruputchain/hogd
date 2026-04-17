@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <span>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -615,6 +617,40 @@ TEST(ItemLockTest, FinalizeExclusive)
   ASSERT_TRUE(inner != nullptr);
   EXPECT_EQ(inner->get_base_and_delta(),
             (std::pair<int128_t, int128_t>(200, 20)));
+}
+
+TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
+{
+  for (int i = 0; i < 10000; ++i) {
+    ItemLock lock(0);
+    auto change_a = make_nnint_change(100, 10);
+    auto change_b = make_nnint_change(100, 20);
+
+    std::atomic<bool> finalized_ready = false;
+    std::atomic<bool> committed = false;
+
+    std::thread thread_a([&]() {
+      auto ctx = make_dummy_context();
+      auto res = lock.try_atomic_change_lock(nullptr, &change_a, ctx);
+      if (res.has_value()) {
+        committed.store(true, std::memory_order_relaxed);
+        (void)lock.commit_change(change_a, ctx);
+      }
+      finalized_ready.store(true, std::memory_order_relaxed);
+    });
+
+    std::thread thread_b([&]() {
+      while (!finalized_ready.load(std::memory_order_relaxed)) {
+      }
+      auto ctx = make_dummy_context();
+      auto ignored = lock.try_atomic_change_lock(nullptr, &change_b, ctx);
+      (void)ignored;
+    });
+
+    thread_a.join();
+    thread_b.join();
+    ASSERT_TRUE(committed.load(std::memory_order_relaxed));
+  }
 }
 
 } // namespace hogd
