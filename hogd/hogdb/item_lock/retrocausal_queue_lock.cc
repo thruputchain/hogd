@@ -251,10 +251,11 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
   if (delta.consume) {
     // Now that we know this transaction will commit, we need to do one more
-    // thing before we compute storage costs. commit_change() has no DAO access,
-    // but the number of entries consumed by this delta depends on the size of
-    // stored blocks. Compute the number of entries consumed by this delta, here
-    // and record it in case this transaction commits.
+    // thing before we compute storage costs. commit_change() should not
+    // consult the DAO, but the number of entries consumed by this delta
+    // depends on the size of stored blocks. Compute the number of entries
+    // consumed by this delta here and record it in case this transaction
+    // commits.
     size_t consumed_entries = 0;
 
     auto const &snapshot_consume = meta.consume_state;
@@ -367,7 +368,7 @@ int128_t
 RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
                                     int128_t snapshot_cost,
                                     const change_type &change,
-                                    const StorageCostModel *cost_model)
+                                    const LockContext &ctx)
 {
   std::unique_lock<std::mutex> lock(mtx_);
 
@@ -392,7 +393,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     // consumed entries were matched by inserts.
     live_entries = std::max(live_entries, int64_t{0});
 
-    return cost_model->get_retrocausal_queue_cost(
+    return ctx.cost_model->get_retrocausal_queue_cost(
         static_cast<uint64_t>(live_entries));
   };
 

@@ -34,7 +34,7 @@ public:
                          const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<ReplayCacheIt> &after,
-                         const StorageCostModel *cost_model);
+                         const LockContext &ctx);
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
@@ -66,6 +66,8 @@ private:
   mutable ConcurrentSet<uint128_t> conflicts_;
 
   mutable std::atomic<int32_t> pending_new_heights_{0};
+  mutable std::mutex committed_cost_lock_;
+  mutable uint64_t committed_additions_{0};
 
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;

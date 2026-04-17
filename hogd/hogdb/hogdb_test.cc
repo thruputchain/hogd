@@ -1716,7 +1716,73 @@ TEST_F(HogDBTest, ReplayCacheGCOnNextModificationUpdatesHash)
   });
 }
 
-TEST_F(HogDBTest, ReplayCacheGCOverchargesFirstPostExpiryTransaction)
+TEST_F(HogDBTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
+{
+  Address addr = make_address(kAddress + 52);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  auto populate_two_expiring_entries = [&] {
+    commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 100),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+    commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+  };
+
+  populate_two_expiring_entries();
+
+  {
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   5);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(7, 300), std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+
+    invoke_tx.abort();
+    invoke_tx.release_blocktx_reference();
+
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  auto replay_meta_after_abort = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_after_abort);
+  ASSERT_EQ(2, replay_meta_after_abort->size);
+  ASSERT_EQ(1, replay_meta_after_abort->heights.size());
+  EXPECT_EQ(3, replay_meta_after_abort->heights[0].height);
+  EXPECT_EQ(2, replay_meta_after_abort->heights[0].nonce_count);
+
+  auto replay_data_after_abort = db_.read_address_replay_cache_data(addr, 3);
+  ASSERT_TRUE(replay_data_after_abort);
+  ASSERT_EQ(2, replay_data_after_abort->nonces.size());
+  EXPECT_EQ(100, replay_data_after_abort->nonces[0]);
+  EXPECT_EQ(200, replay_data_after_abort->nonces[1]);
+
+  commit_block_expect_db_hash_matches_full(6, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 300), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto replay_meta_after_commit = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_after_commit);
+  ASSERT_EQ(1, replay_meta_after_commit->size);
+  ASSERT_EQ(1, replay_meta_after_commit->heights.size());
+  EXPECT_EQ(8, replay_meta_after_commit->heights[0].height);
+  EXPECT_EQ(1, replay_meta_after_commit->heights[0].nonce_count);
+
+  auto replay_data_after_gc = db_.read_address_replay_cache_data(addr, 3);
+  EXPECT_FALSE(replay_data_after_gc.has_value());
+}
+
+TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
 {
   auto populate_two_expiring_entries = [&](Address addr) {
     commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
@@ -1778,7 +1844,10 @@ TEST_F(HogDBTest, ReplayCacheGCOverchargesFirstPostExpiryTransaction)
 
   auto charged_balance_after_gc = db_.read_address_balance(charged_addr);
   ASSERT_TRUE(charged_balance_after_gc);
-  EXPECT_EQ(0, *charged_balance_after_gc);
+  EXPECT_EQ(cost_model_.get_replay_cache_cost(2) +
+                cost_model_.kReplayCacheCostPerEntry -
+                cost_model_.get_replay_cache_cost(1),
+            *charged_balance_after_gc);
 
   auto replay_meta = db_.read_address_replay_cache_meta(charged_addr);
   ASSERT_TRUE(replay_meta);
