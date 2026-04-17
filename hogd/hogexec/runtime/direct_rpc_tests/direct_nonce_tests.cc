@@ -113,7 +113,8 @@ TEST_P(DirectNonceTests,
   setup_grant_storage_token(contract_addr,
                             cost_model_->get_replay_cache_cost(2));
 
-  auto commit_nonce_consume = [&](BlockHeight expiry_height, uint64_t nonce) {
+  auto commit_nonce_consume = [&](BlockHeight expiry_height,
+                                  std::uint64_t nonce) {
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(make_replay_cache_addrkey(contract_addr),
                  make_nonce_delta(
@@ -153,8 +154,9 @@ TEST_P(DirectNonceTests,
   auto post_expiry_push = post_expiry_tx.try_push_current_subtransaction();
   ASSERT_TRUE(post_expiry_push.has_value());
   ASSERT_FALSE(post_expiry_push.value())
-      << "The pre-GC reservation still requires balance for a third entry, "
-         "so the first post-expiry consume must conflict until commit time.";
+      << "The pre-GC reservation treats the cache size as 3 (current 2 + "
+         "new 1), requiring balance for a third entry that is not available; "
+         "the consume must be rejected at push time.";
   ASSERT_TRUE(post_expiry_tx.abort_transaction().has_value());
 
   auto balance_after_rejection = lookup_storage_item_from_db(

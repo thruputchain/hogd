@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cassert>
 #include <iterator>
-#include <memory>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -177,7 +176,7 @@ public:
   }
 };
 
-uint64_t
+static uint64_t
 count_pruned_replay_cache_entries(const ReplayCacheMetadata &meta,
                                   BlockHeight block_height)
 {
