@@ -1716,6 +1716,78 @@ TEST_F(HogDBTest, ReplayCacheGCOnNextModificationUpdatesHash)
   });
 }
 
+TEST_F(HogDBTest, ReplayCacheGCOverchargesFirstPostExpiryTransaction)
+{
+  auto populate_two_expiring_entries = [&](Address addr) {
+    commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 100),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+    commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+  };
+
+  Address conflict_addr = make_address(kAddress + 50);
+  ASSERT_TRUE(db_.write_address_balance(conflict_addr,
+                                        cost_model_.get_replay_cache_cost(2)));
+  populate_two_expiring_entries(conflict_addr);
+
+  auto conflict_balance = db_.read_address_balance(conflict_addr);
+  ASSERT_TRUE(conflict_balance);
+  EXPECT_EQ(0, *conflict_balance);
+
+  {
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   5);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+    invoke_tx.create_savepoint();
+
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        conflict_addr, Uniquifier(7, 300),
+        std::to_underlying(StorageDeltaFlags::None)));
+
+    auto sync_result = invoke_tx.sync_balance_locks();
+    ASSERT_FALSE(sync_result.has_value());
+    EXPECT_EQ(HogDBCode::kConflict, sync_result.error().code());
+
+    invoke_tx.rollback_to_savepoint(0);
+    invoke_tx.release_blocktx_reference();
+  }
+
+  Address charged_addr = make_address(kAddress + 51);
+  ASSERT_TRUE(
+      db_.write_address_balance(charged_addr,
+                                cost_model_.get_replay_cache_cost(2) +
+                                    cost_model_.kReplayCacheCostPerEntry));
+  populate_two_expiring_entries(charged_addr);
+
+  auto charged_balance_before_gc = db_.read_address_balance(charged_addr);
+  ASSERT_TRUE(charged_balance_before_gc);
+  EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, *charged_balance_before_gc);
+
+  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        charged_addr, Uniquifier(7, 300),
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto charged_balance_after_gc = db_.read_address_balance(charged_addr);
+  ASSERT_TRUE(charged_balance_after_gc);
+  EXPECT_EQ(0, *charged_balance_after_gc);
+
+  auto replay_meta = db_.read_address_replay_cache_meta(charged_addr);
+  ASSERT_TRUE(replay_meta);
+  ASSERT_EQ(1, replay_meta->size);
+  ASSERT_EQ(1, replay_meta->heights.size());
+  EXPECT_EQ(7, replay_meta->heights[0].height);
+  EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
+}
+
 // Auth data: create then delete matches empty db.
 // Creating and then deleting auth data should leave no residual state.
 TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
