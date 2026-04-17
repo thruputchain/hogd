@@ -328,7 +328,6 @@ private:
   };
 
   struct PreparedValidationChunk {
-    x23::XdrVec<SignedTransaction> txs;
     x23::Vec<ProposedTransaction> proposed_txs;
     x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
     double lookup_duration = 0.0;
@@ -448,9 +447,6 @@ private:
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
-
-  x23::Async<std::vector<std::shared_ptr<const SignedTransaction>>>
-  lookup_validation_chunk_txs(x23::span<const SignedTransactionHash> tx_hashes);
 
   x23::Async<PreparedValidationChunk> prepare_validation_chunk(
       x23::span<const SignedTransactionHash> tx_hashes,

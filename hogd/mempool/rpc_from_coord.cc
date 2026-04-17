@@ -1037,75 +1037,66 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   }));
 }
 
-x23::Async<std::vector<std::shared_ptr<const SignedTransaction>>>
-MempoolCoordinatorRpc::lookup_validation_chunk_txs(
-    x23::span<const SignedTransactionHash> tx_hashes)
-{
-  std::vector<std::shared_ptr<const SignedTransaction>> found_txs(
-      tx_hashes.size());
-  const std::vector<ChunkRange> lookup_chunks =
-      make_chunks(tx_hashes.size(), available_parallelism());
-  x23::Vec<x23::Async<void>> lookup_handles;
-  lookup_handles.reserve(lookup_chunks.size());
-
-  for (const ChunkRange &lookup_chunk : lookup_chunks) {
-    lookup_handles.push_back(
-        [](const ChunkRange *lookup_chunk,
-           x23::span<const SignedTransactionHash> tx_hashes,
-           std::vector<std::shared_ptr<const SignedTransaction>> &found_txs,
-           std::shared_ptr<Scheduler> scheduler) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-
-          for (size_t i = lookup_chunk->start; i < lookup_chunk->end; i++) {
-            found_txs[i] = scheduler->find_tx(tx_hashes[i]);
-          }
-          co_return;
-        }(&lookup_chunk, tx_hashes, found_txs, scheduler_));
-  }
-  for (x23::Async<void> &handle : lookup_handles) {
-    co_await handle;
-  }
-  co_return found_txs;
-}
-
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
 MempoolCoordinatorRpc::prepare_validation_chunk(
     x23::span<const SignedTransactionHash> tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
   PreparedValidationChunk prepared;
-  prepared.txs.reserve(tx_hashes.size());
-  prepared.proposed_txs.reserve(tx_hashes.size());
+  prepared.proposed_txs.resize(tx_hashes.size());
+  x23::Vec<bool> tx_found(tx_hashes.size(), false);
 
   {
-    ElapsedTimer timer;
-    std::vector<std::shared_ptr<const SignedTransaction>> found_txs =
-        co_await lookup_validation_chunk_txs(tx_hashes);
-    prepared.lookup_duration = timer.elapsed();
+    ElapsedTimer lookup_timer;
+    const std::vector<ChunkRange> lookup_chunks =
+        make_chunks(tx_hashes.size(), available_parallelism());
+    x23::Vec<x23::Async<void>> lookup_handles;
+    lookup_handles.reserve(lookup_chunks.size());
+
+    for (const ChunkRange &lookup_chunk : lookup_chunks) {
+      lookup_handles.push_back(
+          [](const ChunkRange *lookup_chunk,
+             x23::span<const SignedTransactionHash> tx_hashes,
+             x23::span<const NondeterministicProposalData> tx_nominations,
+             x23::Vec<ProposedTransaction> &proposed_txs,
+             x23::Vec<bool> &tx_found,
+             std::shared_ptr<Scheduler> scheduler) noexcept
+              -> x23::Async<void> {
+            co_await default_coropoll().pool_.bg();
+
+            for (size_t i = lookup_chunk->start; i < lookup_chunk->end; i++) {
+              std::shared_ptr<const SignedTransaction> found_tx =
+                  scheduler->find_tx(tx_hashes[i]);
+              if (!found_tx) {
+                continue;
+              }
+              proposed_txs[i] = {.signed_tx = *found_tx,
+                                 .nondeterministic_proposal_data =
+                                     tx_nominations[i]};
+              tx_found[i] = true;
+            }
+            co_return;
+          }(&lookup_chunk, tx_hashes, tx_nominations, prepared.proposed_txs,
+              tx_found, scheduler_));
+    }
+    for (x23::Async<void> &handle : lookup_handles) {
+      co_await handle;
+    }
+    prepared.lookup_duration = lookup_timer.elapsed();
     info("this lookup took {}", prepared.lookup_duration);
 
-    for (size_t i = 0; i < found_txs.size(); i++) {
-      if (!found_txs[i]) {
+    ElapsedTimer build_timer;
+    for (size_t i = 0; i < tx_found.size(); i++) {
+      if (!tx_found[i]) {
         prepared.missing_tx_hashes.push_back(tx_hashes[i]);
-        continue;
       }
-      prepared.txs.push_back(*found_txs[i]);
     }
+    prepared.build_duration = build_timer.elapsed();
+    info("this build took {}", prepared.build_duration);
   }
 
   if (!prepared.missing_tx_hashes.empty()) {
-    co_return prepared;
-  }
-
-  {
-    ElapsedTimer timer;
-    for (size_t i = 0; i < prepared.txs.size(); i++) {
-      prepared.proposed_txs.push_back(
-          {.signed_tx = prepared.txs[i],
-           .nondeterministic_proposal_data = tx_nominations[i]});
-    }
-    prepared.build_duration = timer.elapsed();
-    info("this build took {}", prepared.build_duration);
+    prepared.proposed_txs.clear();
   }
 
   co_return prepared;
@@ -1118,11 +1109,13 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
 {
   co_await default_coropoll().pool_.bg();
 
+  ElapsedTimer a;
   PreparedValidationChunk prepared =
       co_await prepare_validation_chunk(tx_hashes, tx_nominations);
 
+  info("prepare_validation_chunk took {}", a.elapsed());
+  ElapsedTimer b;
   PreparedAndValidatedChunk ret{
-      .txs = std::move(prepared.txs),
       .missing_tx_hashes = std::move(prepared.missing_tx_hashes),
       .lookup_duration = prepared.lookup_duration,
       .build_duration = prepared.build_duration,
@@ -1136,6 +1129,11 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
   ElapsedTimer validate_timer;
   ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
   ret.validate_duration = validate_timer.elapsed();
+  ret.txs.reserve(prepared.proposed_txs.size());
+  for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
+    ret.txs.push_back(std::move(proposed_tx.signed_tx));
+  }
+  info("validate_batch took {}", b.elapsed());
   co_return ret;
 }
 
@@ -1229,8 +1227,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_open_event_block = 0.0;
   double stage_open_validation_blocks = 0.0;
   double stage_lookup_txs = 0.0;
-  double stage_build_proposed_txs = 0.0;
-  double stage_validate_batch = 0.0;
   double stage_block_execution = 0.0;
   double stage_close_snapshot = 0.0;
   double stage_close_event_block = 0.0;
@@ -1379,6 +1375,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // is what the executors expect to receive.
   x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
   bool validated = true;
+  SHA256Hash txset_hash;
   {
     const std::vector<ChunkRange> validation_chunks =
         make_chunks_for_max_size(cache.tx_hashes.size(),
@@ -1398,6 +1395,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                          tx_nominations_span));
     }
 
+    // Compute the txset hash here so that we can overlap its compute overhead
+    // with that of the block execution.
+    txset_hash = get_txset_hash(cache.tx_hashes);
+
     x23::Vec<PreparedAndValidatedChunk> chunk_results;
     chunk_results.reserve(chunk_handles.size());
     for (x23::Async<PreparedAndValidatedChunk> &handle : chunk_handles) {
@@ -1405,16 +1406,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
       stage_lookup_txs += chunk_result.lookup_duration;
-      stage_build_proposed_txs += chunk_result.build_duration;
-      stage_validate_batch += chunk_result.validate_duration;
       validated = chunk_result.validated && validated;
       missing_tx_hashes += chunk_result.missing_tx_hashes;
       cache.txs += chunk_result.txs;
     }
     if (!chunk_results.empty()) {
       stage_lookup_txs /= chunk_results.size();
-      stage_build_proposed_txs /= chunk_results.size();
-      stage_validate_batch /= chunk_results.size();
     }
 
     if (!missing_tx_hashes.empty()) {
@@ -1467,10 +1464,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     record_stage(stage_close_event_block);
   }
-  // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
-  // because we already checked above that all of these hashes correspond to
-  // vetted txs.
-  SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
+
   BlockHeader header{.network_id = network_id_,
                      .block_height = nomination.block_height,
                      .txset_hash = txset_hash,
@@ -1520,7 +1514,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        "wait_transfers={:.6f}, wait_auth_data={:.6f}, "
        "create_snapshot={:.6f}, open_event_block={:.6f}, "
        "open_validation_blocks={:.6f}, lookup_txs={:.6f}, "
-       "build_proposed_txs={:.6f}, validate_batch={:.6f}, "
        "block_execution={:.6f}, "
        "close_snapshot={:.6f}, close_event_block={:.6f}, "
        "verify_block_hash={:.6f}, finish_executors={:.6f}, "
@@ -1530,9 +1523,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        stage_deserialize_nomination_data, stage_deserialize_tx_hashes,
        stage_wait_transfers, stage_wait_auth_data, stage_create_snapshot,
        stage_open_event_block, stage_open_validation_blocks, stage_lookup_txs,
-       stage_build_proposed_txs, stage_validate_batch, stage_block_execution,
-       stage_close_snapshot, stage_close_event_block, stage_verify_block_hash,
-       stage_finish_executors, stage_serialize_result,
+       stage_block_execution, stage_close_snapshot, stage_close_event_block,
+       stage_verify_block_hash, stage_finish_executors, stage_serialize_result,
        stage_cache_validated_block, stage_finalize, timer.elapsed(), block_id,
        nomination.block_height, validation_telemetry.tx_count);
   info("schedulercoord_validate ret");
