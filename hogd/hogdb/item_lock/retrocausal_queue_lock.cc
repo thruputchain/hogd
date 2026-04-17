@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cassert>
 #include <expected>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -24,6 +25,45 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+// RAII rollback helper local to try_atomic_change_lock. Holds a list of undo
+// closures that run on destruction (in reverse order of registration) unless
+// disarm() has been called. Not copyable, not movable: instances are strictly
+// function-local and should not escape.
+class ScopedUndo {
+ public:
+  ScopedUndo() = default;
+  ~ScopedUndo()
+  {
+    if (!armed_) {
+      return;
+    }
+    // Run in reverse, mirroring stack-unwind semantics.
+    for (auto it = actions_.rbegin(); it != actions_.rend(); ++it) {
+      (*it)();
+    }
+  }
+
+  ScopedUndo(const ScopedUndo&) = delete;
+  ScopedUndo& operator=(const ScopedUndo&) = delete;
+  ScopedUndo(ScopedUndo&&) = delete;
+  ScopedUndo& operator=(ScopedUndo&&) = delete;
+
+  void push(std::function<void()> action)
+  {
+    actions_.push_back(std::move(action));
+  }
+
+  void disarm() { armed_ = false; }
+
+ private:
+  std::vector<std::function<void()>> actions_;
+  bool armed_ = true;
+};
+
+} // namespace
 
 // TODO(stutsman): almost identical to ReplayCacheLock::get_meta. Factor out
 // similar to Rust.
@@ -95,6 +135,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
   // This is either a new change or a modification to an existing change.
   CHECK(after != nullptr);
+  ScopedUndo undo;
   auto const &delta = after->delta();
 
   // Verify that the shorter insert list is a prefix of the longer one.
@@ -132,11 +173,17 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       if (!consumed_.compare_exchange_strong(expected, true)) {
         return HogDBError{HogDBCode::kConflict};
       }
+      undo.push([this] {
+        consumed_.store(false, std::memory_order_relaxed);
+      });
     }
   }
   else if (this_tx_already_consumed) {
     // Update removed the consume.
     consumed_.store(false, std::memory_order_relaxed);
+    undo.push([this] {
+      consumed_.store(true, std::memory_order_relaxed);
+    });
   }
 
   auto r = get_meta(&ctx);
@@ -166,10 +213,18 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
     if (reserved_before + additional_entries >
         kRetrocausalQueueBlockEntriesMaxLen) {
-      reserved_entry_count_.fetch_sub(additional_entries,
-                                      std::memory_order_relaxed);
+      // Don't unreserve inline — register the undo and let ScopedUndo roll
+      // back both the reservation and consumed_ on return.
+      undo.push([this, additional_entries] {
+        reserved_entry_count_.fetch_sub(additional_entries,
+                                        std::memory_order_relaxed);
+      });
       return HogDBError{HogDBCode::kConflict};
     }
+    undo.push([this, additional_entries] {
+      reserved_entry_count_.fetch_sub(additional_entries,
+                                      std::memory_order_relaxed);
+    });
   }
   else if (new_entries_count < previous_entries_count) {
     // Rollback case: unreserve entries that are no longer needed.
@@ -177,6 +232,10 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
         previous_entries_count - new_entries_count;
     reserved_entry_count_.fetch_sub(entries_to_unreserve,
                                     std::memory_order_relaxed);
+    undo.push([this, entries_to_unreserve] {
+      reserved_entry_count_.fetch_add(entries_to_unreserve,
+                                      std::memory_order_relaxed);
+    });
   }
 
   if (delta.consume) {
@@ -289,6 +348,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   }
   int128_t standalone_cost =
       ctx.cost_model->get_retrocausal_queue_cost(net_entries);
+  undo.disarm();
   return standalone_cost + ctx.item_lock_snapshot_cost;
 }
 
