@@ -442,11 +442,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   // send the smaller chunks across multiple TCP streams and (2) so that the
   // executor can begin executing txs without having to wait for *all* of the
   // txs to arrive first.
-  //
-  // Each coroutine will likely be scheduled on its own thread, so I choose to
-  // create 120 chunks (one per coroutine) since the machine has 128 logical
-  // cores and I want to leave some cores leftover for other work.
-  constexpr size_t kNumBigChunks = 120;
+  const size_t kNumBigChunks = available_parallelism();
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
 
@@ -1114,7 +1110,6 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
       co_await prepare_validation_chunk(tx_hashes, tx_nominations);
 
   info("prepare_validation_chunk took {}", a.elapsed());
-  ElapsedTimer b;
   PreparedAndValidatedChunk ret{
       .missing_tx_hashes = std::move(prepared.missing_tx_hashes),
       .lookup_duration = prepared.lookup_duration,
@@ -1129,11 +1124,13 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
   ElapsedTimer validate_timer;
   ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
   ret.validate_duration = validate_timer.elapsed();
+  info("validate_batch took {}", validate_timer.elapsed());
+  ElapsedTimer last;
   ret.txs.reserve(prepared.proposed_txs.size());
   for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
     ret.txs.push_back(std::move(proposed_tx.signed_tx));
   }
-  info("validate_batch took {}", b.elapsed());
+  info("last bit of tx work took {}", last.elapsed());
   co_return ret;
 }
 
@@ -1144,7 +1141,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
   // into smaller RPC-sized chunks and stripes those requests across executors.
-  constexpr size_t kNumBigChunks = 120;
+  const size_t kNumBigChunks = available_parallelism();
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
 
@@ -1235,6 +1232,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_serialize_result = 0.0;
   double stage_cache_validated_block = 0.0;
   double stage_finalize = 0.0;
+  double stage_reserve_cache = 0.0;
   ValidationTelemetry validation_telemetry{.block_id = 0,
                                            .block_height =
                                                nomination.block_height,
@@ -1299,20 +1297,32 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
-  CHECK(co_await parallel_batch_to_t(
-      nomination.transactions_nondeterministic_data, tx_nominations));
-  record_stage(stage_deserialize_nomination_data);
-
-  // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
-  // correctly when we use the helper functions above to send txs to the
-  // executors.
   PendingBlock cache{};
-  cache.block_id = generate_block_id();
-  validation_telemetry.block_id = cache.block_id;
-  CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
-                                     cache.tx_hashes));
-  validation_telemetry.tx_count = cache.tx_hashes.size();
-  record_stage(stage_deserialize_tx_hashes);
+  {
+    x23::Async<bool> tx_nondeterministic_data_handle =
+        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nominations);
+    x23::Async<bool> tx_hash_handle =
+        parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
+
+    cache.txs.reserve(kMaxBlockSize);
+    cache.tx_hashes.reserve(kMaxBlockSize);
+    cache.result_tx_hashes.reserve(kMaxBlockSize);
+    cache.result_tx_nominations.reserve(kMaxBlockSize);
+    record_stage(stage_reserve_cache);
+
+    CHECK(co_await tx_nondeterministic_data_handle);
+    record_stage(stage_deserialize_nomination_data);
+
+    // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
+    // correctly when we use the helper functions above to send txs to the
+    // executors.
+    cache.block_id = generate_block_id();
+    validation_telemetry.block_id = cache.block_id;
+    CHECK(co_await tx_hash_handle);
+    validation_telemetry.tx_count = cache.tx_hashes.size();
+    record_stage(stage_deserialize_tx_hashes);
+  }
 
   co_await wait_for_transfer_data(nomination.block_height - 1);
   record_stage(stage_wait_transfers);
@@ -1510,6 +1520,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   validation_telemetry.outcome =
       validation_outcome_str(SchedulerValidationOutcome::SchedulerValidationOK);
   info("validate() stages: wait_validation_gate={:.6f}, precheck={:.6f}, "
+       "reserve_cache={:.6f}, "
        "deserialize_nomination_data={:.6f}, deserialize_tx_hashes={:.6f}, "
        "wait_transfers={:.6f}, wait_auth_data={:.6f}, "
        "create_snapshot={:.6f}, open_event_block={:.6f}, "
@@ -1519,7 +1530,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        "verify_block_hash={:.6f}, finish_executors={:.6f}, "
        "serialize_result={:.6f}, cache_validated_block={:.6f}, "
        "finalize={:.6f}, total={:.6f}, block_id={}, block_height={}, txs={}",
-       stage_wait_validation_gate, stage_precheck,
+       stage_wait_validation_gate, stage_precheck, stage_reserve_cache,
        stage_deserialize_nomination_data, stage_deserialize_tx_hashes,
        stage_wait_transfers, stage_wait_auth_data, stage_create_snapshot,
        stage_open_event_block, stage_open_validation_blocks, stage_lookup_txs,
