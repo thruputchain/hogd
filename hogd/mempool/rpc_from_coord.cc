@@ -1073,8 +1073,6 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
     x23::span<const SignedTransactionHash> tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
-  co_await default_coropoll().pool_.bg();
-
   PreparedValidationChunk prepared;
   prepared.txs.reserve(tx_hashes.size());
   prepared.proposed_txs.reserve(tx_hashes.size());
@@ -1118,6 +1116,8 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
     BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
+  co_await default_coropoll().pool_.bg();
+
   PreparedValidationChunk prepared =
       co_await prepare_validation_chunk(tx_hashes, tx_nominations);
 
