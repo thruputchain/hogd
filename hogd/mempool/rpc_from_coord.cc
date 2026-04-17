@@ -1227,8 +1227,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   double stage_open_event_block = 0.0;
   double stage_open_validation_blocks = 0.0;
   double stage_lookup_txs = 0.0;
-  double stage_build_proposed_txs = 0.0;
-  double stage_validate_batch = 0.0;
   double stage_block_execution = 0.0;
   double stage_close_snapshot = 0.0;
   double stage_close_event_block = 0.0;
@@ -1377,6 +1375,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // is what the executors expect to receive.
   x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
   bool validated = true;
+  SHA256Hash txset_hash;
   {
     const std::vector<ChunkRange> validation_chunks =
         make_chunks_for_max_size(cache.tx_hashes.size(),
@@ -1396,6 +1395,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                          tx_nominations_span));
     }
 
+    // Compute the txset hash here so that we can overlap its compute overhead
+    // with that of the block execution.
+    txset_hash = get_txset_hash(cache.tx_hashes);
+
     x23::Vec<PreparedAndValidatedChunk> chunk_results;
     chunk_results.reserve(chunk_handles.size());
     for (x23::Async<PreparedAndValidatedChunk> &handle : chunk_handles) {
@@ -1403,16 +1406,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     for (PreparedAndValidatedChunk &chunk_result : chunk_results) {
       stage_lookup_txs += chunk_result.lookup_duration;
-      stage_build_proposed_txs += chunk_result.build_duration;
-      stage_validate_batch += chunk_result.validate_duration;
       validated = chunk_result.validated && validated;
       missing_tx_hashes += chunk_result.missing_tx_hashes;
       cache.txs += chunk_result.txs;
     }
     if (!chunk_results.empty()) {
       stage_lookup_txs /= chunk_results.size();
-      stage_build_proposed_txs /= chunk_results.size();
-      stage_validate_batch /= chunk_results.size();
     }
 
     if (!missing_tx_hashes.empty()) {
@@ -1465,10 +1464,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     record_stage(stage_close_event_block);
   }
-  // Verify the block hash. It is safe to directly use [cache.tx_hashes] here
-  // because we already checked above that all of these hashes correspond to
-  // vetted txs.
-  SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
+
   BlockHeader header{.network_id = network_id_,
                      .block_height = nomination.block_height,
                      .txset_hash = txset_hash,
@@ -1518,7 +1514,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        "wait_transfers={:.6f}, wait_auth_data={:.6f}, "
        "create_snapshot={:.6f}, open_event_block={:.6f}, "
        "open_validation_blocks={:.6f}, lookup_txs={:.6f}, "
-       "build_proposed_txs={:.6f}, validate_batch={:.6f}, "
        "block_execution={:.6f}, "
        "close_snapshot={:.6f}, close_event_block={:.6f}, "
        "verify_block_hash={:.6f}, finish_executors={:.6f}, "
@@ -1528,9 +1523,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
        stage_deserialize_nomination_data, stage_deserialize_tx_hashes,
        stage_wait_transfers, stage_wait_auth_data, stage_create_snapshot,
        stage_open_event_block, stage_open_validation_blocks, stage_lookup_txs,
-       stage_build_proposed_txs, stage_validate_batch, stage_block_execution,
-       stage_close_snapshot, stage_close_event_block, stage_verify_block_hash,
-       stage_finish_executors, stage_serialize_result,
+       stage_block_execution, stage_close_snapshot, stage_close_event_block,
+       stage_verify_block_hash, stage_finish_executors, stage_serialize_result,
        stage_cache_validated_block, stage_finalize, timer.elapsed(), block_id,
        nomination.block_height, validation_telemetry.tx_count);
   info("schedulercoord_validate ret");
