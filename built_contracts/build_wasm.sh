@@ -9,7 +9,7 @@
 set -e
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.2.3"
+EXPECTED_VERSION="groundhog 0.2.4"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
 if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
     echo "error: expected '$EXPECTED_VERSION', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2
@@ -33,13 +33,17 @@ fi
 shift 2
 
 # Clean environment
+unset RUSTC_WRAPPER
 unset RUSTFLAGS
 unset CARGO_ENCODED_RUSTFLAGS
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
+# Keep cargo/groundhog intermediates in the build tree instead of the source tree.
+INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
+
 # Build with groundhog-cli
 # Pass remaining args (e.g. -F features) through to cargo
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --optimize --json -- --frozen --offline "$@")
+OUTPUT=$(groundhog build -p "${TARGET_NAME}" --optimize --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@")
 
 # Parse output paths from JSON
 WASM_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.wasm')
