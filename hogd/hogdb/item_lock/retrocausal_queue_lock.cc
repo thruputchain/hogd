@@ -36,12 +36,14 @@ namespace {
 class ScopedUndo {
 public:
   ScopedUndo() = default;
-  ~ScopedUndo()
+  ~ScopedUndo() noexcept
   {
     if (!armed_) {
       return;
     }
-    // Run in reverse, mirroring stack-unwind semantics.
+    // Run in reverse, mirroring stack-unwind semantics. The registered
+    // closures only touch atomic counters and do not throw; if one ever
+    // did, terminating here is preferable to leaving mutations uncommitted.
     for (auto &action : std::ranges::reverse_view(actions_)) {
       action();
     }
@@ -207,21 +209,18 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     const size_t reserved_before =
         reserved_entry_count_.fetch_add(additional_entries,
                                         std::memory_order_relaxed);
-
-    if (reserved_before + additional_entries >
-        kRetrocausalQueueBlockEntriesMaxLen) {
-      // Don't unreserve inline — register the undo and let ScopedUndo roll
-      // back both the reservation and consumed_ on return.
-      undo.push([this, additional_entries] {
-        reserved_entry_count_.fetch_sub(additional_entries,
-                                        std::memory_order_relaxed);
-      });
-      return HogDBError{HogDBCode::kConflict};
-    }
+    // Register the unreserve undo once, unconditionally. On the overflow
+    // branch ScopedUndo rolls this back for us on return; on the
+    // fall-through it rolls back only if a later step fails.
     undo.push([this, additional_entries] {
       reserved_entry_count_.fetch_sub(additional_entries,
                                       std::memory_order_relaxed);
     });
+
+    if (reserved_before + additional_entries >
+        kRetrocausalQueueBlockEntriesMaxLen) {
+      return HogDBError{HogDBCode::kConflict};
+    }
   }
   else if (new_entries_count < previous_entries_count) {
     // Rollback case: unreserve entries that are no longer needed.
