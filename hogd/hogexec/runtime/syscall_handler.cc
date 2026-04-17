@@ -1312,7 +1312,9 @@ SystemCallHandler::get_native_token_balance(
   }
 
   int128_t balance = *base + from_xdr(balance_item->add_value_);
-  assert(balance >= 0);
+  if (balance < 0) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   return balance;
 }
 

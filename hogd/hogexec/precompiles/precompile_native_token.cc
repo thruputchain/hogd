@@ -392,7 +392,6 @@ make_native_token_contract()
         if (!balance.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
         return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
@@ -419,7 +418,6 @@ make_native_token_contract()
         if (!balance.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
         return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
