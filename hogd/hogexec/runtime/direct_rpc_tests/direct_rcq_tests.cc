@@ -3983,5 +3983,56 @@ TEST_F(DirectRCQTests,
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 }
 
+// Pop of a consume-adding sub: sub1 = insert-only, sub2 = consume_insert
+// that adds the consume. Pop sub2 → the lock call has before.consume set
+// and after.consume null, triggering the else-if CLEAR in
+// try_atomic_change_lock. This is the reachable half of that branch;
+// its undo path is unreachable today (documented inline).
+TEST_F(DirectRCQTests, PopConsumeAddingSubReleasesConsumerBit)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_pop_adds_consume");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+
+  // Sub1: insert-only, one entry A.
+  tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value()) << "sub1 insert must succeed";
+
+  // Sub2: consume_insert cumulative. Adds a consume + one more insert so
+  // that sub2's cumulative inserts (2) are a superset of sub1's (1) and
+  // the prefix check at lock line ~160 passes. Consume is valid (max_fully
+  // = 0 on a fresh RCQ). consumed_ becomes true.
+  tx1.add_delta(key,
+                make_rcq_consume_insert_delta(
+                    0, 0, {}, {make_rcq_entry({0}), make_rcq_entry({1})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value()) << "sub2 consume_insert must succeed";
+
+  // Pop sub2: lock call sees before.consume != null, after.consume null,
+  // this_tx_already_consumed = true. else-if CLEAR stores consumed_ =
+  // false. Shrink branch fetch_sub(1). Final success → undo disarm.
+  auto pop_r = tx1.pop_subtransactions(1);
+  ASSERT_TRUE(pop_r.has_value()) << "pop_subtransactions must succeed";
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // A separate tx consumes entry A from current block. With the else-if
+  // CLEAR working, consumed_ was released and the CAS here succeeds.
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key,
+                make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "tx2 pure consume must succeed; else-if CLEAR must have released "
+         "consumed_";
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
