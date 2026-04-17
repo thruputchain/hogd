@@ -3607,5 +3607,59 @@ TEST_F(DirectRCQTests, ConsumeThreeBlocksInOneDelta)
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
 }
 
+// H005 (#1489): An overfull consume+insert transaction must not poison the
+// single-consumer bit. A later legitimate consume on the same key in the same
+// block must still succeed.
+TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress, "rcq_h005_poison");
+
+  // TX1: Insert 900 entries to fill most of the per-block budget (max=1000).
+  std::vector<QueueEntry> entries_900;
+  entries_900.reserve(900);
+  for (int i = 0; i < 900; ++i) {
+    entries_900.push_back(make_rcq_entry(
+        {static_cast<uint8_t>(i & 0xFF),
+         static_cast<uint8_t>((i >> 8) & 0xFF)}));
+  }
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_rcq_insert_delta(entries_900),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value()) << "TX1 insert 900 should succeed";
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // TX2: Consume + insert 200 entries. Aggregate reservation 900 + 200 = 1100
+  // exceeds the 1000-entry per-block cap, so push must fail with kConflict.
+  std::vector<QueueEntry> entries_200;
+  entries_200.reserve(200);
+  for (int i = 0; i < 200; ++i) {
+    entries_200.push_back(make_rcq_entry(
+        {static_cast<uint8_t>((i + 100) & 0xFF),
+         static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
+  }
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(
+      key,
+      make_rcq_consume_insert_delta(0, 0, {entries_900[0]}, entries_200),
+      std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && !r.value())
+      << "TX2 consume+insert 200 should fail (aggregate > 1000)";
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  // TX3: legitimate pure consume. TX2's failed reservation must not leak the
+  // consumed_ bit, so TX3 must succeed.
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_rcq_consume_delta(0, 0, {entries_900[0]}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "TX3 pure consume must succeed after TX2's failed overfull "
+         "reservation";
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
