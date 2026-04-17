@@ -495,6 +495,11 @@ ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
 std::optional<QueueEntry>
 ItemLock::get_concurrent_entry(uint32_t index) const
 {
+  auto lock_state = lock_state_.load(std::memory_order_acquire);
+  if (lock_state == kUncommitted) {
+    return std::nullopt;
+  }
+
   return std::visit(
       [index](auto const &lock) -> std::optional<QueueEntry> {
         using lock_t = std::decay_t<decltype(lock)>;
