@@ -13,6 +13,7 @@
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
@@ -79,10 +80,10 @@ HogConservationInvariant::handle_balance_change(
       return 0;
     }
     assert(item.value().type == kNNInt128);
-    int128_t balance{0};
-    std::ranges::copy(item.value().value, std::begin(std::as_writable_bytes(
-                                              std::span(&balance, 1))));
-    return le_to_cpu(balance);
+    CHECK(item.value().value.size() == sizeof(int128_xdr));
+    auto encoded = std::span<const std::byte, sizeof(int128_xdr)>(
+        item.value().value.data(), sizeof(int128_xdr));
+    return int128_from_xdr_bytes(encoded);
   };
 
   auto before_balance = get_balance(before);

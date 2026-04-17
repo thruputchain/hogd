@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -120,9 +121,9 @@ NNInt128Lock::stage_committed_changes(const LockContext &ctx,
   assert(!ctx.key.is_address_balance());
   auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
   CHECK(!of);
-  int128_t out = cpu_to_le(value);
+  auto encoded = int128_to_xdr_bytes(value);
   auto key = make_contract_data_key(ctx.key.as_bytes());
-  changes.put(key, kNNInt128, byte_view(out));
+  changes.put(key, kNNInt128, encoded);
   return {};
 }
 

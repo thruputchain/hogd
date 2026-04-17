@@ -104,9 +104,9 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
     changes.put(hog_age_key, 0, age_buf);
   }
 
-  int128_t encoded = cpu_to_le(value);
+  auto encoded = int128_to_xdr_bytes(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
-  changes.put(key, kNNInt128, byte_view(encoded));
+  changes.put(key, kNNInt128, encoded);
   return {};
 }
 

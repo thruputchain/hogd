@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -109,6 +110,45 @@ protected:
     EXPECT_EQ(incremental_hash, full_hash);
   }
 
+  template<typename F>
+  DbHash commit_block_and_return_db_hash(BlockHeight height, F &&fn)
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    bool acquired_reference = block_tx.try_acquire_reference();
+    EXPECT_TRUE(acquired_reference);
+    if (!acquired_reference) {
+      return {};
+    }
+    InvokeTX invoke_tx(block_tx);
+
+    fn(invoke_tx);
+
+    bool synced_balances = static_cast<bool>(invoke_tx.sync_balance_locks());
+    EXPECT_TRUE(synced_balances);
+    if (!synced_balances) {
+      return {};
+    }
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    EXPECT_TRUE(hash_result.has_value());
+    if (!hash_result.has_value()) {
+      return {};
+    }
+    DbHash incremental_hash = *hash_result;
+    bool committed = static_cast<bool>(block_tx.get().commit());
+    EXPECT_TRUE(committed);
+    if (!committed) {
+      return {};
+    }
+    EXPECT_EQ(incremental_hash, db_.compute_full_db_hash());
+    return incremental_hash;
+  }
+
   void setup_contract_address(const Address &addr)
   {
     ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
@@ -125,6 +165,15 @@ constexpr ItemKey
 make_key(size_t addr, size_t item)
 {
   return make_item_key(make_address(addr), item);
+}
+
+std::array<std::byte, sizeof(int128_t)>
+raw_int128_le_bytes(int128_t value)
+{
+  int128_t le = cpu_to_le(value);
+  std::array<std::byte, sizeof(int128_t)> out{};
+  std::memcpy(out.data(), &le, out.size());
+  return out;
 }
 
 constexpr uint64_t kAddress = 0xdeadbeef;
@@ -272,6 +321,61 @@ TEST_F(HogDBTest, ItemLockCacheDataBalance)
   EXPECT_EQ(0, rbalance->first);
   ASSERT_TRUE(rbalance->second.is_cached_balance());
   EXPECT_EQ(100000, rbalance->second.get_cached_balance().value());
+}
+
+TEST_F(HogDBTest, NNIntAndBalancePersistenceUseCanonicalXdrBytes)
+{
+  constexpr int128_t kNNIntValue =
+      (int128_t{0x0102030405060708LL} << 64) | 0x1112131415161718ULL;
+  ItemKey item_key = make_key(kAddress + 20, 7);
+
+  ASSERT_TRUE(db_.write_nnint128(item_key, kNNIntValue));
+
+  auto raw_item = db_.read_contract_data_item(item_key);
+  ASSERT_TRUE(raw_item);
+  ASSERT_EQ(raw_item->type, kNNInt128);
+  ASSERT_EQ(raw_item->value.size(), sizeof(int128_xdr));
+
+  auto canonical_item_bytes = int128_to_xdr_bytes(kNNIntValue);
+  auto raw_item_bytes = raw_int128_le_bytes(kNNIntValue);
+  EXPECT_TRUE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                         canonical_item_bytes.begin()));
+  EXPECT_FALSE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                          raw_item_bytes.begin()));
+
+  auto reread_item = db_.read_nnint128(item_key);
+  ASSERT_TRUE(reread_item);
+  EXPECT_EQ(*reread_item, kNNIntValue);
+
+  auto cached_item =
+      db_.get_charged_storage_cost_and_cache_data(item_key, &cost_model_);
+  ASSERT_TRUE(cached_item);
+  EXPECT_EQ(cached_item->first, cost_model_.get_nnint_cost());
+  ASSERT_TRUE(cached_item->second.is_cached_nnint128_base());
+  EXPECT_EQ(cached_item->second.get_cached_nnint128_base(), kNNIntValue);
+
+  const Address kBalanceAddr = make_address(kAddress + 21);
+  constexpr int128_t kBalanceValue =
+      (int128_t{0x2122232425262728LL} << 64) | 0x3132333435363738ULL;
+
+  ASSERT_TRUE(db_.write_address_balance(kBalanceAddr, kBalanceValue));
+
+  auto balance_key = make_address_key(kBalanceAddr, Prefix::kBalance);
+  auto raw_balance = db_.get_ramdb().get_if_type(std::as_bytes(std::span(balance_key)),
+                                                 kNNInt128);
+  ASSERT_TRUE(raw_balance);
+  ASSERT_EQ(raw_balance->size(), sizeof(int128_xdr));
+
+  auto canonical_balance_bytes = int128_to_xdr_bytes(kBalanceValue);
+  auto raw_balance_bytes = raw_int128_le_bytes(kBalanceValue);
+  EXPECT_TRUE(std::equal(raw_balance->begin(), raw_balance->end(),
+                         canonical_balance_bytes.begin()));
+  EXPECT_FALSE(std::equal(raw_balance->begin(), raw_balance->end(),
+                          raw_balance_bytes.begin()));
+
+  auto reread_balance = db_.read_address_balance(kBalanceAddr);
+  ASSERT_TRUE(reread_balance);
+  EXPECT_EQ(*reread_balance, kBalanceValue);
 }
 
 TEST_F(HogDBTest, ItemLockCacheDataNoBalance)
@@ -719,6 +823,122 @@ TEST_F(HogDBTest, DbHashDeltaNNInt128LockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_nnint128(
         key, 321, std::to_underlying(StorageDeltaFlags::None)));
   });
+}
+
+TEST_F(HogDBTest, CommittedLocksPersistCanonicalXdrBytes)
+{
+  Address balance_addr = make_address(kAddress + 60);
+  ASSERT_TRUE(db_.write_address_balance(balance_addr, 10'000));
+
+  commit_block_and_return_db_hash(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        make_address_balance_item_key(balance_addr), 123,
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto balance_key = make_address_key(balance_addr, Prefix::kBalance);
+  auto raw_balance =
+      db_.get_ramdb().get_if_type(std::as_bytes(std::span(balance_key)),
+                                  kNNInt128);
+  ASSERT_TRUE(raw_balance);
+  EXPECT_TRUE(std::equal(raw_balance->begin(), raw_balance->end(),
+                         int128_to_xdr_bytes(10'123).begin()));
+  EXPECT_FALSE(std::equal(raw_balance->begin(), raw_balance->end(),
+                          raw_int128_le_bytes(10'123).begin()));
+
+  Address contract_addr = make_address(kAddress + 61);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 9);
+
+  commit_block_and_return_db_hash(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        key, 321, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto raw_item = db_.read_contract_data_item(key);
+  ASSERT_TRUE(raw_item);
+  EXPECT_TRUE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                         int128_to_xdr_bytes(321).begin()));
+  EXPECT_FALSE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                          raw_int128_le_bytes(321).begin()));
+}
+
+TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
+{
+  Address contract_addr = make_address(kAddress + 62);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 10);
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto balance_key = make_address_key(contract_addr, Prefix::kBalance);
+  DbHash base_hash = db_.compute_full_db_hash();
+  constexpr int128_t kInitialBalance = 10'000'000;
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      key, 321, std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  auto hash_result = block_tx.get().close(base_hash);
+  ASSERT_TRUE(hash_result.has_value());
+  DbHash incremental_hash = *hash_result;
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto final_balance = db_.read_address_balance(contract_addr);
+  ASSERT_TRUE(final_balance);
+
+  LtHash16 canonical = lthash16_from_db_hash(base_hash);
+  auto initial_balance_bytes = int128_to_xdr_bytes(kInitialBalance);
+  lthash_remove_item(canonical, std::as_bytes(std::span(balance_key)),
+                     kNNInt128, initial_balance_bytes);
+  lthash_add_item(canonical, std::as_bytes(std::span(balance_key)), kNNInt128,
+                  int128_to_xdr_bytes(*final_balance));
+  auto canonical_bytes = int128_to_xdr_bytes(321);
+  lthash_add_item(canonical, db_key, kNNInt128, canonical_bytes);
+  DbHash canonical_hash = db_hash_from_lthash16(canonical);
+
+  LtHash16 raw = lthash16_from_db_hash(base_hash);
+  lthash_remove_item(raw, std::as_bytes(std::span(balance_key)), kNNInt128,
+                     initial_balance_bytes);
+  lthash_add_item(raw, std::as_bytes(std::span(balance_key)), kNNInt128,
+                  raw_int128_le_bytes(*final_balance));
+  auto raw_bytes = raw_int128_le_bytes(321);
+  lthash_add_item(raw, db_key, kNNInt128, raw_bytes);
+  DbHash raw_hash = db_hash_from_lthash16(raw);
+
+  EXPECT_EQ(incremental_hash, canonical_hash);
+  EXPECT_NE(incremental_hash, raw_hash);
+  EXPECT_EQ(incremental_hash, db_.compute_full_db_hash());
+}
+
+TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
+{
+  Address contract_addr = make_address(kAddress + 63);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 11);
+  DbHash base_hash = db_.compute_full_db_hash();
+
+  db_.enable_debug_invariants(cost_model_);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      key, 321, std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  auto hash_result = block_tx.get().close(base_hash);
+  ASSERT_TRUE(hash_result.has_value());
+  ASSERT_TRUE(block_tx.get().commit());
+
+  EXPECT_TRUE(db_.check_invariants());
 }
 
 TEST_F(HogDBTest, DbHashDeltaBytestringLockMatchesFullStateHash)
