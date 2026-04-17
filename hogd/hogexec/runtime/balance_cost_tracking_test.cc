@@ -508,7 +508,7 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
       *runtime_context);
 
   auto res = handler.root_invoke();
-  EXPECT_TRUE(res.result_.has_value());
+  ASSERT_TRUE(res.is_root_success());
 }
 
 // Companion to NegativeBalanceReadbackReturnsDeterministic that exercises the
@@ -598,7 +598,7 @@ TEST_F(BalanceCostTrackingTest,
       *runtime_context);
 
   auto res = handler.root_invoke();
-  EXPECT_TRUE(res.result_.has_value());
+  ASSERT_TRUE(res.is_root_success());
 }
 
 // Regression guard: non-overspending transfer followed by get_balance must
@@ -686,7 +686,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
       *runtime_context);
 
   auto res = handler.root_invoke();
-  EXPECT_TRUE(res.result_.has_value());
+  ASSERT_TRUE(res.is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
