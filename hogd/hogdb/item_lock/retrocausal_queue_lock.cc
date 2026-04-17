@@ -7,6 +7,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <utility>
 #include <vector>
@@ -41,8 +42,8 @@ class ScopedUndo {
       return;
     }
     // Run in reverse, mirroring stack-unwind semantics.
-    for (auto it = actions_.rbegin(); it != actions_.rend(); ++it) {
-      (*it)();
+    for (auto& action : std::ranges::reverse_view(actions_)) {
+      action();
     }
   }
 
