@@ -45,7 +45,12 @@ public:
     // closures only touch atomic counters and do not throw; if one ever
     // did, terminating here is preferable to leaving mutations uncommitted.
     for (auto &action : std::ranges::reverse_view(actions_)) {
-      action();
+      try {
+        action();
+      }
+      catch (...) {
+        panic("ScopedUndo rollback action threw; cannot safely recover");
+      }
     }
   }
 
