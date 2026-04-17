@@ -4,8 +4,10 @@
 #include <atomic>
 #include <cassert>
 #include <expected>
+#include <functional>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <utility>
 #include <vector>
@@ -24,6 +26,51 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+// RAII rollback helper local to try_atomic_change_lock. Holds a list of undo
+// closures that run on destruction (in reverse order of registration) unless
+// disarm() has been called. Not copyable, not movable: instances are strictly
+// function-local and should not escape.
+class ScopedUndo {
+public:
+  ScopedUndo() = default;
+  ~ScopedUndo() noexcept
+  {
+    if (!armed_) {
+      return;
+    }
+    // Run in reverse, mirroring stack-unwind semantics. The registered
+    // closures only touch atomic counters and do not throw; if one ever
+    // did, terminating here is preferable to leaving mutations uncommitted.
+    for (auto &action : std::ranges::reverse_view(actions_)) {
+      try {
+        action();
+      } catch (...) {
+        panic("ScopedUndo rollback action threw; cannot safely recover");
+      }
+    }
+  }
+
+  ScopedUndo(const ScopedUndo &) = delete;
+  ScopedUndo &operator=(const ScopedUndo &) = delete;
+  ScopedUndo(ScopedUndo &&) = delete;
+  ScopedUndo &operator=(ScopedUndo &&) = delete;
+
+  void push(std::function<void()> action)
+  {
+    actions_.push_back(std::move(action));
+  }
+
+  void disarm() { armed_ = false; }
+
+private:
+  std::vector<std::function<void()>> actions_;
+  bool armed_ = true;
+};
+
+} // namespace
 
 // TODO(stutsman): almost identical to ReplayCacheLock::get_meta. Factor out
 // similar to Rust.
@@ -95,6 +142,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
   // This is either a new change or a modification to an existing change.
   CHECK(after != nullptr);
+  ScopedUndo undo;
   auto const &delta = after->delta();
 
   // Verify that the shorter insert list is a prefix of the longer one.
@@ -132,11 +180,20 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       if (!consumed_.compare_exchange_strong(expected, true)) {
         return HogDBError{HogDBCode::kConflict};
       }
+      undo.push([this] { consumed_.store(false, std::memory_order_relaxed); });
     }
   }
   else if (this_tx_already_consumed) {
     // Update removed the consume.
     consumed_.store(false, std::memory_order_relaxed);
+    // NOTE: this undo is defensive. Today this branch is only reachable via
+    // pop_subtransactions, whose lock call has new_entries <=
+    // previous_entries (shrink) and thus never hits the overflow check -
+    // no failure path exists downstream. RetrocausalQueueIt::narrow() in
+    // item_change.cc blocks forward drops. The undo preserves the
+    // "ScopedUndo owns rollback" invariant so any future edit that adds a
+    // fallible step after this point stays correct automatically.
+    undo.push([this] { consumed_.store(true, std::memory_order_relaxed); });
   }
 
   auto r = get_meta(&ctx);
@@ -163,11 +220,16 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     const size_t reserved_before =
         reserved_entry_count_.fetch_add(additional_entries,
                                         std::memory_order_relaxed);
+    // Register the unreserve undo once, unconditionally. On the overflow
+    // branch ScopedUndo rolls this back for us on return; on the
+    // fall-through it rolls back only if a later step fails.
+    undo.push([this, additional_entries] {
+      reserved_entry_count_.fetch_sub(additional_entries,
+                                      std::memory_order_relaxed);
+    });
 
     if (reserved_before + additional_entries >
         kRetrocausalQueueBlockEntriesMaxLen) {
-      reserved_entry_count_.fetch_sub(additional_entries,
-                                      std::memory_order_relaxed);
       return HogDBError{HogDBCode::kConflict};
     }
   }
@@ -177,6 +239,14 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
         previous_entries_count - new_entries_count;
     reserved_entry_count_.fetch_sub(entries_to_unreserve,
                                     std::memory_order_relaxed);
+    // NOTE: same defensive-undo rationale as the else-if consumed_ branch
+    // above. The only shrink caller today is pop_subtransactions, which
+    // cannot fail downstream. Kept to preserve the ScopedUndo "owns
+    // rollback" invariant across future edits.
+    undo.push([this, entries_to_unreserve] {
+      reserved_entry_count_.fetch_add(entries_to_unreserve,
+                                      std::memory_order_relaxed);
+    });
   }
 
   if (delta.consume) {
@@ -289,6 +359,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   }
   int128_t standalone_cost =
       ctx.cost_model->get_retrocausal_queue_cost(net_entries);
+  undo.disarm();
   return standalone_cost + ctx.item_lock_snapshot_cost;
 }
 
