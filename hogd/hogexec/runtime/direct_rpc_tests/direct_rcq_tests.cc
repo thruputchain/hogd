@@ -3914,5 +3914,74 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 }
 
+// Stacked sub: sub1 = valid consume_insert (sets consumed_ via CAS),
+// sub2 = consume_insert with invalid max_fully_consumed. Because
+// this_tx_already_consumed is true in sub2, no CAS runs — only the
+// fetch_add undo is in play. consumed_ stays set (sub1 owns it); the
+// reservation must reflect only sub1's inserts after sub2 fails.
+TEST_F(DirectRCQTests,
+       StackedConsumeInsertThenInvalidConsumeInsertDoesNotPoison)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_stacked_already");
+
+  std::vector<QueueEntry> entries_100;
+  entries_100.reserve(100);
+  for (int i = 0; i < 100; ++i) {
+    entries_100.push_back(
+        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
+                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
+  }
+  std::vector<QueueEntry> entries_300;
+  entries_300.reserve(300);
+  for (int i = 0; i < 300; ++i) {
+    entries_300.push_back(
+        make_rcq_entry({static_cast<uint8_t>(i & 0xFF),
+                        static_cast<uint8_t>((i >> 8) & 0xFF)}));
+  }
+
+  auto tx1 = make_new_per_tx_db_proxy();
+
+  // Sub1: valid consume_insert, 100 inserts. consumed_=true, reservation=100.
+  tx1.add_delta(key,
+                make_rcq_consume_insert_delta(0, 0, {}, entries_100),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value()) << "sub1 consume_insert must succeed";
+
+  // Sub2: invalid max_fully_consumed=1, cumulative 300 inserts. narrow
+  // passes (consume is still present, monotonic; inserts grew). In the
+  // lock: this_tx_already_consumed=true so no new CAS. fetch_add(200)
+  // runs, undo pushed. Consume validation trips kInvalidExecutorBehavior.
+  // Only the reservation undo fires.
+  tx1.add_delta(key,
+                make_rcq_consume_insert_delta(1, 0, {}, entries_300),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx1.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value())
+      << "sub2 should fail with kInvalidExecutorBehavior";
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // Reservation should be 100 (sub1 only) if fetch_add was undone; with a
+  // leak it would be 300. Verify by inserting 899 more entries from a
+  // separate tx: 100+899=999 <= 1000 passes; 300+899=1199 > 1000 fails.
+  std::vector<QueueEntry> entries_899;
+  entries_899.reserve(899);
+  for (int i = 0; i < 899; ++i) {
+    entries_899.push_back(
+        make_rcq_entry({static_cast<uint8_t>((i + 100) & 0xFF),
+                        static_cast<uint8_t>(((i + 100) >> 8) & 0xFF)}));
+  }
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta(entries_899),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "tx2 insert 899 must succeed; sub2 must not leak fetch_add";
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
