@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <optional>
 #include <span>
 #include <thread>
 #include <unordered_map>
@@ -9,6 +10,8 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -16,8 +19,11 @@
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -33,6 +39,14 @@ ItemChange
 make_bytestring_change(std::vector<uint8_t> data)
 {
   return Bytes(std::as_bytes(std::span(data)));
+}
+
+ItemChange
+make_rcq_insert_change(uint8_t value)
+{
+  RetrocausalQueueDelta delta;
+  delta.insert.added_entries.push_back(QueueEntry{value});
+  return ItemChange(RetrocausalQueueIt(std::move(delta)));
 }
 
 ItemChange
@@ -88,6 +102,27 @@ make_dummy_context()
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
   return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
+}
+
+inline LockContext
+make_rcq_context()
+{
+  static std::optional<Directory> dir;
+  static std::optional<HogDBDAO> dao;
+  if (!dao.has_value()) {
+    auto dir_status = Directory::open_temporary();
+    CHECK(static_cast<bool>(dir_status));
+    dir.emplace(std::move(*dir_status));
+
+    constexpr size_t kHeapSize = 10_MiB;
+    auto db = Database::open(dir->get_path(),
+                             Database::estimate_heap_size(kHeapSize), 0);
+    CHECK(static_cast<bool>(db));
+    dao.emplace(RAMDB(std::move(*db)));
+  }
+
+  static ItemKey dummy_key = make_item_key(make_address(0), 0);
+  return LockContext(&*dao, 0, dummy_key, &kTestCostModel);
 }
 
 } // namespace
@@ -618,6 +653,81 @@ TEST(ItemLockTest, FinalizeExclusive)
   EXPECT_EQ(inner->get_base_and_delta(),
             (std::pair<int128_t, int128_t>(200, 20)));
 }
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+TEST(ItemLockTest, ConcurrentRCQReadReturnsNulloptUntilCommit)
+{
+  ItemLock lock(0);
+  auto first = make_rcq_insert_change(0x01);
+  auto second = make_rcq_insert_change(0x02);
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_rcq_context());
+  ASSERT_TRUE(r1.has_value());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_rcq_context());
+  ASSERT_TRUE(r2.has_value());
+
+  EXPECT_EQ(lock.get_concurrent_entry(0), std::nullopt);
+  EXPECT_EQ(lock.get_concurrent_entry(1), std::nullopt);
+
+  EXPECT_EQ(lock.commit_change(first, make_rcq_context()),
+            kTestCostModel.get_retrocausal_queue_cost(1));
+
+  auto entry0 = lock.get_concurrent_entry(0);
+  ASSERT_TRUE(entry0.has_value());
+  EXPECT_EQ(*entry0, QueueEntry{0x01});
+  EXPECT_EQ(lock.get_concurrent_entry(1), std::nullopt);
+
+  EXPECT_EQ(lock.commit_change(second, make_rcq_context()), 1);
+
+  auto entry0_after = lock.get_concurrent_entry(0);
+  ASSERT_TRUE(entry0_after.has_value());
+  EXPECT_EQ(*entry0_after, QueueEntry{0x01});
+
+  auto entry1 = lock.get_concurrent_entry(1);
+  ASSERT_TRUE(entry1.has_value());
+  EXPECT_EQ(*entry1, QueueEntry{0x02});
+}
+
+TEST(ItemLockTest, ConcurrentRCQReadDoesNotTouchUncommittedVariant)
+{
+  for (int iter = 0; iter < 1000; ++iter) {
+    ItemLock lock(0);
+    std::atomic<bool> stop = false;
+    std::atomic<bool> writer_failed = false;
+
+    std::thread reader([&]() {
+      while (!stop.load(std::memory_order_relaxed)) {
+        auto entry = lock.get_concurrent_entry(0);
+        (void)entry;
+      }
+    });
+
+    std::thread writer([&]() {
+      auto ctx = make_rcq_context();
+      auto finish = [&]() { stop.store(true, std::memory_order_relaxed); };
+      auto guard = x23::Defer(finish);
+
+      for (int j = 0; j < 200; ++j) {
+        auto change = make_rcq_insert_change(0x42);
+        auto res = lock.try_atomic_change_lock(nullptr, &change, ctx);
+        if (!res.has_value()) {
+          continue;
+        }
+        auto release = lock.try_atomic_change_lock(&change, nullptr, ctx);
+        if (!release.has_value()) {
+          writer_failed.store(true, std::memory_order_relaxed);
+          ADD_FAILURE() << "RCQ release path unexpectedly failed";
+          return;
+        }
+      }
+    });
+
+    reader.join();
+    writer.join();
+    ASSERT_FALSE(writer_failed.load(std::memory_order_relaxed));
+  }
+}
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
 {
