@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cassert>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -164,6 +165,8 @@ ReplayCacheLock::get_base(const LockContext &ctx,
   return res.first->second.get();
 }
 
+namespace {
+
 class UniquifierHelper {
 public:
   static Uniquifier from_uint128(uint128_t v)
@@ -176,7 +179,7 @@ public:
   }
 };
 
-static uint64_t
+uint64_t
 count_pruned_replay_cache_entries(const ReplayCacheMetadata &meta,
                                   BlockHeight block_height)
 {
@@ -189,6 +192,8 @@ count_pruned_replay_cache_entries(const ReplayCacheMetadata &meta,
   }
   return pruned_count;
 }
+
+} // namespace
 
 HogDBStatus<int128_t>
 ReplayCacheLock::try_atomic_change_lock(
