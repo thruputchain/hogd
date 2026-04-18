@@ -3,7 +3,6 @@
 #include <atomic>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <utility>
@@ -64,10 +63,9 @@ private:
   mutable bool meta_poisoned_{false};
 
   mutable ConcurrentSet<uint128_t> conflicts_;
+  mutable std::atomic<uint64_t> committed_additions_{0};
 
   mutable std::atomic<int32_t> pending_new_heights_{0};
-  mutable std::mutex committed_cost_lock_;
-  mutable uint64_t committed_additions_{0};
 
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;
