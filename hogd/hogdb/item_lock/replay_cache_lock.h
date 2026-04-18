@@ -3,6 +3,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <utility>
@@ -13,7 +14,6 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"

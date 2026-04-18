@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -182,7 +183,7 @@ TEST_P(DirectNonceTests,
 
   auto contract_addr = make_contract_address(11);
   const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
-                                   2 * cost_model_->kReplayCacheCostPerEntry;
+                                   (2 * cost_model_->kReplayCacheCostPerEntry);
   setup_grant_storage_token(contract_addr, initial_balance);
 
   auto commit_nonce_consume = [&](BlockHeight expiry_height,
@@ -265,7 +266,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
 
   auto contract_addr = make_contract_address(12);
   const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
-                                   2 * cost_model_->kReplayCacheCostPerEntry;
+                                   (2 * cost_model_->kReplayCacheCostPerEntry);
   setup_grant_storage_token(contract_addr, initial_balance);
 
   auto commit_nonce_consume = [&](BlockHeight expiry_height,
