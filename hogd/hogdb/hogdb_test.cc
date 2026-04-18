@@ -1857,6 +1857,154 @@ TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
   EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
 }
 
+TEST_F(HogDBTest, ReplayCacheGCPrunesMultipleHeightsAtOnce)
+{
+  // Seed three distinct expiry heights (3, 5, 8) so the GC at block 7 has to
+  // walk past more than one ReplayCacheHeightCount entry: heights 3 and 5
+  // expire; height 8 survives.
+  //
+  // Any intermediate block that touches the replay cache would trigger GC of
+  // already-expired heights, so we seed at ascending block numbers
+  // (1, 2, 3) where none of the seeded heights are yet expired relative to
+  // the seeding block height. This preserves meta == {3:1, 5:1, 8:1} up to
+  // the GC trigger at block 7.
+  Address addr = make_address(kAddress + 53);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(3, 100), std::to_underlying(StorageDeltaFlags::None)));
+  });
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(5, 200), std::to_underlying(StorageDeltaFlags::None)));
+  });
+  commit_block_expect_db_hash_matches_full(3, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 800), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto replay_meta_before_gc = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_before_gc);
+  ASSERT_EQ(3, replay_meta_before_gc->size);
+  ASSERT_EQ(3, replay_meta_before_gc->heights.size());
+  EXPECT_EQ(3, replay_meta_before_gc->heights[0].height);
+  EXPECT_EQ(1, replay_meta_before_gc->heights[0].nonce_count);
+  EXPECT_EQ(5, replay_meta_before_gc->heights[1].height);
+  EXPECT_EQ(1, replay_meta_before_gc->heights[1].nonce_count);
+  EXPECT_EQ(8, replay_meta_before_gc->heights[2].height);
+  EXPECT_EQ(1, replay_meta_before_gc->heights[2].nonce_count);
+
+  auto balance_before_gc = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance_before_gc);
+
+  // Block 7 adds a single entry at expiry 7. GC must prune heights 3 and 5
+  // (2 entries) but keep height 8 (1 entry); the new addition lives at
+  // height 7. Net size goes from 3 to 2, so the balance refund equals
+  // cost(3) - cost(2) = kReplayCacheCostPerEntry.
+  commit_block_expect_db_hash_matches_full(7, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(7, 700), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto replay_meta_after_gc = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_after_gc);
+  ASSERT_EQ(2, replay_meta_after_gc->size);
+  ASSERT_EQ(2, replay_meta_after_gc->heights.size());
+  EXPECT_EQ(7, replay_meta_after_gc->heights[0].height);
+  EXPECT_EQ(1, replay_meta_after_gc->heights[0].nonce_count);
+  EXPECT_EQ(8, replay_meta_after_gc->heights[1].height);
+  EXPECT_EQ(1, replay_meta_after_gc->heights[1].nonce_count);
+
+  // Pruned heights' data rows are gone; the surviving height-8 data is
+  // unchanged.
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 3).has_value());
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 5).has_value());
+
+  auto height_8_data = db_.read_address_replay_cache_data(addr, 8);
+  ASSERT_TRUE(height_8_data);
+  ASSERT_EQ(1, height_8_data->nonces.size());
+  EXPECT_EQ(800, height_8_data->nonces[0]);
+
+  auto height_7_data = db_.read_address_replay_cache_data(addr, 7);
+  ASSERT_TRUE(height_7_data);
+  ASSERT_EQ(1, height_7_data->nonces.size());
+  EXPECT_EQ(700, height_7_data->nonces[0]);
+
+  auto balance_after_gc = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance_after_gc);
+  EXPECT_EQ(cost_model_.get_replay_cache_cost(3) -
+                cost_model_.get_replay_cache_cost(2),
+            *balance_after_gc - *balance_before_gc);
+}
+
+TEST_F(HogDBTest, ReplayCacheNonceLifecycleAddThenGCAtExpiryBoundary)
+{
+  // End-to-end lifecycle for a single nonce:
+  //   * added at block 1 with expiry 5,
+  //   * still present after a replay-cache touch at block 5 (height == expiry
+  //     is NOT pruned; GC uses strict less-than),
+  //   * pruned by the first replay-cache touch at block 6 (height < 6).
+  Address addr = make_address(kAddress + 54);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(5, 100), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta_after_add = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta_after_add);
+  ASSERT_EQ(1, meta_after_add->size);
+  ASSERT_EQ(1, meta_after_add->heights.size());
+  EXPECT_EQ(5, meta_after_add->heights[0].height);
+  EXPECT_EQ(1, meta_after_add->heights[0].nonce_count);
+
+  auto data_after_add = db_.read_address_replay_cache_data(addr, 5);
+  ASSERT_TRUE(data_after_add);
+  ASSERT_EQ(1, data_after_add->nonces.size());
+  EXPECT_EQ(100, data_after_add->nonces[0]);
+
+  // Block 5: replay-cache touch at the exact expiry height must not GC the
+  // entry. The new addition (expiry 8) lives alongside the original.
+  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 200), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta_at_expiry = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta_at_expiry);
+  ASSERT_EQ(2, meta_at_expiry->size);
+  ASSERT_EQ(2, meta_at_expiry->heights.size());
+  EXPECT_EQ(5, meta_at_expiry->heights[0].height);
+  EXPECT_EQ(1, meta_at_expiry->heights[0].nonce_count);
+  EXPECT_EQ(8, meta_at_expiry->heights[1].height);
+  EXPECT_EQ(1, meta_at_expiry->heights[1].nonce_count);
+
+  auto data_at_expiry = db_.read_address_replay_cache_data(addr, 5);
+  ASSERT_TRUE(data_at_expiry);
+  ASSERT_EQ(1, data_at_expiry->nonces.size());
+  EXPECT_EQ(100, data_at_expiry->nonces[0]);
+
+  // Block 6: first block where the expiry-5 entry is strictly past its
+  // expiry. The replay-cache touch triggers GC of the original nonce.
+  commit_block_expect_db_hash_matches_full(6, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(9, 300), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta_after_gc = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta_after_gc);
+  ASSERT_EQ(2, meta_after_gc->size);
+  ASSERT_EQ(2, meta_after_gc->heights.size());
+  EXPECT_EQ(8, meta_after_gc->heights[0].height);
+  EXPECT_EQ(1, meta_after_gc->heights[0].nonce_count);
+  EXPECT_EQ(9, meta_after_gc->heights[1].height);
+  EXPECT_EQ(1, meta_after_gc->heights[1].nonce_count);
+
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 5).has_value());
+}
+
 // Auth data: create then delete matches empty db.
 // Creating and then deleting auth data should leave no residual state.
 TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
