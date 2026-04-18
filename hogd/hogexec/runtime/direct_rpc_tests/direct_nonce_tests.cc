@@ -340,6 +340,110 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
   EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
 }
 
+TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
+
+  // Three concurrent in-block replay-cache additions where the middle tx
+  // aborts. If the aborted tx's reservation somehow leaked into
+  // committed_additions_, or if the two committed txs didn't properly
+  // telescope off the post-GC baseline, the balance math would drift. With
+  // the fix in place, commit_additions_ sees exactly 2, so the post-GC
+  // charge is cost(2) rather than cost(3) or cost(1).
+  auto contract_addr = make_contract_address(13);
+  // Pre-GC reservations are cumulative and snapshot-based: with 3 concurrent
+  // in-block additions, the third push needs cost(snapshot+3) in balance.
+  const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
+                                   (3 * cost_model_->kReplayCacheCostPerEntry);
+  setup_grant_storage_token(contract_addr, initial_balance);
+
+  auto commit_nonce_consume = [&](BlockHeight expiry_height,
+                                  std::uint64_t nonce) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = expiry_height,
+                                .nonce = nonce}),
+                 std::to_underlying(StorageDeltaFlags::None));
+
+    auto push_result = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(push_result.has_value());
+    ASSERT_TRUE(push_result.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  };
+
+  // Seed three distinct heights that all expire by block 7.
+  commit_nonce_consume(4, 100);
+  commit_nonce_consume(5, 200);
+  commit_nonce_consume(6, 300);
+
+  auto balance_before_gc_block = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(balance_before_gc_block.has_value());
+  EXPECT_EQ(3 * cost_model_->kReplayCacheCostPerEntry,
+            from_xdr(balance_before_gc_block->nnint()));
+
+  advance_block();
+  advance_block();
+  advance_block();
+  ASSERT_EQ(7, get_block_number());
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 400}),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto tx1_push = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(tx1_push.has_value());
+  ASSERT_TRUE(tx1_push.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 401}),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto tx2_push = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(tx2_push.has_value());
+  ASSERT_TRUE(tx2_push.value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 402}),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto tx3_push = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(tx3_push.has_value());
+  ASSERT_TRUE(tx3_push.value());
+
+  // tx2 is the middle tx that aborts.
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+
+  advance_block();
+
+  // Final committed size is 2 (tx1 and tx3 survived), so balance is
+  // initial - cost(2): the snapshot cost(3) is refunded on the first commit
+  // and tx3 pays the single incremental cost(2)-cost(1)=kReplayCacheCostPerEntry.
+  auto final_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(final_balance.has_value());
+  EXPECT_EQ(initial_balance - cost_model_->get_replay_cache_cost(2),
+            from_xdr(final_balance->nnint()));
+
+  auto replay_meta =
+      get_hogdb_dao().read_address_replay_cache_meta(contract_addr);
+  ASSERT_TRUE(replay_meta);
+  ASSERT_EQ(2, replay_meta->size);
+  ASSERT_EQ(1, replay_meta->heights.size());
+  EXPECT_EQ(7, replay_meta->heights[0].height);
+  EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNonceTests,
