@@ -270,7 +270,7 @@ ReplayCacheLock::try_atomic_change_lock(
 }
 
 int128_t
-ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
+ReplayCacheLock::commit_change(bool /*did_finalize*/, int128_t snapshot_cost,
                                const PointerItem<ReplayCacheIt> & /*after*/,
                                const LockContext &ctx)
 {
@@ -284,7 +284,6 @@ ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   uint64_t live_size_after_gc = static_cast<uint64_t>(meta.size) - pruned_count;
   uint64_t committed_additions_before =
       committed_additions_.fetch_add(1, std::memory_order_relaxed);
-  CHECK_EQ(did_finalize, committed_additions_before == 0);
 
   uint64_t committed_size_before =
       live_size_after_gc + committed_additions_before;
@@ -292,11 +291,12 @@ ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   CHECK_GT(committed_size_after, 0U);
 
   // Reservations and commits are not the same thing: later in-block additions
-  // may already be reserved in conflicts_ but still abort. Only the first
-  // committed replay-cache touch may realize the snapshot->post-GC transition;
-  // later commits charge incremental growth from the already-committed size.
+  // may already be reserved in conflicts_ but still abort. The committed
+  // counter, not ItemLock finalization state, defines the first committed
+  // replay-cache addition that may realize the snapshot->post-GC transition.
+  // Later commits charge incremental growth from the already-committed size.
   int128_t previous_cost =
-      did_finalize
+      committed_additions_before == 0
           ? snapshot_cost
           : ctx.cost_model->get_replay_cache_cost(committed_size_before);
   int128_t new_cost =
