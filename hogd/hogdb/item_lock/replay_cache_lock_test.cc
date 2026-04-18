@@ -620,8 +620,7 @@ TEST_F(ReplayCacheLockTest, ExpiryHeightEqualToCurrentIsKeptAndConsumable)
   int128_t d2 = lock.commit_change(true, snapshot_cost, item2, ctx);
   EXPECT_EQ(kTestCostModel.kReplayCacheCostPerEntry, d2);
 
-  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(3) - snapshot_cost,
-            d1 + d2);
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(3) - snapshot_cost, d1 + d2);
 }
 
 TEST_F(ReplayCacheLockTest, RemovedReservationDoesNotAdvanceCommittedCounter)

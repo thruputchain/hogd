@@ -428,7 +428,8 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
 
   // Final committed size is 2 (tx1 and tx3 survived), so balance is
   // initial - cost(2): the snapshot cost(3) is refunded on the first commit
-  // and tx3 pays the single incremental cost(2)-cost(1)=kReplayCacheCostPerEntry.
+  // and tx3 pays the single incremental
+  // cost(2)-cost(1)=kReplayCacheCostPerEntry.
   auto final_balance = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(contract_addr));
   ASSERT_TRUE(final_balance.has_value());
