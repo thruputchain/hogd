@@ -368,4 +368,48 @@ TEST_F(ReplayCacheLockTest, MergeCost)
   // since they are best tested with storage.
 }
 
+TEST_F(ReplayCacheLockTest, CommitChangeUsesCommittedAdditionsNotReservations)
+{
+  ReplayCacheLock lock;
+  ReplayCacheLockTestHelper::set_empty_bases(lock, 7, 7);
+  ReplayCacheLockTestHelper::set_base(lock, 4,
+                                      ReplayCacheData{.nonces = {100}});
+  ReplayCacheLockTestHelper::set_base(lock, 5,
+                                      ReplayCacheData{.nonces = {200}});
+  ReplayCacheLockTestHelper::set_base(lock, 6,
+                                      ReplayCacheData{.nonces = {300}});
+
+  auto ctx = make_dummy_context(7);
+  const int128_t snapshot_cost = kTestCostModel.get_replay_cache_cost(3);
+
+  PointerItem<ReplayCacheIt> item1(u(7, 400));
+  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, ctx);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(4), *r1);
+
+  PointerItem<ReplayCacheIt> item2(u(7, 401));
+  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, ctx);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(4), *r2);
+
+  int128_t commit_cost1 = lock.commit_change(true, snapshot_cost, item1, ctx);
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(1) - snapshot_cost,
+            commit_cost1);
+
+  ASSERT_TRUE(lock.try_atomic_change_lock(&item2, nullptr, ctx).has_value());
+
+  PointerItem<ReplayCacheIt> item3(u(7, 402));
+  auto r3 = lock.try_atomic_change_lock(nullptr, &item3, ctx);
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(4), *r3);
+
+  int128_t commit_cost2 = lock.commit_change(false, snapshot_cost, item3, ctx);
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2) -
+                kTestCostModel.get_replay_cache_cost(1),
+            commit_cost2);
+
+  EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2) - snapshot_cost,
+            commit_cost1 + commit_cost2);
+}
+
 } // namespace hogd

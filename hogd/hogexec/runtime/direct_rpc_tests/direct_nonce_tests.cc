@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -100,6 +101,243 @@ TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
       << "ConsumeUniquifier with exclusive lock should be rejected";
   ASSERT_TRUE(tx.abort_transaction().has_value());
   advance_block();
+}
+
+TEST_P(DirectNonceTests,
+       ReplayCacheGCStillRejectsPostExpiryConsumeWithoutExtraReservation)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
+
+  auto contract_addr = make_contract_address(10);
+  setup_grant_storage_token(contract_addr,
+                            cost_model_->get_replay_cache_cost(2));
+
+  auto commit_nonce_consume = [&](BlockHeight expiry_height,
+                                  std::uint64_t nonce) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = expiry_height,
+                                .nonce = nonce}),
+                 std::to_underlying(StorageDeltaFlags::None));
+
+    auto push_result = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(push_result.has_value());
+    ASSERT_TRUE(push_result.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  };
+
+  // Blocks 1 and 2 each add a height-3 nonce.
+  commit_nonce_consume(3, 100);
+  advance_block();
+  commit_nonce_consume(3, 200);
+  advance_block();
+
+  // Advance through empty blocks 3 and 4 so the next tx executes in block 5,
+  // where the two height-3 entries are expired and should be GC'd.
+  advance_block();
+  advance_block();
+  ASSERT_EQ(5, get_block_number());
+
+  auto balance_before_gc = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(balance_before_gc.has_value());
+  EXPECT_EQ(0, from_xdr(balance_before_gc->nnint()));
+
+  auto post_expiry_tx = make_new_per_tx_db_proxy();
+  post_expiry_tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                           make_nonce_delta(Uniquifier{.block_expiry_height = 7,
+                                                       .nonce = 300}),
+                           std::to_underlying(StorageDeltaFlags::None));
+
+  auto post_expiry_push = post_expiry_tx.try_push_current_subtransaction();
+  ASSERT_TRUE(post_expiry_push.has_value());
+  ASSERT_FALSE(post_expiry_push.value())
+      << "The pre-GC reservation treats the cache size as 3 (current 2 + "
+         "new 1), requiring balance for a third entry that is not available; "
+         "the consume must be rejected at push time.";
+  ASSERT_TRUE(post_expiry_tx.abort_transaction().has_value());
+
+  auto balance_after_rejection = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(balance_after_rejection.has_value());
+  EXPECT_EQ(0, from_xdr(balance_after_rejection->nnint()));
+
+  auto replay_meta =
+      get_hogdb_dao().read_address_replay_cache_meta(contract_addr);
+  ASSERT_TRUE(replay_meta);
+  ASSERT_EQ(2, replay_meta->size);
+  ASSERT_EQ(1, replay_meta->heights.size());
+  EXPECT_EQ(3, replay_meta->heights[0].height);
+  EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
+}
+
+TEST_P(DirectNonceTests,
+       ReplayCacheGCKeepsCorrectCommittedBalanceAcrossTwoTxsInSameBlock)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
+
+  auto contract_addr = make_contract_address(11);
+  const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
+                                   (2 * cost_model_->kReplayCacheCostPerEntry);
+  setup_grant_storage_token(contract_addr, initial_balance);
+
+  auto commit_nonce_consume = [&](BlockHeight expiry_height,
+                                  std::uint64_t nonce) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = expiry_height,
+                                .nonce = nonce}),
+                 std::to_underlying(StorageDeltaFlags::None));
+
+    auto push_result = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(push_result.has_value());
+    ASSERT_TRUE(push_result.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  };
+
+  // Seed 3 distinct expiry heights that all survive until block 7, where the
+  // next replay-cache touch should GC all of them at once.
+  commit_nonce_consume(4, 100);
+  commit_nonce_consume(5, 200);
+  commit_nonce_consume(6, 300);
+
+  auto balance_before_gc_block = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(balance_before_gc_block.has_value());
+  EXPECT_EQ(2 * cost_model_->kReplayCacheCostPerEntry,
+            from_xdr(balance_before_gc_block->nnint()));
+
+  advance_block();
+  advance_block();
+  advance_block();
+  ASSERT_EQ(7, get_block_number());
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 400}),
+                std::to_underlying(StorageDeltaFlags::None));
+
+  auto tx1_push = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(tx1_push.has_value());
+  ASSERT_TRUE(tx1_push.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 401}),
+                std::to_underlying(StorageDeltaFlags::None));
+
+  auto tx2_push = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(tx2_push.has_value());
+  ASSERT_TRUE(tx2_push.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto final_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(final_balance.has_value());
+  EXPECT_EQ(initial_balance - cost_model_->get_replay_cache_cost(2),
+            from_xdr(final_balance->nnint()));
+
+  auto replay_meta =
+      get_hogdb_dao().read_address_replay_cache_meta(contract_addr);
+  ASSERT_TRUE(replay_meta);
+  ASSERT_EQ(2, replay_meta->size);
+  ASSERT_EQ(1, replay_meta->heights.size());
+  EXPECT_EQ(7, replay_meta->heights[0].height);
+  EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
+}
+
+TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
+
+  auto contract_addr = make_contract_address(12);
+  const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
+                                   (2 * cost_model_->kReplayCacheCostPerEntry);
+  setup_grant_storage_token(contract_addr, initial_balance);
+
+  auto commit_nonce_consume = [&](BlockHeight expiry_height,
+                                  std::uint64_t nonce) {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_replay_cache_addrkey(contract_addr),
+                 make_nonce_delta(
+                     Uniquifier{.block_expiry_height = expiry_height,
+                                .nonce = nonce}),
+                 std::to_underlying(StorageDeltaFlags::None));
+
+    auto push_result = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(push_result.has_value());
+    ASSERT_TRUE(push_result.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  };
+
+  commit_nonce_consume(4, 100);
+  commit_nonce_consume(5, 200);
+  commit_nonce_consume(6, 300);
+
+  auto balance_before_gc_block = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(balance_before_gc_block.has_value());
+  EXPECT_EQ(2 * cost_model_->kReplayCacheCostPerEntry,
+            from_xdr(balance_before_gc_block->nnint()));
+
+  advance_block();
+  advance_block();
+  advance_block();
+  ASSERT_EQ(7, get_block_number());
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 400}),
+                std::to_underlying(StorageDeltaFlags::None));
+
+  auto tx1_push = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(tx1_push.has_value());
+  ASSERT_TRUE(tx1_push.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_replay_cache_addrkey(contract_addr),
+                make_nonce_delta(
+                    Uniquifier{.block_expiry_height = 7, .nonce = 401}),
+                std::to_underlying(StorageDeltaFlags::None));
+
+  auto tx2_push = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(tx2_push.has_value());
+  ASSERT_TRUE(tx2_push.value());
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  advance_block();
+
+  auto final_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(final_balance.has_value());
+  EXPECT_EQ(initial_balance - cost_model_->get_replay_cache_cost(1),
+            from_xdr(final_balance->nnint()));
+
+  auto replay_meta =
+      get_hogdb_dao().read_address_replay_cache_meta(contract_addr);
+  ASSERT_TRUE(replay_meta);
+  ASSERT_EQ(1, replay_meta->size);
+  ASSERT_EQ(1, replay_meta->heights.size());
+  EXPECT_EQ(7, replay_meta->heights[0].height);
+  EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

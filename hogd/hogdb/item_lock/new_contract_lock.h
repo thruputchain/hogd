@@ -22,7 +22,7 @@ public:
                                                const LockContext &ctx);
   static int128_t commit_change(bool /*unused*/, int128_t /*unused*/,
                                 const NewContractData & /*unused*/,
-                                const StorageCostModel * /*unused*/)
+                                const LockContext & /*ctx*/)
   {
     return 0;
   }

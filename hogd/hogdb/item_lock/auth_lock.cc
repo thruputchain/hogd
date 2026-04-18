@@ -105,7 +105,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
 int128_t
 AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
                         const PointerItem<AuthDataItem> &after,
-                        const StorageCostModel *cost_model)
+                        const LockContext &ctx)
 {
   std::unique_lock<x23::TestLock> ul(lock_);
   CHECK(locked_);
@@ -117,7 +117,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   // base ItemLock.
   int128_t previous_cost =
       did_finalize ? snapshot_cost
-                   : cost_model->get_auth_data_cost(count_active_keys());
+                   : ctx.cost_model->get_auth_data_cost(count_active_keys());
 
   for (size_t i = 0; i < kMaxSigners; ++i) {
 
@@ -138,7 +138,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   }
 
   // TODO(geoff): cost for gas configs
-  int128_t new_cost = cost_model->get_auth_data_cost(count_active_keys());
+  int128_t new_cost = ctx.cost_model->get_auth_data_cost(count_active_keys());
   return new_cost - previous_cost;
 }
 

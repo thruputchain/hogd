@@ -71,8 +71,8 @@ TEST(BytestringLockTest, CommitCost)
                   .has_value());
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
-  EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, item1, make_dummy_context()),
             kTestCostModel.get_bytestring_cost(4));
-  EXPECT_EQ(lock.commit_change(false, 0, item1, &kTestCostModel), 0);
+  EXPECT_EQ(lock.commit_change(false, 0, item1, make_dummy_context()), 0);
 }
 } // namespace hogd

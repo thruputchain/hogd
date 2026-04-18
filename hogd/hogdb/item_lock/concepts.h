@@ -45,7 +45,7 @@ concept item_lock_unsized =
         lock.try_atomic_change_lock(before, after, ctx)
       } -> std::same_as<HogDBStatus<int128_t>>;
       {
-        lock.commit_change(finalize, snapshot_cost, *after, ctx.cost_model)
+        lock.commit_change(finalize, snapshot_cost, *after, ctx)
       } -> std::same_as<int128_t>;
     } &&
     requires(Lock const &lock, const LockContext &ctx, ChangeSet &changes) {

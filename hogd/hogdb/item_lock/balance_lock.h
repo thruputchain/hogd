@@ -63,7 +63,7 @@ public:
   static int128_t commit_change(bool /* finalize */,
                                 int128_t /* snapshot_cost */,
                                 const Balance & /* after */,
-                                const StorageCostModel * /* cost_model */)
+                                const LockContext & /*ctx*/)
   {
     return 0;
   }

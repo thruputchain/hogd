@@ -164,8 +164,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
         else {
           auto const *inner = change.get_inner<typename lock_t::change_type>();
           CHECK_CONST_PTR(inner);
-          return lock.commit_change(did_finalize, snapshot_cost_, *inner,
-                                    ctx.cost_model);
+          return lock.commit_change(did_finalize, snapshot_cost_, *inner, ctx);
         }
       },
       lock_contents_);

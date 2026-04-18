@@ -216,7 +216,7 @@ TEST(NNInt128LockTest, MultipleAddsOnValue)
             std::numeric_limits<int128_t>::max() - 200);
   EXPECT_EQ(lock.get_sub_capacity(), 100);
 
-  EXPECT_EQ(lock.commit_change(true, 0, add2, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, add2, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
 
   EXPECT_EQ(lock.get_base_and_delta(),
@@ -247,9 +247,9 @@ TEST(NNInt128LockTest, NegativeBase)
       lock.try_atomic_change_lock(nullptr, &big_add, make_dummy_context())
           .has_value());
 
-  EXPECT_EQ(lock.commit_change(true, 0, big_add, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, big_add, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
-  EXPECT_EQ(lock.commit_change(false, 0, add, &kTestCostModel), 0);
+  EXPECT_EQ(lock.commit_change(false, 0, add, make_dummy_context()), 0);
 
   EXPECT_EQ(lock.get_base_and_delta(),
             (std::pair<int128_t, int128_t>(

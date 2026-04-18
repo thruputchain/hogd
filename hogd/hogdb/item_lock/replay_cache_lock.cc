@@ -165,6 +165,8 @@ ReplayCacheLock::get_base(const LockContext &ctx,
   return res.first->second.get();
 }
 
+namespace {
+
 class UniquifierHelper {
 public:
   static Uniquifier from_uint128(uint128_t v)
@@ -176,6 +178,22 @@ public:
     return (static_cast<uint128_t>(u.block_expiry_height) << 64) | u.nonce;
   }
 };
+
+uint64_t
+count_pruned_replay_cache_entries(const ReplayCacheMetadata &meta,
+                                  BlockHeight block_height)
+{
+  auto prune_end = std::ranges::lower_bound(meta.heights, block_height, {},
+                                            &ReplayCacheHeightCount::height);
+
+  uint64_t pruned_count = 0;
+  for (auto it = meta.heights.begin(); it != prune_end; ++it) {
+    pruned_count += it->nonce_count;
+  }
+  return pruned_count;
+}
+
+} // namespace
 
 HogDBStatus<int128_t>
 ReplayCacheLock::try_atomic_change_lock(
@@ -247,22 +265,43 @@ ReplayCacheLock::try_atomic_change_lock(
     return meta.error();
   }
 
+  // Reservation stays snapshot-based. GC credit is only applied once this
+  // change commits, so multiple txs cannot spend the same future refund.
   return ctx.cost_model->get_replay_cache_cost(meta.value()->size + 1);
 }
 
 int128_t
-ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
+ReplayCacheLock::commit_change(bool /*did_finalize*/, int128_t snapshot_cost,
                                const PointerItem<ReplayCacheIt> & /*after*/,
-                               const StorageCostModel *cost_model)
+                               const LockContext &ctx)
 {
   assert(meta_.load(std::memory_order_acquire) != nullptr);
   auto &meta = **get_meta(nullptr);
 
-  int128_t previous_cost = did_finalize
-                               ? snapshot_cost
-                               : cost_model->get_replay_cache_cost(meta.size);
+  uint64_t pruned_count =
+      count_pruned_replay_cache_entries(meta, ctx.block_height);
+  CHECK_LE(pruned_count, static_cast<uint64_t>(meta.size));
 
-  int128_t new_cost = cost_model->get_replay_cache_cost(meta.size + 1);
+  uint64_t live_size_after_gc = static_cast<uint64_t>(meta.size) - pruned_count;
+  uint64_t committed_additions_before =
+      committed_additions_.fetch_add(1, std::memory_order_relaxed);
+
+  uint64_t committed_size_before =
+      live_size_after_gc + committed_additions_before;
+  uint64_t committed_size_after = committed_size_before + 1;
+  CHECK_GT(committed_size_after, 0U);
+
+  // Reservations and commits are not the same thing: later in-block additions
+  // may already be reserved in conflicts_ but still abort. The committed
+  // counter, not ItemLock finalization state, defines the first committed
+  // replay-cache addition that may realize the snapshot->post-GC transition.
+  // Later commits charge incremental growth from the already-committed size.
+  int128_t previous_cost =
+      committed_additions_before == 0
+          ? snapshot_cost
+          : ctx.cost_model->get_replay_cache_cost(committed_size_before);
+  int128_t new_cost =
+      ctx.cost_model->get_replay_cache_cost(committed_size_after);
 
   return new_cost - previous_cost;
 }
