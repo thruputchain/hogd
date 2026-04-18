@@ -429,11 +429,12 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   // Size amounts so the only commit-time rejection reason is the sender's
   // balance going negative: receiver's new-entry balance_cost is covered by
   // the incoming delta, and sender's delta overshoots its initial balance.
+  // The lambda can't capture, so use function-local statics.
   auto const *cost_model = get_default_cost_model();
   int128_t balance_cost = cost_model->get_balance_cost();
   ASSERT_GT(balance_cost, 0);
-  int128_t kInitialBalance = balance_cost + 1;
-  int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
+  static int128_t kInitialBalance = balance_cost + 1;
+  static int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   auto sender_contract = std::make_unique<NativeContract>(
@@ -534,8 +535,8 @@ TEST_F(BalanceCostTrackingTest,
   auto const *cost_model = get_default_cost_model();
   int128_t balance_cost = cost_model->get_balance_cost();
   ASSERT_GT(balance_cost, 0);
-  int128_t kInitialBalance = balance_cost + 1;
-  int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
+  static int128_t kInitialBalance = balance_cost + 1;
+  static int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   auto sender_contract = std::make_unique<NativeContract>(
@@ -627,8 +628,13 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   constexpr static ContractAddress kSenderAddr = make_contract_address(164);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(165);
 
-  constexpr int128_t kInitialBalance = 1'000'000;
-  constexpr int128_t kTransferAmount = 100;
+  // Both sender and receiver end with a positive (tiny) residual balance so
+  // HogDB's commit-time balance-lock accepts both.
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+  static int128_t kTransferAmount = balance_cost + 1;
+  static int128_t kInitialBalance = kTransferAmount + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   auto sender_contract = std::make_unique<NativeContract>(
