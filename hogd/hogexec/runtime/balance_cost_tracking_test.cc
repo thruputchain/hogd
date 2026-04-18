@@ -426,8 +426,14 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   constexpr static ContractAddress kSenderAddr = make_contract_address(160);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(161);
 
-  constexpr int128_t kInitialBalance = 100;
-  constexpr int128_t kTransferAmount = 1000;
+  // Size amounts so the only commit-time rejection reason is the sender's
+  // balance going negative: receiver's new-entry balance_cost is covered by
+  // the incoming delta, and sender's delta overshoots its initial balance.
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+  int128_t kInitialBalance = balance_cost + 1;
+  int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   auto sender_contract = std::make_unique<NativeContract>(
@@ -525,8 +531,11 @@ TEST_F(BalanceCostTrackingTest,
   constexpr static ContractAddress kSenderAddr = make_contract_address(162);
   constexpr static ContractAddress kReceiverAddr = make_contract_address(163);
 
-  constexpr int128_t kInitialBalance = 100;
-  constexpr int128_t kTransferAmount = 1000;
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+  int128_t kInitialBalance = balance_cost + 1;
+  int128_t kTransferAmount = balance_cost + kInitialBalance + 1;
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   auto sender_contract = std::make_unique<NativeContract>(
