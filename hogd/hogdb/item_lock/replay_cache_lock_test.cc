@@ -14,8 +14,8 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/ramdb/db.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -710,9 +710,8 @@ TEST(ReplayCacheLockHeightCap, RejectsNewHeightWhenMetadataAlreadyAtCap)
 
   // Attempt a consume_uniquifier at a NEW height that is strictly greater
   // than every seeded height (so it will miss in bases_ and in the DAO).
-  BlockHeight new_height = kSeedBase +
-                           static_cast<BlockHeight>(kReplayCacheHeightsMaxLen) +
-                           1000;
+  BlockHeight new_height =
+      kSeedBase + static_cast<BlockHeight>(kReplayCacheHeightsMaxLen) + 1000;
   PointerItem<ReplayCacheIt> item(u(new_height, 42));
 
   auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);

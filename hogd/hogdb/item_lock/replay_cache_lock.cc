@@ -151,7 +151,8 @@ ReplayCacheLock::get_base(const LockContext &ctx,
       return meta.error();
     }
     auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
-    if (meta.value()->heights.size() + pending + 1 > kReplayCacheHeightsMaxLen) {
+    if (meta.value()->heights.size() + pending + 1 >
+        kReplayCacheHeightsMaxLen) {
       pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
       return HogDBError{HogDBCode::kConflict};
     }
