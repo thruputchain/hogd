@@ -742,9 +742,9 @@ TEST_F(ReplayCacheLockTest, MaxExpiryHeightBuildResult)
 
   auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, kMaxHeight);
   ASSERT_TRUE(out.has_value());
-  ASSERT_EQ(2u, out->nonces.size());
-  EXPECT_EQ(42u, out->nonces[0]);
-  EXPECT_EQ(100u, out->nonces[1]);
+  ASSERT_EQ(2U, out->nonces.size());
+  EXPECT_EQ(42U, out->nonces[0]);
+  EXPECT_EQ(100U, out->nonces[1]);
 }
 
 TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
@@ -762,8 +762,8 @@ TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
 
   auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
   ASSERT_TRUE(out.has_value());
-  ASSERT_EQ(1u, out->nonces.size());
-  EXPECT_EQ(20u, out->nonces[0]);
+  ASSERT_EQ(1U, out->nonces.size());
+  EXPECT_EQ(20U, out->nonces[0]);
 }
 
 } // namespace hogd

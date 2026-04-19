@@ -598,15 +598,15 @@ TEST_F(HogDBTest, ReplayCacheMaxExpiryHeightStageAndApply)
   auto data =
       db_.read_address_replay_cache_data(rckey.get_address(), kMaxHeight);
   ASSERT_TRUE(data);
-  ASSERT_EQ(1u, data->nonces.size());
-  EXPECT_EQ(7u, data->nonces[0]);
+  ASSERT_EQ(1U, data->nonces.size());
+  EXPECT_EQ(7U, data->nonces[0]);
 
   auto meta = db_.read_address_replay_cache_meta(rckey.get_address());
   ASSERT_TRUE(meta);
   EXPECT_EQ(1, meta->size);
-  ASSERT_EQ(1u, meta->heights.size());
+  ASSERT_EQ(1U, meta->heights.size());
   EXPECT_EQ(kMaxHeight, meta->heights[0].height);
-  EXPECT_EQ(1u, meta->heights[0].nonce_count);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
 }
 
 TEST_F(HogDBTest, BalanceTransferReducesByCost)
