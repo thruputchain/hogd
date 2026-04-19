@@ -98,6 +98,13 @@ private:
   };
 
   // `U` is `ContractException<Exn, Sel>` with `kSelector` and `exn`.
+  //
+  // Open-enum semantics: when `exn` is (or contains) an enum, a successful
+  // decode may yield a value outside `xdr_meta<E>::tags`. This is intentional
+  // — x23 enums are open, and callers must handle unknown enum values
+  // defensively (no no-default switches on contract-returned enums). An
+  // attacker-controlled body producing such a value is not a trust-boundary
+  // violation; do not add tag-set validation here.
   template<typename U>
   bool try_dispatch_exception(uint64_t selector, std::span<const uint8_t> body)
   {
