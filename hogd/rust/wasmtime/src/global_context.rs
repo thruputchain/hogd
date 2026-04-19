@@ -8,7 +8,7 @@ use common::LinkEntry;
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker,
-    PoolingAllocationConfig,
+    PoolingAllocationConfig, WasmFeatures,
 };
 
 use crate::error::TrampolineError;
@@ -111,7 +111,14 @@ impl WasmtimeGlobalContext {
             .wasm_backtrace(false)
             .debug_info(false)
             .cranelift_opt_level(wasmtime::OptLevel::Speed)
-            .cranelift_nan_canonicalization(true) // deterministic nan
+            .cranelift_nan_canonicalization(true) // deterministic nan on cranelift
+            // Note: nan canonicalization is not currently available on winch,
+            // so we disable floats entirely. wasmtime's Config has no
+            // high-level helper for this; the supported path is the
+            // low-level wasm_features escape hatch, which clears the
+            // FLOATS bit in wasmparser::WasmFeatures so f32/f64 ops and
+            // types are rejected at validation.
+            .wasm_features(WasmFeatures::FLOATS, false)
             // Disable SIMD. Winch's x86_64 SIMD lowering is gated on
             // runtime-detected AVX, and its aarch64 backend leaves SIMD
             // unimplemented. Leaving SIMD enabled would make contract

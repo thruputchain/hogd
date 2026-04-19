@@ -997,3 +997,165 @@ fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
         let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
+
+// ===========================================================================
+// Regression tests for audit issue #1522 (H001):
+// Winch accepts float-bearing contracts without NaN canonicalization.
+//
+// Root cause: the production config selected Strategy::Winch and relied on
+// cranelift_nan_canonicalization(true) for deterministic NaN handling, but
+// that knob is a no-op under Winch. Winch's x86_64 lowering of f32.div,
+// f32.sqrt, etc. emits raw host-produced NaN bit patterns (0xffc00000),
+// not the canonical 0x7fc00000 — so scalar float results are host- and
+// backend-dependent, risking consensus divergence.
+//
+// Fix: clear the FLOATS bit in wasmparser's WasmFeatures via the
+// wasm_features(...) Config escape hatch. wasmparser then rejects every
+// f32/f64 operator and type at validation, uniformly across hosts and
+// backends, before Winch is consulted.
+// ===========================================================================
+
+// Minimal float-bearing module: an f32 constant returned from an exported
+// function. Both the return type (f32) and the operator (f32.const) are
+// gated by wasmparser's FLOATS feature, so either validation branch will
+// reject this before Winch codegen runs. Bytes are leaked to 'static so
+// the FFI can treat them the same way as build.rs-produced fixtures. We
+// can't route this through build.rs because groundhog_wasm_meter's
+// default config rejects floats during instrument, so inline wat::parse
+// bypasses the instrument step the normal fixtures go through.
+fn float_contract_bytes() -> &'static [u8] {
+    let wat = r#"
+        (module
+          (func (export "f") (result f32)
+            (f32.const 0.0))
+          (memory 1 1)
+          (export "memory" (memory 0)))
+    "#;
+    let bytes = wat::parse_str(wat).expect("inline float WAT must parse");
+    Box::leak(bytes.into_boxed_slice())
+}
+
+unsafe extern "C" fn test_get_float_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    if hash_slice.iter().any(|&b| b != 5) {
+        return ContractGetResult::new(
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            &[],
+        );
+    }
+    ContractGetResult::new(0, float_contract_bytes())
+}
+
+// Directly asserts that the production Wasmtime Config clears the FLOATS
+// bit at the wasmparser validation layer. This is the property that makes
+// float rejection deterministic across hosts and independent of Winch's
+// (non-canonical) NaN handling.
+//
+// Before the fix, wasm_features left FLOATS set: Module::new compiled
+// float-bearing modules successfully, and wasm-meter was the only layer
+// rejecting floats — so a wasm-meter regression would silently re-expose
+// Winch's non-canonical NaN output to consensus.
+//
+// After the fix, Module::new fails at validation with an error chain
+// containing "floating-point" (wasmparser emits "floating-point support
+// is disabled" for f32/f64 types and "floating-point instruction
+// disallowed" for ops). That's the deterministic wasmparser-layer
+// rejection we want.
+#[test]
+fn test_h001_production_config_rejects_floats_at_validation() {
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+    let float_bytes = float_contract_bytes();
+
+    let err = wasmtime::Module::new(&engine, float_bytes).err().expect(
+        "production config must clear WasmFeatures::FLOATS so float-bearing \
+         modules are rejected at validation on every host",
+    );
+
+    // Alternate Display (`{err:#}`) prints the full anyhow chain on one
+    // line; the top-level "failed to compile" message drops the nested
+    // "floating-point ..." cause we need to assert on.
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("floating-point"),
+        "expected wasmparser validation rejection mentioning \
+         \"floating-point\", got: {err:#}"
+    );
+}
+
+// Regression test using the real production FFI path. With FLOATS cleared
+// in the WasmFeatures, wasmparser rejects any module with f32/f64
+// operators or types before Winch is consulted, so verification returns
+// false on every host. Prior to the fix, the wasmtime verify path relied
+// solely on wasm-meter's reject_floats check — this test pins the
+// wasmparser-layer gate as a second line of defense.
+#[test]
+fn test_h001_verify_contract_rejects_float_module() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let wasm_bytes = float_contract_bytes();
+        let result = wasmtime_verify_contract(
+            context,
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len(),
+        );
+
+        assert!(
+            !result,
+            "float-bearing contracts must be rejected by \
+             wasmtime_verify_contract on every host"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+// Documents the downstream kSystemUnrecoverable that the audit issue is
+// about. If any path (verify bypass, cache prime, legacy stored contract)
+// ever delivers float-bearing bytes to get_instance_pre, Module::new
+// fails and the runtime path maps the failure to kSystemUnrecoverable.
+// With FLOATS cleared this now happens deterministically at validation,
+// uniformly across hosts, rather than executing under Winch with
+// non-canonical NaN bits.
+#[test]
+fn test_h001_runtime_creation_on_float_returns_system_unrecoverable() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context = new_wasmtime_context(
+            test_get_float_contract_get_fn,
+            global_context,
+        );
+        let contract_hash = [5u8; 32];
+
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
+        let result =
+            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context);
+
+        assert!(
+            result.get().is_none(),
+            "float-bearing contract must not yield a runtime"
+        );
+        assert_eq!(
+            result.err_code(),
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            "Module::new failure on float bytes must map to \
+             kSystemUnrecoverable"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
+    }
+}

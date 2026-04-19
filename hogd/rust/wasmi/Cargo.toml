@@ -10,6 +10,9 @@ wasmi = { workspace = true }
 common = {path = "../common"}
 groundhog-wasm-meter = { workspace = true }
 
+[dev-dependencies]
+wat = "1.219.1"
+
 [features]
 debug_logging = []
 
