@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -99,6 +100,7 @@ public:
 
   bool verify_contract(Contract const &contract) const override
   {
+    CHECK(contract.contract_type() == ContractType::kNative);
     return contracts_.contains(
         std::to_underlying(contract.native_contract_id()));
   }
