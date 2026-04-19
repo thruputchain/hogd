@@ -595,8 +595,8 @@ TEST_F(HogDBTest, ReplayCacheMaxExpiryHeightStageAndApply)
   ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
   ASSERT_TRUE(db_.apply(changes));
 
-  auto data = db_.read_address_replay_cache_data(rckey.get_address(),
-                                                 kMaxHeight);
+  auto data =
+      db_.read_address_replay_cache_data(rckey.get_address(), kMaxHeight);
   ASSERT_TRUE(data);
   ASSERT_EQ(1u, data->nonces.size());
   EXPECT_EQ(7u, data->nonces[0]);

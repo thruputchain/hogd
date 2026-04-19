@@ -732,14 +732,13 @@ TEST_F(ReplayCacheLockTest, MaxExpiryHeightBuildResult)
   constexpr BlockHeight kMaxHeight = std::numeric_limits<BlockHeight>::max();
 
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(
-      lock, kMaxHeight, ReplayCacheData{.nonces = {100}});
+  ReplayCacheLockTestHelper::set_base(lock, kMaxHeight,
+                                      ReplayCacheData{.nonces = {100}});
   auto ctx = make_dummy_context(0);
 
   PointerItem<ReplayCacheIt> item(u(kMaxHeight, 42));
   auto admit = lock.try_atomic_change_lock(nullptr, &item, ctx);
-  ASSERT_TRUE(admit.has_value())
-      << "admission must accept expiry == INT64_MAX";
+  ASSERT_TRUE(admit.has_value()) << "admission must accept expiry == INT64_MAX";
 
   auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, kMaxHeight);
   ASSERT_TRUE(out.has_value());
@@ -757,15 +756,11 @@ TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
   PointerItem<ReplayCacheIt> item_lo(u(height_, 10));
   PointerItem<ReplayCacheIt> item_mid(u(height_ + 1, 20));
   PointerItem<ReplayCacheIt> item_hi(u(height_ + 2, 30));
-  ASSERT_TRUE(
-      lock.try_atomic_change_lock(nullptr, &item_lo, ctx).has_value());
-  ASSERT_TRUE(
-      lock.try_atomic_change_lock(nullptr, &item_mid, ctx).has_value());
-  ASSERT_TRUE(
-      lock.try_atomic_change_lock(nullptr, &item_hi, ctx).has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item_lo, ctx).has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item_mid, ctx).has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item_hi, ctx).has_value());
 
-  auto out =
-      ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
+  auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
   ASSERT_TRUE(out.has_value());
   ASSERT_EQ(1u, out->nonces.size());
   EXPECT_EQ(20u, out->nonces[0]);
