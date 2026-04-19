@@ -2505,6 +2505,240 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
   }
 }
 
+// Regression for #1458: aborting the only reservation on a fresh expiry
+// height must not leave phantom zero-count metadata or an empty data row.
+TEST_F(HogDBTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
+{
+  Address addr = make_address(kAddress + 53);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx_a(block_tx);
+    ASSERT_TRUE(invoke_tx_a.request_consume_uniquifier(
+        addr, Uniquifier(99999, 100),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx_a.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx_b(block_tx);
+      ASSERT_TRUE(invoke_tx_b.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
+      invoke_tx_b.commit();
+      invoke_tx_b.release_blocktx_reference();
+    }
+
+    invoke_tx_a.abort();
+    invoke_tx_a.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    ASSERT_TRUE(hash_result.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  auto meta = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(1, meta->size);
+  ASSERT_EQ(1U, meta->heights.size());
+  EXPECT_EQ(3, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+
+  auto committed_data = db_.read_address_replay_cache_data(addr, 3);
+  ASSERT_TRUE(committed_data);
+  ASSERT_EQ(1U, committed_data->nonces.size());
+  EXPECT_EQ(200U, committed_data->nonces[0]);
+
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 99999).has_value());
+}
+
+// The phantom must stay absent after a subsequent block reloads and
+// rewrites the address's replay-cache metadata.
+TEST_F(HogDBTest, AbortedFreshHeightStaysAbsentInNextBlock)
+{
+  Address addr = make_address(kAddress + 54);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx_a(block_tx);
+    ASSERT_TRUE(invoke_tx_a.request_consume_uniquifier(
+        addr, Uniquifier(99999, 100),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx_a.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx_b(block_tx);
+      ASSERT_TRUE(invoke_tx_b.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
+      invoke_tx_b.commit();
+      invoke_tx_b.release_blocktx_reference();
+    }
+
+    invoke_tx_a.abort();
+    invoke_tx_a.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    ASSERT_TRUE(hash_result.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Block 2 touches the replay cache on the same address for a different
+  // fresh expiry height. Forces the lock to reload metadata from DB and
+  // re-stage it — any leaked 99999 entry would be carried forward here.
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(77777, 900),
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(2, meta->size);
+  ASSERT_EQ(2U, meta->heights.size());
+  EXPECT_EQ(3, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+  EXPECT_EQ(77777, meta->heights[1].height);
+  EXPECT_EQ(1U, meta->heights[1].nonce_count);
+
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 99999).has_value());
+}
+
+// Positive control: aborting one of two reservations on the same fresh
+// expiry height must NOT remove the height — only the aborted nonce.
+TEST_F(HogDBTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
+{
+  Address addr = make_address(kAddress + 55);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx_a(block_tx);
+    ASSERT_TRUE(invoke_tx_a.request_consume_uniquifier(
+        addr, Uniquifier(99999, 100),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx_a.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx_b(block_tx);
+      ASSERT_TRUE(invoke_tx_b.request_consume_uniquifier(
+          addr, Uniquifier(99999, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
+      invoke_tx_b.commit();
+      invoke_tx_b.release_blocktx_reference();
+    }
+
+    invoke_tx_a.abort();
+    invoke_tx_a.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    ASSERT_TRUE(hash_result.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  auto meta = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(1, meta->size);
+  ASSERT_EQ(1U, meta->heights.size());
+  EXPECT_EQ(99999, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+
+  auto data = db_.read_address_replay_cache_data(addr, 99999);
+  ASSERT_TRUE(data);
+  ASSERT_EQ(1U, data->nonces.size());
+  EXPECT_EQ(200U, data->nonces[0]);
+}
+
+// Strongest regression: a block that reserves-and-aborts a fresh expiry
+// height must leave the DB in a state bit-identical to a block that never
+// attempted the aborted reservation at all.
+TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
+{
+  auto run_scenario = [&](bool include_aborted_attempt) -> DbHash {
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    EXPECT_TRUE(static_cast<bool>(dir));
+    constexpr size_t kHeapSize = 10_MiB;
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), Database::estimate_heap_size(kHeapSize),
+                       0);
+    EXPECT_TRUE(db);
+    HogDBDAO dao(RAMDB(std::move(*db)));
+
+    Address addr = make_address(kAddress + 56);
+    EXPECT_TRUE(dao.write_address_balance(addr, 10'000'000));
+
+    DbHash base_hash = dao.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(dao, cost_model_, background_commit_worker_,
+                                   1);
+
+    if (include_aborted_attempt) {
+      EXPECT_TRUE(block_tx.try_acquire_reference());
+      InvokeTX invoke_tx_a(block_tx);
+      EXPECT_TRUE(invoke_tx_a.request_consume_uniquifier(
+          addr, Uniquifier(99999, 100),
+          std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_TRUE(invoke_tx_a.sync_balance_locks());
+
+      EXPECT_TRUE(block_tx.try_acquire_reference());
+      {
+        InvokeTX invoke_tx_b(block_tx);
+        EXPECT_TRUE(invoke_tx_b.request_consume_uniquifier(
+            addr, Uniquifier(3, 200),
+            std::to_underlying(StorageDeltaFlags::None)));
+        EXPECT_TRUE(invoke_tx_b.sync_balance_locks());
+        invoke_tx_b.commit();
+        invoke_tx_b.release_blocktx_reference();
+      }
+
+      invoke_tx_a.abort();
+      invoke_tx_a.release_blocktx_reference();
+    }
+    else {
+      EXPECT_TRUE(block_tx.try_acquire_reference());
+      InvokeTX invoke_tx(block_tx);
+      EXPECT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    auto hash_result = block_tx.get().close(base_hash);
+    EXPECT_TRUE(hash_result.has_value());
+    EXPECT_TRUE(block_tx.get().commit());
+
+    return dao.compute_full_db_hash();
+  };
+
+  DbHash hash_with_aborted = run_scenario(true);
+  DbHash hash_without_aborted = run_scenario(false);
+  EXPECT_EQ(hash_with_aborted, hash_without_aborted);
+}
+
 } // namespace hogd
 
 int

@@ -358,6 +358,13 @@ ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
       return res.error();
     }
 
+    // A fresh (is_new) height whose only reservation was aborted leaves an
+    // empty base here. Skip serializing so we don't persist a zero-count
+    // meta entry or an empty data row.
+    if (res->nonces.empty()) {
+      continue;
+    }
+
     auto key = make_replay_cache_data_key(ctx.key.get_address(), height);
     auto buf = x23::serialize(*res);
     changes.put(key, 0, buf);
