@@ -4,6 +4,8 @@
 #include <concepts>
 #include <type_traits>
 
+#include "hogd/base/compiler.h"
+
 namespace hogd {
 
 // GCC's stdlib does not provide integral specializations for
@@ -25,7 +27,7 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
   {
     for (;;) {
       T current = std::atomic<T>::load(std::memory_order_relaxed);
-      T desired = current + arg;
+      T desired = wrapping_add(current, arg);
       if (std::atomic<T>::compare_exchange_weak(current, desired, order,
                                                 std::memory_order_relaxed)) {
         return current;
@@ -38,7 +40,7 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
   {
     for (;;) {
       T current = std::atomic<T>::load(std::memory_order_relaxed);
-      T desired = current - arg;
+      T desired = wrapping_sub(current, arg);
       if (std::atomic<T>::compare_exchange_weak(current, desired, order,
                                                 std::memory_order_relaxed)) {
         return current;
@@ -48,11 +50,11 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
 
   T operator+=(T arg) noexcept requires std::integral<T>
   {
-    return fetch_add(arg) + arg;
+    return wrapping_add(fetch_add(arg), arg);
   }
   T operator-=(T arg) noexcept requires std::integral<T>
   {
-    return fetch_sub(arg) - arg;
+    return wrapping_sub(fetch_sub(arg), arg);
   }
 
   T operator++(int) noexcept requires std::integral<T> { return fetch_add(1); }
