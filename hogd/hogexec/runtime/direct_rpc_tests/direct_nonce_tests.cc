@@ -445,6 +445,63 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
   EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
 }
 
+TEST_P(DirectNonceTests, ReplayCacheHeightCapRejects4001stHeight)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
+
+  auto contract_addr = make_contract_address(42);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Pre-populate the DAO with exactly kReplayCacheHeightsMaxLen active
+  // heights for this address. Going through the runtime for 4000 txs would be
+  // prohibitively slow; the bug under test is in the lock/DAO layer, and the
+  // trigger tx below is what actually exercises the end-to-end path.
+  auto &dao = get_hogdb_dao();
+  constexpr BlockHeight kSeedBase = 1000;
+
+  ReplayCacheMetadata meta;
+  meta.size = kReplayCacheHeightsMaxLen;
+  meta.heights.reserve(kReplayCacheHeightsMaxLen);
+  for (std::int64_t i = 0; i < kReplayCacheHeightsMaxLen; ++i) {
+    BlockHeight h = kSeedBase + static_cast<BlockHeight>(i);
+    meta.heights.push_back(
+        ReplayCacheHeightCount{.height = h, .nonce_count = 1});
+
+    ReplayCacheData data;
+    data.nonces.push_back(static_cast<int64_t>(h));
+    ASSERT_TRUE(dao.write_address_replay_cache_data(contract_addr, h, data));
+  }
+  ASSERT_TRUE(dao.write_address_replay_cache_meta(contract_addr, meta));
+
+  // Drive the trigger tx through the full runtime. Pick a block_expiry_height
+  // strictly greater than every seeded height and greater than the current
+  // block number so expiry checks do not fire.
+  const BlockHeight new_height =
+      kSeedBase + static_cast<BlockHeight>(kReplayCacheHeightsMaxLen) + 1000;
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_replay_cache_addrkey(contract_addr),
+               make_nonce_delta(
+                   Uniquifier{.block_expiry_height = new_height, .nonce = 77}),
+               std::to_underlying(StorageDeltaFlags::None));
+
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_FALSE(r.value())
+      << "replay-cache height cap at " << kReplayCacheHeightsMaxLen
+      << " must reject a brand-new height once the cap is reached";
+
+  ASSERT_TRUE(tx.abort_transaction().has_value());
+
+  // Metadata must still be exactly at the cap, not one over.
+  auto final_meta = dao.read_address_replay_cache_meta(contract_addr);
+  ASSERT_TRUE(final_meta);
+  EXPECT_EQ(static_cast<std::int64_t>(kReplayCacheHeightsMaxLen),
+            static_cast<std::int64_t>(final_meta->heights.size()));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNonceTests,
