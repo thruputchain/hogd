@@ -97,9 +97,10 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  bool verify_contract(Contract const & /*unused*/) const override
+  bool verify_contract(Contract const &contract) const override
   {
-    return true;
+    return contracts_.contains(
+        std::to_underlying(contract.native_contract_id()));
   }
 
 private:
