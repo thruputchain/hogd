@@ -576,6 +576,39 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   EXPECT_EQ(102, final_data_h11->nonces[0]);
 }
 
+TEST_F(HogDBTest, ReplayCacheMaxExpiryHeightStageAndApply)
+{
+  // Regression for issue #1447: stage_committed_changes must not overflow
+  // when an active replay-cache height equals INT64_MAX.
+  constexpr BlockHeight kMaxHeight = std::numeric_limits<BlockHeight>::max();
+  BlockHeight current_height = 9;
+  auto rckey = make_replay_cache_item_key(make_address("abcd"));
+
+  ItemChange c(ReplayCacheIt(Uniquifier(kMaxHeight, 7)));
+  ItemLock lock(0);
+
+  LockContext ctx(&db_, current_height, rckey, &cost_model_);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &c, ctx));
+  (void)lock.commit_change(c, ctx);
+
+  auto changes = db_.create_changeset();
+  ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+  ASSERT_TRUE(db_.apply(changes));
+
+  auto data =
+      db_.read_address_replay_cache_data(rckey.get_address(), kMaxHeight);
+  ASSERT_TRUE(data);
+  ASSERT_EQ(1U, data->nonces.size());
+  EXPECT_EQ(7U, data->nonces[0]);
+
+  auto meta = db_.read_address_replay_cache_meta(rckey.get_address());
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(1, meta->size);
+  ASSERT_EQ(1U, meta->heights.size());
+  EXPECT_EQ(kMaxHeight, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+}
+
 TEST_F(HogDBTest, BalanceTransferReducesByCost)
 {
   Address sender_addr = make_address(kAddress);

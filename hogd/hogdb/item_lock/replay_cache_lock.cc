@@ -95,11 +95,13 @@ ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
   auto &base = *r.value();
 
   // Get an iterator to the range of additions with matching
-  // block_expiry_height.
-  Uniquifier l(block_height, 0);
-  Uniquifier u(block_height + 1, 0);
-  auto b = std::ranges::lower_bound(uniquifiers, l);
-  auto e = std::ranges::lower_bound(uniquifiers, u);
+  // block_expiry_height. Caller must sort uniquifiers so the
+  // block_expiry_height projection is non-decreasing; Uniquifier's
+  // default order (block_expiry_height, then nonce) satisfies this.
+  assert(std::ranges::is_sorted(uniquifiers, {},
+                                &Uniquifier::block_expiry_height));
+  auto [b, e] = std::ranges::equal_range(uniquifiers, block_height, {},
+                                         &Uniquifier::block_expiry_height);
   auto filtered_nonces = std::ranges::subrange(b, e) |
                          std::views::transform([](const auto &uniquifier) {
                            return uniquifier.nonce;

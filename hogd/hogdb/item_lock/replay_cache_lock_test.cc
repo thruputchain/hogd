@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -722,6 +723,47 @@ TEST(ReplayCacheLockHeightCap, RejectsNewHeightWhenMetadataAlreadyAtCap)
   ASSERT_FALSE(r.has_value())
       << "height cap must reject the 4001st height; got success instead";
   EXPECT_EQ(HogDBError(HogDBCode::kConflict), r.error());
+}
+
+TEST_F(ReplayCacheLockTest, MaxExpiryHeightBuildResult)
+{
+  // Regression for issue #1447: build_result must not compute
+  // block_height + 1 when block_height == INT64_MAX (signed overflow / UB).
+  constexpr BlockHeight kMaxHeight = std::numeric_limits<BlockHeight>::max();
+
+  ReplayCacheLock lock;
+  ReplayCacheLockTestHelper::set_base(lock, kMaxHeight,
+                                      ReplayCacheData{.nonces = {100}});
+  auto ctx = make_dummy_context(0);
+
+  PointerItem<ReplayCacheIt> item(u(kMaxHeight, 42));
+  auto admit = lock.try_atomic_change_lock(nullptr, &item, ctx);
+  ASSERT_TRUE(admit.has_value()) << "admission must accept expiry == INT64_MAX";
+
+  auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, kMaxHeight);
+  ASSERT_TRUE(out.has_value());
+  ASSERT_EQ(2U, out->nonces.size());
+  EXPECT_EQ(42U, out->nonces[0]);
+  EXPECT_EQ(100U, out->nonces[1]);
+}
+
+TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
+{
+  ReplayCacheLock lock;
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 3);
+  auto ctx = make_dummy_context(height_);
+
+  PointerItem<ReplayCacheIt> item_lo(u(height_, 10));
+  PointerItem<ReplayCacheIt> item_mid(u(height_ + 1, 20));
+  PointerItem<ReplayCacheIt> item_hi(u(height_ + 2, 30));
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item_lo, ctx).has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item_mid, ctx).has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item_hi, ctx).has_value());
+
+  auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
+  ASSERT_TRUE(out.has_value());
+  ASSERT_EQ(1U, out->nonces.size());
+  EXPECT_EQ(20U, out->nonces[0]);
 }
 
 } // namespace hogd
