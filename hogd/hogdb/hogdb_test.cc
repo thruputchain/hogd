@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
