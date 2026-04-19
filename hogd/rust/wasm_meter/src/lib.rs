@@ -26,6 +26,7 @@ pub unsafe extern "C" fn wasm_meter_instrument(
     let wasm = unsafe { slice::from_raw_parts(wasm_ptr, wasm_len) };
     let config = groundhog_wasm_meter::Config {
         max_imported_functions,
+        reject_floats: true,
         ..groundhog_wasm_meter::Config::default()
     };
     match groundhog_wasm_meter::instrument(wasm, &config) {

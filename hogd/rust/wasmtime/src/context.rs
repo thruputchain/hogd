@@ -178,7 +178,11 @@ impl WasmtimeContext {
             );
             return false;
         }
-        let config = groundhog_wasm_meter::Config::default();
+        let config = groundhog_wasm_meter::Config {
+            max_imported_functions: 1,
+            reject_floats: true,
+            ..groundhog_wasm_meter::Config::default()
+        };
         if let Err(e) = groundhog_wasm_meter::verify(contract_data, &config) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: wasm-meter: {e}");
