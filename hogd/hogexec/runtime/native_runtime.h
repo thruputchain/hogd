@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -97,9 +98,11 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  bool verify_contract(Contract const & /*unused*/) const override
+  bool verify_contract(Contract const &contract) const override
   {
-    return true;
+    CHECK(contract.contract_type() == ContractType::kNative);
+    return contracts_.contains(
+        std::to_underlying(contract.native_contract_id()));
   }
 
 private:
