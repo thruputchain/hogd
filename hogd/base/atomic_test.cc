@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "hogd/base/atomic.h"
 #include "hogd/base/types.h"
 

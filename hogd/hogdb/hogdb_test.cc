@@ -32,6 +32,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 
