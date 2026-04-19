@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/io.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -13,6 +14,7 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -665,6 +667,61 @@ TEST_F(ReplayCacheLockTest, RemovedReservationDoesNotAdvanceCommittedCounter)
             d2);
 
   EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2) - snapshot_cost, d1 + d2);
+}
+
+TEST(ReplayCacheLockHeightCap, RejectsNewHeightWhenMetadataAlreadyAtCap)
+{
+  // Set up a real HogDBDAO over a temp RAMDB so get_base() can actually reach
+  // its DAO-miss branch (where the height cap check lives).
+  auto dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+
+  constexpr size_t kHeapSize = 10_MiB;
+  auto db = Database::open(dir->get_path(),
+                           Database::estimate_heap_size(kHeapSize), 0);
+  ASSERT_TRUE(db);
+  HogDBDAO dao(RAMDB(std::move(*db)));
+
+  // Seed kReplayCacheHeightsMaxLen active heights (each with one nonce) for a
+  // test address: both the metadata record AND the per-height data records
+  // must exist, because get_base() consults both.
+  Address addr = make_address(0xabc123);
+  constexpr BlockHeight kSeedBase = 100;
+
+  ReplayCacheMetadata meta;
+  meta.size = kReplayCacheHeightsMaxLen;
+  meta.heights.reserve(kReplayCacheHeightsMaxLen);
+  for (std::int64_t i = 0; i < kReplayCacheHeightsMaxLen; ++i) {
+    BlockHeight h = kSeedBase + static_cast<BlockHeight>(i);
+    meta.heights.push_back(
+        ReplayCacheHeightCount{.height = h, .nonce_count = 1});
+
+    ReplayCacheData data;
+    data.nonces.push_back(static_cast<int64_t>(h));
+    ASSERT_TRUE(dao.write_address_replay_cache_data(addr, h, data));
+  }
+  ASSERT_TRUE(dao.write_address_replay_cache_meta(addr, meta));
+
+  // Build a lock and a context pointing at the seeded DAO.
+  ReplayCacheLock lock;
+  ItemKey rckey = make_replay_cache_item_key(addr);
+  BlockHeight current_height = 50;
+  LockContext ctx(&dao, current_height, rckey, &kTestCostModel);
+
+  // Attempt a consume_uniquifier at a NEW height that is strictly greater
+  // than every seeded height (so it will miss in bases_ and in the DAO).
+  BlockHeight new_height =
+      kSeedBase + static_cast<BlockHeight>(kReplayCacheHeightsMaxLen) + 1000;
+  PointerItem<ReplayCacheIt> item(u(new_height, 42));
+
+  auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
+
+  // Expected post-fix: the cap is at kReplayCacheHeightsMaxLen, so admitting
+  // a brand new height here would make the post-commit total exceed the cap.
+  // The call must return kConflict.
+  ASSERT_FALSE(r.has_value())
+      << "height cap must reject the 4001st height; got success instead";
+  EXPECT_EQ(HogDBError(HogDBCode::kConflict), r.error());
 }
 
 } // namespace hogd
