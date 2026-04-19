@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <limits>
 #include <optional>
 #include <utility>
 
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
