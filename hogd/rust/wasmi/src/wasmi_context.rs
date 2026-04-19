@@ -535,3 +535,83 @@ pub unsafe extern "C" fn wasmi_verify_contract(
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
     unsafe { (*context).verify_contract(wasm) }
 }
+
+// ===========================================================================
+// Regression tests for audit issue #1522 (H001):
+// Float rejection at the wasmi validation layer.
+//
+// The live wasmtime/Winch path was the primary subject of #1522, but the
+// dormant wasmi backend must hold the same invariant so a future backend
+// swap can't silently re-expose non-canonical NaN semantics. wasmi's
+// Config::floats(false) threads the equivalent of wasmparser's FLOATS
+// feature flag, causing Module::new to reject f32/f64 operators and types
+// at validation — independent of (and redundant with) the separate
+// groundhog_wasm_meter reject_floats check in verify_contract.
+// ===========================================================================
+#[cfg(test)]
+mod h001_float_rejection_tests {
+    use super::*;
+
+    // Minimal float-bearing module — exercises both a float type (f32
+    // return) and a float operator (f32.const). Either triggers wasmi's
+    // validation gate when the engine has floats disabled.
+    fn float_module_bytes() -> Vec<u8> {
+        let wat = r#"
+            (module
+              (func (export "f") (result f32)
+                (f32.const 0.0))
+              (memory 1 1)
+              (export "memory" (memory 0)))
+        "#;
+        wat::parse_str(wat).expect("inline float WAT must parse")
+    }
+
+    // Anchors the production engine's .floats(false) to validation
+    // behavior. If anyone drops the call from new_engine, Module::new
+    // would accept float-bearing modules (wasmi would compile them with
+    // host-native NaN semantics) and this assertion catches the
+    // regression.
+    #[test]
+    fn production_engine_rejects_float_module_at_validation() {
+        let engine = WasmiContext::new_engine();
+        let bytes = float_module_bytes();
+        let err = Module::new(&engine, &bytes).err().expect(
+            "wasmi engine built with .floats(false) must reject \
+             float-bearing modules at validation",
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("floating-point") || msg.contains("float"),
+            "expected wasmi validation rejection mentioning floats, got: \
+             {err:#}"
+        );
+    }
+
+    // End-to-end via the public verify_contract entry point. Either the
+    // wasmi-level .floats(false) gate (Module::new) or the
+    // groundhog_wasm_meter::verify reject_floats gate will reject —
+    // verify_contract returning false is the only behavior callers
+    // observe, and that's what consensus depends on.
+    #[test]
+    fn verify_contract_rejects_float_module() {
+        // Stub contract_get_fn — verify_contract doesn't touch it, but
+        // WasmiContext::new requires a function pointer.
+        unsafe extern "C" fn stub_get_fn(
+            _userctx: *mut c_void,
+            _hash: *const u8,
+        ) -> ContractGetResult {
+            ContractGetResult::new(
+                SystemErrorCode::kSystemUnrecoverable as i32,
+                &[],
+            )
+        }
+
+        let global_context = std::sync::Arc::new(WasmiGlobalContext::default());
+        let ctx = WasmiContext::new(global_context, stub_get_fn);
+        let bytes = float_module_bytes();
+        assert!(
+            !ctx.verify_contract(&bytes),
+            "wasmi verify_contract must reject float-bearing modules"
+        );
+    }
+}

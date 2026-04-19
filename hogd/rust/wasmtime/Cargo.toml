@@ -18,6 +18,7 @@ groundhog-wasm-meter = { workspace = true }
 
 [dev-dependencies]
 wasmtime = { workspace = true }
+wat = "1.219.1"
 
 [features]
 debug_logging = []

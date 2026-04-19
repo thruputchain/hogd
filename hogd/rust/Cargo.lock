@@ -1390,6 +1390,7 @@ dependencies = [
  "groundhog-wasm-meter",
  "lru",
  "wasmi",
+ "wat",
 ]
 
 [[package]]
