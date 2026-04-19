@@ -374,6 +374,9 @@ template<std::integral T> struct CxsSerializer<T> {
   }
 };
 
+// Open-enum semantics: enum values outside `xdr_meta<T>::tags` are valid
+// after decode. The unchecked static_cast below is intentional; consumers
+// must handle unknown tags defensively. Do not add tag-set validation here.
 template<typename T> requires (std::is_enum_v<T>)
 struct CxsSerializer<T> {
   static_assert(std::is_integral_v<std::underlying_type_t<T>>);
