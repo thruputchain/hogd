@@ -291,6 +291,27 @@ TEST(NNInt128LockTest, NegativeBase)
   EXPECT_EQ(lock.get_sub_capacity(), 0);
 }
 
+TEST(NNInt128LockTest, NegativeBaseRejectsAddPastCapacity)
+{
+  constexpr int128_t kBaseValue = -100;
+  NNInt128Lock lock(kBaseValue);
+
+  NNInt128 small_add(kBaseValue, 100);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &small_add,
+                                          make_dummy_context())
+                  .has_value());
+
+  NNInt128 large_add(kBaseValue, std::numeric_limits<int128_t>::max());
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &large_add,
+                                          make_dummy_context())
+                  .has_value());
+
+  NNInt128 extra_add(kBaseValue, 1);
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &extra_add,
+                                           make_dummy_context())
+                   .has_value());
+}
+
 TEST(NNInt128LockTest, StageCommittedChangesRejectsWrappedOutOfBoundsValue)
 {
   NNInt128Lock lock(-100);
