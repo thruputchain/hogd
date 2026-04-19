@@ -163,11 +163,19 @@ bool
 get_value_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
                         Node::Raw &node)
 {
-  constexpr size_t kValuePresentSize = sizeof(bool);
+  static_assert(sizeof(bool) == 1,
+                "Merkle proof encoding uses a 1-byte value-present flag; "
+                "decoder logic (and other on-wire bool fields) rely on "
+                "sizeof(bool) == 1");
+  constexpr size_t kValuePresentSize = 1;
   if (idx + kValuePresentSize > encodings.size()) {
     return false;
   }
-  bool value_present = static_cast<unsigned char>(encodings[idx]) != 0U;
+  const auto flag_byte = static_cast<unsigned char>(encodings[idx]);
+  if (flag_byte != 0U && flag_byte != 1U) {
+    return false;
+  }
+  bool value_present = flag_byte != 0U;
   idx += kValuePresentSize;
 
   if (value_present) {
