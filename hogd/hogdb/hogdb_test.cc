@@ -381,6 +381,28 @@ TEST_F(HogDBTest, NNIntAndBalancePersistenceUseCanonicalXdrBytes)
   EXPECT_EQ(*reread_balance, kBalanceValue);
 }
 
+TEST_F(HogDBTest, NegativeBaseConcurrentAddsPersistMaxValue)
+{
+  constexpr int128_t kBaseValue = -100;
+  ItemKey item_key = make_key(kAddress + 22, 7);
+  LockContext ctx(&db_, BlockHeight{1}, item_key, &cost_model_);
+  NNInt128Lock lock(kBaseValue);
+
+  NNInt128 large_add(kBaseValue, std::numeric_limits<int128_t>::max());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &large_add, ctx));
+
+  NNInt128 small_add(kBaseValue, 100);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &small_add, ctx));
+
+  auto changes = db_.create_changeset();
+  ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+  ASSERT_TRUE(db_.apply(changes));
+
+  auto reread_value = db_.read_nnint128(item_key);
+  ASSERT_TRUE(reread_value);
+  EXPECT_EQ(*reread_value, std::numeric_limits<int128_t>::max());
+}
+
 TEST_F(HogDBTest, ItemLockCacheDataNoBalance)
 {
   ItemKey ikey = make_address_balance_item_key(make_address(kAddress));

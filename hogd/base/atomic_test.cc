@@ -49,4 +49,22 @@ TEST(Atomic16BTest, OperatorMinusEqualsWithLargeArg)
   EXPECT_EQ(a.load(), int128_t{300});
 }
 
+TEST(Atomic16BTest, FetchAddWrapsAcrossInt128Max)
+{
+  Atomic16B<int128_t> a(std::numeric_limits<int128_t>::max());
+  int128_t old = a.fetch_add(int128_t{100});
+
+  EXPECT_EQ(old, std::numeric_limits<int128_t>::max());
+  EXPECT_EQ(a.load(), std::numeric_limits<int128_t>::min() + 99);
+}
+
+TEST(Atomic16BTest, FetchSubWrapsAcrossInt128Min)
+{
+  Atomic16B<int128_t> a(std::numeric_limits<int128_t>::min());
+  int128_t old = a.fetch_sub(int128_t{1});
+
+  EXPECT_EQ(old, std::numeric_limits<int128_t>::min());
+  EXPECT_EQ(a.load(), std::numeric_limits<int128_t>::max());
+}
+
 } // namespace hogd

@@ -117,8 +117,7 @@ NNInt128Lock::stage_committed_changes(const LockContext &ctx,
                                       ChangeSet &changes) const
 {
   assert(!ctx.key.is_address_balance());
-  auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
-  CHECK(!of);
+  auto value = wrapping_add(base_, delta_bounds_.get_delta());
   auto encoded = int128_to_xdr_bytes(value);
   auto key = make_contract_data_key(ctx.key.as_bytes());
   changes.put(key, kNNInt128, encoded);
