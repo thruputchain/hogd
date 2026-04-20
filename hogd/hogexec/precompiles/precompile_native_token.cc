@@ -111,8 +111,9 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      allow_key, false, output_set, output_set_opt, output_add);
+  auto r =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, false, output_set,
+                                                 output_set_opt, output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -127,8 +128,7 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
 
   const int128_t *set_ptr = output_set_opt ? &output_set : nullptr;
   auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-      allow_key, set_ptr, new_add,
-      std::to_underlying(StorageDeltaFlags::None));
+      allow_key, set_ptr, new_add, std::to_underlying(StorageDeltaFlags::None));
   if (!r2.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r2.error());
   }
