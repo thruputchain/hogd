@@ -234,7 +234,7 @@ TEST_P(InstantiateTest, ParamEntryPointSignatureMismatchIsDeterministic)
 }
 
 // Wrong-import-kind tests (global, table, memory instead of func) are not
-// needed: wasm-meter 0.2.0 rejects all non-function imports at instrumentation
+// needed: wasm-meter 0.3.0 rejects all non-function imports at instrumentation
 // and verification time ("only function imports are allowed"), so the
 // entity-kind mismatch error paths in wasmtime's typecheck are unreachable
 // for deployed contracts.
