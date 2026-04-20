@@ -193,40 +193,16 @@ impl WasmtimeContext {
         // Instead, if the module has a start function, it will fail to instantiate a new runtime
         // as we supply no fuel during instantiation.
 
-        let instance_pre =
-            Arc::new(match self.linker().instantiate_pre(&module) {
-                Ok(instance_pre) => instance_pre,
-                Err(e) => {
-                    debug_log!(eprintln!("Error instantiating store: {e}"));
-                    // Unknown import: module references a name the linker
-                    // doesn't have.  Deterministic contract rejection.
-                    if e.downcast_ref::<wasmtime::UnknownImportError>()
-                        .is_some()
-                    {
-                        return Ok(None);
-                    }
-                    // Import type mismatch: the linker has a definition for
-                    // the import name, but the module declares it as a
-                    // different entity kind or with an incompatible
-                    // signature.  Deterministic contract rejection.
-                    //
-                    // WASMTIME-VERSION-SENSITIVE (v42.0.0): this prefix is
-                    // emitted by wasmtime/src/runtime/instance.rs::typecheck()
-                    // via .with_context(|| format!("incompatible import type
-                    // for `{name}::{field}`")).  There is no typed error for
-                    // this case; re-verify this string on wasmtime upgrades.
-                    const INCOMPATIBLE_IMPORT_MSG: &str =
-                        "incompatible import type";
-                    let msg = e.to_string();
-                    if msg.contains(INCOMPATIBLE_IMPORT_MSG) {
-                        return Ok(None);
-                    }
+        let instance_pre = Arc::new(
+            self.linker()
+                .instantiate_pre(&module)
+                .inspect_err(|_e| {
                     debug_log!(eprintln!(
-                        "Unrecoverable: Unknown error instantiating store: {e}"
-                    ));
-                    return Err(SystemErrorCode::kSystemUnrecoverable);
-                }
-            });
+                        "Unrecoverable: instantiate_pre failed: {_e}"
+                    ))
+                })
+                .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?,
+        );
 
         self.global_context.instance_pre_cache().put(
             hash,
