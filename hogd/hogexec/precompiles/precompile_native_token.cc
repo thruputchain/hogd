@@ -108,13 +108,11 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
 {
   auto allow_key = allowance_key(owner, spender);
 
-  // get_nnint via syscall
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
-                                                 output_set_opt, output_add);
+  auto r = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      allow_key, false, output_set, output_set_opt, output_add);
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -126,11 +124,10 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     return false;
   }
   int128_t new_add = output_add + amount;
-  assert(output_set_opt);
 
-  // set_nnint via syscall
+  const int128_t *set_ptr = output_set_opt ? &output_set : nullptr;
   auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-      allow_key, &output_set, new_add,
+      allow_key, set_ptr, new_add,
       std::to_underlying(StorageDeltaFlags::None));
   if (!r2.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r2.error());
@@ -336,11 +333,14 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   if (!r.has_value()) {
     return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
+  if (*r == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    return {Result<amount_t, ERC20Exception>::make_ok(
+        std::make_tuple(uint64_t{0}, uint64_t{0}))};
+  }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  // TODO(geoff): what is the correct overflow behavior on get_allowance?
   if (!output_set_opt) {
     return InvokeError{InvokeErrorCode::Deterministic};
   }
