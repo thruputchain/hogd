@@ -10,7 +10,6 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
@@ -19,11 +18,8 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
-#include "syscall.hh"
-#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -66,7 +62,8 @@ protected:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-// 1. Fresh (owner, spender) pair: allowance() returns 0, not a deterministic fault.
+// 1. Fresh (owner, spender) pair: allowance() returns 0, not a deterministic
+// fault.
 TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(170);
@@ -77,8 +74,9 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
           {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r, _g] = client.invoke_opt<"allowance">(
-                 ctx.handler(), kOwnerAddr, kSpenderAddr);
+             auto [r, _g] =
+                 client.invoke_opt<"allowance">(ctx.handler(), kOwnerAddr,
+                                                kSpenderAddr);
              if (!r.has_value() || !r.value().has_value() ||
                  !r.value().value().has_value() ||
                  !r.value().value().value().is_ok() ||
@@ -134,16 +132,19 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
           {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r_adj, _g1] = client.invoke_opt<"adjust_allowance">(
-                 ctx.handler(), kSpenderAddr, make_difference(100));
+             auto [r_adj, _g1] =
+                 client.invoke_opt<"adjust_allowance">(ctx.handler(),
+                                                       kSpenderAddr,
+                                                       make_difference(100));
              if (!r_adj.has_value() || !r_adj.value().has_value() ||
                  !r_adj.value().value().has_value() ||
                  !r_adj.value().value().value().is_ok()) {
                ADD_FAILURE() << "first adjust_allowance(+100) did not succeed";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
-             auto [r_al, _g2] = client.invoke_opt<"allowance">(
-                 ctx.handler(), kOwnerAddr, kSpenderAddr);
+             auto [r_al, _g2] =
+                 client.invoke_opt<"allowance">(ctx.handler(), kOwnerAddr,
+                                                kSpenderAddr);
              if (!r_al.has_value() || !r_al.value().has_value() ||
                  !r_al.value().value().has_value() ||
                  !r_al.value().value().value().is_ok() ||
@@ -201,9 +202,11 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
           {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r, _g] = client.invoke_opt<"transfer_from">(
-                 ctx.handler(), kOwnerAddr, kReceiverAddr, make_amount(50));
-             (void) r;
+             auto [r, _g] =
+                 client.invoke_opt<"transfer_from">(ctx.handler(), kOwnerAddr,
+                                                    kReceiverAddr,
+                                                    make_amount(50));
+             (void)r;
              return {};
            }}});
 
@@ -251,8 +254,10 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
              for (int128_t d : {100, 50}) {
-               auto [r, _g] = client.invoke_opt<"adjust_allowance">(
-                   ctx.handler(), kSpenderAddr, make_difference(d));
+               auto [r, _g] =
+                   client.invoke_opt<"adjust_allowance">(ctx.handler(),
+                                                         kSpenderAddr,
+                                                         make_difference(d));
                if (!r.has_value() || !r.value().has_value() ||
                    !r.value().value().has_value() ||
                    !r.value().value().value().is_ok()) {
@@ -260,8 +265,9 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
              }
-             auto [r_al, _g] = client.invoke_opt<"allowance">(
-                 ctx.handler(), kOwnerAddr, kSpenderAddr);
+             auto [r_al, _g] =
+                 client.invoke_opt<"allowance">(ctx.handler(), kOwnerAddr,
+                                                kSpenderAddr);
              if (!r_al.has_value() || !r_al.value().has_value() ||
                  !r_al.value().value().has_value() ||
                  !r_al.value().value().value().is_ok() ||
@@ -316,7 +322,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
 
   auto owner_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
              auto [r, _g] = client.invoke_opt<"adjust_allowance">(
@@ -332,8 +339,9 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
           {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r, _g] = client.invoke_opt<"allowance">(
-                 ctx.handler(), kOwnerAddr, kSpenderAddr);
+             auto [r, _g] =
+                 client.invoke_opt<"allowance">(ctx.handler(), kOwnerAddr,
+                                                kSpenderAddr);
              if (!r.has_value() || !r.value().has_value() ||
                  !r.value().value().has_value() ||
                  !r.value().value().value().is_ok() ||
@@ -346,11 +354,14 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
 
   auto spender_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r, _g] = client.invoke_opt<"transfer_from">(
-                 ctx.handler(), kOwnerAddr, kReceiverAddr, make_amount(50'000));
+             auto [r, _g] =
+                 client.invoke_opt<"transfer_from">(ctx.handler(), kOwnerAddr,
+                                                    kReceiverAddr,
+                                                    make_amount(50'000));
              if (!r.has_value() || !r.value().has_value() ||
                  !r.value().value().has_value() ||
                  !r.value().value().value().is_ok()) {
@@ -362,9 +373,11 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
           {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r, _g] = client.invoke_opt<"transfer_from">(
-                 ctx.handler(), kOwnerAddr, kReceiverAddr, make_amount(60'000));
-             (void) r;
+             auto [r, _g] =
+                 client.invoke_opt<"transfer_from">(ctx.handler(), kOwnerAddr,
+                                                    kReceiverAddr,
+                                                    make_amount(60'000));
+             (void)r;
              return {};
            }}});
 
@@ -473,9 +486,11 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
              for (int128_t d : {100, -150}) {
-               auto [r, _g] = client.invoke_opt<"adjust_allowance">(
-                   ctx.handler(), kSpenderAddr, make_difference(d));
-               (void) r;
+               auto [r, _g] =
+                   client.invoke_opt<"adjust_allowance">(ctx.handler(),
+                                                         kSpenderAddr,
+                                                         make_difference(d));
+               (void)r;
              }
              return {};
            }}});
