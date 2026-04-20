@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <print>
@@ -11,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
+#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 #include "hogd/hogexec/runtime/wasm/wasmtime_runtime.h"
 #include "hogd/init.h"
@@ -42,6 +44,14 @@ load_wasm_file(std::string const &filename)
     }
   }
   std::fclose(f);
+
+  auto instrumented = InstrumentedBytes::instrument(contents);
+  if (!instrumented) {
+    throw std::runtime_error("Failed to instrument WASM file: " + filename);
+  }
+  contents.clear();
+  contents.insert(contents.end(), instrumented->data().begin(),
+                  instrumented->data().end());
 
   return contents;
 }
@@ -128,6 +138,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       hogd::process_contract(contract_name, filename);
     } catch (std::exception const &e) {
       std::println(stderr, "Error processing {}: {}", contract_name, e.what());
+      exit(EXIT_FAILURE);
     }
   }
 

@@ -11,10 +11,12 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/runtime/trampoline_result.h"
 
 namespace hogd {
 
@@ -92,6 +94,77 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   return detail::get_engine_info(engine).has_eager_link_guards;
 }
 
+extern "C" {
+using HostFn0 = TrampolineResult(HostCallContext *) noexcept;
+using HostFn1 = TrampolineResult(HostCallContext *, uint64_t) noexcept;
+using HostFn2 = TrampolineResult(HostCallContext *, uint64_t,
+                                 uint64_t) noexcept;
+using HostFn3 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t) noexcept;
+using HostFn4 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t) noexcept;
+using HostFn5 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t) noexcept;
+using HostFn6 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t,
+                                 uint64_t) noexcept;
+using HostFn7 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t, uint64_t,
+                                 uint64_t) noexcept;
+using HostFn8 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t, uint64_t,
+                                 uint64_t, uint64_t) noexcept;
+using ErasedHostFn = void();
+using ErasedFnPtr = ErasedHostFn *;
+}
+
+// Erased C-ABI function-pointer type for syscall trampoline dispatch.
+// Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
+// Using a function-pointer type (not void*) keeps the cast chain within
+// the guaranteed fn-ptr <-> fn-ptr reinterpret_cast
+// ([expr.reinterpret.cast]/6).
+template<typename Fn> struct HostFnTraits;
+
+template<> struct HostFnTraits<HostFn0 *> {
+  static constexpr uint8_t kNargs = 0;
+};
+
+template<> struct HostFnTraits<HostFn1 *> {
+  static constexpr uint8_t kNargs = 1;
+};
+
+template<> struct HostFnTraits<HostFn2 *> {
+  static constexpr uint8_t kNargs = 2;
+};
+
+template<> struct HostFnTraits<HostFn3 *> {
+  static constexpr uint8_t kNargs = 3;
+};
+
+template<> struct HostFnTraits<HostFn4 *> {
+  static constexpr uint8_t kNargs = 4;
+};
+
+template<> struct HostFnTraits<HostFn5 *> {
+  static constexpr uint8_t kNargs = 5;
+};
+
+template<> struct HostFnTraits<HostFn6 *> {
+  static constexpr uint8_t kNargs = 6;
+};
+
+template<> struct HostFnTraits<HostFn7 *> {
+  static constexpr uint8_t kNargs = 7;
+};
+
+template<> struct HostFnTraits<HostFn8 *> {
+  static constexpr uint8_t kNargs = 8;
+};
+
+template<typename Fn>
+concept supported_host_fn_ptr =
+    requires { HostFnTraits<std::remove_cvref_t<Fn>>::kNargs; };
+
 // Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list
 // of function pointers to link, or an environment allocator).
@@ -123,7 +196,8 @@ public:
   //
   // Validate link_fn parameters. Returns false if any parameter is invalid.
   static bool validate_link_fn_params(std::string_view module_name,
-                                      std::string_view fn_name, void *fn_ptr)
+                                      std::string_view fn_name,
+                                      ErasedFnPtr fn_ptr)
   {
     return !module_name.empty() && !fn_name.empty() && (fn_ptr != nullptr);
   }

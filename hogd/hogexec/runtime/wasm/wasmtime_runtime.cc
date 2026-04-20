@@ -33,7 +33,7 @@ make_err(SystemErrorCode err)
                            .data_len = 0};
 }
 
-ContractGetResult
+extern "C" ContractGetResult
 wasmtime_contract_get_fn(void *host_call_context_ptr,
                          const uint8_t *hash_ptr) noexcept
 {
@@ -175,8 +175,8 @@ WasmtimeContext::verify_contract(Contract const &contract) const
 
 bool
 WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
-                                     std::string_view fn_name, void *fn_ptr,
-                                     uint8_t nargs)
+                                     std::string_view fn_name,
+                                     ErasedFnPtr fn_ptr, uint8_t nargs)
 {
   assert(global_context_ptr_ != nullptr);
   return wasmtime_global_link_nargs(
@@ -184,8 +184,7 @@ WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
       reinterpret_cast<uint8_t const *>(module_name.data()),
       static_cast<uint32_t>(module_name.size()),
       reinterpret_cast<uint8_t const *>(fn_name.data()),
-      static_cast<uint32_t>(fn_name.size()),
-      reinterpret_cast<void (*)()>(fn_ptr), nargs);
+      static_cast<uint32_t>(fn_name.size()), fn_ptr, nargs);
 }
 
 std::span<std::byte>

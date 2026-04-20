@@ -51,7 +51,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   auto ctx_with_snapshot = ctx;
   ctx_with_snapshot.item_lock_snapshot_cost = snapshot_cost_;
 
-  auto lock_state = lock_state_.load(std::memory_order_relaxed);
+  auto lock_state = lock_state_.load(std::memory_order_acquire);
 
   if (lock_state == kFinalized) {
     return handle_try_atomic_from_finalized(before, after, ctx_with_snapshot);
@@ -164,8 +164,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
         else {
           auto const *inner = change.get_inner<typename lock_t::change_type>();
           CHECK_CONST_PTR(inner);
-          return lock.commit_change(did_finalize, snapshot_cost_, *inner,
-                                    ctx.cost_model);
+          return lock.commit_change(did_finalize, snapshot_cost_, *inner, ctx);
         }
       },
       lock_contents_);
@@ -495,6 +494,11 @@ ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
 std::optional<QueueEntry>
 ItemLock::get_concurrent_entry(uint32_t index) const
 {
+  auto lock_state = lock_state_.load(std::memory_order_acquire);
+  if (lock_state == kUncommitted) {
+    return std::nullopt;
+  }
+
   return std::visit(
       [index](auto const &lock) -> std::optional<QueueEntry> {
         using lock_t = std::decay_t<decltype(lock)>;

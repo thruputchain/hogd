@@ -1,14 +1,22 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <limits>
+#include <optional>
 #include <utility>
 
+#include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#define private public
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#undef private
+#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
@@ -25,6 +33,33 @@ make_dummy_context()
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
   return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
+}
+
+inline HogDBDAO &
+test_dao()
+{
+  static std::optional<Directory> dir;
+  static std::optional<HogDBDAO> dao;
+  if (!dao.has_value()) {
+    auto dir_status = Directory::open_temporary();
+    CHECK(static_cast<bool>(dir_status));
+    dir.emplace(std::move(*dir_status));
+
+    constexpr size_t kHeapSize = 10_MiB;
+    auto db = Database::open(dir->get_path(),
+                             Database::estimate_heap_size(kHeapSize), 0);
+    CHECK(static_cast<bool>(db));
+    dao.emplace(RAMDB(std::move(*db)));
+  }
+
+  return *dao;
+}
+
+inline LockContext
+make_persist_context()
+{
+  static ItemKey key = make_item_key(make_address(1), 0);
+  return LockContext(&test_dao(), 0, key, &kTestCostModel);
 }
 
 } // namespace
@@ -216,7 +251,7 @@ TEST(NNInt128LockTest, MultipleAddsOnValue)
             std::numeric_limits<int128_t>::max() - 200);
   EXPECT_EQ(lock.get_sub_capacity(), 100);
 
-  EXPECT_EQ(lock.commit_change(true, 0, add2, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, add2, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
 
   EXPECT_EQ(lock.get_base_and_delta(),
@@ -247,15 +282,54 @@ TEST(NNInt128LockTest, NegativeBase)
       lock.try_atomic_change_lock(nullptr, &big_add, make_dummy_context())
           .has_value());
 
-  EXPECT_EQ(lock.commit_change(true, 0, big_add, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, big_add, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
-  EXPECT_EQ(lock.commit_change(false, 0, add, &kTestCostModel), 0);
+  EXPECT_EQ(lock.commit_change(false, 0, add, make_dummy_context()), 0);
 
   EXPECT_EQ(lock.get_base_and_delta(),
             (std::pair<int128_t, int128_t>(
                 -100, uint128_t{std::numeric_limits<int128_t>::max()} + 100)));
   EXPECT_EQ(lock.get_add_capacity(), 0);
   EXPECT_EQ(lock.get_sub_capacity(), 0);
+}
+
+TEST(NNInt128LockTest, NegativeBaseRejectsAddPastCapacity)
+{
+  constexpr int128_t kBaseValue = -100;
+  NNInt128Lock lock(kBaseValue);
+
+  NNInt128 small_add(kBaseValue, 100);
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &small_add, make_dummy_context())
+          .has_value());
+
+  NNInt128 large_add(kBaseValue, std::numeric_limits<int128_t>::max());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &large_add, make_dummy_context())
+          .has_value());
+
+  NNInt128 extra_add(kBaseValue, 1);
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &extra_add, make_dummy_context())
+          .has_value());
+}
+
+TEST(NNInt128LockTest, StageCommittedChangesRejectsWrappedOutOfBoundsValue)
+{
+  NNInt128Lock lock(-100);
+  lock.delta_bounds_.delta_.store(std::numeric_limits<int128_t>::min() + 100,
+                                  std::memory_order_relaxed);
+
+  auto &dao = test_dao();
+  auto changes = dao.create_changeset();
+
+  EXPECT_DEATH(
+      {
+        auto ctx = make_persist_context();
+        auto status = lock.stage_committed_changes(ctx, changes);
+        (void)status;
+      },
+      "CHECK FAILED");
 }
 
 } // namespace hogd

@@ -1,11 +1,11 @@
 #include "hogd/hogdb/change_set.h"
 
 #include <cstddef>
-#include <cstdint> // NOLINT(misc-include-cleaner)
 #include <span>
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/byte_arena.h"
 #include "hogd/hogdb/hogdb_dao.h"

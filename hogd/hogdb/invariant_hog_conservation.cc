@@ -1,23 +1,22 @@
 #include "hogd/hogdb/invariant_hog_conservation.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <iterator>
 #include <span>
 #include <utility>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
-#include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -79,10 +78,10 @@ HogConservationInvariant::handle_balance_change(
       return 0;
     }
     assert(item.value().type == kNNInt128);
-    int128_t balance{0};
-    std::ranges::copy(item.value().value, std::begin(std::as_writable_bytes(
-                                              std::span(&balance, 1))));
-    return le_to_cpu(balance);
+    CHECK(item.value().value.size() == sizeof(int128_xdr));
+    auto encoded = std::span<const std::byte, sizeof(int128_xdr)>(
+        item.value().value.data(), sizeof(int128_xdr));
+    return int128_from_xdr_bytes(encoded);
   };
 
   auto before_balance = get_balance(before);
@@ -113,8 +112,7 @@ HogConservationInvariant::handle_address_metadata_item_change(
       assert(false);
       return 0;
     }
-    return cost_model_.get_contract_size_cost(
-        deployed_contract_hash.contract_size);
+    return cost_model_.get_deployment_cost(deployed_contract_hash);
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);

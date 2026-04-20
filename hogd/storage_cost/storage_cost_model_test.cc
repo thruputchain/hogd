@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -59,6 +60,40 @@ TEST(StorageCostModelTest, GetBytestringCostLargeLen)
   int128_t expected = int128_t{12000} + (int128_t{large_len} * int128_t{10});
   int128_t actual = model.get_bytestring_cost(large_len);
   EXPECT_EQ(actual, expected);
+}
+
+TEST(StorageCostModelTest, ContractDeploymentCostIncludesBase)
+{
+  StorageCostModelXdr xdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = ::hogd::to_xdr(int128_t{5000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{10}),
+      .auth_per_key_cost = ::hogd::to_xdr(int128_t{1111}),
+      .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{8}),
+      .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
+      .balance_cost = ::hogd::to_xdr(int128_t{1234}),
+  };
+  StorageCostModel model(xdr);
+
+  DeployedContractHash wasm_hash{.hash = {},
+                                 .contract_size = 100,
+                                 .contract_type = ContractType::kWasmi};
+  EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{13000});
+
+  wasm_hash.contract_size = 0;
+  EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{12000});
+
+  DeployedContractHash native_hash{.hash = {},
+                                   .contract_size = 0,
+                                   .contract_type = ContractType::kNative};
+  EXPECT_EQ(model.get_deployment_cost(native_hash), int128_t{0});
+
+  DeployedContractHash mock_hash{.hash = {},
+                                 .contract_size = 100,
+                                 .contract_type = ContractType::kMockTest};
+  EXPECT_EQ(model.get_deployment_cost(mock_hash), int128_t{0});
 }
 
 } // namespace hogd

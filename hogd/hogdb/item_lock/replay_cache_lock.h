@@ -14,7 +14,6 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -34,7 +33,7 @@ public:
                          const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<ReplayCacheIt> &after,
-                         const StorageCostModel *cost_model);
+                         const LockContext &ctx);
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
@@ -64,6 +63,7 @@ private:
   mutable bool meta_poisoned_{false};
 
   mutable ConcurrentSet<uint128_t> conflicts_;
+  mutable std::atomic<uint64_t> committed_additions_{0};
 
   mutable std::atomic<int32_t> pending_new_heights_{0};
 

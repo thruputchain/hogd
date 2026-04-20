@@ -19,6 +19,13 @@ fn convert_wat_to_wasm(
     let wasm_bytes = wat::parse_str(&wat_content)
         .unwrap_or_else(|e| panic!("Failed to parse {}: {}", wat_filename, e));
 
+    // Instrument with stack limiting
+    let config = groundhog_wasm_meter::Config::default();
+    let wasm_bytes = groundhog_wasm_meter::instrument(&wasm_bytes, &config)
+        .unwrap_or_else(|e| {
+            panic!("Failed to instrument {}: {}", wat_filename, e)
+        });
+
     // Write the WASM file to the build output directory
     fs::write(&wasm_path, wasm_bytes)
         .unwrap_or_else(|e| panic!("Failed to write {}: {}", wasm_filename, e));
@@ -60,5 +67,17 @@ fn main() {
         &out_dir,
         "test_oob_element_segment.wat",
         "oob_element_segment.wasm",
+    );
+    convert_wat_to_wasm(
+        &manifest_dir,
+        &out_dir,
+        "test_param_entrypoint.wat",
+        "param_entrypoint.wasm",
+    );
+    convert_wat_to_wasm(
+        &manifest_dir,
+        &out_dir,
+        "test_simd_v128.wat",
+        "simd_v128.wasm",
     );
 }

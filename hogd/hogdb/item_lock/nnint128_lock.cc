@@ -5,11 +5,10 @@
 #include <cstddef>
 #include <limits>
 
-#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -118,11 +117,12 @@ NNInt128Lock::stage_committed_changes(const LockContext &ctx,
                                       ChangeSet &changes) const
 {
   assert(!ctx.key.is_address_balance());
-  auto [value, of] = overflowing_add(base_, delta_bounds_.get_delta());
-  CHECK(!of);
-  int128_t out = cpu_to_le(value);
+  auto value = wrapping_add(base_, delta_bounds_.get_delta());
+  auto lower_bound = base_ < 0 ? base_ : int128_t{0};
+  CHECK_GE(value, lower_bound);
+  auto encoded = int128_to_xdr_bytes(value);
   auto key = make_contract_data_key(ctx.key.as_bytes());
-  changes.put(key, kNNInt128, byte_view(out));
+  changes.put(key, kNNInt128, encoded);
   return {};
 }
 

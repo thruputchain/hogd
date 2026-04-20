@@ -588,4 +588,58 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   }
 }
 
+// Regression test for issue #1512. An attached native contract with an
+// unknown native_contract_id must be rejected by verify_contract rather
+// than reaching the panic in the deploy path.
+TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
+{
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract malicious_contract(ContractType::kNative);
+  malicious_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto deployer_contract = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+               return {};
+             }}});
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(deployer_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+  auto context = make_context();
+
+  static constexpr ContractAddress kDeployerAddr = test_contract_address(99);
+  Contract deployer_contract(ContractType::kNative);
+  deployer_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+
+  snapshot_server_->impl()->setup_create_contract(deployer_contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      kDeployerAddr,
+      DeployedContractHash{.hash = sha256(deployer_contract),
+                           .contract_size = 0,
+                           .contract_type = ContractType::kNative});
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = kDeployerAddr,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+          .contracts_to_deploy = {malicious_contract},
+      },
+      snapshot, 0, 0, *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.result_);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::ValidationFailure);
+}
+
 } // namespace hogd

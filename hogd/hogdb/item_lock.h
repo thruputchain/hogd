@@ -188,7 +188,9 @@ private:
   uint8_t snapshot_type_ = kItemLockCacheDataTypeNone;
 
   // This version of the implementation uses the mutex up until the first
-  // transaction commits. After that point, lock_contents_ no longer changes
+  // transaction commits. Concurrent-entry readers must treat kUncommitted as
+  // not yet published and return std::nullopt without inspecting
+  // lock_contents_. After publication, lock_contents_ no longer changes
   // between variants, and the contents of the variant can be operated on
   // directly.
   std::atomic<uint32_t> lock_state_ = kUncommitted;

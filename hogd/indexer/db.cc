@@ -890,6 +890,7 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
     // Create IdentifiedEvent
     IdentifiedEvent identified_event;
     identified_event.proposed_tx_hash = tx_hash;
+    identified_event.block_height = block_height;
     identified_event.sequence_number = sequence_number;
     identified_event.emitted_event = event_log.events[sequence_number];
 

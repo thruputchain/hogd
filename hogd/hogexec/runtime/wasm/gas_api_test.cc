@@ -31,7 +31,7 @@ success()
   return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
 }
 
-auto
+extern "C" TrampolineResult
 consume_gas_call(HostCallContext *ctxp) noexcept
 {
   if (!ctxp->runtime->consume_gas(100)) {
@@ -40,7 +40,7 @@ consume_gas_call(HostCallContext *ctxp) noexcept
   return success();
 }
 
-auto
+extern "C" TrampolineResult
 consume_gas_call2(HostCallContext *ctxp) noexcept
 {
   if (!ctxp->runtime->consume_gas(5000)) {

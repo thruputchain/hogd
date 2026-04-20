@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <bit>
 #include <concepts>
 #include <new>
 #include <type_traits>
@@ -167,6 +168,20 @@ overflowing_add(T a, T b)
   return {ret, overflow};
 }
 
+// wrapping_add returns the sum with modulo-2^N semantics.
+template<std::integral T>
+constexpr T
+wrapping_add(T a, T b)
+{
+  if constexpr (std::unsigned_integral<T>) {
+    return a + b;
+  }
+  else {
+    using U = std::make_unsigned_t<T>;
+    return std::bit_cast<T>(std::bit_cast<U>(a) + std::bit_cast<U>(b));
+  }
+}
+
 // overflowing_sub returns a pair of the difference and a boolean indicating if
 // an overflow would occur. If it would, the difference is returned as a
 // wrapped value.
@@ -177,6 +192,20 @@ overflowing_sub(T a, T b)
   T ret;
   bool overflow = __builtin_sub_overflow(a, b, &ret);
   return {ret, overflow};
+}
+
+// wrapping_sub returns the difference with modulo-2^N semantics.
+template<std::integral T>
+constexpr T
+wrapping_sub(T a, T b)
+{
+  if constexpr (std::unsigned_integral<T>) {
+    return a - b;
+  }
+  else {
+    using U = std::make_unsigned_t<T>;
+    return std::bit_cast<T>(std::bit_cast<U>(a) - std::bit_cast<U>(b));
+  }
 }
 
 // overflowing_mul returns a pair of the product and a boolean indicating if an

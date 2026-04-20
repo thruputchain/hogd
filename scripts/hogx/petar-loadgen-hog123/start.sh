@@ -19,6 +19,15 @@ for host in hog1 hog2 hog3; do
 done
 
 "$HOGX" -m 3 config together -a loadgen -t 2
+
+rm -rf ~/.hogx
+# [$HOGX config together] generates additional config files in
+# [$HOGX_HOME/.hogx]. Thus, we wait until after running that command to copy
+# [.hogx] to the home directory. Additionally, due to these additional config
+# files that are generated, we have to copy from [$HOGX_HOME] rather than from
+# [$SCRIPT_DIR].
+cp -R $HOGX_HOME/ ~/.hogx
+
 "$HOGX" -m 3 start -a loadgen --network-id 1
 
 echo "using: export HOGX_HOME=${HOGX_HOME}"

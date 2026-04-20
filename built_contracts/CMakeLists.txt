@@ -4,17 +4,26 @@ cmake_path(RELATIVE_PATH CMAKE_CURRENT_SOURCE_DIR BASE_DIRECTORY ${CMAKE_SOURCE_
 # Add contract loader library
 add_library(contract_loader
   contract_loader.cc
+  ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/wasm/instrumented_bytes.cc
 )
 
 target_link_libraries(contract_loader
   x23
   protocol
+  unified_lib
 )
 
 target_include_directories(contract_loader PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_BINARY_DIR}/hogd/xdr
+  ${CMAKE_SOURCE_DIR}
 )
+
+target_include_directories(contract_loader PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_dependencies(contract_loader generate_wasm_meter_ffi_h)
 
 target_compile_definitions(contract_loader PRIVATE
   CMAKE_ROOT_BINARY_DIR="${CMAKE_BINARY_DIR}"
@@ -24,41 +33,30 @@ add_custom_target(all_wasm_contracts)
 add_custom_target(all_wasm_headers)
 add_dependencies(all_wasm_contracts all_wasm_headers)
 
-# Configure WASM build based on WASM_DEBUG_BACKTRACES flag
+# Configure WASM build flags
 if(WASM_DEBUG_BACKTRACES)
-  set(WASM_FLAGS "-F logging")
-  set(WASM_BUILD_FOLDER "debug")
-  set(WASM_CARGO_RELEASE_FLAG "")
-  set(WASMOPT_DEBUG_FLAG "-g")
+  set(WASM_FLAGS "-F logging,entrypoints")
   message(STATUS "WASM contracts: debug build with backtraces enabled")
 else()
-  set(WASM_FLAGS "")
-  set(WASM_BUILD_FOLDER "release")
-  set(WASM_CARGO_RELEASE_FLAG "--release")
-  set(WASMOPT_DEBUG_FLAG "")
+  set(WASM_FLAGS "-F entrypoints")
   message(STATUS "WASM contracts: release build (minimal size, no backtraces)")
 endif()
 
-# Tell CMake to clean cargo build directories
+# Tell CMake to clean the cargo/groundhog intermediate build directory.
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/spec_build"
-  "${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown"
-  "${CMAKE_CURRENT_BINARY_DIR}/release"
-  "${CMAKE_CURRENT_BINARY_DIR}/debug"
-  "${CMAKE_CURRENT_BINARY_DIR}/.fingerprint"
-  "${CMAKE_CURRENT_BINARY_DIR}/incremental"
+  "${CMAKE_CURRENT_BINARY_DIR}/cargo-target"
 )
 
 set(generated_rs_files)
 
 add_xdr_rs(
-	cxs_roundtrip_rs 
+	cxs_roundtrip_rs
 	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
 	./integration_test_contracts/xdr/roundtrip.x)
 list(APPEND generated_rs_files ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src/roundtrip.rs)
 
 add_xdr_rs(
-	txs_roundtrip_rs 
+	txs_roundtrip_rs
 	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src
 	./integration_test_contracts/xdr/roundtrip.x)
 list(APPEND generated_rs_files ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src/roundtrip.rs)
@@ -76,16 +74,19 @@ add_custom_command(
 )
 add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
-# Build all WASM targets with separate cargo commands in one custom command
+# Build all WASM contracts via groundhog-cli
+# Usage: add_wasm_builds(SPEC_CONTRACTS c1 c2 ... RAW_CONTRACTS c3 c4 ...)
+# SPEC_CONTRACTS produce both .wasm and _spec.json
+# RAW_CONTRACTS produce only .wasm (no #[contract] macro, no embedded spec)
 function(add_wasm_builds)
-  # ARGN contains all the target names passed to the function
-  
+  cmake_parse_arguments(ARG "" "" "SPEC_CONTRACTS;RAW_CONTRACTS" ${ARGN})
+
   # Common dependencies (use stamp file to ensure roundtrip.rs files exist)
-  set(common_depends 
+  set(common_depends
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
     ${roundtrip_rs_stamp})
-  
+
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
   # run cargo update to update the lockfile manually.
@@ -93,170 +94,77 @@ function(add_wasm_builds)
   # This will not fetch crates during the build process; you need to run the fetch script
   # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
-  
-  # Build lists of all outputs and build commands
-  set(all_unoptimized_wasms "")
-  set(all_optimized_wasms "")
+
+  set(all_outputs "")
   set(all_depends ${common_depends})
   set(build_commands "")
 
-  foreach(target_name ${ARGN})
-    list(APPEND all_unoptimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/${WASM_BUILD_FOLDER}/${target_name}.wasm)
-    list(APPEND all_optimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
-    
-    # Get all .rs files but filter out generated roundtrip.rs
-    file(GLOB target_rs_files 
+  foreach(target_name ${ARG_SPEC_CONTRACTS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+
+    file(GLOB target_rs_files
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
     list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
-    
+
     list(APPEND all_depends
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
       ${target_rs_files})
-    
-    # Add individual cargo build command for this target
+
     list(APPEND build_commands
       COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
         ${target_name}
         ${CMAKE_CURRENT_BINARY_DIR}
-        ${WASM_CARGO_RELEASE_FLAG}
         "${WASM_FLAGS}")
   endforeach()
-  
-  # Single custom command that builds all unoptimized WASMs with separate cargo commands
+
+  foreach(target_name ${ARG_RAW_CONTRACTS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+
+    file(GLOB target_rs_files
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+
+    list(APPEND all_depends
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${target_rs_files})
+
+    list(APPEND build_commands
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
+        --no-spec
+        ${target_name}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        "${WASM_FLAGS}")
+  endforeach()
+
   add_custom_command(
-    OUTPUT ${all_unoptimized_wasms}
+    OUTPUT ${all_outputs}
     ${build_commands}
     DEPENDS ${all_depends}
-    COMMENT "Building all WASM contracts with separate cargo invocations"
+    COMMENT "Building all WASM contracts via groundhog-cli"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
-  
-  # Create one target for all unoptimized WASMs
-  add_custom_target(all_unoptimized_wasms DEPENDS ${all_unoptimized_wasms})
 
-  # Run wasm-opt on each WASM individually
-  foreach(target_name ${ARGN})
-    wasmopt_target(
-      ${target_name}_optimized
-      ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/${WASM_BUILD_FOLDER}/${target_name}.wasm
-      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm
-      -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz ${WASMOPT_DEBUG_FLAG})
-    
-    # Make the optimized target depend on the shared unoptimized build
-    add_dependencies(${target_name}_optimized all_unoptimized_wasms)
-    
-    # Create target for each optimized WASM (NOT marked ALL)
-    add_custom_target(${target_name}_wasm DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
-    add_dependencies(${target_name}_wasm ${target_name}_optimized)
-  endforeach()
-  
-  # Create ONE target that builds everything (but wait for it to be marked ALL after headers are set up)
-  add_custom_target(all_wasms_built DEPENDS ${all_optimized_wasms})
+  add_custom_target(all_wasms_built DEPENDS ${all_outputs})
   add_dependencies(all_wasm_contracts all_wasms_built)
 endfunction()
 
-# Build all spec-related binaries (spec JSONs and types XDR) in one cargo invocation
-# Uses a separate target directory to avoid conflicts with WASM builds
-# Usage: add_spec_and_types_generation(
-#   SPEC_TARGETS target1 target2 ...
-#   TYPES_TARGETS target3 target4 ...
-# )
-function(add_spec_and_types_generation)
-  # Parse named arguments
-  cmake_parse_arguments(ARG "" "" "SPEC_TARGETS;TYPES_TARGETS" ${ARGN})
-  
-  set(all_outputs "")
-  set(all_depends "")
-  set(all_bins "")
-  
-  # Build lists for spec targets
-  foreach(target_name ${ARG_SPEC_TARGETS})
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
-    
-    # Get all .rs files but filter out generated roundtrip.rs
-    file(GLOB target_src_rs_files 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
-    list(FILTER target_src_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
-    file(GLOB target_bin_rs_files 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/bin/*.rs)
-    
-    list(APPEND all_depends 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-      ${target_src_rs_files}
-      ${target_bin_rs_files}
-      ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh)
-    list(APPEND all_bins "--bin" "generate_spec_${target_name}")
-  endforeach()
-  
-  # Build lists for types targets
-  foreach(target_name ${ARG_TYPES_TARGETS})
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x)
-    
-    # Get all .rs files but filter out generated roundtrip.rs
-    file(GLOB target_src_rs_files 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
-    list(FILTER target_src_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
-    file(GLOB target_bin_rs_files 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/bin/*.rs)
-    
-    list(APPEND all_depends 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-      ${target_src_rs_files}
-      ${target_bin_rs_files})
-    list(APPEND all_bins "--bin" "generate_types_${target_name}")
-  endforeach()
-  
-  # Add common dependencies (use stamp file to ensure roundtrip.rs files exist)
-  list(APPEND all_depends 
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-    ${roundtrip_rs_stamp})
-  
-  # Build the generation commands list first
-  set(gen_commands "")
-  foreach(target_name ${ARG_SPEC_TARGETS})
-    list(APPEND gen_commands 
-      COMMAND ${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_spec_${target_name}
-              ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
-  endforeach()
-  
-  foreach(target_name ${ARG_TYPES_TARGETS})
-    list(APPEND gen_commands
-      COMMAND ${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_types_${target_name}
-              ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
-              ${target_name})
-  endforeach()
-  
-  # Use a stamp file to ensure this runs exactly once
-  set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/all_specs_and_types.stamp)
-  
-  # Single custom command that builds all binaries and generates all outputs
+# Generate .x file from spec JSON type_defs
+function(add_types_xdr target_name)
   add_custom_command(
-    OUTPUT ${stamp_file}
-    # First, build all spec/types binaries in one cargo invocation
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm_spec.sh ${CMAKE_CURRENT_BINARY_DIR}/spec_build ${all_bins}
-    # Then run each binary to generate its output
-    ${gen_commands}
-    COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
-    DEPENDS ${all_depends}
-    COMMENT "Building all spec/types binaries and generating outputs in one step"
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generate_types_xdr.py
+        ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+        -o ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
+        -n ${target_name}
+    DEPENDS
+      ${CMAKE_CURRENT_SOURCE_DIR}/generate_types_xdr.py
+      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+    COMMENT "Generating ${target_name}.x from spec type_defs"
   )
-  
-  # Create ONE target (NOT ALL) that depends on the stamp file
-  add_custom_target(all_spec_and_types DEPENDS ${stamp_file})
-  
-  foreach(target_name ${ARG_TYPES_TARGETS})
-    add_xdr(${target_name}_hh ./${target_name}.x)
-    # Make sure XDR generation waits for the .x file to be generated
-    add_dependencies(build_${target_name}_hh all_spec_and_types)
-  endforeach()
 endfunction()
 
+# Generate C++ header from spec JSON
 function(add_contract_header target_name)
 
   # Parse any extra includes passed as additional arguments
@@ -273,7 +181,7 @@ function(add_contract_header target_name)
         -n ${target_name}
         -w ${target_name}.wasm
         ${extra_includes}
-    DEPENDS 
+    DEPENDS
       ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.py
       ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
     COMMENT "Generating ${target_name}.h from spec"
@@ -281,44 +189,17 @@ function(add_contract_header target_name)
 
   add_custom_target(${target_name}_header
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h)
-  # Ensure spec is generated before trying to generate header from it
-  add_dependencies(${target_name}_header all_spec_and_types)
+  # Ensure wasm build (which produces the spec) completes first
+  add_dependencies(${target_name}_header all_wasms_built)
 
   # make sure that other targets can depend on the generated headers,
   # not just the wasms
   add_dependencies(all_wasm_headers ${target_name}_header)
 endfunction()
 
-# Build all WASMs in one cargo invocation
+# Build all WASMs (and specs) via groundhog-cli
 add_wasm_builds(
-  fibonacci
-  fibonacci_call
-  cxs_roundtrip
-  txs_roundtrip
-  read_only_test
-  manual_revert_test
-  manual_revert_caller
-  simple_wallet
-  simple_wallet_authclaim
-  sha256_wrapper
-  initial_token_claim
-  itc_erc20
-  authclaim_test
-  hash_bug
-  htlc
-  payment_channel
-  return_fault_test
-  tuple_return
-  no_syscall_test
-  syscall_misc_tests
-  syscall_parse_hardening_test
-  nnint_output_fault_test
-  output_alias_test
-)
-
-# Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
-add_spec_and_types_generation(
-  SPEC_TARGETS
+  SPEC_CONTRACTS
     fibonacci
     fibonacci_call
     cxs_roundtrip
@@ -341,16 +222,40 @@ add_spec_and_types_generation(
     syscall_parse_hardening_test
     nnint_output_fault_test
     output_alias_test
-  TYPES_TARGETS
-    itc_erc20
-    manual_revert_test
-    txs_roundtrip
-    cxs_roundtrip
-    payment_channel
+    calldata_wrapper
+    delegate_call_test
+    ed25519_verify_wrapper
+  RAW_CONTRACTS
+    hash_bug
+    calldata_raw
+    sha256_raw
+    fibonacci_raw
+    nocontract_wallet
 )
 
-# Make all headers wait for all specs to be generated
-add_dependencies(all_wasm_headers all_spec_and_types)
+# Generate .x files from spec JSON type_defs for contracts that define custom types
+add_types_xdr(itc_erc20)
+add_types_xdr(manual_revert_test)
+add_types_xdr(txs_roundtrip)
+add_types_xdr(cxs_roundtrip)
+add_types_xdr(payment_channel)
+
+# XDR .x -> .hh via x23c
+add_xdr(itc_erc20_hh ./itc_erc20.x)
+add_xdr(manual_revert_test_hh ./manual_revert_test.x)
+add_xdr(txs_roundtrip_hh ./txs_roundtrip.x)
+add_xdr(cxs_roundtrip_hh ./cxs_roundtrip.x)
+add_xdr(payment_channel_hh ./payment_channel.x)
+
+# Ensure XDR generation waits for spec JSONs (produced by wasm build)
+add_dependencies(build_itc_erc20_hh all_wasms_built)
+add_dependencies(build_manual_revert_test_hh all_wasms_built)
+add_dependencies(build_txs_roundtrip_hh all_wasms_built)
+add_dependencies(build_cxs_roundtrip_hh all_wasms_built)
+add_dependencies(build_payment_channel_hh all_wasms_built)
+
+# Make all headers wait for all type XDR .hh files
+add_dependencies(all_wasm_headers all_wasms_built)
 
 # Generate contract headers
 add_contract_header(fibonacci)
@@ -384,4 +289,4 @@ add_dependencies(manual_revert_test_header manual_revert_test_hh)
 
 # Create ONE top-level ALL target that triggers everything
 add_custom_target(build_all_contracts ALL)
-add_dependencies(build_all_contracts all_wasm_contracts all_spec_and_types)
+add_dependencies(build_all_contracts all_wasm_contracts)

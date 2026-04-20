@@ -216,7 +216,7 @@ TEST(BalanceLockTest, MultipleAddsOnValue)
             std::numeric_limits<int128_t>::max() - 200);
   EXPECT_EQ(lock.get_sub_capacity(), 100);
 
-  EXPECT_EQ(lock.commit_change(true, 0, add2, &kTestCostModel), 0);
+  EXPECT_EQ(lock.commit_change(true, 0, add2, make_dummy_context()), 0);
 }
 
 TEST(BalanceLockTest, NewBalanceStorageCost)

@@ -13,7 +13,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/contract_result.h"
+#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
@@ -178,16 +178,9 @@ public:
         return {};
       };
 
-      // Wrap an error in CrossExn envelope, matching SDK behavior.
-      // Layout: CXS i32 discriminant + Format-encoded E.
+      // Serialize error as (u64 selector, CXS body) and set as revert buffer.
       auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
-        auto body = Serializer<Format>::serialize(err_value);
-        if (!body.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        }
-        x23::Buf buf;
-        x23::store_cxs_int<int32_t>(buf, kCrossExnContractDiscriminant);
-        buf.append(body->begin(), body->end());
+        auto buf = err_value.serialize();
         ctx.handler().set_return_buffer(std::move(buf), true);
         return {};
       };
@@ -204,12 +197,7 @@ public:
             return do_return(r.ok());
           }
         }
-        if constexpr (std::is_same_v<decltype(r.err()), void>) {
-          return do_revert(std::tuple<>{});
-        }
-        else {
-          return do_revert(r.err());
-        }
+        return do_revert(r.err());
       }
       else {
         // otherwise, return the received value

@@ -25,6 +25,15 @@ TestEventAggregator::open_block(BlockID block_id)
 EventBlockResult
 TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
 {
+  // Wait for all executor handles to close before proceeding,
+  // matching the real event server's wait_for_executors_closed behavior.
+  while (true) {
+    std::scoped_lock lock(mtx_);
+    if (executor_handle_refcounts_[block_id] <= 0) {
+      break;
+    }
+  }
+
   std::scoped_lock lock(mtx_);
   if (!block_refcounts_.contains(block_id)) {
     error("Block {} is not open", block_id);
@@ -42,6 +51,20 @@ TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
   result.root_hash() = root_hash;
   info("Closed block {}, height = {}", block_id, block_height);
   return result;
+}
+
+void
+TestEventAggregator::executor_open_block(BlockID block_id)
+{
+  std::scoped_lock lock(mtx_);
+  executor_handle_refcounts_[block_id]++;
+}
+
+void
+TestEventAggregator::executor_close_block(BlockID block_id)
+{
+  std::scoped_lock lock(mtx_);
+  executor_handle_refcounts_[block_id]--;
 }
 
 RPCError

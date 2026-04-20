@@ -348,7 +348,7 @@ TEST(AuthLockTest, CommitSingleKey)
 
   // Commit (did_finalize = true)
   int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
   EXPECT_EQ(commit_cost, kTestCostModel.get_auth_data_cost(1) - snapshot_cost);
 }
 
@@ -368,7 +368,7 @@ TEST(AuthLockTest, CommitMultipleKeys)
 
   // Commit
   int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
   EXPECT_EQ(commit_cost, kTestCostModel.get_auth_data_cost(3) - snapshot_cost);
 }
 
@@ -387,7 +387,7 @@ TEST(AuthLockTest, CommitWithBaseKeys)
 
   // Commit - should go from 2 keys to 3 keys
   int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
   EXPECT_EQ(commit_cost, kTestCostModel.get_auth_data_cost(3) - snapshot_cost);
   EXPECT_EQ(commit_cost, kTestCostModel.kAuthPerKeyCost);
 }
@@ -407,7 +407,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
                   .has_value());
 
   // Commit (clears exclusive flag)
-  lock.commit_change(true, 0, item1, &kTestCostModel);
+  lock.commit_change(true, 0, item1, make_dummy_context());
 
   // Now another tx can acquire a lock (exclusive flag was cleared)
   auto item2 = make_auth_item(base, {{0, pk}});
@@ -433,7 +433,7 @@ TEST(AuthLockTest, StorageCostWithDeletedKey)
   // Commit the deletion
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(3);
   int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
 
   // After commit, we should have 2 keys (0, 2)
   EXPECT_EQ(commit_cost, kTestCostModel.get_auth_data_cost(2) - snapshot_cost);
@@ -458,7 +458,7 @@ TEST(AuthLockTest, DISABLED_PartialCommit)
           .has_value());
 
   // Commit only tx1
-  lock.commit_change(true, 0, tx1_item, &kTestCostModel);
+  lock.commit_change(true, 0, tx1_item, make_dummy_context());
 
   // Tx2 still holds its lock
   EXPECT_TRUE(
@@ -532,9 +532,9 @@ TEST(AuthLockTest, DISABLED_ConcurrentExclusiveLocks)
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, make_dummy_context())
                   .has_value());
 
-  EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, item1, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(1));
-  EXPECT_EQ(lock.commit_change(false, 0, item2, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(false, 0, item2, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(2) -
                 kTestCostModel.get_auth_data_cost(1));
 }
@@ -554,7 +554,7 @@ TEST(AuthLockTest, AcquireCosts1)
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(3));
 
   // doesn't pay for the nullptr on 4
-  EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, 0, item1, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(2));
 }
 
@@ -585,9 +585,11 @@ TEST(AuthLockTest, DISABLED_AcquireCosts2)
   // pay for new key on 2, doesn't get refund for deleting 0
   EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
 
-  EXPECT_EQ(lock.commit_change(true, snapshot_cost, item1, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(true, snapshot_cost, item1,
+                               make_dummy_context()),
             kTestCostModel.get_auth_data_cost(1) - snapshot_cost);
-  EXPECT_EQ(lock.commit_change(false, snapshot_cost, item2, &kTestCostModel),
+  EXPECT_EQ(lock.commit_change(false, snapshot_cost, item2,
+                               make_dummy_context()),
             kTestCostModel.get_auth_data_cost(2) -
                 kTestCostModel.get_auth_data_cost(1));
 }
@@ -676,7 +678,7 @@ TEST(AuthLockTest, SetNonceConfig)
 
   // Commit the change
   int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
   EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
 
   // Verify the nonce config was set
@@ -718,7 +720,7 @@ TEST(AuthLockTest, SetGasPermissionConfigs)
 
   // Commit the change
   int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
   EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
 
   // Verify the gas configs were set
@@ -774,7 +776,7 @@ TEST(AuthLockTest, NonceConfigRollback)
                   .has_value());
 
   // Commit the rollback (item2)
-  lock.commit_change(false, snapshot_cost, item2, &kTestCostModel);
+  lock.commit_change(false, snapshot_cost, item2, make_dummy_context());
 
   // Verify final state matches item2 (the middle state)
   AddressAuthData result = lock.build_result();
@@ -801,7 +803,7 @@ TEST(AuthLockTest, AllKeysUsed)
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(kMaxSigners));
 
   // Commit
-  int128_t cost = lock.commit_change(true, 0, item, &kTestCostModel);
+  int128_t cost = lock.commit_change(true, 0, item, make_dummy_context());
   EXPECT_EQ(cost, kTestCostModel.get_auth_data_cost(kMaxSigners));
 }
 

@@ -21,7 +21,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/contract_result.h"
+#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -36,9 +36,6 @@
 #include "x23/vec.h"
 
 namespace hogd {
-
-// SDK CrossExn<E> discriminant for the Contract(E) variant.
-constexpr int32_t kCrossExnContractDiscriminant = 0;
 
 // Common utilities for building preset contracts
 
@@ -209,14 +206,8 @@ public:
   }
 
   // Returns nullopt if decoding fails.
-  // TODO(geoff): Right now, this decode_return is only used via invoke_opt,
-  // which is only used in tests.
-  // If we ever want to use this from non-test code, we would
-  // want to more carefully handle the library errors in the SDK
-  // and probably directly mirror the CrossExn structure in the SDK as our
-  // own XDR type.
-  // Leaving the error messages here as error, instead of trace,
-  // to make test failures clear (again, this is only used in tests).
+  // Currently only used via invoke_opt (tests).
+  // Error messages are at error level to make test failures clear.
   template<StringLiteral Name>
   static auto decode_return(std::span<const std::byte> data,
                             bool manually_reverted)
@@ -226,37 +217,13 @@ public:
     return [data, manually_reverted] -> std::optional<return_type> {
       if constexpr (is_contract_result_type<return_type>) {
         if (manually_reverted) {
-          // Abort buffers contain CXS-encoded CrossExn<E>.
-          // Layout: i32 discriminant (0=Contract, 1=Library, 2=Unknown)
-          // followed by the CXS-encoded variant payload.
-          std::span<const uint8_t> data_u8(reinterpret_cast<const uint8_t *>(
-                                               data.data()),
-                                           data.size());
-          int32_t discriminant;
-          try {
-            discriminant = x23::load_cxs_int<int32_t>(data_u8);
-          } catch (const x23::XdrException &e) {
-            error("Decode Return Failed: Could not parse CrossExn "
-                  "discriminant: {}",
-                  e.what());
-            return std::nullopt;
-          }
-          if (discriminant != kCrossExnContractDiscriminant) {
-            error("Decode Return: CrossExn discriminant {} is not Contract({})",
-                  discriminant, kCrossExnContractDiscriminant);
-            return std::nullopt;
-          }
-          std::span<const std::byte> remaining(
-              reinterpret_cast<const std::byte *>(data_u8.data()),
-              data_u8.size());
-          auto out = Serializer<kSerializationFormat>::template deserialize<
-              typename return_type::err_type>(remaining);
-          if (!out.has_value()) {
-            error("Decode Return Failed: Failed to deserialize return error "
-                  "type");
-            return std::nullopt;
-          }
-          return return_type::make_err(*out);
+          // New format: abort buffer contains CXS-encoded (u64 selector, Buf
+          // body). ContractErrorType parses selector+body and dispatches
+          // internally.
+          ReturnBuffer abort_buf(
+              reinterpret_cast<const uint8_t *>(data.data()),
+              reinterpret_cast<const uint8_t *>(data.data()) + data.size());
+          return return_type::make_err(std::move(abort_buf));
         }
         // ok type
         auto out = Serializer<kSerializationFormat>::template deserialize<

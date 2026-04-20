@@ -2,6 +2,7 @@ add_subdirectory(crypto)
 add_subdirectory(wasmi)
 add_subdirectory(wasmtime)
 add_subdirectory(contract_types)
+add_subdirectory(wasm_meter)
 
 include(cmake/check_rust_version.cmake)
 
@@ -13,13 +14,8 @@ else()
     message(STATUS "sccache not found - Rust builds will not use caching")
 endif()
 
-set(CRATE_TYPE "staticlib")
-if (ENABLE_TEST_FFI)
-  set(CRATE_TYPE "cdylib")
-endif()
-
 # Import targets defined in the workspace manifest `Cargo.toml` file
-corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES ${CRATE_TYPE} LOCKED FROZEN)
+corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES staticlib LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
 if(SCCACHE_EXECUTABLE)
     corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true RUSTC_WRAPPER=${SCCACHE_EXECUTABLE})

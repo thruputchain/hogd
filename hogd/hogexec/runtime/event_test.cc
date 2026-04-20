@@ -183,7 +183,7 @@ TEST_F(EventTest, EventSuccess)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
@@ -296,12 +296,14 @@ TEST_F(EventTest, BadEventInputs)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
   auto tx_event_log = get_tx_event_log(tx_id);
-  ASSERT_FALSE(tx_event_log.has_value());
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log.value().exec_result, ExecResult::ExecResultOK);
+  ASSERT_TRUE(tx_event_log.value().events.empty());
 }
 
 TEST_F(EventTest, EventLengthIncludesTopics)
@@ -376,7 +378,7 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 
@@ -385,6 +387,206 @@ TEST_F(EventTest, EventLengthIncludesTopics)
   ASSERT_EQ(tx_event_log->events.size(), 1);
   ASSERT_EQ(tx_event_log->events[0].num_topics, 1);
   ASSERT_EQ(tx_event_log->events[0].serialized_event.size(), kMaxEventLength);
+}
+
+TEST_F(EventTest, EventCountPerTransactionLimit)
+{
+  auto native_contract_0 = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             const std::string event_data = "event-count-limit";
+
+             for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+               auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   std::as_bytes(std::span(event_data)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
+               }
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+             }
+
+             auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+                 static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 std::as_bytes(std::span(event_data)));
+             if (!overflow_status.has_value()) {
+               return InvokeError{InvokeErrorCode::Unrecoverable};
+             }
+             if (overflow_status.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+  auto contract_0_addr = make_contract_address(0xFF);
+  write_deployment(contract_0_addr, contract_0);
+  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_0_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto r = handler.try_commit_transaction();
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  advance_block();
+
+  auto tx_event_log = get_tx_event_log(tx_id);
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log->events.size(), kMaxEventsPerTransaction);
+}
+
+TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
+{
+  constexpr uint32_t kParentEventCount = 600;
+  constexpr uint32_t kChildEventCount =
+      kMaxEventsPerTransaction - kParentEventCount;
+
+  ContractAddress addr_child = make_contract_address(0xFF);
+  ContractAddress addr_parent = make_contract_address(0xFE);
+
+  auto native_contract_child = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             const std::string event_data = "child-event-count-limit";
+
+             for (uint32_t i = 0; i < kChildEventCount; ++i) {
+               auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   std::as_bytes(std::span(event_data)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
+               }
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+             }
+
+             auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+                 static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 static_cast<SHA256Hash const *>(nullptr),
+                 std::as_bytes(std::span(event_data)));
+             if (!overflow_status.has_value()) {
+               return InvokeError{InvokeErrorCode::Unrecoverable};
+             }
+             if (overflow_status.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+
+             return {};
+           }}});
+
+  auto native_contract_parent = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [addr_child](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             const std::string event_data = "parent-event-count-limit";
+
+             for (uint32_t i = 0; i < kParentEventCount; ++i) {
+               auto status = ctx.syscall<SyscallNo::kLogEvent>(
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   static_cast<SHA256Hash const *>(nullptr),
+                   std::as_bytes(std::span(event_data)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::Unrecoverable};
+               }
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+             }
+
+             auto invoke_status = [&]() {
+               RuntimeMemoryLength output_return_buffer_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   addr_child, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   std::to_underlying(InvokeFlag::None),
+                   output_return_buffer_len);
+             }();
+             if (!invoke_status.has_value()) {
+               return InvokeError{InvokeErrorCode::Unrecoverable};
+             }
+             if (invoke_status.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_child));
+  contract_map.emplace(1, std::move(native_contract_parent));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto child_contract = make_native_contract(0);
+  auto parent_contract = make_native_contract(1);
+  write_contract(child_contract);
+  write_contract(parent_contract);
+  write_deployment(addr_child, child_contract);
+  write_deployment(addr_parent, parent_contract);
+  setup_grant_storage_token(addr_child, 1'000'000'000);
+  setup_grant_storage_token(addr_parent, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = addr_parent,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto r = handler.try_commit_transaction();
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  advance_block();
+
+  auto tx_event_log = get_tx_event_log(tx_id);
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log->events.size(), kMaxEventsPerTransaction);
 }
 
 TEST_F(EventTest, EventWithRevertingFrames)
@@ -662,7 +864,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto r = handler.try_commit_transaction();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   // Part 2: manual-revert entry alone
   EphemeralTxIdentifier tx_id_2;
@@ -683,7 +885,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto r2 = handler2.try_commit_transaction();
   ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
-  ASSERT_TRUE(handler2.emit_events()());
+  ASSERT_TRUE(
+      handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted)());
 
   advance_block();
 
@@ -714,7 +917,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
             make_vec<kMaxEventLength>("third_event"));
 
   auto tx_event_log_2 = get_tx_event_log(tx_id_2);
-  ASSERT_FALSE(tx_event_log_2.has_value());
+  ASSERT_TRUE(tx_event_log_2.has_value());
+  ASSERT_EQ(tx_event_log_2.value().exec_result,
+            ExecResult::ExecResultTxRootFrameReverted);
+  ASSERT_TRUE(tx_event_log_2.value().events.empty());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

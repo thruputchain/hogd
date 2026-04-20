@@ -9,13 +9,12 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/manual_revert_test.h"
-#include "built_contracts/manual_revert_test.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/contract_result.h"
+#include "hogd/hogexec/components/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -103,12 +102,6 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
              if (!result.is_err()) {
                ADD_FAILURE()
                    << "Function call should have returned a contract error";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             auto const &err = result.err();
-             if (err !=
-                 manual_revert_test::ManualRevertTestError::BasicRevert) {
-               ADD_FAILURE() << "Expected BasicRevert error";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 

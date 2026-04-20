@@ -19,37 +19,37 @@ namespace hogd {
 
 namespace {
 
-TrampolineResult
+extern "C" TrampolineResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/) noexcept
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 throw_validation_error(HostCallContext * /*unused*/) noexcept
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure});
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 throw_abort_transaction(HostCallContext * /*unused*/) noexcept
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon});
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 good_call(HostCallContext * /*unused*/) noexcept
 {
   return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 exit_call(HostCallContext * /*unused*/) noexcept
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Exit});
 }
 
-TrampolineResult
+extern "C" TrampolineResult
 return_syscall(HostCallContext * /*unused*/) noexcept
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Return});
@@ -58,7 +58,7 @@ return_syscall(HostCallContext * /*unused*/) noexcept
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
-TrampolineResult
+extern "C" TrampolineResult
 consume_too_much_gas(HostCallContext *context) noexcept
 {
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
@@ -70,7 +70,7 @@ Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
-TrampolineResult
+extern "C" TrampolineResult
 reentrance(HostCallContext * /*unused*/) noexcept
 {
   reentrance_hit = true;

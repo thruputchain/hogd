@@ -7,7 +7,8 @@ members = [
     "contract_types",
     "common",
     "synchronized_map",
-    "test_ffi_bindings"
+    "test_ffi_bindings",
+    "wasm_meter"
 ]
 resolver = "2"
 
@@ -21,6 +22,7 @@ wasmtime = { version = "42.0.0", features = ["winch", "runtime", "cranelift", "p
 siphasher = { version = "1.0.1", default-features = false }
 hogexec-internal = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git", package = "hogexec-internal" }
 groundhog-xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git", features = ["xdrs"] }
+groundhog-wasm-meter = { version = "0.3.0", registry = "groundhog" }
 
 # Shared optimization profiles
 [profile.release]

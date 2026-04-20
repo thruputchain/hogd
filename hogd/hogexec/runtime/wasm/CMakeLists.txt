@@ -42,8 +42,33 @@ target_link_libraries(
   hogd_interface
 )
 
+add_dependencies(
+  wasm_runtime_test_objects
+  generate_wasm_meter_ffi_h
+)
+
 target_include_directories(
   wasm_runtime_test_objects
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_library(wasm_meter_objects OBJECT
+  instrumented_bytes.cc
+)
+
+target_link_libraries(
+  wasm_meter_objects
+  hogd_interface
+)
+
+add_dependencies(
+  wasm_meter_objects
+  generate_wasm_meter_ffi_h
+)
+
+target_include_directories(
+  wasm_meter_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
@@ -52,6 +77,7 @@ add_executable(
   wasm_runtime_test
   wasm_runtime_test_main.cc
   $<TARGET_OBJECTS:wasm_runtime_test_objects>
+  $<TARGET_OBJECTS:wasm_meter_objects>
 )
 
 target_link_libraries(
@@ -122,6 +148,18 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_large_memory.wasm
 )
 
+wat2wasm_target(
+  test_wrong_import_type_wasm
+  wat/test_wrong_import_type.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_wrong_import_type.wasm
+)
+
+wat2wasm_target(
+  test_param_entrypoint_wasm
+  wat/test_param_entrypoint.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_param_entrypoint.wasm
+)
+
 add_dependencies(
   wasm_runtime_test_objects
   all_wasm_headers
@@ -138,5 +176,7 @@ add_dependencies(
   test_no_start_wasm
   test_oob_data_segment_wasm
   test_oob_element_segment_wasm
+  test_wrong_import_type_wasm
+  test_param_entrypoint_wasm
   all_wasm_contracts
 )

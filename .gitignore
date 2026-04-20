@@ -1,10 +1,12 @@
 **/.DS_STORE
 *.a
+*.codex
 *.combined
 *.core
 *.d
 *.dev
 *.json
+*.pyc
 !.devcontainer/devcontainer.json
 *.log
 *.o
@@ -14,6 +16,7 @@
 .cache
 .ccls-cache
 .venv
+__pycache__/
 .cproject
 .nfs*
 .project

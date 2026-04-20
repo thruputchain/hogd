@@ -768,18 +768,15 @@ SystemCallHandler::get_proposal_data() const
 }
 
 x23::Async<SystemStatus<void>>
-SystemCallHandler::emit_events()
+SystemCallHandler::emit_events(ExecResult exec_result)
 {
-  assert(last_frame_.has_value());
-  assert(cumulative_invoke_result_.is_root_success());
-  assert(root_invoke_succeeded_);
-  auto events = last_frame_.value().extract_events();
-  if (events.empty()) {
-    trace("No events to emit, skipping emit_events RPC");
-    co_return SystemStatus<void>{};
-  }
+  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded_);
+  auto events = (root_invoke_succeeded_ && last_frame_.has_value())
+                    ? last_frame_.value().extract_events()
+                    : x23::Vec<TxEmittedEvent>{};
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_source_tx_hash(),
+      .exec_result = exec_result,
       .events = std::move(events),
   });
 }
@@ -838,6 +835,9 @@ SystemCallHandler::log_event(uint32_t num_topics,
   }
 
   if (data.size() > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (invocation_frame_stack_.event_count() >= kMaxEventsPerTransaction) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -1312,7 +1312,9 @@ SystemCallHandler::get_native_token_balance(
   }
 
   int128_t balance = *base + from_xdr(balance_item->add_value_);
-  assert(balance >= 0);
+  if (balance < 0) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   return balance;
 }
 

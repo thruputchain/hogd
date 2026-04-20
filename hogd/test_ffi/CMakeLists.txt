@@ -115,20 +115,6 @@ elseif(UNIX)
   target_link_options(test_ffi PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
-# Set rpath so test_ffi can find the Rust cdylib in the same directory.
-# Windows doesn't need this - it searches the DLL's directory by default.
-if(APPLE)
-  set_target_properties(test_ffi PROPERTIES
-    BUILD_RPATH "@loader_path"
-    INSTALL_RPATH "@loader_path"
-  )
-elseif(UNIX)
-  set_target_properties(test_ffi PROPERTIES
-    BUILD_RPATH "$ORIGIN"
-    INSTALL_RPATH "$ORIGIN"
-  )
-endif()
-
 # Tests link against the object files directly so they can reach internal
 # C++ symbols that the dylib intentionally hides.
 add_executable(

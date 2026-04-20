@@ -98,6 +98,23 @@ impl WasmtimeRuntime {
                 return Err(SystemErrorCode::kSystemUnrecoverable);
             }
         };
+        let stack_limit_global = match instance
+            .get_global(&mut store, "__groundhog_stack_limit")
+        {
+            Some(g) => g,
+            None => {
+                eprintln!("Unrecoverable: instrumented module missing __groundhog_stack_limit");
+                return Err(SystemErrorCode::kSystemUnrecoverable);
+            }
+        };
+        // 4096 = 1/4 of max_wasm_stack (16KB) configured in global_context.rs
+        if stack_limit_global
+            .set(&mut store, wasmtime::Val::I64(4096))
+            .is_err()
+        {
+            eprintln!("Unrecoverable: failed to set __groundhog_stack_limit");
+            return Err(SystemErrorCode::kSystemUnrecoverable);
+        }
         Ok(Some(Self { store, instance }))
     }
 
@@ -111,6 +128,16 @@ impl WasmtimeRuntime {
                 );
             }
         };
+
+        let func_type = func.ty(&self.store);
+        if func_type.params().len() != 0 || func_type.results().len() != 0 {
+            debug_log!(eprintln!(
+                "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
+            ));
+            return WasmtimeInvokeResult::error(
+                InvokeErrorCode::kInvokeDeterministic,
+            );
+        }
 
         match func.call(&mut self.store, &[], &mut []) {
             Ok(_) => WasmtimeInvokeResult::success(),
@@ -220,6 +247,10 @@ impl NewWasmtimeRuntimeResult {
             return None;
         }
         Some(self.runtime_pointer)
+    }
+
+    pub fn err_code(&self) -> i32 {
+        self.err_code
     }
 }
 

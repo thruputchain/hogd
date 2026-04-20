@@ -186,4 +186,59 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
             AuthErrorCode::kAuthSuccess);
 }
 
+TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
+{
+  constexpr size_t kNumAddresses = 4;
+  constexpr size_t kTxsPerAddress = 16;
+  constexpr size_t kTotalTxs = kNumAddresses * kTxsPerAddress;
+  constexpr size_t kMaxParallelism = 4;
+
+  ContractAddress addresses[kNumAddresses];
+  std::pair<PublicKey, SecretKey> keys[kNumAddresses];
+
+  for (size_t i = 0; i < kNumAddresses; i++) {
+    addresses[i] = make_test_address(static_cast<uint8_t>(20 + i));
+
+    auto [pk, sk] = make_key_pair();
+    keys[i] = {pk, sk};
+
+    AddressAuthData auth_data{};
+    add_pk_to_auth_data(auth_data, 0, pk);
+    auth_data.nonce_config.accepted_keys = 1 << 0;
+    auth_data.nonce_config.required_weight = 1;
+    auth_data.gas_permissions.push_back(GasPermissionConfig{
+        .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+
+    mock_db().set(addresses[i], auth_data);
+  }
+
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  x23::Vec<SignedTransaction> stx_vec;
+  for (size_t i = 0; i < kTotalTxs; i++) {
+    const size_t addr_idx = i % kNumAddresses;
+
+    Transaction tx{};
+    tx.invocation.invoked_address = addresses[addr_idx];
+    tx.auth_claims.push_back(make_self_individual_key_claim(0));
+
+    SignedTransaction stx{};
+    stx.tx = tx;
+    stx.signatures.push_back(make_signature(keys[addr_idx].second, tx, 0, 0));
+    stx_vec.push_back(std::move(stx));
+  }
+
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  const auto result =
+      auth_server().verify_transactions(0, stx_span, kMaxParallelism)();
+
+  ASSERT_EQ(result.size(), kTotalTxs);
+  for (AuthErrorCode status : result) {
+    EXPECT_EQ(status, AuthErrorCode::kAuthSuccess);
+  }
+}
+
 } // namespace hogd

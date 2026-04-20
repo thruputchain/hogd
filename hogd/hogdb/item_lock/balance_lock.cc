@@ -4,12 +4,10 @@
 #include <cstddef>
 
 #include "db_sched.hh"
-#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -104,9 +102,9 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
     changes.put(hog_age_key, 0, age_buf);
   }
 
-  int128_t encoded = cpu_to_le(value);
+  auto encoded = int128_to_xdr_bytes(value);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kBalance);
-  changes.put(key, kNNInt128, byte_view(encoded));
+  changes.put(key, kNNInt128, encoded);
   return {};
 }
 

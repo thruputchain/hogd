@@ -148,14 +148,23 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 {
   BlockHeight current_height =
       co_await dbauth_client_.subscribe_to_auth_data_changes(card);
-  CHECK_EQ(current_height_futex_.load(), kUninitializedHeight);
   if (current_height != -1) {
-    current_height_futex_.store(current_height);
-    info("initializing auth server to height {}", current_height);
-    // There should be no one waiting on [current_height_futex_] as we are
-    // setting [current_height_futex_] in the initialization path, so we are
-    // deliberately not calling [current_height_futex_.broadcast()] after
-    // storing a value to it.
+    bool initialized = current_height_futex_.rmw([&](auto &value) {
+      if (value == kUninitializedHeight) {
+        value = current_height;
+        return true;
+      }
+      return false;
+    });
+    if (initialized) {
+      info("initializing auth server to height {}", current_height);
+      current_height_futex_.broadcast(&default_threadpool());
+    }
+    else {
+      info("auth server already initialized to height {} by concurrent "
+           "update, intro height was {}",
+           current_height_futex_.load(), current_height);
+    }
   }
   else {
     info("not initializing auth server height");
@@ -233,7 +242,8 @@ AuthServer::verify_transactions(BlockHeight height,
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           std::unordered_map<ContractAddress, AddressAuthData> &auth_data,
+           const std::unordered_map<ContractAddress, AddressAuthData>
+               &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -244,8 +254,9 @@ AuthServer::verify_transactions(BlockHeight height,
             }
 
             const ContractAddress &account = tx.tx.invocation.invoked_address;
-            CHECK(auth_data.contains(account));
-            AddressAuthData &source_auth_data = auth_data[account];
+            const auto account_it = auth_data.find(account);
+            CHECK(account_it != auth_data.end());
+            const AddressAuthData &source_auth_data = account_it->second;
 
             // Get the relevant contracts.
             std::unordered_set<ContractAddress> relevant_contracts =
@@ -253,8 +264,9 @@ AuthServer::verify_transactions(BlockHeight height,
             std::unordered_map<ContractAddress, const AddressAuthData *>
                 aux_auth_data;
             for (const ContractAddress &contract : relevant_contracts) {
-              CHECK(auth_data.contains(contract));
-              aux_auth_data[contract] = &auth_data[contract];
+              const auto contract_it = auth_data.find(contract);
+              CHECK(contract_it != auth_data.end());
+              aux_auth_data[contract] = &contract_it->second;
             }
 
             AuthVerifyStatus<void> verify_result =

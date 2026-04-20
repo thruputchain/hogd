@@ -73,9 +73,8 @@ public:
   }
 
   // Link a function to the global context
-  template<std::same_as<uint64_t>... Args>
-  bool link_fn(std::string_view module_name, std::string_view fn_name,
-               TrampolineResult (*f)(HostCallContext *, Args...) noexcept)
+  template<typename Fn> requires supported_host_fn_ptr<Fn>
+  bool link_fn(std::string_view module_name, std::string_view fn_name, Fn f)
   {
     assert(!context_); // don't link functions after a context has been created
     if (std::holds_alternative<WasmiGlobalContext>(global_context_)) {

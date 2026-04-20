@@ -1,8 +1,10 @@
+#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -19,9 +21,11 @@
 #include "transaction.hh"
 #include "types.hh"
 
+#include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/lthash16.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
@@ -29,6 +33,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 
@@ -109,6 +114,45 @@ protected:
     EXPECT_EQ(incremental_hash, full_hash);
   }
 
+  template<typename F>
+  DbHash commit_block_and_return_db_hash(BlockHeight height, F &&fn)
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   height);
+    bool acquired_reference = block_tx.try_acquire_reference();
+    EXPECT_TRUE(acquired_reference);
+    if (!acquired_reference) {
+      return {};
+    }
+    InvokeTX invoke_tx(block_tx);
+
+    fn(invoke_tx);
+
+    bool synced_balances = static_cast<bool>(invoke_tx.sync_balance_locks());
+    EXPECT_TRUE(synced_balances);
+    if (!synced_balances) {
+      return {};
+    }
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    EXPECT_TRUE(hash_result.has_value());
+    if (!hash_result.has_value()) {
+      return {};
+    }
+    DbHash incremental_hash = *hash_result;
+    bool committed = static_cast<bool>(block_tx.get().commit());
+    EXPECT_TRUE(committed);
+    if (!committed) {
+      return {};
+    }
+    EXPECT_EQ(incremental_hash, db_.compute_full_db_hash());
+    return incremental_hash;
+  }
+
   void setup_contract_address(const Address &addr)
   {
     ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
@@ -125,6 +169,15 @@ constexpr ItemKey
 make_key(size_t addr, size_t item)
 {
   return make_item_key(make_address(addr), item);
+}
+
+std::array<std::byte, sizeof(int128_t)>
+raw_int128_le_bytes(int128_t value)
+{
+  int128_t le = cpu_to_le(value);
+  std::array<std::byte, sizeof(int128_t)> out{};
+  std::memcpy(out.data(), &le, out.size());
+  return out;
 }
 
 constexpr uint64_t kAddress = 0xdeadbeef;
@@ -274,6 +327,84 @@ TEST_F(HogDBTest, ItemLockCacheDataBalance)
   EXPECT_EQ(100000, rbalance->second.get_cached_balance().value());
 }
 
+TEST_F(HogDBTest, NNIntAndBalancePersistenceUseCanonicalXdrBytes)
+{
+  constexpr int128_t kNNIntValue =
+      (int128_t{0x0102030405060708LL} << 64) | 0x1112131415161718ULL;
+  ItemKey item_key = make_key(kAddress + 20, 7);
+
+  ASSERT_TRUE(db_.write_nnint128(item_key, kNNIntValue));
+
+  auto raw_item = db_.read_contract_data_item(item_key);
+  ASSERT_TRUE(raw_item);
+  ASSERT_EQ(raw_item->type, kNNInt128);
+  ASSERT_EQ(raw_item->value.size(), sizeof(int128_xdr));
+
+  auto canonical_item_bytes = int128_to_xdr_bytes(kNNIntValue);
+  auto raw_item_bytes = raw_int128_le_bytes(kNNIntValue);
+  EXPECT_TRUE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                         canonical_item_bytes.begin()));
+  EXPECT_FALSE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                          raw_item_bytes.begin()));
+
+  auto reread_item = db_.read_nnint128(item_key);
+  ASSERT_TRUE(reread_item);
+  EXPECT_EQ(*reread_item, kNNIntValue);
+
+  auto cached_item =
+      db_.get_charged_storage_cost_and_cache_data(item_key, &cost_model_);
+  ASSERT_TRUE(cached_item);
+  EXPECT_EQ(cached_item->first, cost_model_.get_nnint_cost());
+  ASSERT_TRUE(cached_item->second.is_cached_nnint128_base());
+  EXPECT_EQ(cached_item->second.get_cached_nnint128_base(), kNNIntValue);
+
+  const Address kBalanceAddr = make_address(kAddress + 21);
+  constexpr int128_t kBalanceValue =
+      (int128_t{0x2122232425262728LL} << 64) | 0x3132333435363738ULL;
+
+  ASSERT_TRUE(db_.write_address_balance(kBalanceAddr, kBalanceValue));
+
+  auto balance_key = make_address_key(kBalanceAddr, Prefix::kBalance);
+  auto raw_balance =
+      db_.get_ramdb().get_if_type(std::as_bytes(std::span(balance_key)),
+                                  kNNInt128);
+  ASSERT_TRUE(raw_balance);
+  ASSERT_EQ(raw_balance->size(), sizeof(int128_xdr));
+
+  auto canonical_balance_bytes = int128_to_xdr_bytes(kBalanceValue);
+  auto raw_balance_bytes = raw_int128_le_bytes(kBalanceValue);
+  EXPECT_TRUE(std::equal(raw_balance->begin(), raw_balance->end(),
+                         canonical_balance_bytes.begin()));
+  EXPECT_FALSE(std::equal(raw_balance->begin(), raw_balance->end(),
+                          raw_balance_bytes.begin()));
+
+  auto reread_balance = db_.read_address_balance(kBalanceAddr);
+  ASSERT_TRUE(reread_balance);
+  EXPECT_EQ(*reread_balance, kBalanceValue);
+}
+
+TEST_F(HogDBTest, NegativeBaseConcurrentAddsPersistMaxValue)
+{
+  constexpr int128_t kBaseValue = -100;
+  ItemKey item_key = make_key(kAddress + 22, 7);
+  LockContext ctx(&db_, BlockHeight{1}, item_key, &cost_model_);
+  NNInt128Lock lock(kBaseValue);
+
+  NNInt128 large_add(kBaseValue, std::numeric_limits<int128_t>::max());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &large_add, ctx));
+
+  NNInt128 small_add(kBaseValue, 100);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &small_add, ctx));
+
+  auto changes = db_.create_changeset();
+  ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+  ASSERT_TRUE(db_.apply(changes));
+
+  auto reread_value = db_.read_nnint128(item_key);
+  ASSERT_TRUE(reread_value);
+  EXPECT_EQ(*reread_value, std::numeric_limits<int128_t>::max());
+}
+
 TEST_F(HogDBTest, ItemLockCacheDataNoBalance)
 {
   ItemKey ikey = make_address_balance_item_key(make_address(kAddress));
@@ -318,11 +449,11 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
       invoke_tx.request_nnint128(make_address_balance_item_key(addr2), 100000,
                                  std::to_underlying(StorageDeltaFlags::None)));
 
-  ASSERT_TRUE(invoke_tx.request_deploy_contract(
-      addr3,
-      DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
-  int128_t cost =
-      cost_model_.get_contract_size_cost(10) + cost_model_.get_balance_cost();
+  DeployedContractHash deployed_hash{.hash = sha256(contract),
+                                     .contract_size = 10};
+  ASSERT_TRUE(invoke_tx.request_deploy_contract(addr3, deployed_hash));
+  int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
+                  cost_model_.get_balance_cost();
   CHECK(cost < 100000); // for the test, given the above constant
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr3), -cost,
@@ -443,6 +574,39 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   ASSERT_TRUE(final_data_h11);
   ASSERT_EQ(1, final_data_h11->nonces.size());
   EXPECT_EQ(102, final_data_h11->nonces[0]);
+}
+
+TEST_F(HogDBTest, ReplayCacheMaxExpiryHeightStageAndApply)
+{
+  // Regression for issue #1447: stage_committed_changes must not overflow
+  // when an active replay-cache height equals INT64_MAX.
+  constexpr BlockHeight kMaxHeight = std::numeric_limits<BlockHeight>::max();
+  BlockHeight current_height = 9;
+  auto rckey = make_replay_cache_item_key(make_address("abcd"));
+
+  ItemChange c(ReplayCacheIt(Uniquifier(kMaxHeight, 7)));
+  ItemLock lock(0);
+
+  LockContext ctx(&db_, current_height, rckey, &cost_model_);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &c, ctx));
+  (void)lock.commit_change(c, ctx);
+
+  auto changes = db_.create_changeset();
+  ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+  ASSERT_TRUE(db_.apply(changes));
+
+  auto data =
+      db_.read_address_replay_cache_data(rckey.get_address(), kMaxHeight);
+  ASSERT_TRUE(data);
+  ASSERT_EQ(1U, data->nonces.size());
+  EXPECT_EQ(7U, data->nonces[0]);
+
+  auto meta = db_.read_address_replay_cache_meta(rckey.get_address());
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(1, meta->size);
+  ASSERT_EQ(1U, meta->heights.size());
+  EXPECT_EQ(kMaxHeight, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
 }
 
 TEST_F(HogDBTest, BalanceTransferReducesByCost)
@@ -719,6 +883,126 @@ TEST_F(HogDBTest, DbHashDeltaNNInt128LockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_nnint128(
         key, 321, std::to_underlying(StorageDeltaFlags::None)));
   });
+}
+
+TEST_F(HogDBTest, CommittedLocksPersistCanonicalXdrBytes)
+{
+  Address balance_addr = make_address(kAddress + 60);
+  ASSERT_TRUE(db_.write_address_balance(balance_addr, 10'000));
+
+  commit_block_and_return_db_hash(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        make_address_balance_item_key(balance_addr), 123,
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto balance_key = make_address_key(balance_addr, Prefix::kBalance);
+  auto raw_balance =
+      db_.get_ramdb().get_if_type(std::as_bytes(std::span(balance_key)),
+                                  kNNInt128);
+  ASSERT_TRUE(raw_balance);
+  EXPECT_TRUE(std::equal(raw_balance->begin(), raw_balance->end(),
+                         int128_to_xdr_bytes(10'123).begin()));
+  EXPECT_FALSE(std::equal(raw_balance->begin(), raw_balance->end(),
+                          raw_int128_le_bytes(10'123).begin()));
+
+  Address contract_addr = make_address(kAddress + 61);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 9);
+
+  commit_block_and_return_db_hash(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_nnint128(
+        key, 321, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto raw_item = db_.read_contract_data_item(key);
+  ASSERT_TRUE(raw_item);
+  EXPECT_TRUE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                         int128_to_xdr_bytes(321).begin()));
+  EXPECT_FALSE(std::equal(raw_item->value.begin(), raw_item->value.end(),
+                          raw_int128_le_bytes(321).begin()));
+}
+
+TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
+{
+  Address contract_addr = make_address(kAddress + 62);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 10);
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto balance_key = make_address_key(contract_addr, Prefix::kBalance);
+  DbHash base_hash = db_.compute_full_db_hash();
+  constexpr int128_t kInitialBalance = 10'000'000;
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  ASSERT_TRUE(
+      invoke_tx.request_nnint128(key, 321,
+                                 std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  auto hash_result = block_tx.get().close(base_hash);
+  ASSERT_TRUE(hash_result.has_value());
+  DbHash incremental_hash = *hash_result;
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto final_balance = db_.read_address_balance(contract_addr);
+  ASSERT_TRUE(final_balance);
+
+  LtHash16 canonical = lthash16_from_db_hash(base_hash);
+  auto initial_balance_bytes = int128_to_xdr_bytes(kInitialBalance);
+  lthash_remove_item(canonical, std::as_bytes(std::span(balance_key)),
+                     kNNInt128, initial_balance_bytes);
+  lthash_add_item(canonical, std::as_bytes(std::span(balance_key)), kNNInt128,
+                  int128_to_xdr_bytes(*final_balance));
+  auto canonical_bytes = int128_to_xdr_bytes(321);
+  lthash_add_item(canonical, db_key, kNNInt128, canonical_bytes);
+  DbHash canonical_hash = db_hash_from_lthash16(canonical);
+
+  LtHash16 raw = lthash16_from_db_hash(base_hash);
+  lthash_remove_item(raw, std::as_bytes(std::span(balance_key)), kNNInt128,
+                     initial_balance_bytes);
+  lthash_add_item(raw, std::as_bytes(std::span(balance_key)), kNNInt128,
+                  raw_int128_le_bytes(*final_balance));
+  auto raw_bytes = raw_int128_le_bytes(321);
+  lthash_add_item(raw, db_key, kNNInt128, raw_bytes);
+  DbHash raw_hash = db_hash_from_lthash16(raw);
+
+  EXPECT_EQ(incremental_hash, canonical_hash);
+  EXPECT_NE(incremental_hash, raw_hash);
+  EXPECT_EQ(incremental_hash, db_.compute_full_db_hash());
+}
+
+TEST_F(HogDBTest, InvariantsAcceptCanonicalBalanceBytes)
+{
+  Address contract_addr = make_address(kAddress + 63);
+  setup_contract_address(contract_addr);
+  ItemKey key = make_item_key(contract_addr, 11);
+  DbHash base_hash = db_.compute_full_db_hash();
+
+  db_.enable_debug_invariants(cost_model_);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  ASSERT_TRUE(
+      invoke_tx.request_nnint128(key, 321,
+                                 std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  auto hash_result = block_tx.get().close(base_hash);
+  ASSERT_TRUE(hash_result.has_value());
+  ASSERT_TRUE(block_tx.get().commit());
+
+  EXPECT_TRUE(db_.check_invariants());
 }
 
 TEST_F(HogDBTest, DbHashDeltaBytestringLockMatchesFullStateHash)
@@ -1489,6 +1773,295 @@ TEST_F(HogDBTest, ReplayCacheGCOnNextModificationUpdatesHash)
   });
 }
 
+TEST_F(HogDBTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
+{
+  Address addr = make_address(kAddress + 52);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  auto populate_two_expiring_entries = [&] {
+    commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 100),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+    commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+  };
+
+  populate_two_expiring_entries();
+
+  {
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   5);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(7, 300), std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+
+    invoke_tx.abort();
+    invoke_tx.release_blocktx_reference();
+
+    ASSERT_TRUE(block_tx.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  auto replay_meta_after_abort = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_after_abort);
+  ASSERT_EQ(2, replay_meta_after_abort->size);
+  ASSERT_EQ(1, replay_meta_after_abort->heights.size());
+  EXPECT_EQ(3, replay_meta_after_abort->heights[0].height);
+  EXPECT_EQ(2, replay_meta_after_abort->heights[0].nonce_count);
+
+  auto replay_data_after_abort = db_.read_address_replay_cache_data(addr, 3);
+  ASSERT_TRUE(replay_data_after_abort);
+  ASSERT_EQ(2, replay_data_after_abort->nonces.size());
+  EXPECT_EQ(100, replay_data_after_abort->nonces[0]);
+  EXPECT_EQ(200, replay_data_after_abort->nonces[1]);
+
+  commit_block_expect_db_hash_matches_full(6, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 300), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto replay_meta_after_commit = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_after_commit);
+  ASSERT_EQ(1, replay_meta_after_commit->size);
+  ASSERT_EQ(1, replay_meta_after_commit->heights.size());
+  EXPECT_EQ(8, replay_meta_after_commit->heights[0].height);
+  EXPECT_EQ(1, replay_meta_after_commit->heights[0].nonce_count);
+
+  auto replay_data_after_gc = db_.read_address_replay_cache_data(addr, 3);
+  EXPECT_FALSE(replay_data_after_gc.has_value());
+}
+
+TEST_F(HogDBTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
+{
+  auto populate_two_expiring_entries = [&](Address addr) {
+    commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 100),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+    commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+      ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+    });
+  };
+
+  Address conflict_addr = make_address(kAddress + 50);
+  ASSERT_TRUE(db_.write_address_balance(conflict_addr,
+                                        cost_model_.get_replay_cache_cost(2)));
+  populate_two_expiring_entries(conflict_addr);
+
+  auto conflict_balance = db_.read_address_balance(conflict_addr);
+  ASSERT_TRUE(conflict_balance);
+  EXPECT_EQ(0, *conflict_balance);
+
+  {
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   5);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+    invoke_tx.create_savepoint();
+
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        conflict_addr, Uniquifier(7, 300),
+        std::to_underlying(StorageDeltaFlags::None)));
+
+    auto sync_result = invoke_tx.sync_balance_locks();
+    ASSERT_FALSE(sync_result.has_value());
+    EXPECT_EQ(HogDBCode::kConflict, sync_result.error().code());
+
+    invoke_tx.rollback_to_savepoint(0);
+    invoke_tx.release_blocktx_reference();
+  }
+
+  Address charged_addr = make_address(kAddress + 51);
+  ASSERT_TRUE(
+      db_.write_address_balance(charged_addr,
+                                cost_model_.get_replay_cache_cost(2) +
+                                    cost_model_.kReplayCacheCostPerEntry));
+  populate_two_expiring_entries(charged_addr);
+
+  auto charged_balance_before_gc = db_.read_address_balance(charged_addr);
+  ASSERT_TRUE(charged_balance_before_gc);
+  EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, *charged_balance_before_gc);
+
+  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        charged_addr, Uniquifier(7, 300),
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto charged_balance_after_gc = db_.read_address_balance(charged_addr);
+  ASSERT_TRUE(charged_balance_after_gc);
+  EXPECT_EQ(cost_model_.get_replay_cache_cost(2) +
+                cost_model_.kReplayCacheCostPerEntry -
+                cost_model_.get_replay_cache_cost(1),
+            *charged_balance_after_gc);
+
+  auto replay_meta = db_.read_address_replay_cache_meta(charged_addr);
+  ASSERT_TRUE(replay_meta);
+  ASSERT_EQ(1, replay_meta->size);
+  ASSERT_EQ(1, replay_meta->heights.size());
+  EXPECT_EQ(7, replay_meta->heights[0].height);
+  EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
+}
+
+TEST_F(HogDBTest, ReplayCacheGCPrunesMultipleHeightsAtOnce)
+{
+  // Seed three distinct expiry heights (3, 5, 8) so the GC at block 7 has to
+  // walk past more than one ReplayCacheHeightCount entry: heights 3 and 5
+  // expire; height 8 survives.
+  //
+  // Any intermediate block that touches the replay cache would trigger GC of
+  // already-expired heights, so we seed at ascending block numbers
+  // (1, 2, 3) where none of the seeded heights are yet expired relative to
+  // the seeding block height. This preserves meta == {3:1, 5:1, 8:1} up to
+  // the GC trigger at block 7.
+  Address addr = make_address(kAddress + 53);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(3, 100), std::to_underlying(StorageDeltaFlags::None)));
+  });
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(5, 200), std::to_underlying(StorageDeltaFlags::None)));
+  });
+  commit_block_expect_db_hash_matches_full(3, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 800), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto replay_meta_before_gc = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_before_gc);
+  ASSERT_EQ(3, replay_meta_before_gc->size);
+  ASSERT_EQ(3, replay_meta_before_gc->heights.size());
+  EXPECT_EQ(3, replay_meta_before_gc->heights[0].height);
+  EXPECT_EQ(1, replay_meta_before_gc->heights[0].nonce_count);
+  EXPECT_EQ(5, replay_meta_before_gc->heights[1].height);
+  EXPECT_EQ(1, replay_meta_before_gc->heights[1].nonce_count);
+  EXPECT_EQ(8, replay_meta_before_gc->heights[2].height);
+  EXPECT_EQ(1, replay_meta_before_gc->heights[2].nonce_count);
+
+  auto balance_before_gc = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance_before_gc);
+
+  // Block 7 adds a single entry at expiry 7. GC must prune heights 3 and 5
+  // (2 entries) but keep height 8 (1 entry); the new addition lives at
+  // height 7. Net size goes from 3 to 2, so the balance refund equals
+  // cost(3) - cost(2) = kReplayCacheCostPerEntry.
+  commit_block_expect_db_hash_matches_full(7, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(7, 700), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto replay_meta_after_gc = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(replay_meta_after_gc);
+  ASSERT_EQ(2, replay_meta_after_gc->size);
+  ASSERT_EQ(2, replay_meta_after_gc->heights.size());
+  EXPECT_EQ(7, replay_meta_after_gc->heights[0].height);
+  EXPECT_EQ(1, replay_meta_after_gc->heights[0].nonce_count);
+  EXPECT_EQ(8, replay_meta_after_gc->heights[1].height);
+  EXPECT_EQ(1, replay_meta_after_gc->heights[1].nonce_count);
+
+  // Pruned heights' data rows are gone; the surviving height-8 data is
+  // unchanged.
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 3).has_value());
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 5).has_value());
+
+  auto height_8_data = db_.read_address_replay_cache_data(addr, 8);
+  ASSERT_TRUE(height_8_data);
+  ASSERT_EQ(1, height_8_data->nonces.size());
+  EXPECT_EQ(800, height_8_data->nonces[0]);
+
+  auto height_7_data = db_.read_address_replay_cache_data(addr, 7);
+  ASSERT_TRUE(height_7_data);
+  ASSERT_EQ(1, height_7_data->nonces.size());
+  EXPECT_EQ(700, height_7_data->nonces[0]);
+
+  auto balance_after_gc = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance_after_gc);
+  EXPECT_EQ(cost_model_.get_replay_cache_cost(3) -
+                cost_model_.get_replay_cache_cost(2),
+            *balance_after_gc - *balance_before_gc);
+}
+
+TEST_F(HogDBTest, ReplayCacheNonceLifecycleAddThenGCAtExpiryBoundary)
+{
+  // End-to-end lifecycle for a single nonce:
+  //   * added at block 1 with expiry 5,
+  //   * still present after a replay-cache touch at block 5 (height == expiry
+  //     is NOT pruned; GC uses strict less-than),
+  //   * pruned by the first replay-cache touch at block 6 (height < 6).
+  Address addr = make_address(kAddress + 54);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(5, 100), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta_after_add = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta_after_add);
+  ASSERT_EQ(1, meta_after_add->size);
+  ASSERT_EQ(1, meta_after_add->heights.size());
+  EXPECT_EQ(5, meta_after_add->heights[0].height);
+  EXPECT_EQ(1, meta_after_add->heights[0].nonce_count);
+
+  auto data_after_add = db_.read_address_replay_cache_data(addr, 5);
+  ASSERT_TRUE(data_after_add);
+  ASSERT_EQ(1, data_after_add->nonces.size());
+  EXPECT_EQ(100, data_after_add->nonces[0]);
+
+  // Block 5: replay-cache touch at the exact expiry height must not GC the
+  // entry. The new addition (expiry 8) lives alongside the original.
+  commit_block_expect_db_hash_matches_full(5, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(8, 200), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta_at_expiry = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta_at_expiry);
+  ASSERT_EQ(2, meta_at_expiry->size);
+  ASSERT_EQ(2, meta_at_expiry->heights.size());
+  EXPECT_EQ(5, meta_at_expiry->heights[0].height);
+  EXPECT_EQ(1, meta_at_expiry->heights[0].nonce_count);
+  EXPECT_EQ(8, meta_at_expiry->heights[1].height);
+  EXPECT_EQ(1, meta_at_expiry->heights[1].nonce_count);
+
+  auto data_at_expiry = db_.read_address_replay_cache_data(addr, 5);
+  ASSERT_TRUE(data_at_expiry);
+  ASSERT_EQ(1, data_at_expiry->nonces.size());
+  EXPECT_EQ(100, data_at_expiry->nonces[0]);
+
+  // Block 6: first block where the expiry-5 entry is strictly past its
+  // expiry. The replay-cache touch triggers GC of the original nonce.
+  commit_block_expect_db_hash_matches_full(6, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(9, 300), std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta_after_gc = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta_after_gc);
+  ASSERT_EQ(2, meta_after_gc->size);
+  ASSERT_EQ(2, meta_after_gc->heights.size());
+  EXPECT_EQ(8, meta_after_gc->heights[0].height);
+  EXPECT_EQ(1, meta_after_gc->heights[0].nonce_count);
+  EXPECT_EQ(9, meta_after_gc->heights[1].height);
+  EXPECT_EQ(1, meta_after_gc->heights[1].nonce_count);
+
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 5).has_value());
+}
+
 // Auth data: create then delete matches empty db.
 // Creating and then deleting auth data should leave no residual state.
 TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
@@ -1987,6 +2560,240 @@ TEST_F(HogDBTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
     EXPECT_EQ(incremental_hash, full_hash)
         << "RCQ insert then consume current block in different InvokeTXs";
   }
+}
+
+// Regression for #1458: aborting the only reservation on a fresh expiry
+// height must not leave phantom zero-count metadata or an empty data row.
+TEST_F(HogDBTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
+{
+  Address addr = make_address(kAddress + 53);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx_a(block_tx);
+    ASSERT_TRUE(invoke_tx_a.request_consume_uniquifier(
+        addr, Uniquifier(99999, 100),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx_a.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx_b(block_tx);
+      ASSERT_TRUE(invoke_tx_b.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
+      invoke_tx_b.commit();
+      invoke_tx_b.release_blocktx_reference();
+    }
+
+    invoke_tx_a.abort();
+    invoke_tx_a.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    ASSERT_TRUE(hash_result.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  auto meta = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(1, meta->size);
+  ASSERT_EQ(1U, meta->heights.size());
+  EXPECT_EQ(3, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+
+  auto committed_data = db_.read_address_replay_cache_data(addr, 3);
+  ASSERT_TRUE(committed_data);
+  ASSERT_EQ(1U, committed_data->nonces.size());
+  EXPECT_EQ(200U, committed_data->nonces[0]);
+
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 99999).has_value());
+}
+
+// The phantom must stay absent after a subsequent block reloads and
+// rewrites the address's replay-cache metadata.
+TEST_F(HogDBTest, AbortedFreshHeightStaysAbsentInNextBlock)
+{
+  Address addr = make_address(kAddress + 54);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx_a(block_tx);
+    ASSERT_TRUE(invoke_tx_a.request_consume_uniquifier(
+        addr, Uniquifier(99999, 100),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx_a.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx_b(block_tx);
+      ASSERT_TRUE(invoke_tx_b.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
+      invoke_tx_b.commit();
+      invoke_tx_b.release_blocktx_reference();
+    }
+
+    invoke_tx_a.abort();
+    invoke_tx_a.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    ASSERT_TRUE(hash_result.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  // Block 2 touches the replay cache on the same address for a different
+  // fresh expiry height. Forces the lock to reload metadata from DB and
+  // re-stage it — any leaked 99999 entry would be carried forward here.
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_consume_uniquifier(
+        addr, Uniquifier(77777, 900),
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto meta = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(2, meta->size);
+  ASSERT_EQ(2U, meta->heights.size());
+  EXPECT_EQ(3, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+  EXPECT_EQ(77777, meta->heights[1].height);
+  EXPECT_EQ(1U, meta->heights[1].nonce_count);
+
+  EXPECT_FALSE(db_.read_address_replay_cache_data(addr, 99999).has_value());
+}
+
+// Positive control: aborting one of two reservations on the same fresh
+// expiry height must NOT remove the height — only the aborted nonce.
+TEST_F(HogDBTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
+{
+  Address addr = make_address(kAddress + 55);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  {
+    DbHash base_hash = db_.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                   1);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx_a(block_tx);
+    ASSERT_TRUE(invoke_tx_a.request_consume_uniquifier(
+        addr, Uniquifier(99999, 100),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx_a.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    {
+      InvokeTX invoke_tx_b(block_tx);
+      ASSERT_TRUE(invoke_tx_b.request_consume_uniquifier(
+          addr, Uniquifier(99999, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      ASSERT_TRUE(invoke_tx_b.sync_balance_locks());
+      invoke_tx_b.commit();
+      invoke_tx_b.release_blocktx_reference();
+    }
+
+    invoke_tx_a.abort();
+    invoke_tx_a.release_blocktx_reference();
+
+    auto hash_result = block_tx.get().close(base_hash);
+    ASSERT_TRUE(hash_result.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  auto meta = db_.read_address_replay_cache_meta(addr);
+  ASSERT_TRUE(meta);
+  EXPECT_EQ(1, meta->size);
+  ASSERT_EQ(1U, meta->heights.size());
+  EXPECT_EQ(99999, meta->heights[0].height);
+  EXPECT_EQ(1U, meta->heights[0].nonce_count);
+
+  auto data = db_.read_address_replay_cache_data(addr, 99999);
+  ASSERT_TRUE(data);
+  ASSERT_EQ(1U, data->nonces.size());
+  EXPECT_EQ(200U, data->nonces[0]);
+}
+
+// Strongest regression: a block that reserves-and-aborts a fresh expiry
+// height must leave the DB in a state bit-identical to a block that never
+// attempted the aborted reservation at all.
+TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
+{
+  auto run_scenario = [&](bool include_aborted_attempt) -> DbHash {
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    EXPECT_TRUE(static_cast<bool>(dir));
+    constexpr size_t kHeapSize = 10_MiB;
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), Database::estimate_heap_size(kHeapSize),
+                       0);
+    EXPECT_TRUE(db);
+    HogDBDAO dao(RAMDB(std::move(*db)));
+
+    Address addr = make_address(kAddress + 56);
+    EXPECT_TRUE(dao.write_address_balance(addr, 10'000'000));
+
+    DbHash base_hash = dao.compute_full_db_hash();
+
+    PerThreadARC<BlockTX> block_tx(dao, cost_model_, background_commit_worker_,
+                                   1);
+
+    if (include_aborted_attempt) {
+      EXPECT_TRUE(block_tx.try_acquire_reference());
+      InvokeTX invoke_tx_a(block_tx);
+      EXPECT_TRUE(invoke_tx_a.request_consume_uniquifier(
+          addr, Uniquifier(99999, 100),
+          std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_TRUE(invoke_tx_a.sync_balance_locks());
+
+      EXPECT_TRUE(block_tx.try_acquire_reference());
+      {
+        InvokeTX invoke_tx_b(block_tx);
+        EXPECT_TRUE(invoke_tx_b.request_consume_uniquifier(
+            addr, Uniquifier(3, 200),
+            std::to_underlying(StorageDeltaFlags::None)));
+        EXPECT_TRUE(invoke_tx_b.sync_balance_locks());
+        invoke_tx_b.commit();
+        invoke_tx_b.release_blocktx_reference();
+      }
+
+      invoke_tx_a.abort();
+      invoke_tx_a.release_blocktx_reference();
+    }
+    else {
+      EXPECT_TRUE(block_tx.try_acquire_reference());
+      InvokeTX invoke_tx(block_tx);
+      EXPECT_TRUE(invoke_tx.request_consume_uniquifier(
+          addr, Uniquifier(3, 200),
+          std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_TRUE(invoke_tx.sync_balance_locks());
+      invoke_tx.commit();
+      invoke_tx.release_blocktx_reference();
+    }
+
+    auto hash_result = block_tx.get().close(base_hash);
+    EXPECT_TRUE(hash_result.has_value());
+    EXPECT_TRUE(block_tx.get().commit());
+
+    return dao.compute_full_db_hash();
+  };
+
+  DbHash hash_with_aborted = run_scenario(true);
+  DbHash hash_without_aborted = run_scenario(false);
+  EXPECT_EQ(hash_with_aborted, hash_without_aborted);
 }
 
 } // namespace hogd

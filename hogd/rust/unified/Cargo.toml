@@ -8,6 +8,7 @@ rust-version = "1.81"
 crypto_lib = { path = "../crypto" }
 wasmi_lib = { path = "../wasmi" }
 wasmtime_lib = { path = "../wasmtime" }
+wasm_meter = { path = "../wasm_meter" }
 
 [dev-dependencies]
 test_ffi_bindings = { path = "../test_ffi_bindings" }
@@ -17,5 +18,5 @@ debug_logging = ["wasmi_lib/debug_logging", "wasmtime_lib/debug_logging"]
 wasm_debug = ["wasmtime_lib/wasm_debug"]
 
 [lib]
-crate-type = ["staticlib", "cdylib"]
+crate-type = ["staticlib"]
 

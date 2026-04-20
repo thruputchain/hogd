@@ -33,7 +33,7 @@ make_err(SystemErrorCode err)
                            .data_len = 0};
 }
 
-ContractGetResult
+extern "C" ContractGetResult
 wasmi_contract_get_fn(void *host_call_context_ptr,
                       const uint8_t *hash_ptr) noexcept
 {
@@ -109,15 +109,15 @@ WasmiGlobalContext::operator=(WasmiGlobalContext &&other) noexcept
 
 bool
 WasmiGlobalContext::link_fn_nargs(std::string_view module_name,
-                                  std::string_view fn_name, void *fn_ptr,
+                                  std::string_view fn_name, ErasedFnPtr fn_ptr,
                                   uint8_t nargs)
 {
   assert(global_context_ptr_ != nullptr);
   return wasmi_global_link_nargs(
       global_context_ptr_,
       reinterpret_cast<const uint8_t *>(module_name.data()), module_name.size(),
-      reinterpret_cast<const uint8_t *>(fn_name.data()), fn_name.size(),
-      reinterpret_cast<void (*)()>(fn_ptr), nargs);
+      reinterpret_cast<const uint8_t *>(fn_name.data()), fn_name.size(), fn_ptr,
+      nargs);
 }
 
 WasmiContext::WasmiContext(WasmiGlobalContext &global_context)

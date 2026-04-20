@@ -34,7 +34,7 @@ struct InvokeResult;
 class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
-                  InvokeFlagSet flags);
+                  InvokeFlagSet flags, size_t event_count);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -73,6 +73,7 @@ public:
   // add a log message to the output of the transaction, associated with the
   // current call frame.
   void log_event(TxEmittedEvent event);
+  size_t event_count() const { return event_count_; }
 
   x23::Vec<TxEmittedEvent> const &get_events() const { return events_; }
 
@@ -171,6 +172,7 @@ private:
 
   // Accumulates the events created in the current call frame (and child frames)
   x23::Vec<TxEmittedEvent> events_;
+  size_t event_count_ = 0;
 
   uint32_t try_invoke_frame_count_ = 0;
 
@@ -197,6 +199,11 @@ public:
     return self.frame_stack_.back();
   }
   bool empty() const { return frame_stack_.empty(); }
+  size_t event_count() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().event_count();
+  }
 
   void start_frame(ContractAddress const &address, Calldata &&calldata,
                    InvokeFlagSet flags);

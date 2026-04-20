@@ -150,10 +150,11 @@ public:
   // released after the transaction commits.
   static int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                                 const NNInt128 & /*unused*/,
-                                const StorageCostModel *cost_model)
+                                const LockContext &ctx)
   {
     if (did_finalize) {
-      return get_storage_cost_of_committed_value(cost_model) - snapshot_cost;
+      return get_storage_cost_of_committed_value(ctx.cost_model) -
+             snapshot_cost;
     }
     return 0;
   }

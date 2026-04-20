@@ -13,6 +13,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
@@ -35,6 +36,32 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 };
+
+namespace {
+
+// Test-only stub that accepts any wasmi contract without parsing it. Tests in
+// this file exercise SystemCallHandler's selective-deployment bookkeeping
+// (which contracts end up in the DB), not wasm validation, and use opaque
+// placeholder bytes in contracts_to_deploy rather than real wasm modules. A
+// real wasmi context would reject those bytes in verify_contract and the test
+// would fail for unrelated reasons. The deployed contracts are never invoked,
+// so make_new_runtime does not need to produce a working Runtime.
+class NoopWasmiContext : public RuntimeContext {
+public:
+  bool verify_contract(Contract const & /*unused*/) const override
+  {
+    return true;
+  }
+
+  SystemStatus<std::unique_ptr<Runtime>>
+  make_new_runtime(DeployedContractHash const & /*unused*/,
+                   SystemCallHandler * /*unused*/) override
+  {
+    return nullptr;
+  }
+};
+
+} // namespace
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
@@ -64,31 +91,31 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   }();
 
   // Create a native contract that will deploy only the first contract
-  auto make_context = [contract_1_hash]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [contract_1_hash](
-                 NativeSyscallContext &ctx) -> InvokeStatus<void> {
-               // Deploy only the first contract
+  auto native_contract_0 = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [contract_1_hash](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             // Deploy only the first contract
 
-               auto deploy_result =
-                   ctx.handler().deploy_contract(kDeployNonce, contract_1_hash);
-               if (!deploy_result.has_value()) {
-                 return deploy_result.error().to_invoke_error();
-               }
-               if (!deploy_result.value().has_value()) {
-                 return InvokeError{InvokeErrorCode::Deterministic};
-               }
+             auto deploy_result =
+                 ctx.handler().deploy_contract(kDeployNonce, contract_1_hash);
+             if (!deploy_result.has_value()) {
+               return deploy_result.error().to_invoke_error();
+             }
+             if (!deploy_result.value().has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
 
-               return {};
-             }}});
-    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_0));
-    return std::make_unique<NativeContext>(std::move(contract_map));
-  };
-
-  auto context = make_context();
+             return {};
+           }}});
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext native_context(std::move(contract_map));
+  NoopWasmiContext wasmi_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kWasmi, {&wasmi_context, false}}});
 
   // Mark the deployer contract as existing and deployed within the database
   auto deployer_contract = make_native_contract(0);
@@ -118,7 +145,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
                   .contracts_to_deploy = {contract_to_deploy_1,
                                           contract_to_deploy_2},
               }},
-      *context);
+      context);
 
   // Invoke the contract
   auto res = handler.root_invoke();
@@ -127,7 +154,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   // Commit the transaction
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-  ASSERT_TRUE(handler.emit_events()());
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
 
   advance_block();
 

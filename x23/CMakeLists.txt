@@ -127,7 +127,7 @@ function(add_xdr_rs target_name output_folder)
     set(output_file "${output_folder}/${base_name}.rs")
     add_custom_command(
       OUTPUT ${output_file}
-      COMMAND ${X23C_EXECUTABLE} --rust --rust-no-feature serde -o ${output_file} ${xdr_file_}
+      COMMAND ${X23C_EXECUTABLE} --rust --rust-no-feature serde --rust-feature xdrs -o ${output_file} ${xdr_file_}
       DEPENDS ${xdr_file_} ${X23C_EXECUTABLE}
       COMMENT "Generating ${output_file} from ${xdr_file_}"
     )

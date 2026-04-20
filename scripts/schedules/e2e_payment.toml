@@ -13,18 +13,16 @@ git fetch --quiet --depth 1 origin {{ .git_commit }}
 git checkout --quiet {{ .git_commit }}
 git submodule update --init --recursive --quiet
 
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/prepare_env.sh
 
-echo 'install chuckd-rs from registry (fail-fast before long hogd build)'
-cargo install chuckd --registry groundhog > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
-
-echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
-
-echo 'build hogd'
-make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
-
-cp "$HOME/.cargo/bin/chuckd" release/chuckd.dev
+echo 'build'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+# These build scripts place the binaries in the current working directory, so we
+# [pushd release] so that the binaries are placed in the [release] directory.
+pushd release >/dev/null
+../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
+../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
+popd >/dev/null
 
 echo 'clear hogdb file directory'
 rm -r ./work_dir/ || true
@@ -43,7 +41,6 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 [jobs.host]
@@ -71,11 +68,8 @@ git submodule update --init --recursive --quiet
 
 source ./scripts/ci/prepare_env.sh
 
-echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
-
 echo 'build'
-make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
@@ -112,8 +106,9 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 
 [jobs.host]
 metrics_1 = "hog10"

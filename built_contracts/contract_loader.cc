@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
@@ -48,6 +49,7 @@ load_raw_file(std::string_view filename)
   }
   std::fclose(f);
 
+  // groundhog build produces already-instrumented wasm; no need to re-instrument.
   return contents;
 }
 
