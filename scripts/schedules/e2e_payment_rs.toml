@@ -16,7 +16,7 @@ git submodule update --init --recursive --quiet
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'install chuckd-rs from registry (fail-fast before long hogd build)'
-cargo install chuckd --registry groundhog > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
+cargo install chuckd@0.1.9 --registry groundhog > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
