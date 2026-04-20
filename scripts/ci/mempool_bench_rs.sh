@@ -17,6 +17,22 @@ cleanup() {
   exit "$exit_code"
 }
 
+kill_stale_processes() {
+  # [ssh] will return a non-zero error code if a process we try to kill does not
+  # exist. To prevent this non-zero error code from causing this overall script
+  # to fail, we append [|| true] to each line.
+  ssh -n hog7 "killall loadgen_server" || true
+  ssh -n hog5 "killall hogexec" || true
+  ssh -n hog6 "killall hogexec" || true
+  ssh -n hog8 "killall auth_exec" || true
+  ssh -n hog9 "killall event_exec" || true
+  ssh -n hog9 "killall indexer_exec" || true
+  ssh -n hog11 "killall hogdb" || true
+  ssh -n hog4 "killall chuckd" || true
+  ssh -n hog4 "killall chuckd.dev" || true
+  ssh -n hog10 "killall mempool_exec" || true
+}
+
 trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM # 130 is conventional for SIGINT
 
@@ -66,21 +82,6 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'kill stale processes'
-kill_stale_processes() {
-  # [ssh] will return a non-zero error code if a process we try to kill does not
-  # exist. To prevent this non-zero error code from causing this overall script
-  # to fail, we append [|| true] to each line.
-  ssh -n hog7 "killall loadgen_server" || true
-  ssh -n hog5 "killall hogexec" || true
-  ssh -n hog6 "killall hogexec" || true
-  ssh -n hog8 "killall auth_exec" || true
-  ssh -n hog9 "killall event_exec" || true
-  ssh -n hog9 "killall indexer_exec" || true
-  ssh -n hog11 "killall hogdb" || true
-  ssh -n hog4 "killall chuckd" || true
-  ssh -n hog4 "killall chuckd.dev" || true
-  ssh -n hog10 "killall mempool_exec" || true
-}
 kill_stale_processes
 
 echo 'launch loadgen'

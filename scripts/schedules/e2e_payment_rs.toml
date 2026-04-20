@@ -69,7 +69,7 @@ git fetch --quiet --depth 1 origin {{ .git_commit }}
 git checkout --quiet {{ .git_commit }}
 git submodule update --init --recursive --quiet
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
@@ -84,8 +84,7 @@ export BUILD_DIR=release
 export WORK_DIR=work_dir/
 
 echo 'run mempool benchmarks'
-(./scripts/ci/mempool_bench_rs.sh) || true
-mempool_bench_exit=$?
+./scripts/ci/mempool_bench_rs.sh
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
