@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -54,6 +55,10 @@ public:
   // this.
   x23::Async<void> gc_executor_context(BlockID block_id);
 
+  // Test-only counters for executor-state GC sequencing.
+  static void reset_gc_count_for_test();
+  static uint32_t gc_count_for_test();
+
 private:
   x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode);
 
@@ -98,6 +103,8 @@ private:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   DispatchPool worker_pool_;
+
+  inline static std::atomic<uint32_t> gc_count_for_test_ = 0;
 };
 
 inline x23::MaybeAsync<PerThreadARC<ExecutorContext> *>

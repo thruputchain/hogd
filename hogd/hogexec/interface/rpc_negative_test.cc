@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <format>
+#include <future>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include "db_sched.hh"
@@ -228,6 +230,42 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
   EXPECT_EQ(result.size(), 0);
 
   client_.executorsched_finish_block(block_id);
+}
+
+TEST_F(RpcNegativeTest, TestFinishBlockDoesNotGCWhileValidateBatchInFlight)
+{
+  init_executor();
+
+  BlockID block_id = 1005;
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+            ExecResult::ExecResultOK);
+
+  ExecutorStateManager::reset_gc_count_for_test();
+  ExecutorContext::block_validate_transaction_batch_for_test();
+  x23::Defer cleanup([&] {
+    ExecutorContext::unblock_validate_transaction_batch_for_test();
+    ExecutorContext::reset_validate_transaction_batch_test_state();
+  });
+
+  std::promise<ExecValidateBatchResult> validate_promise;
+  auto validate_future = validate_promise.get_future();
+  std::thread validate_thread([&] {
+    ProposedTransactionBatch empty_batch;
+    validate_promise.set_value(
+        client_.executorsched_validate_batch(block_id, empty_batch));
+  });
+
+  ExecutorContext::wait_for_validate_transaction_batch_blocked_for_test();
+
+  EXPECT_EQ(client_.executorsched_finish_block(block_id),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(ExecutorStateManager::gc_count_for_test(), 0U);
+
+  ExecutorContext::unblock_validate_transaction_batch_for_test();
+  EXPECT_TRUE(validate_future.get().empty());
+  validate_thread.join();
+
+  EXPECT_EQ(ExecutorStateManager::gc_count_for_test(), 1U);
 }
 
 } // namespace hogd

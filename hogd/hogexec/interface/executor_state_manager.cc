@@ -178,6 +178,7 @@ x23::Async<void>
 ExecutorStateManager::gc_executor_context(BlockID block_id)
 {
   trace("Garbage collecting state for block {}", block_id);
+  gc_count_for_test_.fetch_add(1, std::memory_order_relaxed);
   // The blockID must already have had shutdown initiated.
   x23::CoroGuard g;
   co_await g(active_blocks_lock_);
@@ -217,6 +218,18 @@ ExecutorStateManager::get_snapshot_cache(BlockID block_id,
   out->set_block_id(block_id);
   free_snapshot_caches_.pop_back();
   return out;
+}
+
+void
+ExecutorStateManager::reset_gc_count_for_test()
+{
+  gc_count_for_test_.store(0, std::memory_order_relaxed);
+}
+
+uint32_t
+ExecutorStateManager::gc_count_for_test()
+{
+  return gc_count_for_test_.load(std::memory_order_relaxed);
 }
 
 } // namespace hogd
