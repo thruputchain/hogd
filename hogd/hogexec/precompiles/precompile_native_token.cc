@@ -341,9 +341,7 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  if (!output_set_opt) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
+  CHECK(output_set_opt);
   auto [total, of] = overflowing_add(output_set, output_add);
   if (of) {
     return InvokeError{InvokeErrorCode::Deterministic};
