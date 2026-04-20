@@ -197,8 +197,7 @@ TEST_P(InstantiateTest, UnknownImportRejectsDeterministically)
   make_syscall_handler(contract);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
                                                  get_syscall_handler());
-  ASSERT_TRUE(runtime.has_value())
-      << "unknown import caused a SystemError";
+  ASSERT_TRUE(runtime.has_value()) << "unknown import caused a SystemError";
   EXPECT_FALSE(runtime.value());
 }
 

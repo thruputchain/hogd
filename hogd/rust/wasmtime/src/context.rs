@@ -43,8 +43,7 @@ fn validate_imports(
     imports: &std::collections::HashMap<(String, String), u8>,
 ) -> bool {
     for import in module.imports() {
-        let key =
-            (import.module().to_string(), import.name().to_string());
+        let key = (import.module().to_string(), import.name().to_string());
         let expected_nargs = match imports.get(&key) {
             Some(n) => *n as usize,
             None => {
