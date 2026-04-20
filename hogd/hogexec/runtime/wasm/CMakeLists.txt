@@ -161,6 +161,12 @@ wat2wasm_target(
 )
 
 wat2wasm_target(
+  test_wrong_import_kind_wasm
+  wat/test_wrong_import_kind.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_wrong_import_kind.wasm
+)
+
+wat2wasm_target(
   test_param_entrypoint_wasm
   wat/test_param_entrypoint.wat
   ${CMAKE_CURRENT_BINARY_DIR}/test_param_entrypoint.wasm
@@ -184,6 +190,7 @@ add_dependencies(
   test_oob_element_segment_wasm
   test_wrong_import_type_wasm
   test_unknown_import_wasm
+  test_wrong_import_kind_wasm
   test_param_entrypoint_wasm
   all_wasm_contracts
 )
