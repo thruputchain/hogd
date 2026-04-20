@@ -90,6 +90,7 @@ add_library(runtime_test_objects OBJECT
   nnint_output_fault_test_wasm_test.cc
   output_alias_test_wasm_test.cc
   native_contract_test.cc
+  native_token_allowance_test.cc
   nnint_add_test.cc
   propose_validate_roundtrip_test.cc
   nnint_get_test.cc
