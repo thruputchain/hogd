@@ -187,6 +187,10 @@ TEST_P(InstantiateTest, UnknownImportRejectsDeterministically)
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_unknown_import.wasm");
 
+  // An unknown-module import still passes wasm-meter (it is a valid function
+  // import); rejection happens structurally at instantiation time.
+  EXPECT_TRUE(get_context()->verify_contract(contract));
+
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
       .contract_size =

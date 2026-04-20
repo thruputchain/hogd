@@ -57,13 +57,12 @@ fn validate_imports(
         };
         let func_ty = match import.ty() {
             ExternType::Func(f) => f,
-            other => {
+            _other => {
                 debug_log!(eprintln!(
-                    "Import {}::{} declared as non-function: {other:?}",
+                    "Import {}::{} declared as non-function: {_other:?}",
                     import.module(),
                     import.name()
                 ));
-                let _ = other;
                 return false;
             }
         };
