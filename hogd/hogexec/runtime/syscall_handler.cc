@@ -238,8 +238,7 @@ SystemCallHandler::root_invoke()
   auto [res, gas_consumed] =
       invoke(root_invocation.invoked_address,
              sdk_method_id(root_invocation.entrypoint), available_gas,
-             Calldata(root_invocation.calldata),
-             std::to_underlying(InvokeFlag::None));
+             root_invocation.calldata, std::to_underlying(InvokeFlag::None));
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
