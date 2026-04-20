@@ -26,8 +26,10 @@ namespace hogd {
 x23::Async<EventStatus<void>>
 EventRPCContext::open_block(BlockID block_id)
 {
+  info("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
   x23::CoroGuard g;
   co_await g(lock_);
+  info("EventRPCContext::open_block: block_id={} lock acquired", block_id);
 
   bool inserted = false;
   if (!cached_blocks_.empty()) {
@@ -178,8 +180,10 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 x23::Async<EventStatus<void>>
 EventRPCContext::abandon_block(BlockID block_id)
 {
+  info("EventRPCContext::abandon_block: block_id={} acquiring lock", block_id);
   x23::CoroGuard g;
   co_await g(lock_);
+  info("EventRPCContext::abandon_block: block_id={} lock acquired", block_id);
 
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
@@ -189,7 +193,10 @@ EventRPCContext::abandon_block(BlockID block_id)
   if (context.get().closing()) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
+  info("EventRPCContext::abandon_block: block_id={} awaiting abandon",
+       block_id);
   co_await context.get().await_abandon();
+  info("EventRPCContext::abandon_block: block_id={} done", block_id);
 
   if (context.initiate_shutdown()) {
     gc_context_internal(it);

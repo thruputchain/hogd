@@ -1,0 +1,118 @@
+name = "e2e_payment_rs_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_bench_servers"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --quiet --depth 1 origin {{ .git_commit }}
+git checkout --quiet {{ .git_commit }}
+git submodule update --init --recursive --quiet
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+
+echo 'install chuckd-rs from registry (fail-fast before long hogd build)'
+cargo install chuckd@0.1.9 --registry groundhog > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
+
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+
+echo 'build hogd'
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+
+cp "$HOME/.cargo/bin/chuckd" release/chuckd.dev
+
+echo 'clear hogdb file directory'
+rm -r ./work_dir/ || true
+mkdir -p work_dir/
+
+echo 'set port env vars'
+export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
+
+echo 'run bench server'
+./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w work_dir/
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+
+[jobs.host]
+bench_1 = "hog6"
+bench_2 = "hog7"
+bench_3 = "hog8"
+bench_4 = "hog9"
+bench_5 = "hog11"
+bench_6 = "hog5"
+bench_7 = "hog4"
+
+
+[[jobs]]
+name = "{{ .hog_schedule }}_metrics"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --quiet --depth 1 origin {{ .git_commit }}
+git checkout --quiet {{ .git_commit }}
+git submodule update --init --recursive --quiet
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+
+echo 'build'
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+
+echo 'set port env vars'
+export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
+
+export BUILD_DIR=release
+export WORK_DIR=work_dir/
+
+echo 'run mempool benchmarks'
+./scripts/ci/mempool_bench_rs.sh
+
+echo 'commit metrics'
+(./scripts/commit_metrics.sh) || true
+
+"""
+after = """
+
+echo 'set port env vars'
+export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
+
+echo 'cleanup control servers'
+./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+
+[jobs.host]
+metrics_1 = "hog10"
