@@ -174,6 +174,37 @@ TEST_P(InstantiateTest, WrongImportTypeSignatureMismatch)
   EXPECT_FALSE(runtime.value());
 }
 
+// Regression guard for #1533: a contract that imports a name the host
+// does not register must be rejected as a deterministic invalid contract
+// (null runtime), not escalated to kSystemUnrecoverable. This guards
+// against accidentally removing unknown-import handling when the
+// string-based classifier was replaced with structural validation.
+TEST_P(InstantiateTest, UnknownImportRejectsDeterministically)
+{
+  ASSERT_TRUE(link_fn("marmot", "syscall", &dummy_syscall_8args));
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_unknown_import.wasm");
+
+  // An unknown-module import still passes wasm-meter (it is a valid function
+  // import); rejection happens structurally at instantiation time.
+  EXPECT_TRUE(get_context()->verify_contract(contract));
+
+  auto deployed_contract_hash = DeployedContractHash{
+      .hash = sha256(contract),
+      .contract_size =
+          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+      .contract_type = ContractType::kWasmi,
+  };
+
+  make_syscall_handler(contract);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 get_syscall_handler());
+  ASSERT_TRUE(runtime.has_value()) << "unknown import caused a SystemError";
+  EXPECT_FALSE(runtime.value());
+}
+
 // Regression test for issue #1472: both engines currently allow a method-name
 // export with the wrong ABI through verification and instantiation, so the
 // invoke path must classify the signature mismatch as deterministic instead of
@@ -206,7 +237,7 @@ TEST_P(InstantiateTest, ParamEntryPointSignatureMismatchIsDeterministic)
 }
 
 // Wrong-import-kind tests (global, table, memory instead of func) are not
-// needed: wasm-meter 0.2.0 rejects all non-function imports at instrumentation
+// needed: wasm-meter 0.3.0 rejects all non-function imports at instrumentation
 // and verification time ("only function imports are allowed"), so the
 // entity-kind mismatch error paths in wasmtime's typecheck are unreachable
 // for deployed contracts.
