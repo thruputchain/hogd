@@ -193,7 +193,8 @@ EventRPCContext::abandon_block(BlockID block_id)
   if (context.get().closing()) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
-  info("EventRPCContext::abandon_block: block_id={} awaiting abandon", block_id);
+  info("EventRPCContext::abandon_block: block_id={} awaiting abandon",
+       block_id);
   co_await context.get().await_abandon();
   info("EventRPCContext::abandon_block: block_id={} done", block_id);
 
