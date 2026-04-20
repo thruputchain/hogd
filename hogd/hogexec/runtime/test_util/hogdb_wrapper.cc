@@ -104,8 +104,10 @@ HogDBDAO
 HogdbWrapper::open_db()
 {
   Directory dir = Directory::open_temporary().value();
-  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-  auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
+  constexpr static size_t kDefaultHeapSize = 10_MiB;
+  auto db = Database::open(dir.get_path(),
+                           Database::estimate_heap_size(kDefaultHeapSize))
+                .value();
   return HogDBDAO(RAMDB(std::move(db)));
 }
 
