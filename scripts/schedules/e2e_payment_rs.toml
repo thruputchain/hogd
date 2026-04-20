@@ -84,7 +84,7 @@ export BUILD_DIR=release
 export WORK_DIR=work_dir/
 
 echo 'run mempool benchmarks'
-(./scripts/ci/mempool_bench.sh) || true
+(./scripts/ci/mempool_bench_rs.sh) || true
 mempool_bench_exit=$?
 
 echo 'commit metrics'
