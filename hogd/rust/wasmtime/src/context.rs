@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::debug_log;
 
-use wasmtime::{Engine, InstancePre, Linker, Module};
+use wasmtime::{Engine, ExternType, InstancePre, Linker, Module};
 
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
@@ -29,6 +29,75 @@ fn check_memory_limit(module: &Module) -> bool {
     }
     debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
     false
+}
+
+/// Structurally validate every import declared by `module` against the
+/// host manifest. Returns `true` iff every import is a function with
+/// the registered arity, all i64 params, and a single i32 result.
+///
+/// This replaces wasmtime's stringly-typed incompatible-import-type
+/// classification (see issue #1533): all rejections here are
+/// deterministic, no formatted error text is inspected anywhere.
+fn validate_imports(
+    module: &Module,
+    imports: &std::collections::HashMap<(String, String), u8>,
+) -> bool {
+    for import in module.imports() {
+        let key =
+            (import.module().to_string(), import.name().to_string());
+        let expected_nargs = match imports.get(&key) {
+            Some(n) => *n as usize,
+            None => {
+                debug_log!(eprintln!(
+                    "Unknown host import: {}::{}",
+                    import.module(),
+                    import.name()
+                ));
+                return false;
+            }
+        };
+        let func_ty = match import.ty() {
+            ExternType::Func(f) => f,
+            other => {
+                debug_log!(eprintln!(
+                    "Import {}::{} declared as non-function: {other:?}",
+                    import.module(),
+                    import.name()
+                ));
+                let _ = other;
+                return false;
+            }
+        };
+        let params: Vec<_> = func_ty.params().collect();
+        let results: Vec<_> = func_ty.results().collect();
+        if params.len() != expected_nargs {
+            debug_log!(eprintln!(
+                "Import {}::{} arity mismatch: declared {}, expected {}",
+                import.module(),
+                import.name(),
+                params.len(),
+                expected_nargs
+            ));
+            return false;
+        }
+        if !params.iter().all(|p| p.is_i64()) {
+            debug_log!(eprintln!(
+                "Import {}::{} param type mismatch: {params:?}",
+                import.module(),
+                import.name()
+            ));
+            return false;
+        }
+        if results.len() != 1 || !results[0].is_i32() {
+            debug_log!(eprintln!(
+                "Import {}::{} result type mismatch: {results:?}",
+                import.module(),
+                import.name()
+            ));
+            return false;
+        }
+    }
+    true
 }
 
 /// A Wasmtime runtime context that can be reused across multiple transactions.
@@ -110,6 +179,13 @@ impl WasmtimeContext {
 
         if !check_memory_limit(&module) {
             debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
+            return Ok(None);
+        }
+
+        if !validate_imports(&module, self.global_context.imports()) {
+            debug_log!(eprintln!(
+                "Module instantiation failed: import validation"
+            ));
             return Ok(None);
         }
 
