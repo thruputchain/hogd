@@ -287,4 +287,51 @@ TEST(NNInt128LockTest, IsCommittedValueInBoundsRejectsWrappedOutOfBoundsValue)
       -100, std::numeric_limits<int128_t>::min() + 100));
 }
 
+TEST(NNInt128LockTest, CommittedValueInBoundsPositiveBase)
+{
+  // base=100: lower_bound=0, value must be >= 0
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(100, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(100, -100));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(100, 50));
+  // wraps below zero
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(100, -101));
+}
+
+TEST(NNInt128LockTest, CommittedValueInBoundsNegativeBase)
+{
+  // base=-100: lower_bound=base=-100, value must be >= -100
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(-100, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(-100, 100));
+  // wrapping_add(-100, int128_min+100) = int128_min, which is < -100
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(
+      -100, std::numeric_limits<int128_t>::min() + 100));
+}
+
+TEST(NNInt128LockTest, CommittedValueInBoundsZeroBase)
+{
+  // base=0: lower_bound=0, value must be >= 0
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(0, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(0, 1));
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(0, -1));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(
+      0, std::numeric_limits<int128_t>::max()));
+}
+
+TEST(NNInt128LockTest, CommittedValueInBoundsExtremeBase)
+{
+  constexpr auto kMax = std::numeric_limits<int128_t>::max();
+  constexpr auto kMin = std::numeric_limits<int128_t>::min();
+
+  // base=int128_max: lower_bound=0, value must be >= 0
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMax, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMax, -kMax));
+  // wrapping_add(kMax, 1) = kMin, which is < 0
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(kMax, 1));
+
+  // base=int128_min: lower_bound=base=kMin, value must be >= kMin (always true
+  // for any non-wrapping delta, but wrapping can produce kMin-1 etc.)
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMin, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMin, kMax));
+}
+
 } // namespace hogd
