@@ -55,7 +55,7 @@ public:
                                       uint32_t popcount);
 
   x23::Async<ExpectedStorageItem>
-  get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
+  get_snapshot_item(BlockID block, AddressAndKey addrkey);
   ExpectedContract get_contract(BlockID block, SHA256Hash const &contract_hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);

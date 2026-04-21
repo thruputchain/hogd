@@ -22,7 +22,7 @@ BlockSnapshotRpc::db_snapshot_read_null()
 {}
 
 x23::Async<ExpectedStorageItem>
-BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
+BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey addrkey)
 {
   if (block != block_id_) {
     co_return ExpectedStorageItem(RPCError::kRPCBadBlockID);
