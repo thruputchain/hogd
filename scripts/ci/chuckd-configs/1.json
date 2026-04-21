@@ -1,0 +1,105 @@
+{
+    "validator_config": {
+        "private_info": {
+            "public_info": {
+                "public_key": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa",
+                "address": "10.100.0.103:10200"
+            },
+            "secret_key": "b4ab9f6c526e2fdc32a1b28c28ed9285f469c3e48132c6964d497eb2b1c9cdf2aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa"
+        },
+        "known_validators": [
+            {
+                "public_key": "be87fef9c9d49869601aba731ddaafbc74bd7f78eb36b3e618d02e6ac0b89032",
+                "address": "10.100.0.102:10200"
+            },
+            {
+                "public_key": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa",
+                "address": "10.100.0.103:10200"
+            }
+        ]
+    },
+    "wallet_config": {
+        "secret_key": "613165323736",
+        "users": [
+            {
+                "login": "wallet_user",
+                "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+            }
+        ]
+    },
+    "discovery_config": {
+        "advertise_interval_msec": "5000",
+        "advertise_par": 5,
+        "snapshot_ttl_msec": "7000"
+    },
+    "router_config": {
+        "tree_fan_out": 5
+    },
+    "dogwood_config": {
+        "route_count": 50,
+        "route_time_to_live_msec": "60000",
+        "route_max_latency_msec": "1000",
+        "endpoint_max_pending": 800,
+        "endpoint_num_clients": 16,
+        "endpoint_idle_ttl_msec": "60000",
+        "endpoint_dial_timeout_msec": "2000",
+        "endpoint_redial_delay_msec": "100",
+        "endpoint_call_timeout_msec": "2000",
+        "stream_receiver_worker_count": 512,
+        "stream_sender_worker_count": 32,
+        "transmission_receiver_decode_worker_count": 512,
+        "transmission_sender_worker_count": 32,
+        "transmission_partial_max_ttl_msec": "10000",
+        "transmission_partial_idle_ttl_msec": "1000"
+    },
+    "mempool_config": {
+        "transaction_ttl_msec": "2000",
+        "submission_lot_size": "50000",
+        "submission_lot_wait_msec": "50"
+    },
+    "catchup_config": {
+        "catchup_block_ttl_sec": "10",
+        "catchup_block_age": "10"
+    },
+    "scp_config": {
+        "max_timeout_ms": "1000",
+        "initial_ballot_timeout_ms": "750",
+        "increment_ballot_timeout_ms": "750",
+        "initial_nomination_timeout_ms": "750",
+        "increment_nomination_timeout_ms": "750",
+        "quorum_set": {
+            "threshold": 2,
+            "validators": [
+                {
+                    "Ed25519": {
+                        "ed25519": "be87fef9c9d49869601aba731ddaafbc74bd7f78eb36b3e618d02e6ac0b89032"
+                    }
+                },
+                {
+                    "Ed25519": {
+                        "ed25519": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa"
+                    }
+                }
+            ],
+            "inner_sets": [
+            ]
+        }
+    },
+    "baton_config": {
+        "skew_msec": "40",
+        "heartbeat_msec": "200",
+        "patience_msec": "1000",
+        "max_catchup_height": 86400
+    },
+    "repair_config": {
+        "base_delay_msec": "200",
+        "max_delay_msec": "5000",
+        "multiplier_nom": 3,
+        "multiplier_denom": 2
+    },
+    "storage_config": {
+        "reclaim_interval_msec": "300000",
+        "max_catchup_blocks": 86400,
+        "max_scp_slots": 86400
+    }
+}

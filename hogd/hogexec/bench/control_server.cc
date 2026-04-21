@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -29,6 +30,7 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "x23/cpumap.h"
 #include "x23/fastclock.h"
 #include "x23/vec.h"
 
@@ -80,6 +82,9 @@ wait_for_child(pid_t child_pid)
 std::string
 join_args(std::vector<std::string> const &args)
 {
+  if (args.empty()) {
+    return "";
+  }
   std::string args_joined;
   for (const auto &arg : args) {
     args_joined += "\"" + arg + "\" ";
@@ -93,11 +98,24 @@ class Subprocess {
 public:
   std::optional<pid_t>
   launch_process(std::string const &program_name,
-                 std::vector<std::string> const &program_args)
+                 std::vector<std::string> const &program_args,
+                 std::string const &cpu_affinity)
   {
     std::string full_program_name =
-        std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
+        program_name.starts_with("/")
+            ? program_name
+            : std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
     info("starting process: {} {}", full_program_name, join_args(program_args));
+
+    std::optional<x23::CpuSet> cpu_set;
+    if (!cpu_affinity.empty()) {
+      cpu_set = x23::parse_cpuset(cpu_affinity);
+      if (!cpu_set->valid()) {
+        error("invalid cpu affinity string: {}", cpu_affinity);
+        return std::nullopt;
+      }
+      info("applying cpu affinity: {}", cpu_affinity);
+    }
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
@@ -175,6 +193,14 @@ public:
       // Close the original file descriptors
       close(stdout_fd);
       close(stderr_fd);
+
+      if (cpu_set.has_value()) {
+        Errno err = cpu_set->set_affinity();
+        if (err) {
+          info("sched_setaffinity failed: {}\n", err);
+          _exit(EXIT_FAILURE);
+        }
+      }
 
       std::vector<char *> args;
       args.push_back(const_cast<char *>(program_name.data()));
@@ -284,10 +310,13 @@ public:
     for (auto const &arg : config.program_args) {
       program_args.emplace_back(arg.begin(), arg.end());
     }
+    std::string cpu_affinity(config.cpu_affinity.begin(),
+                             config.cpu_affinity.end());
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
     info("launching process: {} {}", program_name, join_args(program_args));
-    auto pid = new_proc->launch_process(program_name, program_args);
+    auto pid =
+        new_proc->launch_process(program_name, program_args, cpu_affinity);
     if (!pid) {
       error("failed to launch process: {}", Errno{});
       return CIServerErrorCode::kCIServerErrorCodeInternal;
