@@ -118,7 +118,7 @@ public:
       }
       info("applying cpu affinity: {}", cpu_affinity);
 #else  // !HAVE_SCHED_SETAFFINITY
-      PANIC("cpu affinity is unsupported on this platform: {}", cpu_affinity);
+      panic("cpu affinity is unsupported on this platform: {}", cpu_affinity);
 #endif // !HAVE_SCHED_SETAFFINITY
     }
 
