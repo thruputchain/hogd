@@ -61,6 +61,8 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
+          path: |
+            ~/.cargo/bin
 
       # No submodules needed - format.sh formats files in main repo only
 
@@ -132,6 +134,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo/bin
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -261,6 +264,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo/bin
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -371,6 +375,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo/bin
 
       - name: Configure Git for Submodule Caching
         run: |

@@ -6,12 +6,14 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -19,11 +21,11 @@ void
 BlockSnapshotRpc::db_snapshot_read_null()
 {}
 
-ExpectedStorageItem
-BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
+x23::Async<ExpectedStorageItem>
+BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey addrkey)
 {
   if (block != block_id_) {
-    return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+    co_return ExpectedStorageItem(RPCError::kRPCBadBlockID);
   }
 
   {
@@ -31,28 +33,36 @@ BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     if (items_to_stall_.contains(addrkey)) {
       currently_stalled_items_.insert(addrkey);
       stalled_items_cv_.notify_all();
-      stalled_items_cv_.wait(lock, [&] {
-        return !items_to_stall_.contains(addrkey);
-      });
-      currently_stalled_items_.erase(addrkey);
+      auto gen = stall_release_futex_.load();
+      lock.unlock();
+
+      for (;;) {
+        co_await stall_release_futex_.wait(gen);
+        std::scoped_lock recheck(stalled_items_mutex_);
+        if (!items_to_stall_.contains(addrkey)) {
+          currently_stalled_items_.erase(addrkey);
+          break;
+        }
+        gen = stall_release_futex_.load();
+      }
     }
   }
 
   {
     auto blocked = blocked_items_.take();
     if (blocked->contains(addrkey)) {
-      return ExpectedStorageItem(RPCError::kRPCUnrecoverable);
+      co_return ExpectedStorageItem(RPCError::kRPCUnrecoverable);
     }
   }
 
   auto m = items_.take();
   auto it = m->find(addrkey);
   if (it == m->end()) {
-    return ExpectedStorageItem(RPCError::kRPCNotFound);
+    co_return ExpectedStorageItem(RPCError::kRPCNotFound);
   }
   ExpectedStorageItem out(RPCError::kRPCNone);
   out.item() = it->second.to_wire_item();
-  return out;
+  co_return out;
 }
 
 ExpectedContract
@@ -226,9 +236,13 @@ BlockSnapshotRpc::wait_for_stalled_item(AddressAndKey const &addrkey)
 void
 BlockSnapshotRpc::release_stalled_item(AddressAndKey const &addrkey)
 {
-  std::scoped_lock lock(stalled_items_mutex_);
-  items_to_stall_.erase(addrkey);
-  stalled_items_cv_.notify_all();
+  {
+    std::scoped_lock lock(stalled_items_mutex_);
+    items_to_stall_.erase(addrkey);
+    stalled_items_cv_.notify_all();
+  }
+  stall_release_futex_.rmw([](auto &v) { ++v; });
+  stall_release_futex_.broadcast(&default_threadpool());
 }
 
 } // namespace hogd
