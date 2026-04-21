@@ -109,12 +109,16 @@ public:
 
     std::optional<x23::CpuSet> cpu_set;
     if (!cpu_affinity.empty()) {
+#if HAVE_SCHED_SETAFFINITY
       cpu_set = x23::parse_cpuset(cpu_affinity);
       if (!cpu_set->valid()) {
         error("invalid cpu affinity string: {}", cpu_affinity);
         return std::nullopt;
       }
       info("applying cpu affinity: {}", cpu_affinity);
+#else  // !HAVE_SCHED_SETAFFINITY
+      PANIC("cpu affinity is unsupported on this platform: {}", cpu_affinity);
+#endif // !HAVE_SCHED_SETAFFINITY
     }
 
     // Create temporary files
