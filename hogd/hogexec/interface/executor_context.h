@@ -56,12 +56,6 @@ public:
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
 
-  // Test-only hooks for validating ExecutorContext lifetime behavior.
-  static void block_validate_transaction_batch_for_test();
-  static void wait_for_validate_transaction_batch_blocked_for_test();
-  static void unblock_validate_transaction_batch_for_test();
-  static void reset_validate_transaction_batch_test_state();
-
   std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
   {
     // NOLINTNEXTLINE(readability-ambiguous-smartptr-reset-call)
@@ -81,7 +75,6 @@ private:
                                             TransactionID tx_id);
   ExecResult run_validate_transaction(ProposedTransaction const &tx,
                                       TransactionID tx_id);
-  static void maybe_block_validate_transaction_batch_for_test();
 
   void log_event_return(SystemStatus<void> error);
 
@@ -95,11 +88,6 @@ private:
   std::mutex event_accumulate_mutex_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;
   std::atomic<uint32_t> pending_event_calls_ = 0;
-
-  inline static std::atomic<bool>
-      should_block_validate_transaction_batch_for_test_ = false;
-  inline static std::atomic<bool> validate_transaction_batch_blocked_for_test_ =
-      false;
 };
 
 } // namespace hogd

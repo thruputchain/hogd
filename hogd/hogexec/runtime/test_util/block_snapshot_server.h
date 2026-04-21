@@ -1,7 +1,9 @@
 #pragma once
 
+#include <condition_variable>
 #include <cerrno>
 #include <cstddef>
+#include <mutex>
 #include <set>
 #include <span>
 #include <sys/socket.h>
@@ -90,6 +92,9 @@ public:
                                      QueueEntry entry);
 
   void setup_ban_item(AddressAndKey const &addrkey);
+  void setup_stall_item(AddressAndKey const &addrkey);
+  void wait_for_stalled_item(AddressAndKey const &addrkey);
+  void release_stalled_item(AddressAndKey const &addrkey);
 
   void shut_down()
   {
@@ -114,6 +119,13 @@ private:
   // For testing lazy loading:
   // Creates a set of items that throw an error if they are accessed at all
   x23::MVar<std::set<AddressAndKey>> blocked_items_;
+
+  // For testing in-flight snapshot access:
+  // Reads to these items block until released by the test thread.
+  std::mutex stalled_items_mutex_;
+  std::condition_variable stalled_items_cv_;
+  std::set<AddressAndKey> items_to_stall_;
+  std::set<AddressAndKey> currently_stalled_items_;
 };
 static_assert(
     is_DatabaseToExecutorInterfaceV1<BlockSnapshotRpc *, std::type_identity_t>);

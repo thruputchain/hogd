@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -50,14 +49,11 @@ public:
   x23::Async<ExecResult> open_validation(BlockID new_validation_id);
   // Decreases the reference count of the executor context.
   x23::Async<ExecResult> remove_block(BlockID block_id);
+  x23::Async<ExecResult> finalize_block_shutdown(BlockID block_id);
 
   // All references to the executor context must be released before calling
   // this.
   x23::Async<void> gc_executor_context(BlockID block_id);
-
-  // Test-only counters for executor-state GC sequencing.
-  static void reset_gc_count_for_test();
-  static uint32_t gc_count_for_test();
 
 private:
   x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode);
@@ -71,15 +67,35 @@ private:
   std::unique_ptr<StorageSnapshotCache>
   get_snapshot_cache(BlockID block_id, x23::CoroGuard const &g);
 
+  struct ShutdownState {
+    std::mutex lock_;
+    ExecResult result_ = ExecResult::ExecResultOK;
+    x23::CoroFutex<bool> done_{false};
+
+    void set_result(ExecResult result)
+    {
+      std::scoped_lock lock(lock_);
+      result_ = result;
+    }
+
+    ExecResult result()
+    {
+      std::scoped_lock lock(lock_);
+      return result_;
+    }
+  };
+
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
                 std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                 EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
       : context(mode, block_id, db_proxy, std::move(snapshot_cache),
-                event_server_proxy, worker_pool)
+                event_server_proxy, worker_pool),
+        shutdown_state(std::make_shared<ShutdownState>())
     {}
     PerThreadARC<ExecutorContext> context;
     int open_block_count{1};
+    std::shared_ptr<ShutdownState> shutdown_state;
   };
 
   x23::CoroLock active_blocks_lock_;
@@ -103,8 +119,6 @@ private:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   DispatchPool worker_pool_;
-
-  inline static std::atomic<uint32_t> gc_count_for_test_ = 0;
 };
 
 inline x23::MaybeAsync<PerThreadARC<ExecutorContext> *>

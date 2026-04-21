@@ -78,7 +78,6 @@ ExecutorContext::validate_transaction_batch(
   x23::Awaitable<ExecValidateBatchResult> awaitable;
   x23::CoroCB<ExecValidateBatchResult> cb(awaitable);
   worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
-    maybe_block_validate_transaction_batch_for_test();
     ExecValidateBatchResult batch_res;
     batch_res.reserve(proposed_txs.size());
     for (size_t i = 0; i < proposed_txs.size(); i++) {
@@ -90,60 +89,6 @@ ExecutorContext::validate_transaction_batch(
   auto r = co_await awaitable;
   assert(r.size() == proposed_txs.size());
   co_return std::move(r);
-}
-
-void
-ExecutorContext::block_validate_transaction_batch_for_test()
-{
-  validate_transaction_batch_blocked_for_test_.store(false,
-                                                     std::memory_order_release);
-  should_block_validate_transaction_batch_for_test_.store(
-      true, std::memory_order_release);
-}
-
-void
-ExecutorContext::wait_for_validate_transaction_batch_blocked_for_test()
-{
-  while (!validate_transaction_batch_blocked_for_test_.load(
-      std::memory_order_acquire)) {
-    validate_transaction_batch_blocked_for_test_.wait(
-        false, std::memory_order_acquire);
-  }
-}
-
-void
-ExecutorContext::unblock_validate_transaction_batch_for_test()
-{
-  should_block_validate_transaction_batch_for_test_.store(
-      false, std::memory_order_release);
-  should_block_validate_transaction_batch_for_test_.notify_all();
-}
-
-void
-ExecutorContext::reset_validate_transaction_batch_test_state()
-{
-  unblock_validate_transaction_batch_for_test();
-  validate_transaction_batch_blocked_for_test_.store(false,
-                                                     std::memory_order_release);
-}
-
-void
-ExecutorContext::maybe_block_validate_transaction_batch_for_test()
-{
-  if (!should_block_validate_transaction_batch_for_test_.load(
-          std::memory_order_acquire)) {
-    return;
-  }
-
-  validate_transaction_batch_blocked_for_test_.store(true,
-                                                     std::memory_order_release);
-  validate_transaction_batch_blocked_for_test_.notify_all();
-
-  while (should_block_validate_transaction_batch_for_test_.load(
-      std::memory_order_acquire)) {
-    should_block_validate_transaction_batch_for_test_.wait(
-        true, std::memory_order_acquire);
-  }
 }
 
 x23::Async<ExecResult>

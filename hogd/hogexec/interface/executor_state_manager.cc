@@ -56,11 +56,10 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
     if (it->second.context.get().mode() != mode) {
       co_return ExecResult::ExecResultSystemError;
     }
-    if (it->second.open_block_count == 0) {
+    if (it->second.open_block_count <= 0) {
       error("Tried to reopen block {} that is closing", new_block_id);
       co_return ExecResult::ExecResultSystemError;
     }
-    assert(it->second.open_block_count > 0);
     it->second.open_block_count++;
     trace("Increased ref count on existing block {} in mode {}", new_block_id,
           mode);
@@ -115,14 +114,18 @@ x23::Async<ExecResult>
 ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
-  ExecResult result = ExecResult::ExecResultOK;
-  bool do_gc = false;
+  bool finalize_here = false;
+  std::shared_ptr<ShutdownState> shutdown_state;
   {
     x23::CoroGuard g;
     co_await g(active_blocks_lock_);
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
+      co_return ExecResult::ExecResultSystemError;
+    }
+    if (it->second.open_block_count == 0) {
+      error("Tried to remove block {} that is already closing", block_id);
       co_return ExecResult::ExecResultSystemError;
     }
     it->second.open_block_count--;
@@ -133,44 +136,74 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
 
     if (it->second.open_block_count == 0) {
-      if (it->second.context.initiate_shutdown()) {
-        do_gc = true;
-      }
-      auto event_error = co_await it->second.context.get().await_event_return();
-
-      // Notify event server that we're closing our handle to this block
-      auto close_res = co_await event_server_proxy_->close_block(block_id);
-      if (!close_res.has_value()) [[unlikely]] {
-        error("Failed to notify event server of block close: {}", block_id);
-        result = ExecResult::ExecResultSystemError;
-      }
-
-      if (event_error.has_value()) [[unlikely]] {
-        switch (event_error.value()) {
-        case SystemErrorCode::Abandon:
-          result = ExecResult::ExecResultSystemError;
-          break;
-        case SystemErrorCode::ValidationFailure:
-          result = ExecResult::ExecResultTxValidationFailure;
-          break;
-        case SystemErrorCode::Unrecoverable:
-          error("Unrecoverable: Received system unrecoverable error code from "
-                "event server");
-          result = ExecResult::ExecResultUnrecoverable;
-          break;
-        default:
-          error("Unrecoverable: Received unhandled system error code from "
-                "event server: {}",
-                event_error.value());
-          result = ExecResult::ExecResultUnrecoverable;
-          break;
-        }
-      }
+      shutdown_state = it->second.shutdown_state;
+      finalize_here = it->second.context.initiate_shutdown();
     }
   }
-  if (do_gc) {
-    co_await gc_executor_context(block_id);
+  if (!shutdown_state) {
+    co_return ExecResult::ExecResultOK;
   }
+  if (finalize_here) {
+    co_return co_await finalize_block_shutdown(block_id);
+  }
+
+  co_await shutdown_state->done_.wait(false);
+  co_return shutdown_state->result();
+}
+
+x23::Async<ExecResult>
+ExecutorStateManager::finalize_block_shutdown(BlockID block_id)
+{
+  PerThreadARC<ExecutorContext> *ctx = nullptr;
+  std::shared_ptr<ShutdownState> shutdown_state;
+  {
+    x23::CoroGuard g;
+    co_await g(active_blocks_lock_);
+    auto it = active_blocks_.find(block_id);
+    if (it == active_blocks_.end()) {
+      error("Tried to finalize block {} that does not exist", block_id);
+      co_return ExecResult::ExecResultSystemError;
+    }
+    ctx = &it->second.context;
+    shutdown_state = it->second.shutdown_state;
+  }
+
+  ExecResult result = ExecResult::ExecResultOK;
+
+  auto event_error = co_await ctx->get().await_event_return();
+
+  auto close_res = co_await event_server_proxy_->close_block(block_id);
+  if (!close_res.has_value()) [[unlikely]] {
+    error("Failed to notify event server of block close: {}", block_id);
+    result = ExecResult::ExecResultSystemError;
+  }
+
+  if (event_error.has_value()) [[unlikely]] {
+    switch (event_error.value()) {
+    case SystemErrorCode::Abandon:
+      result = ExecResult::ExecResultSystemError;
+      break;
+    case SystemErrorCode::ValidationFailure:
+      result = ExecResult::ExecResultTxValidationFailure;
+      break;
+    case SystemErrorCode::Unrecoverable:
+      error("Unrecoverable: Received system unrecoverable error code from "
+            "event server");
+      result = ExecResult::ExecResultUnrecoverable;
+      break;
+    default:
+      error("Unrecoverable: Received unhandled system error code from "
+            "event server: {}",
+            event_error.value());
+      result = ExecResult::ExecResultUnrecoverable;
+      break;
+    }
+  }
+
+  co_await gc_executor_context(block_id);
+  shutdown_state->set_result(result);
+  shutdown_state->done_.store(true);
+  shutdown_state->done_.broadcast();
   co_return result;
 }
 
@@ -178,7 +211,6 @@ x23::Async<void>
 ExecutorStateManager::gc_executor_context(BlockID block_id)
 {
   trace("Garbage collecting state for block {}", block_id);
-  gc_count_for_test_.fetch_add(1, std::memory_order_relaxed);
   // The blockID must already have had shutdown initiated.
   x23::CoroGuard g;
   co_await g(active_blocks_lock_);
@@ -218,18 +250,6 @@ ExecutorStateManager::get_snapshot_cache(BlockID block_id,
   out->set_block_id(block_id);
   free_snapshot_caches_.pop_back();
   return out;
-}
-
-void
-ExecutorStateManager::reset_gc_count_for_test()
-{
-  gc_count_for_test_.store(0, std::memory_order_relaxed);
-}
-
-uint32_t
-ExecutorStateManager::gc_count_for_test()
-{
-  return gc_count_for_test_.load(std::memory_order_relaxed);
 }
 
 } // namespace hogd
