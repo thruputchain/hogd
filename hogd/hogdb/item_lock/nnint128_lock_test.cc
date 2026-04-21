@@ -1,22 +1,14 @@
 #include <gtest/gtest.h>
 
-#include <atomic>
 #include <limits>
-#include <optional>
 #include <utility>
 
-#include "hogd/base/io.h"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/change_set.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#define private public
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
-#undef private
-#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
@@ -33,33 +25,6 @@ make_dummy_context()
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
   return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
-}
-
-inline HogDBDAO &
-test_dao()
-{
-  static std::optional<Directory> dir;
-  static std::optional<HogDBDAO> dao;
-  if (!dao.has_value()) {
-    auto dir_status = Directory::open_temporary();
-    CHECK(static_cast<bool>(dir_status));
-    dir.emplace(std::move(*dir_status));
-
-    constexpr size_t kHeapSize = 10_MiB;
-    auto db = Database::open(dir->get_path(),
-                             Database::estimate_heap_size(kHeapSize), 0);
-    CHECK(static_cast<bool>(db));
-    dao.emplace(RAMDB(std::move(*db)));
-  }
-
-  return *dao;
-}
-
-inline LockContext
-make_persist_context()
-{
-  static ItemKey key = make_item_key(make_address(1), 0);
-  return LockContext(&test_dao(), 0, key, &kTestCostModel);
 }
 
 } // namespace
@@ -314,22 +279,124 @@ TEST(NNInt128LockTest, NegativeBaseRejectsAddPastCapacity)
           .has_value());
 }
 
-TEST(NNInt128LockTest, StageCommittedChangesRejectsWrappedOutOfBoundsValue)
+TEST(NNInt128LockTest, IsCommittedValueInBoundsRejectsWrappedOutOfBoundsValue)
 {
-  NNInt128Lock lock(-100);
-  lock.delta_bounds_.delta_.store(std::numeric_limits<int128_t>::min() + 100,
-                                  std::memory_order_relaxed);
+  // base=-100, delta=int128_min+100 wraps around to a very large positive
+  // value, which is below the lower bound of base (-100).
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(
+      -100, std::numeric_limits<int128_t>::min() + 100));
+}
 
-  auto &dao = test_dao();
-  auto changes = dao.create_changeset();
+TEST(NNInt128LockTest, CommittedValueInBoundsPositiveBase)
+{
+  // base=100: lower_bound=0, value must be >= 0
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(100, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(100, -100));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(100, 50));
+  // wraps below zero
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(100, -101));
+}
 
-  EXPECT_DEATH(
-      {
-        auto ctx = make_persist_context();
-        auto status = lock.stage_committed_changes(ctx, changes);
-        (void)status;
-      },
-      "CHECK FAILED");
+TEST(NNInt128LockTest, CommittedValueInBoundsNegativeBase)
+{
+  // base=-100: lower_bound=base=-100, value must be >= -100
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(-100, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(-100, 100));
+  // wrapping_add(-100, int128_min+100) = int128_min, which is < -100
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(
+      -100, std::numeric_limits<int128_t>::min() + 100));
+}
+
+TEST(NNInt128LockTest, CommittedValueInBoundsZeroBase)
+{
+  // base=0: lower_bound=0, value must be >= 0
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(0, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(0, 1));
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(0, -1));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(
+      0, std::numeric_limits<int128_t>::max()));
+}
+
+TEST(NNInt128LockTest, CommittedValueInBoundsExtremeBase)
+{
+  constexpr auto kMax = std::numeric_limits<int128_t>::max();
+  constexpr auto kMin = std::numeric_limits<int128_t>::min();
+
+  // base=int128_max: lower_bound=0, value must be >= 0
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMax, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMax, -kMax));
+  // wrapping_add(kMax, 1) = kMin, which is < 0
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(kMax, 1));
+
+  // base=int128_min: lower_bound=base=kMin, value must be >= kMin (always true
+  // for any non-wrapping delta, but wrapping can produce kMin-1 etc.)
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMin, 0));
+  EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMin, kMax));
+}
+
+TEST(NNInt128LockTest, ZeroBase)
+{
+  NNInt128Lock lock(0);
+  EXPECT_EQ(lock.get_add_capacity(), std::numeric_limits<int128_t>::max());
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+
+  // No subtraction allowed
+  NNInt128 sub(0, -1);
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+                   .has_value());
+
+  // Addition works
+  NNInt128 add(0, 100);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+                  .has_value());
+}
+
+TEST(NNInt128LockTest, MaxBase)
+{
+  constexpr auto kMax = std::numeric_limits<int128_t>::max();
+  NNInt128Lock lock(kMax);
+  EXPECT_EQ(lock.get_add_capacity(), 0);
+  EXPECT_EQ(lock.get_sub_capacity(), kMax);
+
+  // No addition allowed
+  NNInt128 add(kMax, 1);
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+                   .has_value());
+
+  // Subtraction works
+  NNInt128 sub(kMax, -1);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+                  .has_value());
+}
+
+TEST(NNInt128LockTest, MinBase)
+{
+  constexpr auto kMin = std::numeric_limits<int128_t>::min();
+  constexpr auto kMax = std::numeric_limits<int128_t>::max();
+  NNInt128Lock lock(kMin);
+  // add_capacity = int128_max - int128_min = 2*int128_max + 1 = uint128_max
+  EXPECT_EQ(lock.get_add_capacity(), uint128_t{kMax} + uint128_t{kMax} + 1);
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+
+  // No subtraction allowed
+  NNInt128 sub(kMin, -1);
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+                   .has_value());
+
+  // Addition works
+  NNInt128 add(kMin, 1);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+                  .has_value());
+}
+
+TEST(NNInt128LockTest, BaseMismatchRejectsConflict)
+{
+  NNInt128Lock lock(100);
+
+  NNInt128 wrong_base(200, 10);
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &wrong_base, make_dummy_context());
+  EXPECT_FALSE(status.has_value());
 }
 
 } // namespace hogd
