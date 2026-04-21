@@ -165,6 +165,13 @@ public:
     return cost_model->kBaseItemCost;
   }
 
+  static bool is_committed_value_in_bounds(int128_t base, int128_t delta)
+  {
+    auto value = wrapping_add(base, delta);
+    auto lower_bound = base < 0 ? base : int128_t{0};
+    return value >= lower_bound;
+  }
+
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 

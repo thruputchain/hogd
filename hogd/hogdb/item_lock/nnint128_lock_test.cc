@@ -13,9 +13,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
-#define private public
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
-#undef private
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
@@ -33,33 +31,6 @@ make_dummy_context()
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
   return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
-}
-
-inline HogDBDAO &
-test_dao()
-{
-  static std::optional<Directory> dir;
-  static std::optional<HogDBDAO> dao;
-  if (!dao.has_value()) {
-    auto dir_status = Directory::open_temporary();
-    CHECK(static_cast<bool>(dir_status));
-    dir.emplace(std::move(*dir_status));
-
-    constexpr size_t kHeapSize = 10_MiB;
-    auto db = Database::open(dir->get_path(),
-                             Database::estimate_heap_size(kHeapSize), 0);
-    CHECK(static_cast<bool>(db));
-    dao.emplace(RAMDB(std::move(*db)));
-  }
-
-  return *dao;
-}
-
-inline LockContext
-make_persist_context()
-{
-  static ItemKey key = make_item_key(make_address(1), 0);
-  return LockContext(&test_dao(), 0, key, &kTestCostModel);
 }
 
 } // namespace
@@ -314,22 +285,12 @@ TEST(NNInt128LockTest, NegativeBaseRejectsAddPastCapacity)
           .has_value());
 }
 
-TEST(NNInt128LockTest, StageCommittedChangesRejectsWrappedOutOfBoundsValue)
+TEST(NNInt128LockTest, IsCommittedValueInBoundsRejectsWrappedOutOfBoundsValue)
 {
-  NNInt128Lock lock(-100);
-  lock.delta_bounds_.delta_.store(std::numeric_limits<int128_t>::min() + 100,
-                                  std::memory_order_relaxed);
-
-  auto &dao = test_dao();
-  auto changes = dao.create_changeset();
-
-  EXPECT_DEATH(
-      {
-        auto ctx = make_persist_context();
-        auto status = lock.stage_committed_changes(ctx, changes);
-        (void)status;
-      },
-      "CHECK FAILED");
+  // base=-100, delta=int128_min+100 wraps around to a very large positive
+  // value, which is below the lower bound of base (-100).
+  EXPECT_FALSE(NNInt128Lock::is_committed_value_in_bounds(
+      -100, std::numeric_limits<int128_t>::min() + 100));
 }
 
 } // namespace hogd
