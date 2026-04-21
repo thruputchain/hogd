@@ -30,6 +30,7 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "x23/config.h"
 #include "x23/cpumap.h"
 #include "x23/fastclock.h"
 #include "x23/vec.h"
