@@ -98,11 +98,10 @@ ExecutorMempoolRpc::executorsched_validate_batch(
   }
 
   CHECK(proposed_txs.size() <= std::numeric_limits<uint32_t>::max());
-  auto r = ctx->get().validate_transaction_batch(proposed_txs,
-                                                 allocate_tx_ids(
-                                                     proposed_txs.size()));
+  auto r = co_await ctx->get().validate_transaction_batch(
+      proposed_txs, allocate_tx_ids(proposed_txs.size()));
   co_await release_context(block_id, ctx);
-  co_return co_await r;
+  co_return r;
 }
 
 x23::Async<ExecResult>

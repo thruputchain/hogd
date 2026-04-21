@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,18 @@ BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   if (block != block_id_) {
     return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+  }
+
+  {
+    std::unique_lock lock(stalled_items_mutex_);
+    if (items_to_stall_.contains(addrkey)) {
+      currently_stalled_items_.insert(addrkey);
+      stalled_items_cv_.notify_all();
+      stalled_items_cv_.wait(lock, [&] {
+        return !items_to_stall_.contains(addrkey);
+      });
+      currently_stalled_items_.erase(addrkey);
+    }
   }
 
   {
@@ -82,7 +95,9 @@ BlockSnapshotRpc::try_push_new_subtransaction(
     BlockID /*unused*/, TransactionID /*unused*/,
     StorageDeltaBatch const & /*unused*/)
 {
-  return RPCError::kRPCUnimplemented;
+  // This test server only models snapshot reads. Treat transaction mutations as
+  // successful no-ops so read-side execution tests can run against it.
+  return RPCError::kRPCNone;
 }
 
 RPCError
@@ -90,7 +105,7 @@ BlockSnapshotRpc::pop_subtransactions(BlockID /*unused*/,
                                       TransactionID /*unused*/,
                                       uint32_t /*unused*/)
 {
-  return RPCError::kRPCUnimplemented;
+  return RPCError::kRPCNone;
 }
 
 RPCError
@@ -98,14 +113,14 @@ BlockSnapshotRpc::commit_transaction(BlockID /*unused*/,
                                      TransactionID /*unused*/,
                                      NewContractBatch const & /*unused*/)
 {
-  return RPCError::kRPCUnimplemented; // unimplemented
+  return RPCError::kRPCNone;
 }
 
 RPCError
 BlockSnapshotRpc::abort_transaction(BlockID /*unused*/,
                                     TransactionID /*unused*/)
 {
-  return RPCError::kRPCUnimplemented; // unimplemented;
+  return RPCError::kRPCNone;
 }
 
 ExpectedRetrocausalQueueBlock
@@ -190,6 +205,30 @@ void
 BlockSnapshotRpc::setup_ban_item(AddressAndKey const &addrkey)
 {
   blocked_items_->insert(addrkey);
+}
+
+void
+BlockSnapshotRpc::setup_stall_item(AddressAndKey const &addrkey)
+{
+  std::scoped_lock lock(stalled_items_mutex_);
+  items_to_stall_.insert(addrkey);
+}
+
+void
+BlockSnapshotRpc::wait_for_stalled_item(AddressAndKey const &addrkey)
+{
+  std::unique_lock lock(stalled_items_mutex_);
+  stalled_items_cv_.wait(lock, [&] {
+    return currently_stalled_items_.contains(addrkey);
+  });
+}
+
+void
+BlockSnapshotRpc::release_stalled_item(AddressAndKey const &addrkey)
+{
+  std::scoped_lock lock(stalled_items_mutex_);
+  items_to_stall_.erase(addrkey);
+  stalled_items_cv_.notify_all();
 }
 
 } // namespace hogd

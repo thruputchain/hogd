@@ -29,6 +29,10 @@ target_link_libraries(
   hogd_interface
   GTest::gtest
 )
+add_dependencies(
+  exec_interface_test_objects
+  all_wasm_headers
+)
 
 add_executable(
   exec_interface_test

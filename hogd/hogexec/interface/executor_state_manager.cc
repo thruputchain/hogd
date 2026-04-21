@@ -185,6 +185,12 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
   auto it = active_blocks_.find(block_id);
   assert(it != active_blocks_.end());
 
+  // remove_block() waits before close_block() on the normal shutdown path, but
+  // in-flight propose/validate RPCs can still spawn detached event callbacks
+  // before the final release_reference() hands off cleanup. Drain again here
+  // before recycling the ExecutorContext.
+  co_await it->second.context.get().await_event_return();
+
   auto ul = context_cache_.lock_threads();
   context_cache_.for_each(ul, [block_id](ContextCache &cache) {
     std::scoped_lock g(cache.lock_);
