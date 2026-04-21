@@ -1,4 +1,4 @@
-name: Mempool Bench (hog_sched)
+name: Mempool Multi-Node Bench (hog_sched)
 
 on:
     schedule:
