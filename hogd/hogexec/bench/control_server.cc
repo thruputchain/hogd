@@ -1,6 +1,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <print>
+#include <sched.h>
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
 #include <string_view>
@@ -80,6 +82,9 @@ wait_for_child(pid_t child_pid)
 std::string
 join_args(std::vector<std::string> const &args)
 {
+  if (args.empty()) {
+    return "";
+  }
   std::string args_joined;
   for (const auto &arg : args) {
     args_joined += "\"" + arg + "\" ";
@@ -87,17 +92,95 @@ join_args(std::vector<std::string> const &args)
   args_joined.pop_back(); // remove the last space
   return args_joined;
 }
+
+std::optional<int>
+parse_cpu_index(std::string_view token)
+{
+  if (token.empty()) {
+    return std::nullopt;
+  }
+  int cpu = 0;
+  auto [ptr, ec] =
+      std::from_chars(token.data(), token.data() + token.size(), cpu);
+  if (ec != std::errc{} || ptr != token.data() + token.size() || cpu < 0 ||
+      cpu >= CPU_SETSIZE) {
+    return std::nullopt;
+  }
+  return cpu;
+}
+
+std::optional<cpu_set_t>
+parse_cpu_affinity(std::string const &cpu_affinity)
+{
+  cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  bool has_cpu = false;
+  size_t pos = 0;
+
+  while (pos < cpu_affinity.size()) {
+    size_t next = cpu_affinity.find(',', pos);
+    if (next == std::string::npos) {
+      next = cpu_affinity.size();
+    }
+
+    std::string_view token(cpu_affinity.data() + pos, next - pos);
+    if (token.empty()) {
+      return std::nullopt;
+    }
+
+    size_t dash = token.find('-');
+    if (dash == std::string_view::npos) {
+      auto cpu = parse_cpu_index(token);
+      if (!cpu.has_value()) {
+        return std::nullopt;
+      }
+      CPU_SET(*cpu, &cpu_set);
+      has_cpu = true;
+    }
+    else {
+      auto begin = parse_cpu_index(token.substr(0, dash));
+      auto end = parse_cpu_index(token.substr(dash + 1));
+      if (!begin.has_value() || !end.has_value() || *begin > *end) {
+        return std::nullopt;
+      }
+      for (int cpu = *begin; cpu <= *end; ++cpu) {
+        CPU_SET(cpu, &cpu_set);
+      }
+      has_cpu = true;
+    }
+
+    pos = next + 1;
+  }
+
+  if (!has_cpu) {
+    return std::nullopt;
+  }
+  return cpu_set;
+}
 } // namespace
 
 class Subprocess {
 public:
   std::optional<pid_t>
   launch_process(std::string const &program_name,
-                 std::vector<std::string> const &program_args)
+                 std::vector<std::string> const &program_args,
+                 std::string const &cpu_affinity)
   {
     std::string full_program_name =
-        std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
+        program_name.starts_with("/")
+            ? program_name
+            : std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
     info("starting process: {} {}", full_program_name, join_args(program_args));
+
+    std::optional<cpu_set_t> cpu_set;
+    if (!cpu_affinity.empty()) {
+      cpu_set = parse_cpu_affinity(cpu_affinity);
+      if (!cpu_set.has_value()) {
+        error("invalid cpu affinity string: {}", cpu_affinity);
+        return std::nullopt;
+      }
+      info("applying cpu affinity: {}", cpu_affinity);
+    }
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
@@ -175,6 +258,12 @@ public:
       // Close the original file descriptors
       close(stdout_fd);
       close(stderr_fd);
+
+      if (cpu_set.has_value() &&
+          sched_setaffinity(0, sizeof(*cpu_set), &*cpu_set) == -1) {
+        info("sched_setaffinity failed: %s\n", strerror(errno));
+        _exit(EXIT_FAILURE);
+      }
 
       std::vector<char *> args;
       args.push_back(const_cast<char *>(program_name.data()));
@@ -284,10 +373,13 @@ public:
     for (auto const &arg : config.program_args) {
       program_args.emplace_back(arg.begin(), arg.end());
     }
+    std::string cpu_affinity(config.cpu_affinity.begin(),
+                             config.cpu_affinity.end());
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
     info("launching process: {} {}", program_name, join_args(program_args));
-    auto pid = new_proc->launch_process(program_name, program_args);
+    auto pid =
+        new_proc->launch_process(program_name, program_args, cpu_affinity);
     if (!pid) {
       error("failed to launch process: {}", Errno{});
       return CIServerErrorCode::kCIServerErrorCodeInternal;

@@ -32,13 +32,15 @@ public:
   }();
 
   void start_server(std::string const &program_name,
-                    std::vector<std::string> const &program_args)
+                    std::vector<std::string> const &program_args,
+                    std::string const &cpu_affinity = "")
   {
     ServerConfig config;
     config.program_name = x23::Buf{program_name.begin(), program_name.end()};
     for (auto const &arg : program_args) {
       config.program_args.push_back(x23::Buf{arg.begin(), arg.end()});
     }
+    config.cpu_affinity = x23::Buf{cpu_affinity.begin(), cpu_affinity.end()};
 
     if (client_.ciserver_start(kHogdGitHash, config) !=
         CIServerErrorCode::kCIServerErrorCodeOK) {

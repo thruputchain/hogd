@@ -10,6 +10,7 @@ WAIT_PORT="$REPO_ROOT/scripts/wait-port.sh"
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
+CONTROL_CLI="$BUILD_ROOT/hogd/hogexec/bench/control_cli"
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 . "$REPO_ROOT/scripts/hog-ip.sh"
@@ -84,46 +85,9 @@ remote_run() {
   ssh "${COMMON_SSH_OPTS[@]}" "$host" "$@"
 }
 
-remote_launch() {
+latest_control_stdout() {
   local host=$1
-  local mask=$2
-  local logfile=$3
-  shift 3
-
-  local cmd
-  local remote_script
-  cmd=$(quote_cmd "$@")
-  remote_script=$(
-    cat <<EOF
-set -euo pipefail
-mkdir -p $(printf '%q' "$(dirname "$logfile")")
-nohup taskset -c $(printf '%q' "$mask") $cmd >$(printf '%q' "$logfile") 2>&1 </dev/null &
-EOF
-  )
-  ssh "${COMMON_SSH_OPTS[@]}" "$host" "bash -lc $(printf '%q' "$remote_script")"
-}
-
-remote_run_logged() {
-  local host=$1
-  local logfile=$2
-  shift 2
-
-  local cmd
-  local remote_script
-  cmd=$(quote_cmd "$@")
-  remote_script=$(
-    cat <<EOF
-set -euo pipefail
-mkdir -p $(printf '%q' "$(dirname "$logfile")")
-set +e
-$cmd >$(printf '%q' "$logfile") 2>&1
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-  )
-  ssh "${COMMON_SSH_OPTS[@]}" "$host" "bash -lc $(printf '%q' "$remote_script")"
+  ssh "${COMMON_SSH_OPTS[@]}" "$host" 'ls -1t /tmp/hogd_stdout* | head -n 1'
 }
 
 kill_stale_processes() {
@@ -150,7 +114,7 @@ done
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do
-  "$BUILD_ROOT/hogd/hogexec/bench/control_cli" "$host" "$CI_CONTROL_PORT" clear_work_dir
+  "$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" clear_work_dir
 done
 
 echo 'kill stale processes'
@@ -165,7 +129,7 @@ done
 
 echo 'launch loadgen servers'
 for node in "${NODE_IDS[@]}"; do
-  remote_launch "${LOADGEN_HOSTS[$node]}" "$SLOT_A_CPUS" "$(node_log_dir "$node")/loadgen_server.log" \
+  "$CONTROL_CLI" "${LOADGEN_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
     "$LOADGEN_BINARY" --port "$LOADGEN_PORT"
 done
 
@@ -178,37 +142,37 @@ echo 'launch hogexec shards'
 for node in "${NODE_IDS[@]}"; do
   coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
   bind_ip="$(hog_ip "${HOGEXEC_HOSTS[$node]}")"
-  remote_launch "${HOGEXEC_HOSTS[$node]}" "$SLOT_A_CPUS" "$(node_log_dir "$node")/hogexec_shard0.log" \
+  "$CONTROL_CLI" "${HOGEXEC_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
     "$HOGEXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOGEXEC_SLOT_A_PORT"
-  remote_launch "${HOGEXEC_HOSTS[$node]}" "$SLOT_B_CPUS" "$(node_log_dir "$node")/hogexec_shard1.log" \
+  "$CONTROL_CLI" "${HOGEXEC_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
     "$HOGEXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOGEXEC_SLOT_B_PORT"
 done
 
 echo 'launch event and indexer'
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
-  remote_launch "$event_host" "$SLOT_A_CPUS" "$(node_log_dir "$node")/event_exec.log" \
+  "$CONTROL_CLI" "$event_host" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
     "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
     --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT"
-  remote_launch "${INDEXER_HOSTS[$node]}" "$SLOT_B_CPUS" "$(node_log_dir "$node")/indexer_exec.log" \
+  "$CONTROL_CLI" "${INDEXER_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
     "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
     --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --event-port "$INDEXER_EVENT_PORT" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT"
 done
 
 echo 'launch hogdb and auth'
 for node in "${NODE_IDS[@]}"; do
-  remote_launch "${HOGDB_HOSTS[$node]}" "$SLOT_A_CPUS" "$(node_log_dir "$node")/hogdb.log" \
+  "$CONTROL_CLI" "${HOGDB_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
     "$HOGDB_BINARY" --db-path "$(node_dir "$node")/hogdb" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOGDB_HOSTS[$node]}")" \
     --coordinator-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_DB_PORT" --executor-port "$DB_EXECUTOR_PORT" \
     --mempool-port "$DB_MEMPOOL_PORT" --auth-port "$DB_AUTH_PORT"
-  remote_launch "${AUTH_HOSTS[$node]}" "$SLOT_B_CPUS" "$(node_log_dir "$node")/auth_exec.log" \
+  "$CONTROL_CLI" "${AUTH_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
     "$AUTH_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_AUTH_PORT" --bind-ip "$(hog_ip "${AUTH_HOSTS[$node]}")" \
     --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT"
 done
 
 echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
-  remote_launch "${CHUCKD_HOSTS[$node]}" "$SLOT_A_CPUS" "$(node_log_dir "$node")/chuckd.log" \
+  "$CONTROL_CLI" "${CHUCKD_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 20 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance 970c9b --seed 1410441218572558875 \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
@@ -248,7 +212,7 @@ echo 'launch mempools'
 node0_mempool_host="${MEMPOOL_HOSTS[0]}"
 node1_mempool_host="${MEMPOOL_HOSTS[1]}"
 node0_mempool_cmd=(
-  timeout 180s taskset -c "$SLOT_B_CPUS" "$MEMPOOL_BINARY"
+  "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
   --network-id 1
   --num-db-shards 1
@@ -260,7 +224,7 @@ node0_mempool_cmd=(
   --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
 )
 node1_mempool_cmd=(
-  timeout 180s taskset -c "$SLOT_B_CPUS" "$MEMPOOL_BINARY"
+  "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node1_mempool_host")"
   --network-id 1
   --num-db-shards 1
@@ -272,9 +236,37 @@ node1_mempool_cmd=(
   --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
 )
 
-remote_run_logged "$node0_mempool_host" "$(node_log_dir 0)/mempool_exec.log" "${node0_mempool_cmd[@]}" &
+node0_mempool_script=$(
+  cat <<EOF
+set -euo pipefail
+set +e
+$(quote_cmd timeout 180s "${node0_mempool_cmd[@]}")
+status=\$?
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
+)
+node1_mempool_script=$(
+  cat <<EOF
+set -euo pipefail
+set +e
+$(quote_cmd timeout 180s "${node1_mempool_cmd[@]}")
+status=\$?
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
+)
+
+"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+  /usr/bin/bash -lc "$node0_mempool_script"
+"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+  /usr/bin/bash -lc "$node1_mempool_script"
+
+"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
 node0_mempool_pid=$!
-remote_run_logged "$node1_mempool_host" "$(node_log_dir 1)/mempool_exec.log" "${node1_mempool_cmd[@]}" &
+"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
 node1_mempool_pid=$!
 
 for node in "${NODE_IDS[@]}"; do
@@ -292,8 +284,8 @@ wait "$node1_mempool_pid"
 echo 'collect coordinator output'
 tmp_node0=$(mktemp)
 tmp_node1=$(mktemp)
-scp "${CHUCKD_HOSTS[0]}:$(node_log_dir 0)/chuckd.log" "$tmp_node0"
-scp "${CHUCKD_HOSTS[1]}:$(node_log_dir 1)/chuckd.log" "$tmp_node1"
+scp "${CHUCKD_HOSTS[0]}:$(latest_control_stdout "${CHUCKD_HOSTS[0]}")" "$tmp_node0"
+scp "${CHUCKD_HOSTS[1]}:$(latest_control_stdout "${CHUCKD_HOSTS[1]}")" "$tmp_node1"
 cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
 rm -f "$tmp_node0" "$tmp_node1"
 
