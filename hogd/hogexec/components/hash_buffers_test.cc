@@ -116,4 +116,25 @@ TEST(HashBuffersTest, InvalidSize)
       0, std::as_bytes(std::span<const uint8_t>(not_too_big_buffer)), false));
 }
 
+TEST(HashBuffersTest, FailedResetPreservesExistingBuffer)
+{
+  HashBuffers buffers;
+
+  std::vector<uint8_t> prefix = {0x41, 0x42, 0x43, 0x44};
+  ASSERT_TRUE(
+      buffers.update(0, std::as_bytes(std::span<const uint8_t>(prefix)), true));
+
+  std::vector<uint8_t> oversized(kSHA256BufferMaxSize + 1, 0xFF);
+  auto result =
+      buffers.update(0, std::as_bytes(std::span<const uint8_t>(oversized)),
+                     true);
+  ASSERT_FALSE(result.has_value());
+  ASSERT_EQ(result.error(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  auto hash = buffers.finalize(0);
+  ASSERT_TRUE(hash.has_value());
+  EXPECT_EQ(hash.value(), sha256(prefix));
+}
+
 } // namespace hogd

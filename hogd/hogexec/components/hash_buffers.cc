@@ -37,6 +37,10 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
 
   auto it = buffers_.find(index);
   if (it != buffers_.end()) {
+    if (data.size() > kSHA256BufferMaxSize) {
+      return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
     it->second.clear();
     return update_existing_buffer(index, data);
   }
