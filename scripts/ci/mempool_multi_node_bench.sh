@@ -215,7 +215,7 @@ node0_mempool_script=$(
   cat <<EOF
 set -euo pipefail
 set +e
-$(quote_cmd timeout 180s "${node0_mempool_cmd[@]}")
+$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
