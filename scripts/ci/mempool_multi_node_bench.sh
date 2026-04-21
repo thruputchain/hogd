@@ -299,4 +299,4 @@ echo 'clone metrics history # This is idempotent'
 "$REPO_ROOT/scripts/clone_metrics_history.sh"
 
 echo 'log integration metrics'
-"$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool "$REPO_ROOT/coordinator_output.txt"
+"$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
