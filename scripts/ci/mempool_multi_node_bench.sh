@@ -81,6 +81,26 @@ quote_cmd() {
   printf '%s' "${quoted% }"
 }
 
+make_ulimit_exec_script() {
+  local quoted_cmd
+  quoted_cmd=$(quote_cmd "$@")
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+exec ${quoted_cmd}
+EOF
+}
+
+control_start_with_ulimit() {
+  local host=$1
+  local cores=$2
+  shift 2
+  local script
+  script=$(make_ulimit_exec_script "$@")
+  "$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" start --cores "$cores" \
+    /usr/bin/bash -lc "$script"
+}
+
 remote_run() {
   local host=$1
   shift
@@ -131,7 +151,7 @@ done
 
 echo 'launch loadgen servers'
 for node in "${NODE_IDS[@]}"; do
-  "$CONTROL_CLI" "${LOADGEN_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${LOADGEN_HOSTS[$node]}" "$SLOT_A_CPUS" \
     "$LOADGEN_BINARY" --port "$LOADGEN_PORT"
 done
 
@@ -144,37 +164,37 @@ echo 'launch hogexec shards'
 for node in "${NODE_IDS[@]}"; do
   coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
   bind_ip="$(hog_ip "${HOGEXEC_HOSTS[$node]}")"
-  "$CONTROL_CLI" "${HOGEXEC_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${HOGEXEC_HOSTS[$node]}" "$SLOT_A_CPUS" \
     "$HOGEXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOGEXEC_SLOT_A_PORT"
-  "$CONTROL_CLI" "${HOGEXEC_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+  control_start_with_ulimit "${HOGEXEC_HOSTS[$node]}" "$SLOT_B_CPUS" \
     "$HOGEXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOGEXEC_SLOT_B_PORT"
 done
 
 echo 'launch event and indexer'
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
-  "$CONTROL_CLI" "$event_host" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
+  control_start_with_ulimit "$event_host" "$SLOT_A_CPUS" \
     "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
     --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT"
-  "$CONTROL_CLI" "${INDEXER_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "$SLOT_B_CPUS" \
     "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
     --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --event-port "$INDEXER_EVENT_PORT" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT"
 done
 
 echo 'launch hogdb and auth'
 for node in "${NODE_IDS[@]}"; do
-  "$CONTROL_CLI" "${HOGDB_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${HOGDB_HOSTS[$node]}" "$SLOT_A_CPUS" \
     "$HOGDB_BINARY" --db-path "$(node_dir "$node")/hogdb" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOGDB_HOSTS[$node]}")" \
     --coordinator-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_DB_PORT" --executor-port "$DB_EXECUTOR_PORT" \
     --mempool-port "$DB_MEMPOOL_PORT" --auth-port "$DB_AUTH_PORT"
-  "$CONTROL_CLI" "${AUTH_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+  control_start_with_ulimit "${AUTH_HOSTS[$node]}" "$SLOT_B_CPUS" \
     "$AUTH_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_AUTH_PORT" --bind-ip "$(hog_ip "${AUTH_HOSTS[$node]}")" \
     --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT"
 done
 
 echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
-  "$CONTROL_CLI" "${CHUCKD_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 20 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
@@ -212,26 +232,10 @@ node1_mempool_cmd=(
 )
 
 node0_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-set +e
-$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
+  make_ulimit_exec_script timeout 360s "${node0_mempool_cmd[@]}"
 )
 node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-set +e
-$(quote_cmd timeout 180s "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
+  make_ulimit_exec_script timeout 180s "${node1_mempool_cmd[@]}"
 )
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
