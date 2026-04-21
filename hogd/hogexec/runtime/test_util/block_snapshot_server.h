@@ -22,6 +22,8 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -52,8 +54,8 @@ public:
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                       uint32_t popcount);
 
-  ExpectedStorageItem get_snapshot_item(BlockID block,
-                                        AddressAndKey const &addrkey);
+  x23::Async<ExpectedStorageItem>
+  get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
   ExpectedContract get_contract(BlockID block, SHA256Hash const &contract_hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);
@@ -121,14 +123,16 @@ private:
   x23::MVar<std::set<AddressAndKey>> blocked_items_;
 
   // For testing in-flight snapshot access:
-  // Reads to these items block until released by the test thread.
+  // Reads to these items suspend (via CoroFutex) until released by the test
+  // thread. The condvar is only used by wait_for_stalled_item (test thread).
   std::mutex stalled_items_mutex_;
   std::condition_variable stalled_items_cv_;
   std::set<AddressAndKey> items_to_stall_;
   std::set<AddressAndKey> currently_stalled_items_;
+  x23::CoroFutex<uint64_t> stall_release_futex_{0};
 };
 static_assert(
-    is_DatabaseToExecutorInterfaceV1<BlockSnapshotRpc *, std::type_identity_t>);
+    is_DatabaseToExecutorInterfaceV1<BlockSnapshotRpc *, x23::MaybeAsync>);
 
 class BlockSnapshotServer : public RpcServer<BlockSnapshotRpc> {
 public:
