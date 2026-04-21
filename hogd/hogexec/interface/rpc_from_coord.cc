@@ -156,8 +156,8 @@ ExecutorMempoolRpc::release_context(BlockID block_id,
 {
   if (ctx->release_reference()) {
     return [this, block_id]() -> x23::Async<void> {
-      static_cast<void>(co_await executor_states_->finalize_block_shutdown(
-          block_id));
+      static_cast<void>(
+          co_await executor_states_->finalize_block_shutdown(block_id));
       co_return;
     }();
   }

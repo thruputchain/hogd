@@ -30,8 +30,9 @@ BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     if (items_to_stall_.contains(addrkey)) {
       currently_stalled_items_.insert(addrkey);
       stalled_items_cv_.notify_all();
-      stalled_items_cv_.wait(
-          lock, [&] { return !items_to_stall_.contains(addrkey); });
+      stalled_items_cv_.wait(lock, [&] {
+        return !items_to_stall_.contains(addrkey);
+      });
       currently_stalled_items_.erase(addrkey);
     }
   }
@@ -216,8 +217,9 @@ void
 BlockSnapshotRpc::wait_for_stalled_item(AddressAndKey const &addrkey)
 {
   std::unique_lock lock(stalled_items_mutex_);
-  stalled_items_cv_.wait(
-      lock, [&] { return currently_stalled_items_.contains(addrkey); });
+  stalled_items_cv_.wait(lock, [&] {
+    return currently_stalled_items_.contains(addrkey);
+  });
 }
 
 void

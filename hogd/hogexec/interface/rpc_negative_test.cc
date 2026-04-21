@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <future>
 #include <format>
+#include <future>
 #include <limits>
 #include <stdexcept>
 #include <thread>
@@ -22,10 +22,10 @@
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
-#include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -101,10 +101,7 @@ protected:
   }
   EventCard make_event_card() { return event_wrapper_.make_event_card(); }
 
-  void init_executor()
-  {
-    init_executor(make_shard_card());
-  }
+  void init_executor() { init_executor(make_shard_card()); }
 
   void init_executor(ShardCard shard_card)
   {
@@ -280,8 +277,8 @@ TEST_F(RpcNegativeTest, TestFinishBlockWhileValidateBatchReadsSnapshotItem)
           contract_address, "nnint_get_key_not_exist");
   snapshot_server->impl()->setup_create_item(
       stalled_addrkey,
-      StorageItemWrapper(int128_t{7},
-                         NativeContractTestFramework::get_default_cost_model()));
+      StorageItemWrapper(
+          int128_t{7}, NativeContractTestFramework::get_default_cost_model()));
   snapshot_server->impl()->setup_stall_item(stalled_addrkey);
   x23::Defer cleanup(
       [&] { snapshot_server->impl()->release_stalled_item(stalled_addrkey); });
@@ -302,9 +299,10 @@ TEST_F(RpcNegativeTest, TestFinishBlockWhileValidateBatchReadsSnapshotItem)
                       .invocation = contract_client.make_invocation<
                           "test_nnint_get_key_not_exist">(UINT64_MAX),
                       .uniquifier =
-                          Uniquifier{.block_expiry_height =
-                                         std::numeric_limits<BlockHeight>::max(),
-                                     .nonce = 1},
+                          Uniquifier{
+                              .block_expiry_height =
+                                  std::numeric_limits<BlockHeight>::max(),
+                              .nonce = 1},
                   },
           },
       .nondeterministic_proposal_data = {},
