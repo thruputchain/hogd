@@ -1,7 +1,6 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
-#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -12,10 +11,8 @@
 #include <mutex>
 #include <optional>
 #include <print>
-#include <sched.h>
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
-#include <string_view>
 #include <sys/wait.h>
 #include <thread>
 #include <type_traits>
@@ -31,6 +28,7 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "x23/cpumap.h"
 #include "x23/fastclock.h"
 #include "x23/vec.h"
 
@@ -92,71 +90,6 @@ join_args(std::vector<std::string> const &args)
   args_joined.pop_back(); // remove the last space
   return args_joined;
 }
-
-std::optional<int>
-parse_cpu_index(std::string_view token)
-{
-  if (token.empty()) {
-    return std::nullopt;
-  }
-  int cpu = 0;
-  auto [ptr, ec] =
-      std::from_chars(token.data(), token.data() + token.size(), cpu);
-  if (ec != std::errc{} || ptr != token.data() + token.size() || cpu < 0 ||
-      cpu >= CPU_SETSIZE) {
-    return std::nullopt;
-  }
-  return cpu;
-}
-
-std::optional<cpu_set_t>
-parse_cpu_affinity(std::string const &cpu_affinity)
-{
-  cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
-  bool has_cpu = false;
-  size_t pos = 0;
-
-  while (pos < cpu_affinity.size()) {
-    size_t next = cpu_affinity.find(',', pos);
-    if (next == std::string::npos) {
-      next = cpu_affinity.size();
-    }
-
-    std::string_view token(cpu_affinity.data() + pos, next - pos);
-    if (token.empty()) {
-      return std::nullopt;
-    }
-
-    size_t dash = token.find('-');
-    if (dash == std::string_view::npos) {
-      auto cpu = parse_cpu_index(token);
-      if (!cpu.has_value()) {
-        return std::nullopt;
-      }
-      CPU_SET(*cpu, &cpu_set);
-      has_cpu = true;
-    }
-    else {
-      auto begin = parse_cpu_index(token.substr(0, dash));
-      auto end = parse_cpu_index(token.substr(dash + 1));
-      if (!begin.has_value() || !end.has_value() || *begin > *end) {
-        return std::nullopt;
-      }
-      for (int cpu = *begin; cpu <= *end; ++cpu) {
-        CPU_SET(cpu, &cpu_set);
-      }
-      has_cpu = true;
-    }
-
-    pos = next + 1;
-  }
-
-  if (!has_cpu) {
-    return std::nullopt;
-  }
-  return cpu_set;
-}
 } // namespace
 
 class Subprocess {
@@ -172,10 +105,10 @@ public:
             : std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
     info("starting process: {} {}", full_program_name, join_args(program_args));
 
-    std::optional<cpu_set_t> cpu_set;
+    std::optional<x23::CpuSet> cpu_set;
     if (!cpu_affinity.empty()) {
-      cpu_set = parse_cpu_affinity(cpu_affinity);
-      if (!cpu_set.has_value()) {
+      cpu_set = x23::parse_cpuset(cpu_affinity);
+      if (!cpu_set->valid()) {
         error("invalid cpu affinity string: {}", cpu_affinity);
         return std::nullopt;
       }
@@ -259,10 +192,12 @@ public:
       close(stdout_fd);
       close(stderr_fd);
 
-      if (cpu_set.has_value() &&
-          sched_setaffinity(0, sizeof(*cpu_set), &*cpu_set) == -1) {
-        info("sched_setaffinity failed: %s\n", strerror(errno));
-        _exit(EXIT_FAILURE);
+      if (cpu_set.has_value()) {
+        Errno err = cpu_set->set_affinity();
+        if (err) {
+          info("sched_setaffinity failed: {}\n", err);
+          _exit(EXIT_FAILURE);
+        }
       }
 
       std::vector<char *> args;
