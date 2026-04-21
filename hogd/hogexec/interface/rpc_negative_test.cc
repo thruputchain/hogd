@@ -135,7 +135,7 @@ protected:
     }
   }
 
-  StalledSyscallMiscSnapshotSetup
+  static StalledSyscallMiscSnapshotSetup
   setup_stalled_syscall_misc_snapshot(BlockSnapshotServer &snapshot_server)
   {
     using syscall_misc_tests_meta =
@@ -165,7 +165,7 @@ protected:
     };
   }
 
-  Transaction
+  static Transaction
   make_stalled_syscall_misc_transaction(ContractAddress contract_address)
   {
     ContractTraitClient<syscall_misc_tests::SyscallMiscTests> contract_client(
