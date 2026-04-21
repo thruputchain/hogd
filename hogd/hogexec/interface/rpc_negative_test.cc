@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <format>
 #include <future>
 #include <limits>
@@ -8,9 +9,9 @@
 #include <thread>
 #include <utility>
 
-#include "built_contracts/contract_loader.h"
 #include "built_contracts/syscall_misc_tests.h"
 #include "db_sched.hh"
+#include "event_rpc.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
