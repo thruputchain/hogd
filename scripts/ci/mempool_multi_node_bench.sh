@@ -277,13 +277,19 @@ for node in "${NODE_IDS[@]}"; do
 done
 
 wait "$node0_mempool_pid"
+echo 'node0 mempool wait completed'
 wait "$node1_mempool_pid"
+echo 'node1 mempool wait completed'
 
 echo 'collect coordinator output'
 tmp_node0=$(mktemp)
 tmp_node1=$(mktemp)
-scp "${CHUCKD_HOSTS[0]}:$(latest_control_stdout "${CHUCKD_HOSTS[0]}")" "$tmp_node0"
-scp "${CHUCKD_HOSTS[1]}:$(latest_control_stdout "${CHUCKD_HOSTS[1]}")" "$tmp_node1"
+echo "copying coordinator output from ${CHUCKD_HOSTS[0]}"
+scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
+  "${CHUCKD_HOSTS[0]}:$(latest_control_stdout "${CHUCKD_HOSTS[0]}")" "$tmp_node0"
+echo "copying coordinator output from ${CHUCKD_HOSTS[1]}"
+scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
+  "${CHUCKD_HOSTS[1]}:$(latest_control_stdout "${CHUCKD_HOSTS[1]}")" "$tmp_node1"
 cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
 rm -f "$tmp_node0" "$tmp_node1"
 
