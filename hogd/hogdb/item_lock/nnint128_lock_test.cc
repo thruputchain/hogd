@@ -334,4 +334,76 @@ TEST(NNInt128LockTest, CommittedValueInBoundsExtremeBase)
   EXPECT_TRUE(NNInt128Lock::is_committed_value_in_bounds(kMin, kMax));
 }
 
+TEST(NNInt128LockTest, ZeroBase)
+{
+  NNInt128Lock lock(0);
+  EXPECT_EQ(lock.get_add_capacity(), std::numeric_limits<int128_t>::max());
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+
+  // No subtraction allowed
+  NNInt128 sub(0, -1);
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+          .has_value());
+
+  // Addition works
+  NNInt128 add(0, 100);
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+          .has_value());
+}
+
+TEST(NNInt128LockTest, MaxBase)
+{
+  constexpr auto kMax = std::numeric_limits<int128_t>::max();
+  NNInt128Lock lock(kMax);
+  EXPECT_EQ(lock.get_add_capacity(), 0);
+  EXPECT_EQ(lock.get_sub_capacity(), kMax);
+
+  // No addition allowed
+  NNInt128 add(kMax, 1);
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+          .has_value());
+
+  // Subtraction works
+  NNInt128 sub(kMax, -1);
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+          .has_value());
+}
+
+TEST(NNInt128LockTest, MinBase)
+{
+  constexpr auto kMin = std::numeric_limits<int128_t>::min();
+  constexpr auto kMax = std::numeric_limits<int128_t>::max();
+  NNInt128Lock lock(kMin);
+  // add_capacity = int128_max - int128_min = 2*int128_max + 1 = uint128_max
+  EXPECT_EQ(lock.get_add_capacity(),
+            uint128_t{kMax} + uint128_t{kMax} + 1);
+  EXPECT_EQ(lock.get_sub_capacity(), 0);
+
+  // No subtraction allowed
+  NNInt128 sub(kMin, -1);
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &sub, make_dummy_context())
+          .has_value());
+
+  // Addition works
+  NNInt128 add(kMin, 1);
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &add, make_dummy_context())
+          .has_value());
+}
+
+TEST(NNInt128LockTest, BaseMismatchRejectsConflict)
+{
+  NNInt128Lock lock(100);
+
+  NNInt128 wrong_base(200, 10);
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &wrong_base, make_dummy_context());
+  EXPECT_FALSE(status.has_value());
+}
+
 } // namespace hogd
