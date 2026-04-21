@@ -93,12 +93,13 @@ remote_launch() {
   local cmd
   local remote_script
   cmd=$(quote_cmd "$@")
-  remote_script=$(cat <<EOF
+  remote_script=$(
+    cat <<EOF
 set -euo pipefail
 mkdir -p $(printf '%q' "$(dirname "$logfile")")
 nohup taskset -c $(printf '%q' "$mask") $cmd >$(printf '%q' "$logfile") 2>&1 </dev/null &
 EOF
-)
+  )
   ssh "${COMMON_SSH_OPTS[@]}" "$host" "bash -lc $(printf '%q' "$remote_script")"
 }
 
@@ -110,7 +111,8 @@ remote_run_logged() {
   local cmd
   local remote_script
   cmd=$(quote_cmd "$@")
-  remote_script=$(cat <<EOF
+  remote_script=$(
+    cat <<EOF
 set -euo pipefail
 mkdir -p $(printf '%q' "$(dirname "$logfile")")
 set +e
@@ -120,7 +122,7 @@ set -e
 [ \$status -eq 124 ] && status=0
 exit \$status
 EOF
-)
+  )
   ssh "${COMMON_SSH_OPTS[@]}" "$host" "bash -lc $(printf '%q' "$remote_script")"
 }
 
