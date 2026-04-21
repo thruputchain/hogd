@@ -198,8 +198,8 @@ ExecutorStateManager::on_context_refs_drained(BlockID block_id)
     if (it->second.open_block_count != 0) {
       co_return;
     }
-    if (it->second.close_state->close_complete_.load(std::memory_order_acquire))
-    {
+    if (it->second.close_state->close_complete_.load(
+            std::memory_order_acquire)) {
       do_gc = true;
     }
     else {

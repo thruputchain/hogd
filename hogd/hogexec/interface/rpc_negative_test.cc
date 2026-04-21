@@ -70,6 +70,11 @@ public:
   }
 
 protected:
+  struct StalledSyscallMiscSnapshotSetup {
+    ContractAddress contract_address;
+    AddressAndKey stalled_addrkey;
+  };
+
   HogdbWrapper db_wrapper_;
   EventServerWrapper event_wrapper_;
 
@@ -128,6 +133,51 @@ protected:
     if (event_res != RPCError::kRPCNone) {
       throw std::runtime_error("Failed to open event block");
     }
+  }
+
+  StalledSyscallMiscSnapshotSetup
+  setup_stalled_syscall_misc_snapshot(BlockSnapshotServer &snapshot_server)
+  {
+    using syscall_misc_tests_meta =
+        ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+
+    auto contract = syscall_misc_tests_meta::load_wasm();
+    ContractAddress contract_address =
+        NativeContractTestFramework::make_contract_address(1);
+    snapshot_server->impl()->setup_create_contract(*contract);
+    snapshot_server->impl()->setup_create_deployment(
+        contract_address,
+        NativeContractTestFramework::make_deployed_contract_hash(contract));
+
+    auto stalled_addrkey = NativeContractTestFramework::
+        make_contract_data_addrkey_matching_static_key_sdk_macro(
+            contract_address, "nnint_get_key_not_exist");
+    snapshot_server->impl()->setup_create_item(
+        stalled_addrkey,
+        StorageItemWrapper(
+            int128_t{7},
+            NativeContractTestFramework::get_default_cost_model()));
+    snapshot_server->impl()->setup_stall_item(stalled_addrkey);
+
+    return StalledSyscallMiscSnapshotSetup{
+        .contract_address = contract_address,
+        .stalled_addrkey = stalled_addrkey,
+    };
+  }
+
+  Transaction
+  make_stalled_syscall_misc_transaction(ContractAddress contract_address)
+  {
+    ContractTraitClient<syscall_misc_tests::SyscallMiscTests> contract_client(
+        contract_address);
+    return Transaction{
+        .invocation =
+            contract_client.make_invocation<"test_nnint_get_key_not_exist">(
+                UINT64_MAX),
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 1},
+    };
   }
 };
 
@@ -255,56 +305,29 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
   client_.executorsched_finish_block(block_id);
 }
 
-TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringValidate)
+TEST_F(RpcNegativeTest,
+       TestFinishBlockDoesNotRecycleSnapshotCacheDuringValidate)
 {
   BlockID block_id = 1005;
   BlockID recycle_probe_block_id = 1006;
   BlockSnapshotServer snapshot_server(block_id);
   auto snapshot_port = snapshot_server.start_server(0);
-
-  using syscall_misc_tests_meta =
-      ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
-
-  auto contract = syscall_misc_tests_meta::load_wasm();
-  ContractAddress contract_address =
-      NativeContractTestFramework::make_contract_address(1);
-  snapshot_server->impl()->setup_create_contract(*contract);
-  snapshot_server->impl()->setup_create_deployment(
-      contract_address,
-      NativeContractTestFramework::make_deployed_contract_hash(contract));
-
-  auto stalled_addrkey = NativeContractTestFramework::
-      make_contract_data_addrkey_matching_static_key_sdk_macro(
-          contract_address, "nnint_get_key_not_exist");
-  snapshot_server->impl()->setup_create_item(
-      stalled_addrkey,
-      StorageItemWrapper(
-          int128_t{7}, NativeContractTestFramework::get_default_cost_model()));
-  snapshot_server->impl()->setup_stall_item(stalled_addrkey);
-  x23::Defer cleanup(
-      [&] { snapshot_server->impl()->release_stalled_item(stalled_addrkey); });
+  auto setup = setup_stalled_syscall_misc_snapshot(snapshot_server);
+  x23::Defer cleanup([&] {
+    snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
+  });
 
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
-  ContractTraitClient<syscall_misc_tests::SyscallMiscTests> contract_client(
-      contract_address);
   ProposedTransactionBatch batch;
   batch.push_back(ProposedTransaction{
       .signed_tx =
           SignedTransaction{
               .tx =
-                  Transaction{
-                      .invocation = contract_client.make_invocation<
-                          "test_nnint_get_key_not_exist">(UINT64_MAX),
-                      .uniquifier =
-                          Uniquifier{
-                              .block_expiry_height =
-                                  std::numeric_limits<BlockHeight>::max(),
-                              .nonce = 1},
-                  },
+                  make_stalled_syscall_misc_transaction(setup.contract_address),
           },
       .nondeterministic_proposal_data = {},
   });
@@ -318,20 +341,21 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringValidate
         validate_client.executorsched_validate_batch(block_id, batch));
   });
 
-  snapshot_server->impl()->wait_for_stalled_item(stalled_addrkey);
+  snapshot_server->impl()->wait_for_stalled_item(setup.stalled_addrkey);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
 
   // If finish_block() recycles block-owned resources before the stalled
   // validation resumes, opening another block can reuse the same snapshot
   // cache and retarget it to the new block ID. Under the buggy validate_batch
-  // ordering, resuming this stalled validation then trips UAF or reads through
-  // the wrong block snapshot. Sanitized builds catch this reliably.
+  // ordering that released the executor context before awaiting the batch,
+  // resuming this stalled validation then trips UAF or reads through the
+  // wrong block snapshot. Sanitized builds catch that old behavior reliably.
   ASSERT_EQ(client_.executorsched_open_validation_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
   open_event_block(recycle_probe_block_id);
 
-  snapshot_server->impl()->release_stalled_item(stalled_addrkey);
+  snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   auto result = validate_future.get();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
@@ -339,12 +363,71 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringValidate
             ExecResult::ExecResultOK);
   EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
             RPCError::kRPCNone);
-  EXPECT_EQ(
-      event_client_
-          .eventsched_close_block(recycle_probe_block_id, recycle_probe_block_id)
-          .error(),
-      RPCError::kRPCNone);
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(recycle_probe_block_id,
+                                        recycle_probe_block_id)
+                .error(),
+            RPCError::kRPCNone);
   validate_thread.join();
+}
+
+TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
+{
+  BlockID block_id = 1007;
+  BlockID recycle_probe_block_id = 1008;
+  BlockSnapshotServer snapshot_server(block_id);
+  auto snapshot_port = snapshot_server.start_server(0);
+  auto setup = setup_stalled_syscall_misc_snapshot(snapshot_server);
+  x23::Defer cleanup([&] {
+    snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
+  });
+
+  init_executor(make_shard_card(snapshot_port));
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  open_event_block(block_id);
+
+  TransactionBatch batch;
+  batch.push_back(
+      make_stalled_syscall_misc_transaction(setup.contract_address));
+
+  auto propose_client = make_srpc_multiclient<ExecutorSched1>(
+      x23::HostPort{"localhost", server_port_}, false);
+  std::promise<ExecProposeBatchResult> propose_promise;
+  auto propose_future = propose_promise.get_future();
+  std::thread propose_thread([&] {
+    propose_promise.set_value(
+        propose_client.executorsched_propose_batch(block_id, batch));
+  });
+
+  snapshot_server->impl()->wait_for_stalled_item(setup.stalled_addrkey);
+  EXPECT_EQ(client_.executorsched_finish_block(block_id),
+            ExecResult::ExecResultOK);
+
+  // This mirrors the validate regression but exercises the propose path.
+  // propose_batch did not have the old validate-specific await ordering bug,
+  // but if finish_block() ever regresses and recycles block-owned resources
+  // while a stalled propose still holds a context ref, opening another block
+  // can retarget the recycled snapshot cache. Sanitized builds should catch
+  // that shutdown/GC regression here.
+  ASSERT_EQ(client_.executorsched_open_proposal_block(recycle_probe_block_id),
+            ExecResult::ExecResultOK);
+  open_event_block(recycle_probe_block_id);
+
+  snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
+  auto result = propose_future.get();
+  ASSERT_EQ(result.size(), 1);
+  EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
+  EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(recycle_probe_block_id,
+                                        recycle_probe_block_id)
+                .error(),
+            RPCError::kRPCNone);
+  propose_thread.join();
 }
 
 } // namespace hogd
