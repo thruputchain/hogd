@@ -181,33 +181,6 @@ for node in "${NODE_IDS[@]}"; do
     --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
 done
 
-echo 'wait for process readiness'
-for node in "${NODE_IDS[@]}"; do
-  hogexec_ip="$(hog_ip "${HOGEXEC_HOSTS[$node]}")"
-  "$WAIT_PORT" "$hogexec_ip" "$HOGEXEC_SLOT_A_PORT"
-  "$WAIT_PORT" "$hogexec_ip" "$HOGEXEC_SLOT_B_PORT"
-
-  event_ip="$(hog_ip "${EVENT_HOSTS[$node]}")"
-  "$WAIT_PORT" "$event_ip" "$EVENT_EXECUTOR_PORT"
-  "$WAIT_PORT" "$event_ip" "$EVENT_MEMPOOL_PORT"
-  "$WAIT_PORT" "$event_ip" "$EVENT_INDEXER_PORT"
-
-  indexer_ip="$(hog_ip "${INDEXER_HOSTS[$node]}")"
-  "$WAIT_PORT" "$indexer_ip" "$INDEXER_EVENT_PORT"
-  "$WAIT_PORT" "$indexer_ip" "$INDEXER_BLOCK_EXPLORER_PORT"
-
-  hogdb_ip="$(hog_ip "${HOGDB_HOSTS[$node]}")"
-  "$WAIT_PORT" "$hogdb_ip" "$DB_EXECUTOR_PORT"
-  "$WAIT_PORT" "$hogdb_ip" "$DB_MEMPOOL_PORT"
-  "$WAIT_PORT" "$hogdb_ip" "$DB_AUTH_PORT"
-
-  auth_ip="$(hog_ip "${AUTH_HOSTS[$node]}")"
-  "$WAIT_PORT" "$auth_ip" "$AUTH_DB_PORT"
-  "$WAIT_PORT" "$auth_ip" "$AUTH_MEMPOOL_PORT"
-
-  "$WAIT_PORT" "$(hog_ip "${CHUCKD_HOSTS[$node]}")" 7888
-done
-
 echo 'launch mempools'
 node0_mempool_host="${MEMPOOL_HOSTS[0]}"
 node1_mempool_host="${MEMPOOL_HOSTS[1]}"
@@ -269,13 +242,38 @@ node0_mempool_pid=$!
 "$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
 node1_mempool_pid=$!
 
+echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
+  hogexec_ip="$(hog_ip "${HOGEXEC_HOSTS[$node]}")"
+  "$WAIT_PORT" "$hogexec_ip" "$HOGEXEC_SLOT_A_PORT"
+  "$WAIT_PORT" "$hogexec_ip" "$HOGEXEC_SLOT_B_PORT"
+
+  event_ip="$(hog_ip "${EVENT_HOSTS[$node]}")"
+  "$WAIT_PORT" "$event_ip" "$EVENT_EXECUTOR_PORT"
+  "$WAIT_PORT" "$event_ip" "$EVENT_MEMPOOL_PORT"
+  "$WAIT_PORT" "$event_ip" "$EVENT_INDEXER_PORT"
+
+  indexer_ip="$(hog_ip "${INDEXER_HOSTS[$node]}")"
+  "$WAIT_PORT" "$indexer_ip" "$INDEXER_EVENT_PORT"
+  "$WAIT_PORT" "$indexer_ip" "$INDEXER_BLOCK_EXPLORER_PORT"
+
   mempool_ip="$(hog_ip "${MEMPOOL_HOSTS[$node]}")"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_COORDINATOR_PORT"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EXECUTOR_PORT"
   "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_DB_PORT"
   "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EVENT_PORT"
+  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EXECUTOR_PORT"
   "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_AUTH_PORT"
+  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_COORDINATOR_PORT"
+
+  hogdb_ip="$(hog_ip "${HOGDB_HOSTS[$node]}")"
+  "$WAIT_PORT" "$hogdb_ip" "$DB_EXECUTOR_PORT"
+  "$WAIT_PORT" "$hogdb_ip" "$DB_MEMPOOL_PORT"
+  "$WAIT_PORT" "$hogdb_ip" "$DB_AUTH_PORT"
+
+  auth_ip="$(hog_ip "${AUTH_HOSTS[$node]}")"
+  "$WAIT_PORT" "$auth_ip" "$AUTH_DB_PORT"
+  "$WAIT_PORT" "$auth_ip" "$AUTH_MEMPOOL_PORT"
+
+  "$WAIT_PORT" "$(hog_ip "${CHUCKD_HOSTS[$node]}")" 7888
 done
 
 wait "$node0_mempool_pid"
