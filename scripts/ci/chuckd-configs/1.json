@@ -3,18 +3,18 @@
         "private_info": {
             "public_info": {
                 "public_key": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa",
-                "address": "10.100.0.108:10200"
+                "address": "10.100.0.108:50000"
             },
             "secret_key": "b4ab9f6c526e2fdc32a1b28c28ed9285f469c3e48132c6964d497eb2b1c9cdf2aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa"
         },
         "known_validators": [
             {
                 "public_key": "be87fef9c9d49869601aba731ddaafbc74bd7f78eb36b3e618d02e6ac0b89032",
-                "address": "10.100.0.104:10200"
+                "address": "10.100.0.104:50000"
             },
             {
                 "public_key": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa",
-                "address": "10.100.0.108:10200"
+                "address": "10.100.0.108:50000"
             }
         ]
     },
