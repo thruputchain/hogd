@@ -42,6 +42,8 @@ HOGEXEC_BINARY="$BUILD_ROOT/hogd/hogexec/hogexec"
 HOGDB_BINARY="$BUILD_ROOT/hogd/hogdb/hogdb"
 AUTH_BINARY="$BUILD_ROOT/hogd/auth/auth_exec"
 CHUCKD_CONFIG_DIR="$REPO_ROOT/scripts/ci/chuckd-configs"
+CHUCKD_INSTANCES=(970c9b 982951)
+CHUCKD_SEEDS=(7704454085476916988 668639415096168636)
 
 export CI_CONTROL_PORT=$("$BUILD_ROOT/hogd/utils/get_port" kCIControlServerPort)
 export LOADGEN_PORT=11222
@@ -173,7 +175,7 @@ done
 echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
   "$CONTROL_CLI" "${CHUCKD_HOSTS[$node]}" "$CI_CONTROL_PORT" start --cores "$SLOT_A_CPUS" \
-    "$CHUCKD_BINARY" -l info --skip 20 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance 970c9b --seed 1410441218572558875 \
+    "$CHUCKD_BINARY" -l info --skip 20 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --wallet-addr :40000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
