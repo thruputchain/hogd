@@ -60,6 +60,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo/bin
 
       # Note: 'apt' cache removed since toolchain is in base image
 
