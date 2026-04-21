@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <exception>
 #include <print>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>

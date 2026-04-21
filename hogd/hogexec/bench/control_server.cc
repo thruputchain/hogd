@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -14,6 +15,7 @@
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <unistd.h>
