@@ -115,9 +115,7 @@ ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
   ExecResult result = ExecResult::ExecResultOK;
-  bool do_gc = false;
   PerThreadARC<ExecutorContext> *ctx = nullptr;
-  std::shared_ptr<CloseState> close_state;
   {
     x23::CoroGuard g;
     co_await g(active_blocks_lock_);
@@ -139,8 +137,8 @@ ExecutorStateManager::remove_block(BlockID block_id)
 
     if (it->second.open_block_count == 0) {
       ctx = &it->second.context;
-      close_state = it->second.close_state;
-      do_gc = it->second.context.initiate_shutdown();
+      CHECK(ctx->try_acquire_reference());
+      ctx->initiate_shutdown();
     }
   }
   if (!ctx) {
@@ -177,39 +175,10 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
   }
 
-  close_state->close_complete_.store(true, std::memory_order_release);
-  if (do_gc || close_state->refs_drained_.load(std::memory_order_acquire)) {
+  if (ctx->release_reference()) {
     co_await gc_executor_context(block_id);
   }
   co_return result;
-}
-
-x23::Async<void>
-ExecutorStateManager::on_context_refs_drained(BlockID block_id)
-{
-  bool do_gc = false;
-  {
-    x23::CoroGuard g;
-    co_await g(active_blocks_lock_);
-    auto it = active_blocks_.find(block_id);
-    if (it == active_blocks_.end()) {
-      co_return;
-    }
-    if (it->second.open_block_count != 0) {
-      co_return;
-    }
-    if (it->second.close_state->close_complete_.load(
-            std::memory_order_acquire)) {
-      do_gc = true;
-    }
-    else {
-      it->second.close_state->refs_drained_.store(true,
-                                                  std::memory_order_release);
-    }
-  }
-  if (do_gc) {
-    co_await gc_executor_context(block_id);
-  }
 }
 
 x23::Async<void>

@@ -155,7 +155,7 @@ ExecutorMempoolRpc::release_context(BlockID block_id,
                                     PerThreadARC<ExecutorContext> *ctx)
 {
   if (ctx->release_reference()) {
-    return executor_states_->on_context_refs_drained(block_id);
+    return executor_states_->gc_executor_context(block_id);
   }
   return {};
 }
