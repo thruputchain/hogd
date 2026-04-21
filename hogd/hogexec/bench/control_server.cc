@@ -459,7 +459,6 @@ private:
       // NOLINTEND(bugprone-unchecked-optional-access)
       return status;
     }
-    info("pid: {} is still running", pid);
     return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
   }
 
