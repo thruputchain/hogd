@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <cstdint>
 #include <format>
 #include <future>
@@ -256,9 +255,10 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
   client_.executorsched_finish_block(block_id);
 }
 
-TEST_F(RpcNegativeTest, TestFinishBlockWhileValidateBatchReadsSnapshotItem)
+TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringValidate)
 {
   BlockID block_id = 1005;
+  BlockID recycle_probe_block_id = 1006;
   BlockSnapshotServer snapshot_server(block_id);
   auto snapshot_port = snapshot_server.start_server(0);
 
@@ -319,31 +319,32 @@ TEST_F(RpcNegativeTest, TestFinishBlockWhileValidateBatchReadsSnapshotItem)
   });
 
   snapshot_server->impl()->wait_for_stalled_item(stalled_addrkey);
+  EXPECT_EQ(client_.executorsched_finish_block(block_id),
+            ExecResult::ExecResultOK);
 
-  auto finish_client = make_srpc_multiclient<ExecutorSched1>(
-      x23::HostPort{"localhost", server_port_}, false);
-  std::promise<void> finish_started_promise;
-  auto finish_started = finish_started_promise.get_future();
-  std::promise<ExecResult> finish_promise;
-  auto finish_future = finish_promise.get_future();
-  std::thread finish_thread([&] {
-    finish_started_promise.set_value();
-    finish_promise.set_value(
-        finish_client.executorsched_finish_block(block_id));
-  });
-  finish_started.wait();
-  EXPECT_EQ(finish_future.wait_for(std::chrono::milliseconds(200)),
-            std::future_status::timeout);
+  // If finish_block() recycles block-owned resources before the stalled
+  // validation resumes, opening another block can reuse the same snapshot
+  // cache and retarget it to the new block ID. Under the buggy validate_batch
+  // ordering, resuming this stalled validation then trips UAF or reads through
+  // the wrong block snapshot. Sanitized builds catch this reliably.
+  ASSERT_EQ(client_.executorsched_open_validation_block(recycle_probe_block_id),
+            ExecResult::ExecResultOK);
+  open_event_block(recycle_probe_block_id);
 
   snapshot_server->impl()->release_stalled_item(stalled_addrkey);
   auto result = validate_future.get();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
-  EXPECT_EQ(finish_future.get(), ExecResult::ExecResultOK);
+  EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
+            ExecResult::ExecResultOK);
   EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
             RPCError::kRPCNone);
+  EXPECT_EQ(
+      event_client_
+          .eventsched_close_block(recycle_probe_block_id, recycle_probe_block_id)
+          .error(),
+      RPCError::kRPCNone);
   validate_thread.join();
-  finish_thread.join();
 }
 
 } // namespace hogd

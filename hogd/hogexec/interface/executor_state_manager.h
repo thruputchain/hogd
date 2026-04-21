@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -49,7 +50,7 @@ public:
   x23::Async<ExecResult> open_validation(BlockID new_validation_id);
   // Decreases the reference count of the executor context.
   x23::Async<ExecResult> remove_block(BlockID block_id);
-  x23::Async<ExecResult> finalize_block_shutdown(BlockID block_id);
+  x23::Async<void> on_context_refs_drained(BlockID block_id);
 
   // All references to the executor context must be released before calling
   // this.
@@ -67,22 +68,9 @@ private:
   std::unique_ptr<StorageSnapshotCache>
   get_snapshot_cache(BlockID block_id, x23::CoroGuard const &g);
 
-  struct ShutdownState {
-    std::mutex lock_;
-    ExecResult result_ = ExecResult::ExecResultOK;
-    x23::CoroFutex<bool> done_{false};
-
-    void set_result(ExecResult result)
-    {
-      std::scoped_lock lock(lock_);
-      result_ = result;
-    }
-
-    ExecResult result()
-    {
-      std::scoped_lock lock(lock_);
-      return result_;
-    }
+  struct CloseState {
+    std::atomic<bool> close_complete_{false};
+    std::atomic<bool> refs_drained_{false};
   };
 
   struct ActiveBlock {
@@ -91,11 +79,11 @@ private:
                 EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
       : context(mode, block_id, db_proxy, std::move(snapshot_cache),
                 event_server_proxy, worker_pool),
-        shutdown_state(std::make_shared<ShutdownState>())
+        close_state(std::make_shared<CloseState>())
     {}
     PerThreadARC<ExecutorContext> context;
     int open_block_count{1};
-    std::shared_ptr<ShutdownState> shutdown_state;
+    std::shared_ptr<CloseState> close_state;
   };
 
   x23::CoroLock active_blocks_lock_;

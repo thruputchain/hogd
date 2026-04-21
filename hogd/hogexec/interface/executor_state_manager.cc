@@ -114,8 +114,10 @@ x23::Async<ExecResult>
 ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
-  bool finalize_here = false;
-  std::shared_ptr<ShutdownState> shutdown_state;
+  ExecResult result = ExecResult::ExecResultOK;
+  bool do_gc = false;
+  PerThreadARC<ExecutorContext> *ctx = nullptr;
+  std::shared_ptr<CloseState> close_state;
   {
     x23::CoroGuard g;
     co_await g(active_blocks_lock_);
@@ -136,39 +138,14 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
 
     if (it->second.open_block_count == 0) {
-      shutdown_state = it->second.shutdown_state;
-      finalize_here = it->second.context.initiate_shutdown();
+      ctx = &it->second.context;
+      close_state = it->second.close_state;
+      do_gc = it->second.context.initiate_shutdown();
     }
   }
-  if (!shutdown_state) {
+  if (!ctx) {
     co_return ExecResult::ExecResultOK;
   }
-  if (finalize_here) {
-    co_return co_await finalize_block_shutdown(block_id);
-  }
-
-  co_await shutdown_state->done_.wait(false);
-  co_return shutdown_state->result();
-}
-
-x23::Async<ExecResult>
-ExecutorStateManager::finalize_block_shutdown(BlockID block_id)
-{
-  PerThreadARC<ExecutorContext> *ctx = nullptr;
-  std::shared_ptr<ShutdownState> shutdown_state;
-  {
-    x23::CoroGuard g;
-    co_await g(active_blocks_lock_);
-    auto it = active_blocks_.find(block_id);
-    if (it == active_blocks_.end()) {
-      error("Tried to finalize block {} that does not exist", block_id);
-      co_return ExecResult::ExecResultSystemError;
-    }
-    ctx = &it->second.context;
-    shutdown_state = it->second.shutdown_state;
-  }
-
-  ExecResult result = ExecResult::ExecResultOK;
 
   auto event_error = co_await ctx->get().await_event_return();
 
@@ -200,11 +177,39 @@ ExecutorStateManager::finalize_block_shutdown(BlockID block_id)
     }
   }
 
-  co_await gc_executor_context(block_id);
-  shutdown_state->set_result(result);
-  shutdown_state->done_.store(true);
-  shutdown_state->done_.broadcast();
+  close_state->close_complete_.store(true, std::memory_order_release);
+  if (do_gc || close_state->refs_drained_.load(std::memory_order_acquire)) {
+    co_await gc_executor_context(block_id);
+  }
   co_return result;
+}
+
+x23::Async<void>
+ExecutorStateManager::on_context_refs_drained(BlockID block_id)
+{
+  bool do_gc = false;
+  {
+    x23::CoroGuard g;
+    co_await g(active_blocks_lock_);
+    auto it = active_blocks_.find(block_id);
+    if (it == active_blocks_.end()) {
+      co_return;
+    }
+    if (it->second.open_block_count != 0) {
+      co_return;
+    }
+    if (it->second.close_state->close_complete_.load(std::memory_order_acquire))
+    {
+      do_gc = true;
+    }
+    else {
+      it->second.close_state->refs_drained_.store(true,
+                                                  std::memory_order_release);
+    }
+  }
+  if (do_gc) {
+    co_await gc_executor_context(block_id);
+  }
 }
 
 x23::Async<void>
