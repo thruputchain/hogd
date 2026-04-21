@@ -155,8 +155,8 @@ ExecutorContext::run_propose_transaction(Transaction const &tx,
     // connections so the calls aren't ordered, then some of those propose calls
     // might still fail by failing to acquire a reference).
     //
-    // Hence, when we go to await_event_return(), we know that this event call
-    // will be awaited before this ExecutorContext is destroyed.
+    // Hence, once shutdown has started, the final cleanup owner can drain
+    // pending_event_calls_ before this ExecutorContext is destroyed.
     syscall_handler.emit_events(exec_res)(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);

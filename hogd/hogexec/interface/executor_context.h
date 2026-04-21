@@ -55,6 +55,7 @@ public:
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
+
   std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
   {
     // NOLINTNEXTLINE(readability-ambiguous-smartptr-reset-call)
