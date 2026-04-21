@@ -56,10 +56,11 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
     if (it->second.context.get().mode() != mode) {
       co_return ExecResult::ExecResultSystemError;
     }
-    if (it->second.open_block_count <= 0) {
+    if (it->second.open_block_count == 0) {
       error("Tried to reopen block {} that is closing", new_block_id);
       co_return ExecResult::ExecResultSystemError;
     }
+    assert(it->second.open_block_count > 0);
     it->second.open_block_count++;
     trace("Increased ref count on existing block {} in mode {}", new_block_id,
           mode);
@@ -115,17 +116,13 @@ ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
   ExecResult result = ExecResult::ExecResultOK;
-  PerThreadARC<ExecutorContext> *ctx = nullptr;
+  bool do_gc = false;
   {
     x23::CoroGuard g;
     co_await g(active_blocks_lock_);
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
-      co_return ExecResult::ExecResultSystemError;
-    }
-    if (it->second.open_block_count == 0) {
-      error("Tried to remove block {} that is already closing", block_id);
       co_return ExecResult::ExecResultSystemError;
     }
     it->second.open_block_count--;
@@ -136,46 +133,42 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
 
     if (it->second.open_block_count == 0) {
-      ctx = &it->second.context;
-      CHECK(ctx->try_acquire_reference());
-      ctx->initiate_shutdown();
+      if (it->second.context.initiate_shutdown()) {
+        do_gc = true;
+      }
+      auto event_error = co_await it->second.context.get().await_event_return();
+
+      // Notify event server that we're closing our handle to this block
+      auto close_res = co_await event_server_proxy_->close_block(block_id);
+      if (!close_res.has_value()) [[unlikely]] {
+        error("Failed to notify event server of block close: {}", block_id);
+        result = ExecResult::ExecResultSystemError;
+      }
+
+      if (event_error.has_value()) [[unlikely]] {
+        switch (event_error.value()) {
+        case SystemErrorCode::Abandon:
+          result = ExecResult::ExecResultSystemError;
+          break;
+        case SystemErrorCode::ValidationFailure:
+          result = ExecResult::ExecResultTxValidationFailure;
+          break;
+        case SystemErrorCode::Unrecoverable:
+          error("Unrecoverable: Received system unrecoverable error code from "
+                "event server");
+          result = ExecResult::ExecResultUnrecoverable;
+          break;
+        default:
+          error("Unrecoverable: Received unhandled system error code from "
+                "event server: {}",
+                event_error.value());
+          result = ExecResult::ExecResultUnrecoverable;
+          break;
+        }
+      }
     }
   }
-  if (!ctx) {
-    co_return ExecResult::ExecResultOK;
-  }
-
-  auto event_error = co_await ctx->get().await_event_return();
-
-  auto close_res = co_await event_server_proxy_->close_block(block_id);
-  if (!close_res.has_value()) [[unlikely]] {
-    error("Failed to notify event server of block close: {}", block_id);
-    result = ExecResult::ExecResultSystemError;
-  }
-
-  if (event_error.has_value()) [[unlikely]] {
-    switch (event_error.value()) {
-    case SystemErrorCode::Abandon:
-      result = ExecResult::ExecResultSystemError;
-      break;
-    case SystemErrorCode::ValidationFailure:
-      result = ExecResult::ExecResultTxValidationFailure;
-      break;
-    case SystemErrorCode::Unrecoverable:
-      error("Unrecoverable: Received system unrecoverable error code from "
-            "event server");
-      result = ExecResult::ExecResultUnrecoverable;
-      break;
-    default:
-      error("Unrecoverable: Received unhandled system error code from "
-            "event server: {}",
-            event_error.value());
-      result = ExecResult::ExecResultUnrecoverable;
-      break;
-    }
-  }
-
-  if (ctx->release_reference()) {
+  if (do_gc) {
     co_await gc_executor_context(block_id);
   }
   co_return result;
