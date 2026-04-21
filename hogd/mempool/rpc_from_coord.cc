@@ -711,7 +711,7 @@ MempoolCoordinatorRpc::finish_nominating_block(const DbTip &db_tip,
   x23::Async<EventBlockResult> event_close_block_handle =
       eventsched_close_block(cache.block_id, db_tip.height + 1);
 
-  SHA256Hash txset_hash = get_txset_hash(cache.tx_hashes);
+  SHA256Hash txset_hash = get_txset_hash(cache.result_tx_hashes);
   record_stage(stage_generate_txset_hash);
   {
     Nomination &nomination =
@@ -1299,17 +1299,19 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
   PendingBlock cache{};
   {
-    x23::Async<bool> tx_nondeterministic_data_handle =
-        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nominations);
-    x23::Async<bool> tx_hash_handle =
-        parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
-
+    // We call [reserve] here to avoid racing with accesses to [cache.tx_hashes]
+    // in [parallel_batch_to_t()] below.
     cache.txs.reserve(kMaxBlockSize);
     cache.tx_hashes.reserve(kMaxBlockSize);
     cache.result_tx_hashes.reserve(kMaxBlockSize);
     cache.result_tx_nominations.reserve(kMaxBlockSize);
     record_stage(stage_reserve_cache);
+
+    x23::Async<bool> tx_nondeterministic_data_handle =
+        parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nominations);
+    x23::Async<bool> tx_hash_handle =
+        parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
 
     CHECK(co_await tx_nondeterministic_data_handle);
     record_stage(stage_deserialize_nomination_data);
