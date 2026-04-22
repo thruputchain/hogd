@@ -12,8 +12,10 @@ WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REP
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
 CONTROL_CLI="$BUILD_ROOT/hogd/hogexec/bench/control_cli"
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
+COMMON_SCP_OPTS=(-o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 . "$REPO_ROOT/scripts/hog-ip.sh"
+. "$REPO_ROOT/scripts/git_info.sh"
 
 SLOT_A_CPUS='0-31,64-95'
 SLOT_B_CPUS='32-63,96-127'
@@ -91,14 +93,41 @@ exec ${quoted_cmd}
 EOF
 }
 
+declare -a CONTROL_LOG_RECORDS=()
+PUBLISHED_RESULTS=0
+COORDINATOR_OUTPUT_WRITTEN=0
+
+record_control_logs() {
+  local host=$1
+  local label=$2
+  local stdout_path=$3
+  local stderr_path=$4
+  CONTROL_LOG_RECORDS+=("${host}|${label}|${stdout_path}|${stderr_path}")
+}
+
 control_start_with_ulimit() {
   local host=$1
-  local cores=$2
-  shift 2
+  local label=$2
+  local cores=$3
+  shift 3
   local script
+  local output
+  local stdout_path
+  local stderr_path
   script=$(make_ulimit_exec_script "$@")
-  "$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" start --cores "$cores" \
-    /usr/bin/bash -lc "$script"
+  if ! output=$("$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" start --cores "$cores" \
+    /usr/bin/bash -lc "$script" 2>&1); then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+  stdout_path=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
+  stderr_path=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
+  if [[ -z $stdout_path || -z $stderr_path ]]; then
+    echo "failed to parse control cli log paths for $label on $host" >&2
+    return 1
+  fi
+  record_control_logs "$host" "$label" "$stdout_path" "$stderr_path"
 }
 
 remote_run() {
@@ -107,9 +136,103 @@ remote_run() {
   ssh "${COMMON_SSH_OPTS[@]}" "$host" "$@"
 }
 
-latest_control_stdout() {
+copy_remote_file() {
   local host=$1
-  ssh "${COMMON_SSH_OPTS[@]}" "$host" 'ls -1t /tmp/hogd_stdout* | head -n 1'
+  local remote_path=$2
+  local local_path=$3
+  scp "${COMMON_SCP_OPTS[@]}" "${host}:${remote_path}" "$local_path"
+}
+
+publish_multi_node_logs() {
+  local metrics_branch_dir
+  local logs_dir
+  local record
+  local host
+  local label
+  local stdout_path
+  local stderr_path
+
+  metrics_branch_dir="$REPO_ROOT/metrics_history/metrics/nightly_integration_mempool_multi_node/$GIT_branch"
+  logs_dir="$metrics_branch_dir/${GIT_commit_time}_$GIT_commit"_logs
+  mkdir -p "$logs_dir"
+
+  for record in "${CONTROL_LOG_RECORDS[@]}"; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    echo "copying ${label} logs from ${host}"
+    copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
+    copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+  done
+}
+
+get_record_stdout_path() {
+  local record
+  local host
+  local label
+  local stdout_path
+  local stderr_path
+  local wanted_label=$1
+
+  for record in "${CONTROL_LOG_RECORDS[@]}"; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    if [[ $label == "$wanted_label" ]]; then
+      printf '%s\n' "$stdout_path"
+      return 0
+    fi
+  done
+
+  echo "missing control log record for $wanted_label" >&2
+  return 1
+}
+
+write_coordinator_output() {
+  local tmp_node0
+  local tmp_node1
+  local node0_stdout
+  local node1_stdout
+
+  if [[ $COORDINATOR_OUTPUT_WRITTEN -eq 1 ]]; then
+    return 0
+  fi
+
+  node0_stdout=$(get_record_stdout_path node0_chuckd) || return 1
+  node1_stdout=$(get_record_stdout_path node1_chuckd) || return 1
+
+  tmp_node0=$(mktemp)
+  tmp_node1=$(mktemp)
+  copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0"
+  copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"
+  echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
+  cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
+  rm -f "$tmp_node0" "$tmp_node1"
+  COORDINATOR_OUTPUT_WRITTEN=1
+}
+
+publish_results() {
+  if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
+    return 0
+  fi
+
+  if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
+    echo 'no control log records captured; skipping metrics_history publication'
+    return 0
+  fi
+
+  echo 'clone metrics history # This is idempotent'
+  "$REPO_ROOT/scripts/clone_metrics_history.sh"
+
+  echo 'copy full remote logs into metrics history'
+  publish_multi_node_logs
+
+  if write_coordinator_output; then
+    echo 'log integration metrics'
+    "$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
+  else
+    echo 'failed to collect coordinator output; skipping summary metric file' >&2
+  fi
+
+  echo 'commit metrics history updates'
+  "$REPO_ROOT/scripts/commit_metrics.sh"
+  PUBLISHED_RESULTS=1
 }
 
 kill_stale_processes() {
@@ -122,6 +245,8 @@ kill_stale_processes() {
 cleanup() {
   local exit_code=$1
   trap - EXIT INT TERM
+  set +e
+  publish_results
   kill_stale_processes
   exit "$exit_code"
 }
@@ -151,7 +276,7 @@ done
 
 echo 'launch loadgen servers'
 for node in "${NODE_IDS[@]}"; do
-  control_start_with_ulimit "${LOADGEN_HOSTS[$node]}" "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${LOADGEN_HOSTS[$node]}" "node${node}_loadgen" "$SLOT_A_CPUS" \
     "$LOADGEN_BINARY" --port "$LOADGEN_PORT"
 done
 
@@ -164,37 +289,37 @@ echo 'launch hogexec shards'
 for node in "${NODE_IDS[@]}"; do
   coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
   bind_ip="$(hog_ip "${HOGEXEC_HOSTS[$node]}")"
-  control_start_with_ulimit "${HOGEXEC_HOSTS[$node]}" "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${HOGEXEC_HOSTS[$node]}" "node${node}_hogexec_slot_a" "$SLOT_A_CPUS" \
     "$HOGEXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOGEXEC_SLOT_A_PORT"
-  control_start_with_ulimit "${HOGEXEC_HOSTS[$node]}" "$SLOT_B_CPUS" \
+  control_start_with_ulimit "${HOGEXEC_HOSTS[$node]}" "node${node}_hogexec_slot_b" "$SLOT_B_CPUS" \
     "$HOGEXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOGEXEC_SLOT_B_PORT"
 done
 
 echo 'launch event and indexer'
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
-  control_start_with_ulimit "$event_host" "$SLOT_A_CPUS" \
+  control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
     "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
     --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT"
-  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "$SLOT_B_CPUS" \
+  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
     "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
     --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --event-port "$INDEXER_EVENT_PORT" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT"
 done
 
 echo 'launch hogdb and auth'
 for node in "${NODE_IDS[@]}"; do
-  control_start_with_ulimit "${HOGDB_HOSTS[$node]}" "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${HOGDB_HOSTS[$node]}" "node${node}_hogdb" "$SLOT_A_CPUS" \
     "$HOGDB_BINARY" --db-path "$(node_dir "$node")/hogdb" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOGDB_HOSTS[$node]}")" \
     --coordinator-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_DB_PORT" --executor-port "$DB_EXECUTOR_PORT" \
     --mempool-port "$DB_MEMPOOL_PORT" --auth-port "$DB_AUTH_PORT"
-  control_start_with_ulimit "${AUTH_HOSTS[$node]}" "$SLOT_B_CPUS" \
+  control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \
     "$AUTH_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_AUTH_PORT" --bind-ip "$(hog_ip "${AUTH_HOSTS[$node]}")" \
     --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT"
 done
 
 echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
-  control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "$SLOT_A_CPUS" \
+  control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
@@ -256,9 +381,9 @@ exit \$status
 EOF
 )
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
+control_start_with_ulimit "$node1_mempool_host" "node1_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node1_mempool_script"
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
@@ -305,21 +430,4 @@ echo 'node0 mempool wait completed'
 wait "$node1_mempool_pid"
 echo 'node1 mempool wait completed'
 
-echo 'collect coordinator output'
-tmp_node0=$(mktemp)
-tmp_node1=$(mktemp)
-echo "copying coordinator output from ${CHUCKD_HOSTS[0]} to $tmp_node0"
-scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
-  "${CHUCKD_HOSTS[0]}:$(latest_control_stdout "${CHUCKD_HOSTS[0]}")" "$tmp_node0"
-echo "copying coordinator output from ${CHUCKD_HOSTS[1]} to $tmp_node1"
-scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
-  "${CHUCKD_HOSTS[1]}:$(latest_control_stdout "${CHUCKD_HOSTS[1]}")" "$tmp_node1"
-echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
-cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
-rm -f "$tmp_node0" "$tmp_node1"
-
-echo 'clone metrics history # This is idempotent'
-"$REPO_ROOT/scripts/clone_metrics_history.sh"
-
-echo 'log integration metrics'
-"$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
+publish_results

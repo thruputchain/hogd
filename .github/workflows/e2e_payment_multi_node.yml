@@ -55,7 +55,7 @@ jobs:
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                     --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     --timeout-sec=1800 \
-                    ./scripts/schedules/mempool_multi_node_bench.toml
+                    ./scripts/schedules/e2e_payment_multi_node.toml
             - name: Print Log Download Instructions
               if: always()
               uses: ./.github/actions/print-log-instructions

@@ -31,9 +31,9 @@ public:
     return x23::Buf{str.begin(), str.end()};
   }();
 
-  void start_server(std::string const &program_name,
-                    std::vector<std::string> const &program_args,
-                    std::string const &cpu_affinity = "")
+  CIStartStatus start_server(std::string const &program_name,
+                             std::vector<std::string> const &program_args,
+                             std::string const &cpu_affinity = "")
   {
     ServerConfig config;
     config.program_name = x23::Buf{program_name.begin(), program_name.end()};
@@ -42,10 +42,11 @@ public:
     }
     config.cpu_affinity = x23::Buf{cpu_affinity.begin(), cpu_affinity.end()};
 
-    if (client_.ciserver_start(kHogdGitHash, config) !=
-        CIServerErrorCode::kCIServerErrorCodeOK) {
+    auto status = client_.ciserver_start(kHogdGitHash, config);
+    if (status.error_code() != CIServerErrorCode::kCIServerErrorCodeOK) {
       throw std::runtime_error("Failed to start server");
     }
+    return status;
   }
 
   void stop_server() { client_.ciserver_stop(kHogdGitHash); }
