@@ -97,10 +97,29 @@ join_args(std::vector<std::string> const &args)
 
 class Subprocess {
 public:
+  struct LaunchMetadata {
+    pid_t pid;
+    std::string stdout_path;
+    std::string stderr_path;
+  };
+
   std::optional<pid_t>
   launch_process(std::string const &program_name,
                  std::vector<std::string> const &program_args,
                  std::string const &cpu_affinity)
+  {
+    auto metadata =
+        launch_process_with_metadata(program_name, program_args, cpu_affinity);
+    if (!metadata) {
+      return std::nullopt;
+    }
+    return metadata->pid;
+  }
+
+  std::optional<LaunchMetadata>
+  launch_process_with_metadata(std::string const &program_name,
+                               std::vector<std::string> const &program_args,
+                               std::string const &cpu_affinity)
   {
     std::string full_program_name =
         program_name.starts_with("/")
@@ -246,7 +265,13 @@ public:
         std::jthread([pid, this]() { wait_for_child_process(pid); });
 
     info("forked process: {}", pid);
-    return pid;
+    stdout_path_ = stdout_template;
+    stderr_path_ = stderr_template;
+    return LaunchMetadata{
+        .pid = pid,
+        .stdout_path = stdout_template,
+        .stderr_path = stderr_template,
+    };
   }
 
   std::optional<int> get_exit_code()
@@ -254,6 +279,9 @@ public:
     std::lock_guard lock(exit_code_mutex_);
     return exit_code_;
   }
+
+  std::string const &get_stdout_path() const { return stdout_path_; }
+  std::string const &get_stderr_path() const { return stderr_path_; }
 
   void wait_for_shutdown()
   {
@@ -284,6 +312,8 @@ private:
   std::optional<int> exit_code_ = std::nullopt;
 
   std::jthread waitpid_thread_;
+  std::string stdout_path_;
+  std::string stderr_path_;
 };
 
 class CIControlRpc {
@@ -299,13 +329,14 @@ public:
     ciserver_stop(hogd_git_hash_);
   }
 
-  CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
-                                   ServerConfig const &config)
+  CIStartStatus ciserver_start(HogdGitHash const &hogd_git_hash,
+                               ServerConfig const &config)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
       error("version mismatch: received {}, expected {}",
             hash_sv(hogd_git_hash), version::kHogdGitHash);
-      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
+      return CIStartStatus(
+          CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
     }
 
     std::lock_guard lock(running_pid_mutex_);
@@ -320,16 +351,22 @@ public:
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
     info("launching process: {} {}", program_name, join_args(program_args));
-    auto pid =
-        new_proc->launch_process(program_name, program_args, cpu_affinity);
-    if (!pid) {
+    auto launch_metadata =
+        new_proc->launch_process_with_metadata(program_name, program_args,
+                                               cpu_affinity);
+    if (!launch_metadata) {
       error("failed to launch process: {}", Errno{});
-      return CIServerErrorCode::kCIServerErrorCodeInternal;
+      return CIStartStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
     }
-    subprocesses_.emplace(*pid, std::move(new_proc));
-    most_recent_pid_ = pid;
+    subprocesses_.emplace(launch_metadata->pid, std::move(new_proc));
+    most_recent_pid_ = launch_metadata->pid;
 
-    return CIServerErrorCode::kCIServerErrorCodeOK;
+    CIStartStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
+    status.paths().stdout_path = {launch_metadata->stdout_path.begin(),
+                                  launch_metadata->stdout_path.end()};
+    status.paths().stderr_path = {launch_metadata->stderr_path.begin(),
+                                  launch_metadata->stderr_path.end()};
+    return status;
   }
 
   CIServerErrorCode ciserver_stop(HogdGitHash const &hogd_git_hash)

@@ -91,10 +91,17 @@ handle_start_command(std::string const &host, std::string const &port,
       command += arg + " ";
     }
     hogd::info("Starting server: {}", command);
-    client.start_server(args[0],
-                        std::vector<std::string>(args.begin() + 1, args.end()),
-                        cpu_affinity);
+    auto status = client.start_server(args[0],
+                                      std::vector<std::string>(args.begin() + 1,
+                                                               args.end()),
+                                      cpu_affinity);
     hogd::info("Start command sent successfully");
+    std::println("CONTROL_STDOUT_PATH={}",
+                 std::string(status.paths().stdout_path.begin(),
+                             status.paths().stdout_path.end()));
+    std::println("CONTROL_STDERR_PATH={}",
+                 std::string(status.paths().stderr_path.begin(),
+                             status.paths().stderr_path.end()));
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
