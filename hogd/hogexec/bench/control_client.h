@@ -42,9 +42,9 @@ public:
     }
     config.cpu_affinity = x23::Buf{cpu_affinity.begin(), cpu_affinity.end()};
 
-    if (client_.ciserver_start(kHogdGitHash, config) !=
-        CIServerErrorCode::kCIServerErrorCodeOK) {
-      throw std::runtime_error("Failed to start server");
+    auto err = client_.ciserver_start(kHogdGitHash, config);
+    if (err != CIServerErrorCode::kCIServerErrorCodeOK) {
+      throw std::runtime_error("Failed to start server due to error {}", err);
     }
   }
 
