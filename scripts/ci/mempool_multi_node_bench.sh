@@ -235,7 +235,7 @@ node0_mempool_script=$(
   make_ulimit_exec_script timeout 360s "${node0_mempool_cmd[@]}"
 )
 node1_mempool_script=$(
-  make_ulimit_exec_script timeout 180s "${node1_mempool_cmd[@]}"
+  make_ulimit_exec_script timeout 360s "${node1_mempool_cmd[@]}"
 )
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
