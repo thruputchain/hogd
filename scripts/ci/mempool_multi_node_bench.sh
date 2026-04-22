@@ -289,9 +289,13 @@ kill_stale_processes() {
 }
 
 cleanup() {
+  echo "cleanup start"
   local exit_code=$1
+  echo "cleanup B"
   trap - EXIT INT TERM
+  echo "cleanup C"
   set +e
+  echo "cleanup D"
   stop_live_log_streams
   echo "publish results"
   publish_results
