@@ -1,5 +1,6 @@
 #pragma once
 
+#include <format>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -44,7 +45,8 @@ public:
 
     auto err = client_.ciserver_start(kHogdGitHash, config);
     if (err != CIServerErrorCode::kCIServerErrorCodeOK) {
-      throw std::runtime_error("Failed to start server due to error {}", err);
+      throw std::runtime_error(
+          std::format("Failed to start server due to error {}", err));
     }
   }
 
