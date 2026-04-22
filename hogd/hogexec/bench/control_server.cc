@@ -265,8 +265,6 @@ public:
         std::jthread([pid, this]() { wait_for_child_process(pid); });
 
     info("forked process: {}", pid);
-    stdout_path_ = stdout_template;
-    stderr_path_ = stderr_template;
     return LaunchMetadata{
         .pid = pid,
         .stdout_path = stdout_template,
@@ -279,9 +277,6 @@ public:
     std::lock_guard lock(exit_code_mutex_);
     return exit_code_;
   }
-
-  std::string const &get_stdout_path() const { return stdout_path_; }
-  std::string const &get_stderr_path() const { return stderr_path_; }
 
   void wait_for_shutdown()
   {
@@ -312,8 +307,6 @@ private:
   std::optional<int> exit_code_ = std::nullopt;
 
   std::jthread waitpid_thread_;
-  std::string stdout_path_;
-  std::string stderr_path_;
 };
 
 class CIControlRpc {
