@@ -97,13 +97,34 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 export BUILD_DIR=release
 export WORK_DIR=ci_work_dir/
 
+shutdown_bench_servers() {
+  set +e
+  ./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog10 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
+}
+trap shutdown_bench_servers EXIT
+
+echo 'run local bench server for hog10-hosted services'
+mkdir -p ci_work_dir/
+./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
+
 echo 'run multiexec interface benchmarks'
 (./scripts/ci/exec_scaling.sh) || true
 exec_scaling_exit=$?
 
-echo 'run mempool benchmarks'
+echo 'run e2e payment benchmark'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
+
+echo 'run e2e payment multi-node benchmark'
+(./scripts/ci/mempool_multi_node_bench.sh) || true
+mempool_multi_node_bench_exit=$?
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
 ./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
@@ -123,13 +144,12 @@ metrics_exit=$?
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
 
-echo 'shut down hog11 and hog8'
-(./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown)
-(./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown)
+echo 'bench servers will be shut down by EXIT trap'
 
 echo 'check for failures'
 if [ "$exec_scaling_exit" -ne 0 ] || \
     [ "$mempool_bench_exit" -ne 0 ] || \
+    [ "$mempool_multi_node_bench_exit" -ne 0 ] || \
     [ "$event_bench_exit" -ne 0 ] || \
     [ "$metrics_exit" -ne 0 ]; then
     echo "one or more benchmark steps failed"
