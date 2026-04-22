@@ -95,7 +95,7 @@ TEST_P(DirectAuthDataTest, BasicAuthDataCreation)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}));
+  ASSERT_TRUE(tx1.commit_transaction());
 }
 
 TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
@@ -117,7 +117,7 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}));
+  ASSERT_TRUE(tx1.commit_transaction());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
@@ -125,7 +125,7 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}));
+  ASSERT_TRUE(tx2.commit_transaction());
 
   advance_block();
   check_balances(contract_addr, contract_addr,
@@ -167,7 +167,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   auto r1_2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_TRUE(r1_2.value());
-  ASSERT_TRUE(tx1.commit_transaction({}));
+  ASSERT_TRUE(tx1.commit_transaction());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_address_auth_data_addrkey(contract_addr_ref),
@@ -176,7 +176,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
-  ASSERT_TRUE(tx2.commit_transaction({}));
+  ASSERT_TRUE(tx2.commit_transaction());
 
   advance_block();
   check_balances(contract_addr, contract_addr_ref,
@@ -210,7 +210,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}));
+  ASSERT_TRUE(tx1.commit_transaction());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
@@ -218,7 +218,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}));
+  ASSERT_TRUE(tx2.commit_transaction());
   advance_block();
   check_balance(contract_addr,
                 kInitialBalance - (cost_model_->get_auth_data_cost(2)));
@@ -271,7 +271,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
   ASSERT_TRUE(r1_3.has_value());
 
   ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}));
+  ASSERT_TRUE(tx1.commit_transaction());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_address_auth_data_addrkey(contract_addr_ref),
@@ -279,7 +279,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}));
+  ASSERT_TRUE(tx2.commit_transaction());
 
   advance_block();
   check_balances(contract_addr, contract_addr_ref,
@@ -375,7 +375,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_TRUE(r2_3.has_value());
   ASSERT_FALSE(r2_3.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // the exclusive lock is now released
   tx2.add_delta(make_address_auth_data_addrkey(contract_addr),
@@ -385,7 +385,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
   ASSERT_TRUE(r2_4.has_value());
   ASSERT_TRUE(r2_4.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   advance_block();
   check_balance(contract_addr,
                 kInitialBalance - (cost_model_->get_auth_data_cost(1)));
@@ -418,7 +418,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
     auto r0 = tx0.try_push_current_subtransaction();
     ASSERT_TRUE(r0.has_value());
     ASSERT_TRUE(r0.value());
-    ASSERT_TRUE(tx0.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx0.commit_transaction().has_value());
     advance_block();
     check_balance(contract_addr,
                   kInitialBalance - (cost_model_->get_auth_data_cost(1)));
@@ -448,8 +448,8 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
   check_balance(contract_addr, 0);
@@ -482,7 +482,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
     auto r0 = tx0.try_push_current_subtransaction();
     ASSERT_TRUE(r0.has_value());
     ASSERT_TRUE(r0.value());
-    ASSERT_TRUE(tx0.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx0.commit_transaction().has_value());
     advance_block();
     check_balance(contract_addr,
                   kInitialBalance - (cost_model_->get_auth_data_cost(1)));
@@ -513,8 +513,8 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
   check_balance(contract_addr, 0);
@@ -546,7 +546,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
     advance_block();
   };
 
@@ -595,7 +595,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           }
           co_await set.bg();
 
-          if (!tx.commit_transaction({}).has_value()) {
+          if (!tx.commit_transaction().has_value()) {
             throw std::runtime_error("commit_transaction error");
           }
 
@@ -625,7 +625,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
           }
           co_await set.bg();
 
-          if (!tx.commit_transaction({}).has_value()) {
+          if (!tx.commit_transaction().has_value()) {
             throw std::runtime_error("commit_transaction error");
           }
 
@@ -686,7 +686,7 @@ TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
 
   ASSERT_TRUE(tx.pop_subtransactions(1).has_value());
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
   check_balance(contract_addr,
                 kInitialBalance - (cost_model_->get_auth_data_cost(1)));

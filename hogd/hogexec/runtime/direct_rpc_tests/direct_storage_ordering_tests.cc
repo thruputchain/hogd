@@ -70,8 +70,7 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
   auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, {}).has_value());
+  ASSERT_TRUE(db_proxy.commit_transaction(get_block_number(), 1).has_value());
   advance_block();
 
   auto res = lookup_storage_item_from_db(
@@ -131,7 +130,7 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
   auto r2 = proxy.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
-  ASSERT_TRUE(proxy.commit_transaction({}).has_value());
+  ASSERT_TRUE(proxy.commit_transaction().has_value());
 
   advance_block();
 
@@ -191,8 +190,7 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
   auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, {}).has_value());
+  ASSERT_TRUE(db_proxy.commit_transaction(get_block_number(), 1).has_value());
   advance_block();
 
   auto res = lookup_storage_item_from_db(

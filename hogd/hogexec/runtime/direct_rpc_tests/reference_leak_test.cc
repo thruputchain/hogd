@@ -159,7 +159,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 }
 
 // Test Auth Data reference leak: when try_reserve_change_signer() fails,
@@ -311,7 +311,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 }
 
 TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
@@ -346,9 +346,9 @@ TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReferenceLeakTest,

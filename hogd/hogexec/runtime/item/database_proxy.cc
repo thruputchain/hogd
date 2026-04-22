@@ -19,6 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
@@ -34,6 +35,14 @@ namespace {
 
 struct VoidMarker {};
 struct NotFoundIsUnrecoverableError {};
+
+BorrowedContractBatch
+empty_borrowed_contract_batch()
+{
+  static const BorrowedContractBatch::hash_set_t kEmptyHashes;
+  static const BorrowedContractBatch::contract_map_t kEmptyContracts;
+  return BorrowedContractBatch(kEmptyHashes, kEmptyContracts);
+}
 
 constexpr auto
 return_type(auto &&f, auto &&err)
@@ -222,10 +231,16 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
 
 SystemStatus<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
-                                  NewContractBatch const &new_contracts)
+                                  BorrowedContractBatch const &new_contracts)
 {
   auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
   return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
+SystemStatus<void>
+DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
+{
+  return commit_transaction(block_id, tx_id, empty_borrowed_contract_batch());
 }
 
 SystemStatus<void>

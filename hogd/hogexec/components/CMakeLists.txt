@@ -21,6 +21,7 @@ target_link_libraries(components crypto hogexec_common)
 # Own test executable (same pattern as runtime_test)
 add_library(components_test_objects OBJECT
   alias_guard_test.cc
+  borrowed_contract_batch_test.cc
   execution_mode_test.cc
   hash_buffers_test.cc
 )

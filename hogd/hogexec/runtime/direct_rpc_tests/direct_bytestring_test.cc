@@ -145,10 +145,10 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx1_1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx1_2.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1_1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1_2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr1, contract_addr2,
@@ -186,7 +186,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
   ASSERT_TRUE(r2.value());
 
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // compare with single tx address
   auto tx3 = make_new_per_tx_db_proxy();
@@ -196,7 +196,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 
@@ -221,7 +221,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
 
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
   advance_block();
 
   // Test begins:
@@ -243,7 +243,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   auto tx2 = make_test_call();
   auto tx3 = make_test_call();
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   ASSERT_TRUE(tx3.abort_transaction().has_value());
 
   // reference address
@@ -254,7 +254,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -277,7 +277,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
   advance_block();
 
   // Test begins:
@@ -298,7 +298,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   auto tx2 = make_test_call();
   auto tx3 = make_test_call();
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   ASSERT_TRUE(tx3.abort_transaction().has_value());
 
   // reference address
@@ -309,7 +309,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -332,7 +332,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
   advance_block();
 
   // Test begins:
@@ -352,9 +352,9 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
   auto tx1 = make_test_call();
   auto tx2 = make_test_call();
   auto tx3 = make_test_call();
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   // reference address
   auto tx_ref = make_new_per_tx_db_proxy();
@@ -364,7 +364,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -385,7 +385,7 @@ TEST_P(DirectBytestringTest, DeletionCost)
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
   advance_block();
 
   // Test begins:
@@ -403,8 +403,8 @@ TEST_P(DirectBytestringTest, DeletionCost)
   auto tx2 = make_test_call();
   auto tx3 = make_test_call();
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 
@@ -428,7 +428,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
   advance_block();
 
   // Start the test
@@ -460,7 +460,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   // tx1 commits
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -502,7 +502,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
   ASSERT_TRUE(r3.value());
 
   ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
@@ -511,7 +511,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -550,7 +550,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
   ASSERT_TRUE(r3.value());
 
   ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
@@ -559,7 +559,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -598,7 +598,7 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()); // should fail because tx1 holds the exclusive lock
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // now the exclusive lock is no longer held
   tx2.add_delta(make_addrkey(contract_addr, "test"),
@@ -616,7 +616,7 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_FALSE(r2_2.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   advance_block();
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -650,7 +650,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
@@ -660,7 +660,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   auto tx_ref = make_new_per_tx_db_proxy();
   tx_ref.add_delta(make_addrkey(reference_addr, "test"),
@@ -669,7 +669,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -708,7 +708,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_FALSE(r1_1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   // reference: the first bytestring write is what commits
@@ -719,7 +719,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   ASSERT_TRUE(r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr,
@@ -742,7 +742,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
 
   auto tx_init_ref = make_new_per_tx_db_proxy();
   tx_init_ref.add_delta(make_addrkey(reference_addr, "test_new"),
@@ -751,7 +751,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   auto r_init_ref = tx_init_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_init_ref.has_value());
   ASSERT_TRUE(r_init_ref.value());
-  ASSERT_TRUE(tx_init_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init_ref.commit_transaction().has_value());
   advance_block();
 
   // start the test
@@ -775,7 +775,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   advance_block();
@@ -802,7 +802,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   auto r_init = tx_ref_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_ref_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref_init.commit_transaction().has_value());
   advance_block();
 
   auto ref_bal = lookup_storage_item_from_db(
@@ -821,7 +821,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   advance_block();
   auto initial_bal = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(contract_addr));
@@ -848,7 +848,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   ASSERT_TRUE(r3.has_value());
   ASSERT_FALSE(r3.value()); // storage not yet available
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // now storage is available
   // This is where hogdb doesn't allow a write, when a retrocausal nnint would
@@ -860,7 +860,7 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   ASSERT_TRUE(r3_1.has_value());
   ASSERT_TRUE(r3_1.value());
 
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
   auto bal = lookup_storage_item_from_db(
@@ -887,7 +887,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   auto r_init = tx_ref_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value());
   ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_ref_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref_init.commit_transaction().has_value());
   advance_block();
 
   auto ref_bal = lookup_storage_item_from_db(
@@ -906,7 +906,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   advance_block();
   auto initial_bal = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(contract_addr));
@@ -946,7 +946,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   ASSERT_TRUE(tx3.abort_transaction().has_value());
 
   advance_block();
@@ -971,7 +971,7 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
   auto r_block = tx_block.try_push_current_subtransaction();
   ASSERT_TRUE(r_block.has_value());
   ASSERT_TRUE(r_block.value());
-  ASSERT_TRUE(tx_block.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_block.commit_transaction().has_value());
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test_nonblock"),
@@ -1004,7 +1004,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
     auto r_init = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r_init.has_value());
     ASSERT_TRUE(r_init.value());
-    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx_init.commit_transaction().has_value());
     advance_block();
   }
 
@@ -1031,7 +1031,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   ASSERT_TRUE(r1_set.has_value());
   ASSERT_FALSE(r1_set.value()); // cannot upgrade under shared lock in mockdb
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value()); // deletes the key
+  ASSERT_TRUE(tx1.commit_transaction().has_value()); // deletes the key
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   // Reference: just a single delete on another address
@@ -1041,7 +1041,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
   // If key absent, delete is treated as no-op but allowed in mockdb path
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr, kInitialBalance);
@@ -1061,7 +1061,7 @@ TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   advance_block();
 
@@ -1085,7 +1085,7 @@ TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   advance_block();
 
@@ -1115,8 +1115,8 @@ TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 
@@ -1147,7 +1147,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   advance_block();
 
@@ -1210,7 +1210,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   ASSERT_TRUE(r2_4.has_value());
   ASSERT_FALSE(r2_4.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -1251,7 +1251,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   advance_block();
 
@@ -1292,7 +1292,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   ASSERT_TRUE(r3_1.has_value());
   ASSERT_FALSE(r3_1.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // now the costs should be released, although hogdb does not implement this
   // yet
@@ -1301,7 +1301,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   // make_bytestring_delta("value_long2"), // slightly longer
   // std::to_underlying(StorageDeltaFlags::None));
 
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 }
@@ -1334,7 +1334,7 @@ TEST_P(DirectBytestringTest, ReuseExclusiveLock)
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_TRUE(r1_2.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -1371,7 +1371,7 @@ TEST_P(DirectBytestringTest, ReusePermamentExclusiveLock)
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_TRUE(r1_2.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -1393,7 +1393,7 @@ TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
@@ -1402,7 +1402,7 @@ TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -1424,7 +1424,7 @@ TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // can't acquire an exclusive lock after the regular lock has been committed
   auto tx2 = make_new_per_tx_db_proxy();
@@ -1434,7 +1434,7 @@ TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -1456,7 +1456,7 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_addrkey(contract_addr, "test"),
@@ -1473,7 +1473,7 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   auto r2_1 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_1.has_value());
   ASSERT_FALSE(r2_1.value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   advance_block();
 
   auto val = lookup_storage_item_from_db(make_addrkey(contract_addr, "test"));
@@ -1500,7 +1500,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -1513,7 +1513,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -1542,7 +1542,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -1576,7 +1576,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_TRUE(r2_2.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // The write was made without an exclusive lock, so another transaction should
   // be able to delete the item
@@ -1587,7 +1587,7 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 
@@ -1621,7 +1621,7 @@ TEST_P(DirectBytestringTest,
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
   // done test setup
@@ -1673,7 +1673,7 @@ TEST_P(DirectBytestringTest,
   ASSERT_TRUE(r2_3.has_value());
   ASSERT_TRUE(r2_3.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // The write was made without an exclusive lock, so another transaction should
   // be able to write to the item
@@ -1688,7 +1688,7 @@ TEST_P(DirectBytestringTest,
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 }
@@ -1712,7 +1712,7 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
   // test setup done
@@ -1750,7 +1750,7 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
   ASSERT_TRUE(r2_2.has_value());
   ASSERT_TRUE(r2_2.value());
 
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -1776,7 +1776,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx_init.commit_transaction().has_value());
     advance_block();
   }
 
@@ -1785,7 +1785,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value() && r1.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // Try NNInt add on the bytestring key
   auto tx = make_new_per_tx_db_proxy();
@@ -1794,7 +1794,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
   auto item = lookup_storage_item_from_db(key);
@@ -1818,7 +1818,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx_init.commit_transaction().has_value());
     advance_block();
   }
 
@@ -1829,7 +1829,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
   auto item = lookup_storage_item_from_db(key);
@@ -1852,7 +1852,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
     advance_block();
   }
 
@@ -1864,7 +1864,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value() && r.value());
 
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
   }
   advance_block();
 
