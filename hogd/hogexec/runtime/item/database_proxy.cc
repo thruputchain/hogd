@@ -229,6 +229,14 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
 }
 
 SystemStatus<void>
+DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
+                                  BorrowedContractBatch const &new_contracts)
+{
+  auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
+SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   auto res = client_.abort_transaction(block_id, tx_id);

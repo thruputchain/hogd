@@ -14,6 +14,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -77,6 +78,9 @@ public:
 
   SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id,
                                         NewContractBatch const &new_contracts);
+  SystemStatus<void>
+  commit_transaction(BlockID block_id, TransactionID tx_id,
+                     BorrowedContractBatch const &new_contracts);
 
   SystemStatus<void> abort_transaction(BlockID block_id, TransactionID tx_id);
 
@@ -143,6 +147,11 @@ public:
   }
 
   SystemStatus<void> commit_transaction(NewContractBatch const &new_contracts)
+  {
+    return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
+  }
+  SystemStatus<void>
+  commit_transaction(BorrowedContractBatch const &new_contracts)
   {
     return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
   }

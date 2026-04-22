@@ -25,6 +25,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/utilities.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -391,15 +392,8 @@ SystemCallHandler::try_commit_transaction()
       last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .get_committed_contracts();
-  NewContractBatch new_contracts;
-  for (auto const &hash : new_contract_hashes) {
-    auto contract_entry = newly_created_contracts_.find(hash);
-    if (contract_entry != newly_created_contracts_.end()) {
-      new_contracts.push_back(*contract_entry->second);
-    }
-  }
-
-  auto res = db_proxy_.commit_transaction(std::move(new_contracts));
+  auto res = db_proxy_.commit_transaction(
+      BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
   if (!res.has_value()) {
     return to_exec_result(res.error().code());
   }
