@@ -293,8 +293,11 @@ cleanup() {
   trap - EXIT INT TERM
   set +e
   stop_live_log_streams
+  echo "publish results"
   publish_results
+  echo "now kill stale processes"
   kill_stale_processes
+  echo "now exit with code $exit_code"
   exit "$exit_code"
 }
 
