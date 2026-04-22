@@ -116,6 +116,13 @@ append_start_failure_diagnostic(std::string_view stage,
 
 class Subprocess {
 public:
+  Subprocess(std::string program_name, std::vector<std::string> program_args,
+             std::string cpu_affinity)
+    : program_name_(std::move(program_name)),
+      program_args_(std::move(program_args)),
+      cpu_affinity_(std::move(cpu_affinity))
+  {}
+
   std::optional<pid_t>
   launch_process(std::string const &program_name,
                  std::vector<std::string> const &program_args,
@@ -312,6 +319,11 @@ private:
     exit_code_ = res;
     if (exit_code_.has_value()) {
       info("child process: {} exited with code: {}", child_pid, *exit_code_);
+      if (*exit_code_ != 0) {
+        append_start_failure_diagnostic("child_exit", program_name_,
+                                        program_args_, cpu_affinity_,
+                                        std::format("exit_code={}", *exit_code_));
+      }
     }
     else {
       error("failed to wait for child process: {}", child_pid);
@@ -322,6 +334,9 @@ private:
   std::optional<int> exit_code_ = std::nullopt;
 
   std::jthread waitpid_thread_;
+  std::string program_name_;
+  std::vector<std::string> program_args_;
+  std::string cpu_affinity_;
 };
 
 class CIControlRpc {
@@ -348,7 +363,6 @@ public:
 
     std::lock_guard lock(running_pid_mutex_);
 
-    std::unique_ptr<Subprocess> new_proc = std::make_unique<Subprocess>();
     std::vector<std::string> program_args;
     for (auto const &arg : config.program_args) {
       program_args.emplace_back(arg.begin(), arg.end());
@@ -357,6 +371,8 @@ public:
                              config.cpu_affinity.end());
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
+    std::unique_ptr<Subprocess> new_proc = std::make_unique<Subprocess>(
+        program_name, program_args, cpu_affinity);
     info("launching process: {} {}", program_name, join_args(program_args));
     auto pid =
         new_proc->launch_process(program_name, program_args, cpu_affinity);
