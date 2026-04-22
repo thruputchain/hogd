@@ -1,4 +1,4 @@
-name = "mempool_bench_ci"
+name = "e2e_payment_multi_node_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_bench_servers"
@@ -68,7 +68,7 @@ bench_7 = "hog4"
 
 
 [[jobs]]
-name = "{{ .hog_schedule }}_mempool_bench"
+name = "{{ .hog_schedule }}_metrics"
 script = """
 
 set -x
