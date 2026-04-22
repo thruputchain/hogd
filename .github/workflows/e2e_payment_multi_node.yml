@@ -1,4 +1,4 @@
-name: Mempool Multi-Node Bench (hog_sched)
+name: E2E Payment Multi-Node (hog_sched)
 
 on:
     schedule:
