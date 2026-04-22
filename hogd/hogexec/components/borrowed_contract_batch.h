@@ -33,7 +33,8 @@ public:
     using hash_iterator = hash_set_t::const_iterator;
 
     const_iterator() = default;
-    const_iterator(hash_iterator it, hash_iterator end, contract_map_t const &map)
+    const_iterator(hash_iterator it, hash_iterator end,
+                   contract_map_t const &map)
       : it_(it), end_(end), map_(&map)
     {
       skip_missing();
@@ -84,7 +85,8 @@ public:
     contract_map_t const *map_ = nullptr;
   };
 
-  BorrowedContractBatch(hash_set_t const &hashes, contract_map_t const &contracts)
+  BorrowedContractBatch(hash_set_t const &hashes,
+                        contract_map_t const &contracts)
     : hashes_(&hashes), contracts_(&contracts)
   {}
 
@@ -120,8 +122,7 @@ private:
 
 namespace x23 {
 
-template<>
-struct xdr_meta<hogd::BorrowedContractBatch> {
+template<> struct xdr_meta<hogd::BorrowedContractBatch> {
   static constexpr XdrCategory category = XdrCategory::kVec;
 };
 
