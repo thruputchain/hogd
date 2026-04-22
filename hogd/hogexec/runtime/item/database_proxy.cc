@@ -19,6 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
