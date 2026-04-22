@@ -119,6 +119,9 @@ set +e
 mempool_bench_exit=$?
 set -e
 
+echo 'commit metrics'
+(./scripts/commit_metrics.sh) || true
+
 echo 'bench servers will be shut down by EXIT trap'
 
 echo 'check for failures'
