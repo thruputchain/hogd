@@ -396,6 +396,3 @@ publish_multi_node_logs
 
 echo 'log integration metrics'
 "$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
-
-echo 'commit metrics history updates'
-"$REPO_ROOT/scripts/commit_metrics.sh"
