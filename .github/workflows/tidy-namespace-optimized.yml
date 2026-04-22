@@ -60,9 +60,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
-            ~/.cargo/bin
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
+            ~/.cargo
 
       # Note: 'apt' cache removed since toolchain is in base image
 
