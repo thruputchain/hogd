@@ -59,7 +59,7 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
 
@@ -126,7 +126,7 @@ TEST_P(DirectNonceTests,
     auto push_result = tx.try_push_current_subtransaction();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
   };
 
   // Blocks 1 and 2 each add a height-3 nonce.
@@ -198,7 +198,7 @@ TEST_P(DirectNonceTests,
     auto push_result = tx.try_push_current_subtransaction();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
     advance_block();
   };
 
@@ -228,7 +228,7 @@ TEST_P(DirectNonceTests,
   auto tx1_push = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(tx1_push.has_value());
   ASSERT_TRUE(tx1_push.value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_replay_cache_addrkey(contract_addr),
@@ -239,7 +239,7 @@ TEST_P(DirectNonceTests,
   auto tx2_push = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(tx2_push.has_value());
   ASSERT_TRUE(tx2_push.value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -281,7 +281,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
     auto push_result = tx.try_push_current_subtransaction();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
     advance_block();
   };
 
@@ -320,7 +320,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
   ASSERT_TRUE(tx2_push.has_value());
   ASSERT_TRUE(tx2_push.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   advance_block();
@@ -371,7 +371,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
     auto push_result = tx.try_push_current_subtransaction();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
     advance_block();
   };
 
@@ -420,9 +420,9 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
 
   // tx2 is the middle tx that aborts.
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
   advance_block();
 

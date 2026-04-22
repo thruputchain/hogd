@@ -82,7 +82,7 @@ public:
                  std::to_underlying(StorageDeltaFlags::None));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx.commit_transaction().has_value());
     advance_block();
   }
 };
@@ -242,8 +242,8 @@ TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
   r = tx_insert.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx_consume.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx_insert.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_consume.commit_transaction().has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction().has_value());
   advance_block();
 
   auto block_from_two =

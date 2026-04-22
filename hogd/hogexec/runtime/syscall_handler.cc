@@ -352,7 +352,7 @@ SystemCallHandler::try_commit_transaction()
   if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .should_revert()) {
-    auto res = db_proxy_.commit_transaction({});
+    auto res = db_proxy_.commit_transaction();
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                    get_block_execution_mode());
     if (!res.has_value()) {

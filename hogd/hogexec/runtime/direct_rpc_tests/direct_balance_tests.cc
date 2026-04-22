@@ -80,7 +80,7 @@ TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
     ASSERT_TRUE(r.value());
   }
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   // Reference: same operations but all in one frame (no depth mismatch)
   auto ref_addr = make_contract_address(2);
@@ -102,7 +102,7 @@ TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
   }
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
 
@@ -168,7 +168,7 @@ TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
     ASSERT_TRUE(r.value());
   }
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   // Reference: all three operations in one batch
   auto ref_A = make_contract_address(152);
@@ -193,7 +193,7 @@ TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
   }
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
 
@@ -290,7 +290,7 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
     ASSERT_TRUE(r.value());
   }
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   // Reference: key1 storage + 300 transfer (key2 was rolled back, depth 2
   // transfer was also rolled back, replaced by depth 3 transfer of 300)
@@ -318,7 +318,7 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
   }
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
 
@@ -375,7 +375,7 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
       ASSERT_TRUE(r.has_value());
       ASSERT_TRUE(r.value());
     }
-    ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx1.commit_transaction().has_value());
   }
 
   // TX2: C writes storage at depth 1, transfers to D at depth 2
@@ -401,7 +401,7 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
       ASSERT_TRUE(r.has_value());
       ASSERT_TRUE(r.value());
     }
-    ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx2.commit_transaction().has_value());
   }
 
   advance_block();
