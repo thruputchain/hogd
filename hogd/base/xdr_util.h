@@ -164,6 +164,32 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 
   const std::vector<ChunkRange> chunks =
       make_chunks(parallel.segment_tokens.size(), kNumThreadsForParallelBatch);
+  auto deserialize_chunk = [&](const ChunkRange &chunk) -> bool {
+    for (size_t i = chunk.start; i < chunk.end; i++) {
+      const unsigned int num_segment_tokens = parallel.segment_tokens[i];
+      const unsigned int num_segment_bytes = parallel.segment_bytes[i];
+
+      size_t inner_obj_offset = 0;
+      size_t inner_xdr_offset = 0;
+      for (size_t j = 0; j < num_segment_tokens; j++) {
+        try {
+          size_t num_consumed = x23::deserialize_from(
+              &objs[obj_offsets[i] + inner_obj_offset++],
+              x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
+                           num_segment_bytes - inner_xdr_offset));
+          inner_xdr_offset += num_consumed;
+        } catch (const x23::XdrBadInput &e) {
+          info("failed to deserialize: {}", e.what());
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  if (chunks.size() <= 1) {
+    co_return chunks.empty() ? true : deserialize_chunk(chunks.front());
+  }
+
   x23::Vec<x23::Async<bool>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
@@ -219,12 +245,35 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   parallel = {};
   const std::vector<ChunkRange> chunks =
       make_chunks(objs.size(), kNumThreadsForParallelBatch);
+  auto serialize_chunk = [&](const ChunkRange &chunk, size_t i,
+                             x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs) {
+    parallel.segment_tokens[i] = chunk.end - chunk.start;
+    // This is just an educated guess, but hopefully it lowers/eliminates the
+    // resize overhead of the vector.
+    xdrs[i].reserve(parallel.segment_tokens[i] * sizeof(T) * 3);
+    for (size_t j = chunk.start; j < chunk.end; j++) {
+      xdrs[i] += x23::serialize(objs[j]);
+    }
+    parallel.segment_bytes[i] = xdrs[i].size();
+  };
+
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
   xdrs.resize(chunks.size(), {});
   parallel.segment_bytes.resize(chunks.size(), 0);
   parallel.segment_tokens.resize(chunks.size(), 0);
+  if (chunks.size() <= 1) {
+    if (!chunks.empty()) {
+      serialize_chunk(chunks.front(), /*i=*/0, xdrs);
+    }
+    parallel.xdr.reserve(objs.size() * sizeof(T) * 3);
+    for (size_t i = 0; i < chunks.size(); i++) {
+      parallel.xdr += xdrs[i];
+    }
+    co_return;
+  }
+
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
     handles.push_back([](const ChunkRange &chunk, size_t i,

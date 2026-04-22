@@ -31,7 +31,8 @@ public:
   TestEventAggregator &operator=(TestEventAggregator &&) = delete;
 
   RPCError open_block(BlockID block_id);
-  EventBlockResult close_block(BlockID block_id, BlockHeight block_height);
+  x23::Async<EventBlockResult> close_block(BlockID block_id,
+                                           BlockHeight block_height);
   x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
                                   TxEventLog event_log);
 
@@ -133,15 +134,17 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.open_block(block_id);
   }
 
-  EventBlockResult eventsched_close_block(BlockID block_id,
-                                          BlockHeight block_height)
+  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
+                                                      BlockHeight block_height)
   {
     return event_aggregator_.close_block(block_id, block_height);
   }
 
-  RPCError eventsched_abandon_block(BlockID block_id)
+  x23::Async<RPCError> eventsched_abandon_block(BlockID block_id)
   {
-    return event_aggregator_.close_block(block_id, /*block_height=*/0).error();
+    co_return (
+        co_await event_aggregator_.close_block(block_id, /*block_height=*/0))
+        .error();
   }
 
 private:

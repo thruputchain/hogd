@@ -22,27 +22,32 @@ TestEventAggregator::open_block(BlockID block_id)
   return RPCError::kRPCNone;
 }
 
-EventBlockResult
+x23::Async<EventBlockResult>
 TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
 {
   // Wait for all executor handles to close before proceeding,
   // matching the real event server's wait_for_executors_closed behavior.
   while (true) {
-    std::scoped_lock lock(mtx_);
-    if (executor_handle_refcounts_[block_id] <= 0) {
+    int32_t executor_refcount = 0;
+    {
+      std::scoped_lock lock(mtx_);
+      executor_refcount = executor_handle_refcounts_[block_id];
+    }
+    if (executor_refcount <= 0) {
       break;
     }
+    co_await default_threadpool().bg();
   }
 
   std::scoped_lock lock(mtx_);
   if (!block_refcounts_.contains(block_id)) {
     error("Block {} is not open", block_id);
-    return EventBlockResult(RPCError::kRPCBadBlockID);
+    co_return EventBlockResult(RPCError::kRPCBadBlockID);
   }
 
   if (block_refcounts_.at(block_id) == 0) {
     error("Block {} is not open", block_id);
-    return EventBlockResult(RPCError::kRPCBadBlockID);
+    co_return EventBlockResult(RPCError::kRPCBadBlockID);
   }
 
   block_refcounts_[block_id]--;
@@ -50,7 +55,7 @@ TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = root_hash;
   info("Closed block {}, height = {}", block_id, block_height);
-  return result;
+  co_return result;
 }
 
 void
