@@ -94,6 +94,7 @@ EOF
 }
 
 declare -a CONTROL_LOG_RECORDS=()
+declare -a LIVE_TAIL_PIDS=()
 PUBLISHED_RESULTS=0
 COORDINATOR_OUTPUT_WRITTEN=0
 
@@ -184,6 +185,50 @@ get_record_stdout_path() {
   return 1
 }
 
+get_record_stderr_path() {
+  local record
+  local host
+  local label
+  local stdout_path
+  local stderr_path
+  local wanted_label=$1
+
+  for record in "${CONTROL_LOG_RECORDS[@]}"; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    if [[ $label == "$wanted_label" ]]; then
+      printf '%s\n' "$stderr_path"
+      return 0
+    fi
+  done
+
+  echo "missing control log record for $wanted_label" >&2
+  return 1
+}
+
+start_log_stream() {
+  local host=$1
+  local label=$2
+  local stream=$3
+  local remote_path=$4
+  local quoted_path
+  local quoted_prefix
+
+  printf -v quoted_path '%q' "$remote_path"
+  printf -v quoted_prefix '%q' "[${host} ${label} ${stream}] "
+  setsid /usr/bin/bash -lc \
+    "ssh ${COMMON_SSH_OPTS[*]} $(printf '%q' "$host") \"tail -n +1 -F $quoted_path\" | sed \"s/^/${quoted_prefix}/\"" &
+  LIVE_TAIL_PIDS+=("$!")
+}
+
+stop_live_log_streams() {
+  local pid
+
+  for pid in "${LIVE_TAIL_PIDS[@]}"; do
+    kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+  done
+  LIVE_TAIL_PIDS=()
+}
+
 write_coordinator_output() {
   local tmp_node0
   local tmp_node1
@@ -246,6 +291,7 @@ cleanup() {
   local exit_code=$1
   trap - EXIT INT TERM
   set +e
+  stop_live_log_streams
   publish_results
   kill_stale_processes
   exit "$exit_code"
@@ -328,6 +374,12 @@ for node in "${NODE_IDS[@]}"; do
     --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
 done
 
+echo 'stream coordinator stdout logs'
+for node in "${NODE_IDS[@]}"; do
+  start_log_stream "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" stdout \
+    "$(get_record_stdout_path "node${node}_chuckd")"
+done
+
 echo 'launch mempools'
 node0_mempool_host="${MEMPOOL_HOSTS[0]}"
 node1_mempool_host="${MEMPOOL_HOSTS[1]}"
@@ -385,6 +437,16 @@ control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
 control_start_with_ulimit "$node1_mempool_host" "node1_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node1_mempool_script"
+
+echo 'stream mempool stdout/stderr logs'
+start_log_stream "$node0_mempool_host" node0_mempool stdout \
+  "$(get_record_stdout_path node0_mempool)"
+start_log_stream "$node0_mempool_host" node0_mempool stderr \
+  "$(get_record_stderr_path node0_mempool)"
+start_log_stream "$node1_mempool_host" node1_mempool stdout \
+  "$(get_record_stdout_path node1_mempool)"
+start_log_stream "$node1_mempool_host" node1_mempool stderr \
+  "$(get_record_stderr_path node1_mempool)"
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
 node0_mempool_pid=$!
