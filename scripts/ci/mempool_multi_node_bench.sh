@@ -94,6 +94,8 @@ EOF
 }
 
 declare -a CONTROL_LOG_RECORDS=()
+PUBLISHED_RESULTS=0
+COORDINATOR_OUTPUT_WRITTEN=0
 
 record_control_logs() {
   local host=$1
@@ -182,6 +184,57 @@ get_record_stdout_path() {
   return 1
 }
 
+write_coordinator_output() {
+  local tmp_node0
+  local tmp_node1
+  local node0_stdout
+  local node1_stdout
+
+  if [[ $COORDINATOR_OUTPUT_WRITTEN -eq 1 ]]; then
+    return 0
+  fi
+
+  node0_stdout=$(get_record_stdout_path node0_chuckd) || return 1
+  node1_stdout=$(get_record_stdout_path node1_chuckd) || return 1
+
+  tmp_node0=$(mktemp)
+  tmp_node1=$(mktemp)
+  copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0"
+  copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"
+  echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
+  cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
+  rm -f "$tmp_node0" "$tmp_node1"
+  COORDINATOR_OUTPUT_WRITTEN=1
+}
+
+publish_results() {
+  if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
+    return 0
+  fi
+
+  if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
+    echo 'no control log records captured; skipping metrics_history publication'
+    return 0
+  fi
+
+  echo 'clone metrics history # This is idempotent'
+  "$REPO_ROOT/scripts/clone_metrics_history.sh"
+
+  echo 'copy full remote logs into metrics history'
+  publish_multi_node_logs
+
+  if write_coordinator_output; then
+    echo 'log integration metrics'
+    "$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
+  else
+    echo 'failed to collect coordinator output; skipping summary metric file' >&2
+  fi
+
+  echo 'commit metrics history updates'
+  "$REPO_ROOT/scripts/commit_metrics.sh"
+  PUBLISHED_RESULTS=1
+}
+
 kill_stale_processes() {
   local host
   for host in "${ALL_HOSTS[@]}"; do
@@ -192,6 +245,8 @@ kill_stale_processes() {
 cleanup() {
   local exit_code=$1
   trap - EXIT INT TERM
+  set +e
+  publish_results
   kill_stale_processes
   exit "$exit_code"
 }
@@ -375,24 +430,4 @@ echo 'node0 mempool wait completed'
 wait "$node1_mempool_pid"
 echo 'node1 mempool wait completed'
 
-echo 'collect coordinator output'
-tmp_node0=$(mktemp)
-tmp_node1=$(mktemp)
-copy_remote_file "${CHUCKD_HOSTS[0]}" \
-  "$(get_record_stdout_path node0_chuckd)" \
-  "$tmp_node0"
-copy_remote_file "${CHUCKD_HOSTS[1]}" \
-  "$(get_record_stdout_path node1_chuckd)" \
-  "$tmp_node1"
-echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
-cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
-rm -f "$tmp_node0" "$tmp_node1"
-
-echo 'clone metrics history # This is idempotent'
-"$REPO_ROOT/scripts/clone_metrics_history.sh"
-
-echo 'copy full remote logs into metrics history'
-publish_multi_node_logs
-
-echo 'log integration metrics'
-"$REPO_ROOT/scripts/log_metric.sh" nightly_integration_mempool_multi_node "$REPO_ROOT/coordinator_output.txt"
+publish_results
