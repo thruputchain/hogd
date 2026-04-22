@@ -221,19 +221,12 @@ start_log_stream() {
 }
 
 stop_live_log_streams() {
-  echo "stop_live_log_streams A"
   local pid
-  echo "stop_live_log_streams B"
 
-  echo "stop_live_log_streams C"
   for pid in "${LIVE_TAIL_PIDS[@]}"; do
-    echo "stop_live_log_streams iter A"
     kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
-    echo "stop_live_log_streams iter B"
   done
-  echo "stop_live_log_streams D"
   LIVE_TAIL_PIDS=()
-  echo "stop_live_log_streams E"
 }
 
 write_coordinator_output() {
