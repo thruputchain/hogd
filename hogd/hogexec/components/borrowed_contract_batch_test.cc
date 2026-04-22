@@ -1,14 +1,17 @@
 #include <gtest/gtest.h>
 
+#include <initializer_list>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/x23.h"
 
