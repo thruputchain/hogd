@@ -195,7 +195,7 @@ done
 echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "$SLOT_A_CPUS" \
-    "$CHUCKD_BINARY" -l info --skip 20 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
+    "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --wallet-addr :40000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
@@ -232,10 +232,28 @@ node1_mempool_cmd=(
 )
 
 node0_mempool_script=$(
-  make_ulimit_exec_script timeout 360s "${node0_mempool_cmd[@]}"
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+set +e
+$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
+status=\$?
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
 )
 node1_mempool_script=$(
-  make_ulimit_exec_script timeout 180s "${node1_mempool_cmd[@]}"
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+set +e
+$(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
+status=\$?
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
 )
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
@@ -290,12 +308,13 @@ echo 'node1 mempool wait completed'
 echo 'collect coordinator output'
 tmp_node0=$(mktemp)
 tmp_node1=$(mktemp)
-echo "copying coordinator output from ${CHUCKD_HOSTS[0]}"
+echo "copying coordinator output from ${CHUCKD_HOSTS[0]} to $tmp_node0"
 scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
   "${CHUCKD_HOSTS[0]}:$(latest_control_stdout "${CHUCKD_HOSTS[0]}")" "$tmp_node0"
-echo "copying coordinator output from ${CHUCKD_HOSTS[1]}"
+echo "copying coordinator output from ${CHUCKD_HOSTS[1]} to $tmp_node1"
 scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
   "${CHUCKD_HOSTS[1]}:$(latest_control_stdout "${CHUCKD_HOSTS[1]}")" "$tmp_node1"
+echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
 cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
 rm -f "$tmp_node0" "$tmp_node1"
 
