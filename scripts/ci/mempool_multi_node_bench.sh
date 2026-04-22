@@ -308,12 +308,13 @@ echo 'node1 mempool wait completed'
 echo 'collect coordinator output'
 tmp_node0=$(mktemp)
 tmp_node1=$(mktemp)
-echo "copying coordinator output from ${CHUCKD_HOSTS[0]}"
+echo "copying coordinator output from ${CHUCKD_HOSTS[0]} to $tmp_node0"
 scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
   "${CHUCKD_HOSTS[0]}:$(latest_control_stdout "${CHUCKD_HOSTS[0]}")" "$tmp_node0"
-echo "copying coordinator output from ${CHUCKD_HOSTS[1]}"
+echo "copying coordinator output from ${CHUCKD_HOSTS[1]} to $tmp_node1"
 scp -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no \
   "${CHUCKD_HOSTS[1]}:$(latest_control_stdout "${CHUCKD_HOSTS[1]}")" "$tmp_node1"
+echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
 cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
 rm -f "$tmp_node0" "$tmp_node1"
 
