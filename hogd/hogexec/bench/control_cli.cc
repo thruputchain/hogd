@@ -137,7 +137,6 @@ handle_wait_command(std::string const &host, std::string const &port)
       auto status = client.query_proc_status();
       if (status.error_code() ==
           hogd::CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
-        hogd::info("Process is still running");
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         continue;
       }
