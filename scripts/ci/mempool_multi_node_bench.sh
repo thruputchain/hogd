@@ -211,23 +211,29 @@ start_log_stream() {
   local stream=$3
   local remote_path=$4
   local quoted_path
+  local quoted_prefix
 
   printf -v quoted_path '%q' "$remote_path"
-  ssh "${COMMON_SSH_OPTS[@]}" "$host" "tail -n +1 -F $quoted_path" |
-    sed "s/^/[${host} ${label} ${stream}] /" &
+  printf -v quoted_prefix '%q' "[${host} ${label} ${stream}] "
+  setsid /usr/bin/bash -lc \
+    "ssh ${COMMON_SSH_OPTS[*]} $(printf '%q' "$host") \"tail -n +1 -F $quoted_path\" | sed \"s/^/${quoted_prefix}/\"" &
   LIVE_TAIL_PIDS+=("$!")
 }
 
 stop_live_log_streams() {
+  echo "stop_live_log_streams A"
   local pid
+  echo "stop_live_log_streams B"
 
+  echo "stop_live_log_streams C"
   for pid in "${LIVE_TAIL_PIDS[@]}"; do
-    kill "$pid" >/dev/null 2>&1 || true
+    echo "stop_live_log_streams iter A"
+    kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+    echo "stop_live_log_streams iter B"
   done
-  for pid in "${LIVE_TAIL_PIDS[@]}"; do
-    wait "$pid" >/dev/null 2>&1 || true
-  done
+  echo "stop_live_log_streams D"
   LIVE_TAIL_PIDS=()
+  echo "stop_live_log_streams E"
 }
 
 write_coordinator_output() {
