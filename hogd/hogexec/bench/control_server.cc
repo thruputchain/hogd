@@ -322,7 +322,8 @@ private:
       if (*exit_code_ != 0) {
         append_start_failure_diagnostic("child_exit", program_name_,
                                         program_args_, cpu_affinity_,
-                                        std::format("exit_code={}", *exit_code_));
+                                        std::format("exit_code={}",
+                                                    *exit_code_));
       }
     }
     else {
@@ -371,8 +372,8 @@ public:
                              config.cpu_affinity.end());
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
-    std::unique_ptr<Subprocess> new_proc = std::make_unique<Subprocess>(
-        program_name, program_args, cpu_affinity);
+    std::unique_ptr<Subprocess> new_proc =
+        std::make_unique<Subprocess>(program_name, program_args, cpu_affinity);
     info("launching process: {} {}", program_name, join_args(program_args));
     auto pid =
         new_proc->launch_process(program_name, program_args, cpu_affinity);

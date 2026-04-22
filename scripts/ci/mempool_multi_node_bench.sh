@@ -232,10 +232,28 @@ node1_mempool_cmd=(
 )
 
 node0_mempool_script=$(
-  make_ulimit_exec_script timeout 360s "${node0_mempool_cmd[@]}"
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+set +e
+$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
+status=\$?
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
 )
 node1_mempool_script=$(
-  make_ulimit_exec_script timeout 360s "${node1_mempool_cmd[@]}"
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+set +e
+$(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
+status=\$?
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
 )
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" start --cores "$SLOT_B_CPUS" \
