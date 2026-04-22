@@ -191,7 +191,7 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
     if (!r) [[unlikely]] {
       panic("failed to write events to file: {}", r.error());
     }
-    if (--pending_write_count_ == 0) {
+    if (--pending_write_count_ == 0 && state_ == BlockState::kFinishing) {
       all_writes_done_.store(true);
       all_writes_done_.broadcast();
     }

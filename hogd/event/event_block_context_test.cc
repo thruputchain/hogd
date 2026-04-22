@@ -26,6 +26,7 @@
 #include "x23/async.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -490,6 +491,60 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   size_t accepted = events_accepted.load(std::memory_order_relaxed);
   EXPECT_GT(accepted, 0UL);
   EXPECT_EQ(event_logs.size(), accepted);
+}
+
+// Regression test for stale all_writes_done_ futex (issue #1551).
+// Forces two async flush epochs on a single-worker pool, then calls
+// finish_file_write().  Without the fix, the stale futex causes a deadlock
+// (ctest --timeout catches it).
+TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
+{
+  x23::ThreadPool pool(1);
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+
+  [](x23::ThreadPool &pool, EventBlockContext &context) -> x23::Async<void> {
+    co_await pool.bg();
+
+    for (int i = 0; i < 600; i++) {
+      SHA256Hash hash{};
+      std::memcpy(hash.data(), &i, sizeof(i));
+      x23::Vec<uint8_t, kMaxEventLength> payload;
+      payload.resize(1024);
+      std::memcpy(payload.data(), &i, sizeof(i));
+      co_await context.add_event(TxEventLog{
+          .proposed_tx_hash = hash,
+          .events = {TxEmittedEvent{
+              .contract_address = {},
+              .num_topics = 0,
+              .serialized_event = std::move(payload),
+          }},
+      });
+    }
+
+    // Yield so the first flush epoch completes on the single worker.
+    co_await pool.bg();
+
+    for (int i = 600; i < 1200; i++) {
+      SHA256Hash hash{};
+      std::memcpy(hash.data(), &i, sizeof(i));
+      x23::Vec<uint8_t, kMaxEventLength> payload;
+      payload.resize(1024);
+      std::memcpy(payload.data(), &i, sizeof(i));
+      co_await context.add_event(TxEventLog{
+          .proposed_tx_hash = hash,
+          .events = {TxEmittedEvent{
+              .contract_address = {},
+              .num_topics = 0,
+              .serialized_event = std::move(payload),
+          }},
+      });
+    }
+
+    context.executor_close_block();
+    co_await context.finish_file_write();
+    co_await context.finish_file(context.get_root_hash());
+  }(pool, context)();
 }
 
 } // namespace hogd
