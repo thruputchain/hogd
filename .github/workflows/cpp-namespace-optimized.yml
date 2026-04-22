@@ -62,7 +62,7 @@ jobs:
         with:
           cache: rust
           path: |
-            ~/.cargo/bin
+            ~/.cargo
 
       # No submodules needed - format.sh formats files in main repo only
 
@@ -134,7 +134,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
-            ~/.cargo/bin
+            ~/.cargo
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -264,7 +264,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
-            ~/.cargo/bin
+            ~/.cargo
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -375,7 +375,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
-            ~/.cargo/bin
+            ~/.cargo
 
       - name: Configure Git for Submodule Caching
         run: |
