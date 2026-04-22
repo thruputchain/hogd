@@ -21,6 +21,7 @@ public:
   using contract_map_t =
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>>;
 
+  // NOLINTNEXTLINE(readability-identifier-naming)
   class const_iterator {
     using hash_iterator = hash_set_t::const_iterator;
 
@@ -59,8 +60,8 @@ public:
       }
     }
 
-    hash_iterator it_{};
-    hash_iterator end_{};
+    hash_iterator it_;
+    hash_iterator end_;
     contract_map_t const *map_ = nullptr;
   };
 
@@ -102,6 +103,7 @@ private:
 namespace x23 {
 
 template<> struct xdr_meta<hogd::BorrowedContractBatch> {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   static constexpr XdrCategory category = XdrCategory::kVec;
 };
 
