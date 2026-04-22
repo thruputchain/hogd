@@ -295,19 +295,12 @@ kill_stale_processes() {
 }
 
 cleanup() {
-  echo "cleanup start"
   local exit_code=$1
-  echo "cleanup B"
   trap - EXIT INT TERM
-  echo "cleanup C"
   set +e
-  echo "cleanup D"
   stop_live_log_streams
-  echo "publish results"
   publish_results
-  echo "now kill stale processes"
   kill_stale_processes
-  echo "now exit with code $exit_code"
   exit "$exit_code"
 }
 
@@ -506,6 +499,4 @@ echo 'node0 mempool wait completed'
 wait "$node1_mempool_pid"
 echo 'node1 mempool wait completed'
 
-echo "publish results A"
 publish_results
-echo "publish results B"
