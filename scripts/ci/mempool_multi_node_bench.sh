@@ -496,4 +496,6 @@ echo 'node0 mempool wait completed'
 wait "$node1_mempool_pid"
 echo 'node1 mempool wait completed'
 
+echo "publish results A"
 publish_results
+echo "publish results B"
