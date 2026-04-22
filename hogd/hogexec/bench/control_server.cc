@@ -8,7 +8,6 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -94,35 +93,10 @@ join_args(std::vector<std::string> const &args)
   args_joined.pop_back(); // remove the last space
   return args_joined;
 }
-
-void
-append_start_failure_diagnostic(std::string_view stage,
-                                std::string_view program_name,
-                                std::vector<std::string> const &program_args,
-                                std::string_view cpu_affinity,
-                                std::string_view details)
-{
-  std::ofstream out("/tmp/ciserver_start_failure.log", std::ios::app);
-  if (!out.is_open()) {
-    return;
-  }
-
-  out << "ts=" << x23::fastclock::now().time_since_epoch().count()
-      << " pid=" << getpid() << " stage=" << stage
-      << " program=" << program_name << " args=[" << join_args(program_args)
-      << "] cpu_affinity=" << cpu_affinity << " details=" << details << '\n';
-}
 } // namespace
 
 class Subprocess {
 public:
-  Subprocess(std::string program_name, std::vector<std::string> program_args,
-             std::string cpu_affinity)
-    : program_name_(std::move(program_name)),
-      program_args_(std::move(program_args)),
-      cpu_affinity_(std::move(cpu_affinity))
-  {}
-
   std::optional<pid_t>
   launch_process(std::string const &program_name,
                  std::vector<std::string> const &program_args,
@@ -140,9 +114,6 @@ public:
       cpu_set = x23::parse_cpuset(cpu_affinity);
       if (!cpu_set->valid()) {
         error("invalid cpu affinity string: {}", cpu_affinity);
-        append_start_failure_diagnostic("parse_cpuset", program_name,
-                                        program_args, cpu_affinity,
-                                        "invalid cpu affinity string");
         return std::nullopt;
       }
       info("applying cpu affinity: {}", cpu_affinity);
@@ -173,8 +144,6 @@ public:
 
     if (stdout_fd == -1 || stderr_fd == -1) {
       error("failed to create temporary files: {}", Errno{});
-      append_start_failure_diagnostic("mkstemp", program_name, program_args,
-                                      cpu_affinity, std::format("{}", Errno{}));
       if (stdout_fd != -1)
         close(stdout_fd);
       if (stderr_fd != -1)
@@ -186,8 +155,6 @@ public:
     int parent_stdout = dup(STDOUT_FILENO);
     if (parent_stdout == -1) {
       error("failed to save parent stdout: {}", Errno{});
-      append_start_failure_diagnostic("dup_stdout", program_name, program_args,
-                                      cpu_affinity, std::format("{}", Errno{}));
       close(stdout_fd);
       close(stderr_fd);
       return std::nullopt;
@@ -196,8 +163,6 @@ public:
     int parent_stderr = dup(STDERR_FILENO);
     if (parent_stderr == -1) {
       error("failed to save parent stderr: {}", Errno{});
-      append_start_failure_diagnostic("dup_stderr", program_name, program_args,
-                                      cpu_affinity, std::format("{}", Errno{}));
       close(stdout_fd);
       close(stderr_fd);
       return std::nullopt;
@@ -211,8 +176,6 @@ public:
     auto pid = fork();
     if (pid < 0) {
       error("fork failed: {}", Errno{});
-      append_start_failure_diagnostic("fork", program_name, program_args,
-                                      cpu_affinity, std::format("{}", Errno{}));
       close(parent_stderr);
       close(parent_stdout);
       close(stdout_fd);
@@ -226,9 +189,6 @@ public:
       // Redirect stdout and stderr to temp files
       if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
           dup2(stderr_fd, STDERR_FILENO) == -1) {
-        append_start_failure_diagnostic("dup2", full_program_name, program_args,
-                                        cpu_affinity,
-                                        std::format("{}", Errno{}));
         // NOLINTBEGIN(modernize-use-std-print)
         info("dup2 failed: %s\n", strerror(errno));
         // NOLINTEND(modernize-use-std-print)
@@ -242,9 +202,6 @@ public:
       if (cpu_set.has_value()) {
         Errno err = cpu_set->set_affinity();
         if (err) {
-          append_start_failure_diagnostic("sched_setaffinity",
-                                          full_program_name, program_args,
-                                          cpu_affinity, std::format("{}", err));
           info("sched_setaffinity failed: {}\n", err);
           _exit(EXIT_FAILURE);
         }
@@ -261,8 +218,6 @@ public:
       // NOLINTBEGIN(modernize-use-std-print)
       info("execvp: {} {}\n", full_program_name, join_args(program_args));
       execvp(full_program_name.c_str(), args.data());
-      append_start_failure_diagnostic("execvp", full_program_name, program_args,
-                                      cpu_affinity, std::format("{}", Errno{}));
       info("execvp failed: %s\n", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
       _exit(EXIT_FAILURE);
@@ -319,12 +274,6 @@ private:
     exit_code_ = res;
     if (exit_code_.has_value()) {
       info("child process: {} exited with code: {}", child_pid, *exit_code_);
-      if (*exit_code_ != 0) {
-        append_start_failure_diagnostic("child_exit", program_name_,
-                                        program_args_, cpu_affinity_,
-                                        std::format("exit_code={}",
-                                                    *exit_code_));
-      }
     }
     else {
       error("failed to wait for child process: {}", child_pid);
@@ -335,9 +284,6 @@ private:
   std::optional<int> exit_code_ = std::nullopt;
 
   std::jthread waitpid_thread_;
-  std::string program_name_;
-  std::vector<std::string> program_args_;
-  std::string cpu_affinity_;
 };
 
 class CIControlRpc {
@@ -364,6 +310,7 @@ public:
 
     std::lock_guard lock(running_pid_mutex_);
 
+    std::unique_ptr<Subprocess> new_proc = std::make_unique<Subprocess>();
     std::vector<std::string> program_args;
     for (auto const &arg : config.program_args) {
       program_args.emplace_back(arg.begin(), arg.end());
@@ -372,15 +319,10 @@ public:
                              config.cpu_affinity.end());
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
-    std::unique_ptr<Subprocess> new_proc =
-        std::make_unique<Subprocess>(program_name, program_args, cpu_affinity);
     info("launching process: {} {}", program_name, join_args(program_args));
     auto pid =
         new_proc->launch_process(program_name, program_args, cpu_affinity);
     if (!pid) {
-      append_start_failure_diagnostic("launch_process", program_name,
-                                      program_args, cpu_affinity,
-                                      std::format("{}", Errno{}));
       error("failed to launch process: {}", Errno{});
       return CIServerErrorCode::kCIServerErrorCodeInternal;
     }
