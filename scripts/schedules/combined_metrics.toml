@@ -101,9 +101,13 @@ echo 'run multiexec interface benchmarks'
 (./scripts/ci/exec_scaling.sh) || true
 exec_scaling_exit=$?
 
-echo 'run mempool benchmarks'
+echo 'run e2e payment benchmark'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
+
+echo 'run e2e payment multi-node benchmark'
+(./scripts/ci/mempool_multi_node_bench.sh) || true
+mempool_multi_node_bench_exit=$?
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
 ./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
@@ -130,6 +134,7 @@ echo 'shut down hog11 and hog8'
 echo 'check for failures'
 if [ "$exec_scaling_exit" -ne 0 ] || \
     [ "$mempool_bench_exit" -ne 0 ] || \
+    [ "$mempool_multi_node_bench_exit" -ne 0 ] || \
     [ "$event_bench_exit" -ne 0 ] || \
     [ "$metrics_exit" -ne 0 ]; then
     echo "one or more benchmark steps failed"
