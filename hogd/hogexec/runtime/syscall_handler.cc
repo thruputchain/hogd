@@ -16,7 +16,6 @@
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
-#include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
