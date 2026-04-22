@@ -60,7 +60,7 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
-            ~/.cargo/bin
+            ~/.cargo
 
       # Note: 'apt' cache removed since toolchain is in base image
 
@@ -142,8 +142,12 @@ jobs:
 
       - name: Run Tidy Checks
         run: |
-          TIDY_RESULT=0
-          ./scripts/tidy-ubuntu.sh -d build/llvm 2>&1 | tee tidy.log || TIDY_RESULT=${PIPESTATUS[0]}
+          set +e
+          set -o pipefail
+          ./scripts/tidy-ubuntu.sh -d build/llvm 2>&1 | tee tidy.log
+          TIDY_RESULT=$?
+          set +o pipefail
+          set -e
 
           if [ $TIDY_RESULT -ne 0 ]; then
             printf '\n===== filtered tidy log =====\n'

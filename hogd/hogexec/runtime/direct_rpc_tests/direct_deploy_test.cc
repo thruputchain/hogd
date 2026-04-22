@@ -73,7 +73,7 @@ TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
   EXPECT_FALSE(r2.value())
       << "TX2 should be blocked by TX1's exclusive lock on the metadata key";
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
   advance_block();
 }

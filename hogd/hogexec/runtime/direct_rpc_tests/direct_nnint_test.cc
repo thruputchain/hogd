@@ -73,7 +73,7 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
 
   // pop last two subtransactions; keep only the first (+100)
   ASSERT_TRUE(tx.pop_subtransactions(2).has_value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   advance_block();
 
@@ -117,7 +117,7 @@ TEST_P(DirectNNIntTest,
   // Abort the positive; committing the negative is still a no-op
   // (no reservations held)
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -162,7 +162,7 @@ TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
 
   // Abort tx1; commit tx2
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -239,7 +239,7 @@ TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
 
   // Abort tx2; commit tx1
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -267,7 +267,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx_init.commit_transaction().has_value());
     advance_block();
   }
 
@@ -295,7 +295,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
 
   // Pop both subtransactions; commit → final remains 500
   ASSERT_TRUE(tx.pop_subtransactions(2).has_value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
 
   advance_block();
 
@@ -342,7 +342,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
     ASSERT_TRUE(r.value());
   }
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // On reference address: only create A
   auto ref_a = make_addrkey(reference_addr, "nn_keyA");
@@ -354,7 +354,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
   }
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
 
@@ -395,8 +395,8 @@ TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
     ASSERT_TRUE(r.value());
   }
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -435,7 +435,7 @@ TEST_P(DirectNNIntTest, AddAndSubOk)
     auto r2 = tx1.try_push_current_subtransaction();
     ASSERT_TRUE(r2.has_value());
     ASSERT_TRUE(r2.value());
-    ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx1.commit_transaction().has_value());
   }
 
   {
@@ -445,7 +445,7 @@ TEST_P(DirectNNIntTest, AddAndSubOk)
     auto r = tx2.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx2.commit_transaction().has_value());
   }
 }
 
@@ -482,9 +482,9 @@ TEST_P(DirectNNIntTest, NNIntProperLocksHeld)
   ASSERT_TRUE(r4.has_value());
   EXPECT_FALSE(r4.value());
 
-  EXPECT_TRUE(tx2.commit_transaction({}).has_value());
+  EXPECT_TRUE(tx2.commit_transaction().has_value());
   EXPECT_TRUE(tx1.pop_subtransactions(1).has_value());
-  EXPECT_TRUE(tx1.commit_transaction({}).has_value());
+  EXPECT_TRUE(tx1.commit_transaction().has_value());
 
   advance_block();
 
@@ -522,8 +522,8 @@ TEST_P(DirectNNIntTest, TryInvokeMultipleReferences)
   auto r3 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value() && r3.value());
 
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 }
 
 TEST_P(DirectNNIntTest, NNIntCreateCost)
@@ -553,7 +553,7 @@ TEST_P(DirectNNIntTest, NNIntCreateCost)
   ASSERT_TRUE(r2.has_value() && r2.value());
 
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   // reference address
   auto tx_ref = make_new_per_tx_db_proxy();
@@ -561,7 +561,7 @@ TEST_P(DirectNNIntTest, NNIntCreateCost)
                    std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value() && r_ref.value());
-  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
 
@@ -592,7 +592,7 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
   auto bal = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(query_addr));
@@ -636,8 +636,8 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   EXPECT_FALSE(r3.value());
 
   ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
 
@@ -669,7 +669,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
                     std::to_underlying(StorageDeltaFlags::None));
   auto r_init = tx_init.try_push_current_subtransaction();
   ASSERT_TRUE(r_init.has_value() && r_init.value());
-  ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
   advance_block();
 
   // Read back - should be INT128_MIN
@@ -687,7 +687,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
                std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
   // Check the value - INT128_MIN + 1 is still negative
@@ -715,7 +715,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx_init.commit_transaction().has_value());
     advance_block();
   }
 
@@ -730,7 +730,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
   ASSERT_TRUE(r1.has_value() && r1.value());
 
   // TX1 has exclusive lock, commit it
-  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // TX2: add -50 should succeed (value was 100, TX1 subtracted 50, so now 50)
   auto tx2 = make_new_per_tx_db_proxy();
@@ -739,7 +739,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value() && !r2.value());
   // exclusive lock causes tx failure
-  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
   advance_block();
 
   auto item = lookup_storage_item_from_db(key);
@@ -763,7 +763,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
   ASSERT_TRUE(r.has_value() && r.value());
   ;
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
   auto item = lookup_storage_item_from_db(key);
@@ -787,7 +787,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r1 = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value() && r1.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
   auto item = lookup_storage_item_from_db(key);
@@ -818,7 +818,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntNegSetTwoSubtxsSameKey)
                std::to_underlying(StorageDeltaFlags::None));
   auto r2 = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value() && r2.value());
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 }
 
@@ -870,7 +870,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
   auto r2 = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value() && r2.value());
 
-  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
   auto item = lookup_storage_item_from_db(key);
@@ -929,7 +929,7 @@ TEST_P(DirectNNIntTest, BugHuntPartialBatchFailureLocksNotReverted)
 
   // Commit tx2 if it succeeded, or abort both
   if (r2.value()) {
-    ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+    ASSERT_TRUE(tx2.commit_transaction().has_value());
   }
   else {
     ASSERT_TRUE(tx2.abort_transaction().has_value());
