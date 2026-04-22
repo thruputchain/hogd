@@ -24,6 +24,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/rpc_from_gateway.h"
 #include "types.hh"
 
 namespace hogd {
@@ -34,7 +35,7 @@ int
 mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
              std::string_view bind_ip, uint16_t db_port, uint16_t event_port,
              uint16_t executor_port, uint16_t auth_port,
-             uint16_t coordinator_port)
+             uint16_t coordinator_port, uint16_t gateway_port)
 {
   Registration &registration = Registration::registration();
 
@@ -99,6 +100,17 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards, uint64_t network_id,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
+  // Public RPC gateway server: shares the scheduler + admission path
+  // with the coordinator server, but exposes a gateway-shaped surface
+  // (SchedGateway1) on a separate port.  Chuckd remains on the
+  // coordinator port; the public RPC gateway binds to this one.
+  MempoolGatewayServer gateway(coord->impl());
+  gateway->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  uint16_t actual_gateway_port =
+      gateway.start_server(make_bind_host_port(bind_ip, gateway_port));
+  CHECK(actual_gateway_port == gateway_port || gateway_port == 0);
+  info("PORT mempool.gateway={}", actual_gateway_port);
+
   // The mempool is initialized. Now block forever.
   info("mempool initialization complete.");
   std::promise<void>().get_future().wait();
@@ -125,7 +137,7 @@ usage(char *argv[])
       "usage: {} --bind-ip <ip> --num-db-shards <n> --num-exec-shards <n> "
       "--network-id <hex> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
-      "[--coordinator-port <port>]",
+      "[--coordinator-port <port>] [--gateway-port <port>]",
       argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -160,6 +172,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t executor_port = 0;
   uint16_t auth_port = 0;
   uint16_t coordinator_port = 0;
+  uint16_t gateway_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -199,6 +212,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coordinator_port = parse_port(argv[++i]);
       continue;
     }
+    if (arg == "--gateway-port" && i + 1 < argc) {
+      gateway_port = parse_port(argv[++i]);
+      continue;
+    }
     usage(argv);
   }
 
@@ -219,5 +236,5 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   return hogd::mempool_init(*num_db_shards, *num_exec_shards, *network_id,
                             bind_ip, db_port, event_port, executor_port,
-                            auth_port, coordinator_port);
+                            auth_port, coordinator_port, gateway_port);
 }

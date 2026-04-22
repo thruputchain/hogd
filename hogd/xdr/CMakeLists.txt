@@ -38,6 +38,7 @@ add_xdr(
   ../../protocol/sched_db.x
   ../../protocol/sched_event.x
   ../../protocol/sched_exec.x
+  ../../protocol/sched_gateway.x
   ../../protocol/standard_asset_events.x
   ../../protocol/storage_cost.x
   ../../protocol/storage_item.x
