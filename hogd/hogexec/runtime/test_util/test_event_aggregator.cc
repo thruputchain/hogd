@@ -104,49 +104,45 @@ TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
   co_return co_await do_emit_event(block_id, tx_id, std::move(event_log));
 }
 
-std::optional<TxEventLog>
+x23::Async<std::optional<TxEventLog>>
 TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
 {
-  return [this, block_id, tx_id]() -> x23::Async<std::optional<TxEventLog>> {
-    x23::CoroGuard guard;
-    co_await guard(lock_);
+  x23::CoroGuard guard;
+  co_await guard(lock_);
 
-    auto it = events_.find(block_id);
-    if (it == events_.end()) {
-      error("Block {} not found", block_id);
-      co_return std::nullopt;
-    }
+  auto it = events_.find(block_id);
+  if (it == events_.end()) {
+    error("Block {} not found", block_id);
+    co_return std::nullopt;
+  }
 
-    if (!it->second.contains(tx_id)) {
-      error("Tx {} not found in block {}", tx_id, block_id);
-      co_return std::nullopt;
-    }
-    co_return std::optional<TxEventLog>(it->second.at(tx_id));
-  }()();
+  if (!it->second.contains(tx_id)) {
+    error("Tx {} not found in block {}", tx_id, block_id);
+    co_return std::nullopt;
+  }
+  co_return std::optional<TxEventLog>(it->second.at(tx_id));
 }
 
-std::optional<TxEventLog>
+x23::Async<std::optional<TxEventLog>>
 TestEventAggregator::get_events_by_hash(BlockID block_id,
                                         SHA256Hash const &tx_hash)
 {
-  return [this, block_id, tx_hash]() -> x23::Async<std::optional<TxEventLog>> {
-    x23::CoroGuard guard;
-    co_await guard(lock_);
+  x23::CoroGuard guard;
+  co_await guard(lock_);
 
-    auto it = events_.find(block_id);
-    if (it == events_.end()) {
-      error("Block {} not found", block_id);
-      co_return std::nullopt;
-    }
-
-    for (auto const &[tx_id, event_log] : it->second) {
-      if (event_log.proposed_tx_hash == tx_hash) {
-        co_return std::optional<TxEventLog>(event_log);
-      }
-    }
-    error("Tx hash not found in block {}", block_id);
+  auto it = events_.find(block_id);
+  if (it == events_.end()) {
+    error("Block {} not found", block_id);
     co_return std::nullopt;
-  }()();
+  }
+
+  for (auto const &[tx_id, event_log] : it->second) {
+    if (event_log.proposed_tx_hash == tx_hash) {
+      co_return std::optional<TxEventLog>(event_log);
+    }
+  }
+  error("Tx hash not found in block {}", block_id);
+  co_return std::nullopt;
 }
 
 } // namespace hogd

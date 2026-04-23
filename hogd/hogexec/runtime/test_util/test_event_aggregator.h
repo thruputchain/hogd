@@ -40,11 +40,12 @@ public:
   x23::Async<void> executor_close_block(BlockID block_id);
 
   // Get all events for a specific block and transaction
-  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
+  x23::Async<std::optional<TxEventLog>> get_events(BlockID block_id,
+                                                   TransactionID tx_id);
 
   // Get events by transaction hash (linear scan over the block's transactions)
-  std::optional<TxEventLog> get_events_by_hash(BlockID block_id,
-                                               SHA256Hash const &tx_hash);
+  x23::Async<std::optional<TxEventLog>>
+  get_events_by_hash(BlockID block_id, SHA256Hash const &tx_hash);
 
   // Blocking control: block emit_event calls until unblock_emit_events is
   // called
