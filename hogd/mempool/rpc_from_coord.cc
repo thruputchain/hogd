@@ -608,6 +608,8 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(kNumSchedulerIterations);
+  x23::Vec<size_t> handle_end_indices;
+  handle_end_indices.reserve(kNumSchedulerIterations);
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
@@ -646,6 +648,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
           propose_batch_in_chunks(cache.block_id, txs_span,
                                   cache.transaction_nomination_chunks[i],
                                   ret_span));
+      handle_end_indices.push_back(cache.tx_hashes.size());
       info("schedule() propose_batch_in_chunks() took {}", timer.elapsed());
     }
   }
@@ -655,23 +658,25 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   cache.failed_txs.clear();
   size_t num_tx_outcomes_processed = 0;
   CHECK(cache.result_tx_nominations.empty());
-  for (size_t i = 0; i < handles.size(); i++) {
-    co_await handles[i];
-    cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
+  for (size_t handle_idx = 0; handle_idx < handles.size(); handle_idx++) {
+    co_await handles[handle_idx];
+    cache.result_tx_nominations +=
+        cache.transaction_nomination_chunks[handle_idx];
 
     // TODO(jhumphri): Start adding the txs to the merkle trie here.
-    for (size_t i = num_tx_outcomes_processed;
-         i < cache.result_tx_nominations.size(); i++) {
-      if (cache.statuses[i]) {
-        cache.result_tx_hashes.push_back(cache.tx_hashes[i]);
+    for (size_t tx_idx = num_tx_outcomes_processed;
+         tx_idx < handle_end_indices[handle_idx]; tx_idx++) {
+      if (cache.statuses[tx_idx]) {
+        cache.result_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
       }
       else {
-        cache.failed_txs.push_back(cache.txs[i]);
+        cache.failed_txs.push_back(cache.txs[tx_idx]);
       }
     }
-    num_tx_outcomes_processed = cache.result_tx_nominations.size();
+    num_tx_outcomes_processed = handle_end_indices[handle_idx];
   }
-  CHECK_EQ(num_tx_outcomes_processed, cache.result_tx_nominations.size());
+  CHECK_EQ(num_tx_outcomes_processed, cache.tx_hashes.size());
+  CHECK_EQ(cache.result_tx_hashes.size(), cache.result_tx_nominations.size());
   record_stage(stage_await_batches);
 
   info("schedule() stages: lock_wait={:.6f}, schedule_loop={:.6f}, "
