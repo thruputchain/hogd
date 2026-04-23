@@ -5,10 +5,13 @@
 
 #include "event.hh"
 #include "event_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
