@@ -1,10 +1,11 @@
-#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <utility>
 
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -31,6 +32,13 @@ public:
   PerTransactionDatabaseProxy make_new_per_tx_db_proxy()
   {
     return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
+  }
+
+  constexpr static BorrowedContractBatch empty_contract_batch()
+  {
+    static const BorrowedContractBatch::hash_set_t kEmptyHashes;
+    static const BorrowedContractBatch::contract_map_t kEmptyContracts;
+    return BorrowedContractBatch(kEmptyHashes, kEmptyContracts);
   }
 };
 
@@ -70,7 +78,9 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
   auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(db_proxy.commit_transaction(get_block_number(), 1).has_value());
+  ASSERT_TRUE(
+      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())
+          .has_value());
   advance_block();
 
   auto res = lookup_storage_item_from_db(
@@ -190,7 +200,9 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
   auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
-  ASSERT_TRUE(db_proxy.commit_transaction(get_block_number(), 1).has_value());
+  ASSERT_TRUE(
+      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())
+          .has_value());
   advance_block();
 
   auto res = lookup_storage_item_from_db(
