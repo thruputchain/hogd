@@ -99,7 +99,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
           "advance_new_block: dbsched_commit_block failed");
     }
 
-    event_server_.close_block(current_block_id_, current_block_id_);
+    event_server_.close_block(current_block_id_, current_block_id_)();
   }
 
   auto res =
@@ -112,7 +112,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   current_block_id_++;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
-  event_server_.open_block(current_block_id_);
+  event_server_.open_block(current_block_id_)();
 }
 
 } // namespace hogd
