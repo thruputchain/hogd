@@ -55,7 +55,7 @@ protected:
         LocalMockDB{.read_port_number_ = snapshot_server_.port()});
     event_server_proxy_ = std::make_unique<EventServerProxy>(
         x23::HostPort{"localhost", event_exec_port});
-    event_server_.open_block(0);
+    event_server_.open_block(0)();
   }
 
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
