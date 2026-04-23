@@ -68,7 +68,8 @@ public:
 
   BlockID get_current_block_id() const { return current_block_id_; }
 
-  std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier identifier)
+  x23::Async<std::optional<TxEventLog>>
+  get_tx_event_log(EphemeralTxIdentifier identifier)
   {
     return event_server_.get_events(identifier.block_id, identifier.tx_id);
   }
