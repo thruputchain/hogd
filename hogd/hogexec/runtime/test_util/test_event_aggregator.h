@@ -1,7 +1,6 @@
 #pragma once
 
 #include <map>
-#include <mutex>
 #include <optional>
 
 #include "event.hh"
@@ -30,15 +29,15 @@ public:
   TestEventAggregator(TestEventAggregator &&) = delete;
   TestEventAggregator &operator=(TestEventAggregator &&) = delete;
 
-  RPCError open_block(BlockID block_id);
+  x23::Async<RPCError> open_block(BlockID block_id);
   x23::Async<EventBlockResult> close_block(BlockID block_id,
                                            BlockHeight block_height);
   x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
                                   TxEventLog event_log);
 
   // Executor handle tracking (mirrors real event server behavior).
-  void executor_open_block(BlockID block_id);
-  void executor_close_block(BlockID block_id);
+  x23::Async<void> executor_open_block(BlockID block_id);
+  x23::Async<void> executor_close_block(BlockID block_id);
 
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
@@ -59,15 +58,15 @@ public:
   }
 
 private:
-  ThreadCheckedMutex<std::mutex> mtx_;
+  x23::CoroLock lock_;
   x23::CoroFutex<bool> should_block_futex_{false};
   // Track opened/closed blocks (from sched side)
   std::map<BlockID, int32_t> block_refcounts_;
   // Track executor handles per block (from exec side)
   std::map<BlockID, int32_t> executor_handle_refcounts_;
 
-  RPCError do_emit_event(BlockID block_id, TransactionID tx_id,
-                         TxEventLog event_log);
+  x23::Async<RPCError> do_emit_event(BlockID block_id, TransactionID tx_id,
+                                     TxEventLog event_log);
 
   bool is_block_open(BlockID block_id) const
   {
@@ -90,13 +89,13 @@ struct TestEventAggregatorExecRpc {
 
   x23::Async<RPCError> eventexecutor_open_block(BlockID block_id)
   {
-    event_aggregator_.executor_open_block(block_id);
+    co_await event_aggregator_.executor_open_block(block_id);
     co_return RPCError::kRPCNone;
   }
 
   x23::Async<RPCError> eventexecutor_close_block(BlockID block_id)
   {
-    event_aggregator_.executor_close_block(block_id);
+    co_await event_aggregator_.executor_close_block(block_id);
     co_return RPCError::kRPCNone;
   }
 
@@ -129,7 +128,7 @@ struct TestEventAggregatorSchedRpc {
 
   static void eventsched_null() {}
 
-  RPCError eventsched_open_block(BlockID block_id)
+  x23::Async<RPCError> eventsched_open_block(BlockID block_id)
   {
     return event_aggregator_.open_block(block_id);
   }
