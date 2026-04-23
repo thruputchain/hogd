@@ -225,7 +225,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Look up events by transaction hash
   for (const auto &tx : txs) {
     SHA256Hash tx_hash = sha256(tx.tx);
-    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
+    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash)();
     ASSERT_TRUE(events.has_value()) << "Events should be present";
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_GT(events->events.size(), 0)
@@ -318,7 +318,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Verify events haven't been emitted yet (they're blocked)
   for (const auto &tx : txs) {
     SHA256Hash tx_hash = sha256(tx.tx);
-    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
+    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash)();
     // Events should not be present yet since emission is blocked
     ASSERT_FALSE(events.has_value()) << "Events should be blocked";
   }
@@ -333,7 +333,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   bool found_events = false;
   for (const auto &tx : txs) {
     SHA256Hash tx_hash = sha256(tx.tx);
-    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash);
+    auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash)();
     if (events.has_value() && !events->events.empty()) {
       found_events = true;
       break;
