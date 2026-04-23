@@ -168,7 +168,7 @@ public:
   }
 
 private:
-  static thread_local StorageDeltaBatch current_subtransaction_batch_;
+  inline static thread_local StorageDeltaBatch current_subtransaction_batch_;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
