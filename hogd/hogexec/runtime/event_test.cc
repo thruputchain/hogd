@@ -187,7 +187,7 @@ TEST_F(EventTest, EventSuccess)
 
   advance_block();
 
-  auto tx_event_log = get_tx_event_log(tx_id);
+  auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 2);
   ASSERT_EQ(tx_event_log.value().events[0].contract_address, addr_emitter);
@@ -300,7 +300,7 @@ TEST_F(EventTest, BadEventInputs)
 
   advance_block();
 
-  auto tx_event_log = get_tx_event_log(tx_id);
+  auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().exec_result, ExecResult::ExecResultOK);
   ASSERT_TRUE(tx_event_log.value().events.empty());
@@ -382,7 +382,7 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 
   advance_block();
 
-  auto tx_event_log = get_tx_event_log(tx_id);
+  auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log->events.size(), 1);
   ASSERT_EQ(tx_event_log->events[0].num_topics, 1);
@@ -460,7 +460,7 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
 
   advance_block();
 
-  auto tx_event_log = get_tx_event_log(tx_id);
+  auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log->events.size(), kMaxEventsPerTransaction);
 }
@@ -584,7 +584,7 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
 
   advance_block();
 
-  auto tx_event_log = get_tx_event_log(tx_id);
+  auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log->events.size(), kMaxEventsPerTransaction);
 }
@@ -891,7 +891,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   advance_block();
 
   // Check that exactly 3 events were emitted
-  auto tx_event_log = get_tx_event_log(tx_id_1);
+  auto tx_event_log = get_tx_event_log(tx_id_1)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 3);
 
@@ -916,7 +916,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_EQ(event_data2.serialized_event,
             make_vec<kMaxEventLength>("third_event"));
 
-  auto tx_event_log_2 = get_tx_event_log(tx_id_2);
+  auto tx_event_log_2 = get_tx_event_log(tx_id_2)();
   ASSERT_TRUE(tx_event_log_2.has_value());
   ASSERT_EQ(tx_event_log_2.value().exec_result,
             ExecResult::ExecResultTxRootFrameReverted);
