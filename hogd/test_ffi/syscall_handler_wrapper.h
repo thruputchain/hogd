@@ -120,7 +120,7 @@ public:
 
   SystemCallHandler &to_handler() { return handler_; }
 
-  std::optional<TxEventLog> get_tx_event_log()
+  x23::Async<std::optional<TxEventLog>> get_tx_event_log()
   {
     return db_.get_tx_event_log(identifier_);
   }
