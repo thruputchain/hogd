@@ -204,8 +204,7 @@ get_cost_model(void *db) noexcept
 }
 
 GetSnapshotStorageItemResult
-get_snapshot_storage_item(void *db,
-                          FFISerializedAddressAndKey addrkey) noexcept
+get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 {
   auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
   if (!db_context || addrkey.data == nullptr) {

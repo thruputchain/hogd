@@ -122,8 +122,7 @@ enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);
 struct GetSnapshotStorageItemResult
-get_snapshot_storage_item(void *db,
-                          struct FFISerializedAddressAndKey addrkey);
+get_snapshot_storage_item(void *db, struct FFISerializedAddressAndKey addrkey);
 
 enum TestFFIErrorCode advance_new_block(void *db);
 
