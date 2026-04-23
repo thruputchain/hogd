@@ -76,6 +76,9 @@ public:
 
   auto &get_base_db() { return hogdb_wrapper_; }
 
+  std::optional<WireStorageItem>
+  get_snapshot_item(AddressAndKey const &addrkey);
+
   AuthErrorCode run_auth_checks(SignedTransaction const &tx)
   {
     x23::span<const SignedTransaction> txs(&tx, 1);

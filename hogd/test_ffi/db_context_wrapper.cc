@@ -115,4 +115,15 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   event_server_.open_block(current_block_id_)();
 }
 
+std::optional<WireStorageItem>
+DBContext::get_snapshot_item(AddressAndKey const &addrkey)
+{
+  auto res = db_proxy_->get_snapshot_item(current_block_id_, addrkey);
+  if (!res) {
+    throw std::runtime_error("get_snapshot_item failed");
+  }
+
+  return res.value();
+}
+
 } // namespace hogd

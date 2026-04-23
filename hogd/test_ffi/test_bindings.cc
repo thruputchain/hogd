@@ -203,6 +203,46 @@ get_cost_model(void *db) noexcept
   }
 }
 
+GetSnapshotStorageItemResult
+get_snapshot_storage_item(void *db,
+                          FFISerializedAddressAndKey addrkey) noexcept
+{
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!db_context || addrkey.data == nullptr) {
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+
+  try {
+    AddressAndKey deserialized_addrkey;
+    try {
+      x23::deserialize(&deserialized_addrkey,
+                       x23::BufView{addrkey.data, addrkey.len});
+    } catch (x23::XdrBadInput const &e) {
+      log_error("error deserializing address and key: {}", e);
+      return {.data = kNullBuffer,
+              .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+    }
+
+    auto item = db_context->get_snapshot_item(deserialized_addrkey);
+    if (!item.has_value()) {
+      return {.data = kNullBuffer, .ffi_error_code = kTestFFIErrorCodeNone};
+    }
+
+    auto serialized = serialize_to_ffi_data_buffer(item.value());
+    if (!serialized.has_value()) {
+      return {.data = kNullBuffer, .ffi_error_code = serialized.error()};
+    }
+
+    return {.data = serialized.value(),
+            .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error getting snapshot storage item: {}", e);
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+}
+
 TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
@@ -853,6 +893,23 @@ get_cost_model(void *db)
   hogd::do_ffi_trace("FFI (start): get_cost_model(db={})", db);
   auto result = hogd::get_cost_model(db);
   hogd::do_ffi_trace("FFI (end): get_cost_model(db={}) -> {}", db, result);
+  return result;
+}
+
+GetSnapshotStorageItemResult
+get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey)
+{
+  hogd::do_ffi_trace("FFI (start): get_snapshot_storage_item(db={}, "
+                     "addrkey.data={}, addrkey.len={})",
+                     db, static_cast<const void *>(addrkey.data), addrkey.len);
+  auto result = hogd::get_snapshot_storage_item(db, addrkey);
+  hogd::do_ffi_trace("FFI (end): get_snapshot_storage_item(db={}, "
+                     "addrkey.data={}, addrkey.len={}) -> "
+                     "ffi_error_code={}, data={}, len={}",
+                     db, static_cast<const void *>(addrkey.data), addrkey.len,
+                     static_cast<int>(result.ffi_error_code),
+                     static_cast<const void *>(result.data.data),
+                     result.data.len);
   return result;
 }
 

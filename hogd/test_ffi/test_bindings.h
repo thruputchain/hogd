@@ -10,7 +10,7 @@ extern "C" {
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
 #define TEST_FFI_VERSION_MINOR 12
-#define TEST_FFI_VERSION_PATCH 2
+#define TEST_FFI_VERSION_PATCH 3
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -105,11 +105,25 @@ struct GetCostModelResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
+struct FFISerializedAddressAndKey {
+  const uint8_t *data;
+  uint32_t len;
+};
+
+struct GetSnapshotStorageItemResult {
+  // Serialized WireStorageItem. Empty if the key does not exist.
+  struct FFIDataBuffer data;
+  enum TestFFIErrorCode ffi_error_code;
+};
+
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
                                 uint32_t serialized_cost_model_len);
 enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);
+struct GetSnapshotStorageItemResult
+get_snapshot_storage_item(void *db,
+                          struct FFISerializedAddressAndKey addrkey);
 
 enum TestFFIErrorCode advance_new_block(void *db);
 
