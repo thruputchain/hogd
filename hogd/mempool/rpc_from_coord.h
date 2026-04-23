@@ -54,7 +54,7 @@ public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 100'000;
+  static constexpr size_t kMaxBlockSize = 1'000'000;
   static constexpr size_t kNumSchedulerIterations = 25;
   static_assert(kMaxBlockSize % kNumSchedulerIterations == 0);
   static constexpr size_t kNumTxsPerNominationChunk =
