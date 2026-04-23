@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
@@ -76,7 +77,6 @@ public:
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch);
 
-  SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id);
   SystemStatus<void>
   commit_transaction(BlockID block_id, TransactionID tx_id,
                      BorrowedContractBatch const &new_contracts);
@@ -102,11 +102,13 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void reserve(size_t delta_count)
   {
     current_subtransaction_batch_.reserve(delta_count);
   }
 
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
@@ -147,8 +149,13 @@ public:
 
   SystemStatus<void> commit_transaction()
   {
-    return db_proxy_.commit_transaction(block_id_, tx_id_);
+    static const BorrowedContractBatch::hash_set_t kEmptyHashes;
+    static const BorrowedContractBatch::contract_map_t kEmptyContracts;
+    static const BorrowedContractBatch kEmptyBatch(kEmptyHashes,
+                                                   kEmptyContracts);
+    return db_proxy_.commit_transaction(block_id_, tx_id_, kEmptyBatch);
   }
+
   SystemStatus<void>
   commit_transaction(BorrowedContractBatch const &new_contracts)
   {
@@ -161,7 +168,7 @@ public:
   }
 
 private:
-  StorageDeltaBatch current_subtransaction_batch_;
+  static thread_local StorageDeltaBatch current_subtransaction_batch_;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;

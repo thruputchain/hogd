@@ -36,14 +36,6 @@ namespace {
 struct VoidMarker {};
 struct NotFoundIsUnrecoverableError {};
 
-BorrowedContractBatch
-empty_borrowed_contract_batch()
-{
-  static const BorrowedContractBatch::hash_set_t kEmptyHashes;
-  static const BorrowedContractBatch::contract_map_t kEmptyContracts;
-  return BorrowedContractBatch(kEmptyHashes, kEmptyContracts);
-}
-
 constexpr auto
 return_type(auto &&f, auto &&err)
 {
@@ -235,12 +227,6 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
 {
   auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
   return to_system_error_code<VoidMarker{}>(res, [] {});
-}
-
-SystemStatus<void>
-DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
-{
-  return commit_transaction(block_id, tx_id, empty_borrowed_contract_batch());
 }
 
 SystemStatus<void>
