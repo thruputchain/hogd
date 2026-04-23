@@ -206,13 +206,14 @@ public:
                          std::format("{}:{}", addr, sched_port()).c_str()};
   }
 
-  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id)
+  x23::Async<std::optional<TxEventLog>> get_events(BlockID block_id,
+                                                   TransactionID tx_id)
   {
     return event_server_.get_events(block_id, tx_id);
   }
 
-  std::optional<TxEventLog> get_events_by_hash(BlockID block_id,
-                                               SHA256Hash const &tx_hash)
+  x23::Async<std::optional<TxEventLog>>
+  get_events_by_hash(BlockID block_id, SHA256Hash const &tx_hash)
   {
     return event_server_.get_events_by_hash(block_id, tx_hash);
   }
@@ -561,7 +562,8 @@ public:
                                 .contract_type = contract->contract_type()};
   }
 
-  std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
+  x23::Async<std::optional<TxEventLog>>
+  get_tx_event_log(EphemeralTxIdentifier const &tx_id)
   {
     return event_server_wrapper_.get_events(tx_id.block_id, tx_id.tx_id);
   }
