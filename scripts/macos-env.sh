@@ -1,7 +1,15 @@
 # macOS Development Environment for hogd
 # Source this file: source ./scripts/macos-env.sh
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${ZSH_VERSION:-}" ]; then
+  eval 'SCRIPT_PATH="${(%):-%x}"'
+elif [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+  SCRIPT_PATH="$0"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Activate Python venv

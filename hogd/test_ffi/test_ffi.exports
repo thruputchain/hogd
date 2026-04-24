@@ -11,6 +11,7 @@ _finish_mock_invocation_frame
 _free_db
 _free_ffi_data_buffer
 _get_cost_model
+_get_snapshot_storage_item
 _mock_syscall_entrypoint
 _open_mock_invocation_frame
 _open_mocked_syscall_handler

@@ -125,6 +125,12 @@ if ! command -v cbindgen &>/dev/null; then
   cargo install cbindgen
 fi
 
+# Install bindgen CLI for test_ffi Rust bindings generation
+if ! command -v bindgen &>/dev/null; then
+  echo "Installing bindgen-cli..."
+  cargo install bindgen-cli
+fi
+
 # Install clippy for required toolchains
 for tc in "1.90.0" "stable"; do
   if ! rustup component list --installed --toolchain "$tc" | grep -q clippy; then
@@ -146,7 +152,15 @@ cat >"$ENV_SCRIPT" <<'EOF'
 # macOS Development Environment for hogd
 # Source this file: source ./scripts/macos-env.sh
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${ZSH_VERSION:-}" ]; then
+  eval 'SCRIPT_PATH="${(%):-%x}"'
+elif [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+  SCRIPT_PATH="$0"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Activate Python venv
