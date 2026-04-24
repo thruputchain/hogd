@@ -27,6 +27,7 @@ add_xdr(
   ../../protocol/loadgen.x
   ../../protocol/network.x
   ../../protocol/nomination.x
+  ../../protocol/pagination.x
   ../../protocol/parallel.x
   ../../protocol/port.x
   ../../protocol/precompiles.x
