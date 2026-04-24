@@ -2,7 +2,7 @@
 # Source this file: source ./scripts/macos-env.sh
 
 if [ -n "${ZSH_VERSION:-}" ]; then
-  SCRIPT_PATH="${(%):-%x}"
+  eval 'SCRIPT_PATH="${(%):-%x}"'
 elif [ -n "${BASH_SOURCE[0]:-}" ]; then
   SCRIPT_PATH="${BASH_SOURCE[0]}"
 else
