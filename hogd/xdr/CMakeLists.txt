@@ -1,6 +1,7 @@
 add_xdr(
   protocol
   ../../protocol/address_auth.x
+  ../../protocol/auth_token.x
   ../../protocol/auth_card.x
   ../../protocol/auth_claim.x
   ../../protocol/auth_rpc.x

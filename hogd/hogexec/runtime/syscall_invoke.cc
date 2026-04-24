@@ -141,7 +141,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      uint64_t input_entrypoint_id, GasAmount input_gas_limit,
                      std::span<const std::byte> input_calldata,
                      InvokeFlagSet input_flags,
-                     RuntimeMemoryLength &output_return_buffer_len) noexcept
+                     std::span<const std::byte> input_owned_auth_token_ids,
+                     RuntimeMemoryLength &output_return_buffer_len,
+                     RuntimeMemoryLength &output_returned_auth_token_len) noexcept
 {
   Calldata calldata;
   try {
@@ -158,11 +160,17 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                 input_calldata.size());
   }
 
+  if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, WrappedGasAmount{0}};
+  }
+
+  std::span<const uint32_t> owned_auth_token_ids(reinterpret_cast<const uint32_t *>(input_owned_auth_token_ids.data()), input_owned_auth_token_ids.size() / sizeof(uint32_t));
+
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.get()),
-                             calldata, input_flags);
+                             calldata, input_flags, owned_auth_token_ids);
 
   // invocation returned successfully
   if (invoke_res.has_value() &&
@@ -187,6 +195,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
+  // TODO(geoff): returning auth tokens unsupported yet
+  output_returned_auth_token_len = 0;
   return {invoke_res, WrappedGasAmount{gas_amount}};
 }
 

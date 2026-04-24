@@ -302,6 +302,18 @@ impl WasmtimeGlobalContext {
                 entry.module(),
                 entry.function(),
             ),
+            9 => Self::link_function_9args(
+                linker,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
+            ),
+            10 => Self::link_function_10args(
+                linker,
+                entry.fn_pointer(),
+                entry.module(),
+                entry.function(),
+            ),
             _ => panic!("Unsupported number of arguments: {}", entry.nargs()),
         }
         .unwrap();
@@ -360,6 +372,33 @@ impl WasmtimeGlobalContext {
         arg6,
         arg7,
         arg8
+    );
+    link_function_nargs!(
+        link_function_9args,
+        c_call_9args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8,
+        arg9
+    );
+    link_function_nargs!(
+        link_function_10args,
+        c_call_10args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8,
+        arg9,
+        arg10
     );
 }
 
