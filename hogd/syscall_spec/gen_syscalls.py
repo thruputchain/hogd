@@ -202,14 +202,10 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
         arg_name = f"optional_{arg_name}"
 
     if "span_argument" in inp and inp["span_argument"]:
-        if "span_type" in inp and inp["span_type"]:
-            span_type = inp["span_type"]
-        else:
-            span_type = "std::byte"
         if optional:
-            return 2, f"std::optional<std::span<{const}{span_type}>> {arg_name}"
+            return 2, f"std::optional<std::span<{const}std::byte>> {arg_name}"
         else:
-            return 2, f"std::span<{const}{span_type}> {arg_name}"
+            return 2, f"std::span<{const}std::byte> {arg_name}"
     # endif span_argument
 
     typename = inp["typename"]

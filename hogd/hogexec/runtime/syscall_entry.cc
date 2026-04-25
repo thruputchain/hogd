@@ -24,7 +24,8 @@ namespace {
 
 using SyscallFunc = HostFnStatus<SyscallErrorCode> (*)(
     SystemCallHandler &, Runtime &, SyscallNo, uint64_t, uint64_t, uint64_t,
-    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) noexcept;
+    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+    uint64_t) noexcept;
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
@@ -35,7 +36,9 @@ make_syscall_array(std::index_sequence<Is...> /*unused*/)
       &wrap_outer<SyscallMeta<static_cast<SyscallNo>(Is)>>}...};
 }
 
-static_assert(std::same_as<decltype(&wrap_outer<NoSyscallFuncMeta>), SyscallFunc>, "wrap_outer<NoSyscallFuncMeta> is not a SyscallFunc");
+static_assert(
+    std::same_as<decltype(&wrap_outer<NoSyscallFuncMeta>), SyscallFunc>,
+    "wrap_outer<NoSyscallFuncMeta> is not a SyscallFunc");
 
 constexpr auto kSyscallTable =
     make_syscall_array(std::make_index_sequence<kSyscallCount>{});
@@ -81,7 +84,8 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
 extern "C" TrampolineResult
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-              uint64_t arg6, uint64_t arg7, uint64_t arg8, uint64_t arg9, uint64_t arg10, uint64_t arg11) noexcept
+              uint64_t arg6, uint64_t arg7, uint64_t arg8, uint64_t arg9,
+              uint64_t arg10, uint64_t arg11) noexcept
 {
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");

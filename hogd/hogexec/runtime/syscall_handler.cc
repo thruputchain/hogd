@@ -235,10 +235,10 @@ SystemCallHandler::root_invoke()
           ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
           : 0;
 
-  auto [res, gas_consumed] =
-      invoke(root_invocation.invoked_address,
-             sdk_method_id(root_invocation.entrypoint), available_gas,
-             root_invocation.calldata, std::to_underlying(InvokeFlag::None), {});
+  auto [res, gas_consumed] = invoke(root_invocation.invoked_address,
+                                    sdk_method_id(root_invocation.entrypoint),
+                                    available_gas, root_invocation.calldata,
+                                    std::to_underlying(InvokeFlag::None), {});
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -444,7 +444,8 @@ SystemCallHandler::get_msg_sender() const
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
-                          Calldata calldata, InvokeFlagSet flags, std::span<uint32_t const> owned_auth_token_ids)
+                          Calldata calldata, InvokeFlagSet flags,
+                          std::span<uint32_t const> owned_auth_token_ids)
 {
   if (!validate_flags<InvokeFlag::TryInvoke, InvokeFlag::ReadOnly>(flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
@@ -476,7 +477,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  auto stashed_parent_trace = start_frame(invocation, flags, owned_auth_token_ids);
+  auto stashed_parent_trace =
+      start_frame(invocation, flags, owned_auth_token_ids);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
@@ -503,8 +505,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 std::unique_ptr<InvocationFrameTrace>
-SystemCallHandler::start_frame(Invocation invocation,
-                               InvokeFlagSet flags, std::span<uint32_t const> owned_auth_token_ids) noexcept
+SystemCallHandler::start_frame(
+    Invocation invocation, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -524,7 +527,8 @@ SystemCallHandler::start_frame(Invocation invocation,
     panic("Failed to set invocation: {}", e.what());
   }
   invocation_frame_stack_.start_frame(invocation.invoked_address,
-                                      std::move(invocation.calldata), flags, owned_auth_token_ids);
+                                      std::move(invocation.calldata), flags,
+                                      owned_auth_token_ids);
   return stashed_parent_trace;
 }
 
@@ -648,7 +652,8 @@ SystemStatus<SyscallStatus<const ReturnBuffer *>>
 SystemCallHandler::get_return_buffer() const
 {
   assert(!invocation_frame_stack_.empty());
-  auto const &top_frame_return_output = invocation_frame_stack_.get_active_frame_child_return_output();
+  auto const &top_frame_return_output =
+      invocation_frame_stack_.get_active_frame_child_return_output();
   if (!top_frame_return_output.has_value()) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
@@ -676,14 +681,12 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
   if (revert_frame) {
     InvocationFrameOutput output(InvocationFrameStatusCode::Abort);
     output.abort_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.set_active_frame_return(
-        std::move(output));
+    invocation_frame_stack_.set_active_frame_return(std::move(output));
   }
   else {
     InvocationFrameOutput output(InvocationFrameStatusCode::Return);
     output.return_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.set_active_frame_return(
-        std::move(output));
+    invocation_frame_stack_.set_active_frame_return(std::move(output));
   }
 }
 
@@ -830,8 +833,7 @@ SystemCallHandler::log_event(uint32_t num_topics,
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  auto message = make_tx_emitted_event(
-      get_current_address(), num_topics, data);
+  auto message = make_tx_emitted_event(get_current_address(), num_topics, data);
   invocation_frame_stack_.log_event(std::move(message));
   return {};
 }
@@ -922,11 +924,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   }();
 
   // deploy new contract
-  invocation_frame_stack_.deploy_contract(deploy_addr,
-                        DeployedContractHash{.hash = contract_hash,
-                                             .contract_size = contract_size,
-                                             .contract_type =
-                                                 contract.contract_type()});
+  invocation_frame_stack_.deploy_contract(
+      deploy_addr,
+      DeployedContractHash{.hash = contract_hash,
+                           .contract_size = contract_size,
+                           .contract_type = contract.contract_type()});
 
   return deploy_addr;
 }
@@ -1471,7 +1473,6 @@ SystemCallHandler::get_block_height() const
   }
   return tip.value()->height;
 }
-
 
 // == Auth token syscalls ==
 

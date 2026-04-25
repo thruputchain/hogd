@@ -7,6 +7,7 @@
 #include <exception>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -135,15 +136,14 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_Invoke_inner(SystemCallHandler &syscall_handler,
-                     WrappedGasAmount remaining_gas,
-                     const ContractAddress &input_address,
-                     uint64_t input_entrypoint_id, GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata,
-                     InvokeFlagSet input_flags,
-                     std::span<const std::byte> input_owned_auth_token_ids,
-                     RuntimeMemoryLength &output_return_buffer_len,
-                     RuntimeMemoryLength &output_returned_auth_token_len) noexcept
+syscall_Invoke_inner(
+    SystemCallHandler &syscall_handler, WrappedGasAmount remaining_gas,
+    const ContractAddress &input_address, uint64_t input_entrypoint_id,
+    GasAmount input_gas_limit, std::span<const std::byte> input_calldata,
+    InvokeFlagSet input_flags,
+    std::span<const std::byte> input_owned_auth_token_ids,
+    RuntimeMemoryLength &output_return_buffer_len,
+    RuntimeMemoryLength &output_returned_auth_token_len) noexcept
 {
   Calldata calldata;
   try {
@@ -161,16 +161,23 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
 
   if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, WrappedGasAmount{0}};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
-
-  std::span<const uint32_t> owned_auth_token_ids(reinterpret_cast<const uint32_t *>(input_owned_auth_token_ids.data()), input_owned_auth_token_ids.size() / sizeof(uint32_t));
+  // owned_auth_token_ids may or may not be aligned.
+  // Hence we perform a memcpy before passing to the invoke function.
+  std::vector<uint32_t> owned_auth_token_ids_vec;
+  owned_auth_token_ids_vec.reserve(input_owned_auth_token_ids.size() /
+                                   sizeof(uint32_t));
+  std::memcpy(owned_auth_token_ids_vec.data(),
+              input_owned_auth_token_ids.data(),
+              input_owned_auth_token_ids.size());
 
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.get()),
-                             calldata, input_flags, owned_auth_token_ids);
+                             calldata, input_flags, owned_auth_token_ids_vec);
 
   // invocation returned successfully
   if (invoke_res.has_value() &&

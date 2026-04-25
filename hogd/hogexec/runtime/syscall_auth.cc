@@ -246,20 +246,22 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
-                            BlockHeight input_expiry_height,
-                            std::span<const std::byte> input_serialized_auth_token, uint32_t &output_token_id) noexcept
+syscall_MintAuthToken_inner(
+    SystemCallHandler &syscall_handler, BlockHeight input_expiry_height,
+    std::span<const std::byte> input_serialized_auth_token,
+    uint32_t &output_token_id) noexcept
 {
-  AuthToken auth_token {
-    .mint_address = syscall_handler.get_current_address(),
-    .expiry_height = input_expiry_height
-  };
+  AuthToken auth_token{.mint_address = syscall_handler.get_current_address(),
+                       .expiry_height = input_expiry_height};
   try {
-    x23::deserialize(&auth_token.root_node, x23::BufView{input_serialized_auth_token});
+    x23::deserialize(&auth_token.root_node,
+                     x23::BufView{input_serialized_auth_token});
   } catch (x23::XdrException &e) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, WrappedGasAmount{0}};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   } catch (...) {
-    error("unrecoverable: failed to deserialize auth token with unknown exception");
+    error("unrecoverable: failed to deserialize auth token with unknown "
+          "exception");
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 

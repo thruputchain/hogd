@@ -129,10 +129,12 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
         }
 
         auto invoke_status = [&]() {
-          RuntimeMemoryLength output_return_buffer_len = 0;
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
           return ctx.syscall<SyscallNo::kInvoke>(
               kChildAddress, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
         }();
         if (!invoke_status.has_value() ||
             invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

@@ -175,10 +175,12 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              }
 
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressChild, 0, ctx.runtime().get_available_gas(),
-                   Calldata{}, 0, output_return_buffer_len);
+                   Calldata{}, 0, std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -527,10 +529,12 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              }
 
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressB, 0, ctx.runtime().get_available_gas(), Calldata{},
-                   0, output_return_buffer_len);
+                   0, std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -565,10 +569,12 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              }
 
              auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressC, 0, ctx.runtime().get_available_gas(), Calldata{},
-                   0, output_return_buffer_len);
+                   0, std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -884,11 +890,13 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
              }
 
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressChild, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                ADD_FAILURE() << "try_invoke on child failed unexpectedly";
@@ -934,11 +942,13 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
              }
 
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressGrandchild, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                ADD_FAILURE() << "try_invoke on grandchild failed unexpectedly";

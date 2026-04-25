@@ -127,12 +127,14 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -140,11 +142,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                }
 
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 1, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r1.has_value()) {
@@ -152,11 +156,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                }
 
                auto r2 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r2.has_value()) {
@@ -288,12 +294,14 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -301,11 +309,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                }
 
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 1, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r1.has_value()) {
@@ -313,11 +323,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                }
 
                auto r2 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r2.has_value()) {
@@ -450,12 +462,14 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -463,11 +477,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                }
 
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 1, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r1.has_value()) {
@@ -475,11 +491,13 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                }
 
                auto r2 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressStorage, 0, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r2.has_value()) {

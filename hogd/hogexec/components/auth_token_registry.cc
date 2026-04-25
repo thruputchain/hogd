@@ -50,7 +50,7 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
   if (overflow) {
     return std::nullopt;
   }
-  
+
   next_token_id_ += new_token_id_count;
 
   for (uint32_t i = 0; i < new_token_id_count; i++) {

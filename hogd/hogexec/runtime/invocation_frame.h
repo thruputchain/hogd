@@ -38,7 +38,8 @@ struct InvokeResult;
 class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
-                  InvokeFlagSet flags, size_t event_count, std::span<uint32_t const> owned_auth_token_ids);
+                  InvokeFlagSet flags, size_t event_count,
+                  std::span<uint32_t const> owned_auth_token_ids);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -164,6 +165,7 @@ public:
 
   bool check_owns_auth_token(uint32_t token_id) const
   {
+    info("check_owns_auth_token: {} {}", token_id, owned_auth_token_ids_);
     return owned_auth_token_ids_.contains(token_id);
   }
 
@@ -172,7 +174,23 @@ public:
     owned_auth_token_ids_.insert(token_id);
   }
 
+  void remove_auth_tokens(std::span<uint32_t const> token_ids)
+  {
+    for (auto token_id : token_ids) {
+      owned_auth_token_ids_.erase(token_id);
+    }
+  }
+
   HashBuffers hash_buffers_;
+
+  void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
+  {
+    assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
+    most_recent_child_frame_forwarded_auth_tokens_.reserve(token_ids.size());
+    for (auto token_id : token_ids) {
+      most_recent_child_frame_forwarded_auth_tokens_.push_back(token_id);
+    }
+  }
 
 private:
   const ContractAddress address_;
@@ -198,6 +216,7 @@ private:
       new_contract_deployments_;
 
   std::unordered_set<uint32_t> owned_auth_token_ids_;
+  std::vector<uint32_t> most_recent_child_frame_forwarded_auth_tokens_;  // refunded if the frame reverts
 };
 
 // Stack of invocation frames.
@@ -228,10 +247,11 @@ public:
     return frame_stack_.back().event_count();
   }
 
-  // It MUST be the case that the owned_auth_token_ids are owned by the parent frame.
-  // Caller is responsible for checking as much.
+  // It MUST be the case that the owned_auth_token_ids are owned by the parent
+  // frame. Caller is responsible for checking as much.
   void start_frame(ContractAddress const &address, Calldata &&calldata,
-                   InvokeFlagSet flags, std::span<uint32_t const> owned_auth_token_ids);
+                   InvokeFlagSet flags,
+                   std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   SystemStatus<std::pair<InvokeResult, bool>>
@@ -267,7 +287,8 @@ public:
     return frame_stack_.back().hash_buffers_;
   }
 
-  std::optional<InvocationFrameOutput> const& get_active_frame_child_return_output() const
+  std::optional<InvocationFrameOutput> const &
+  get_active_frame_child_return_output() const
   {
     assert(!frame_stack_.empty());
     return frame_stack_.back().child_return_output_;
@@ -315,7 +336,7 @@ public:
     return AddressAndKey{.address = frame_stack_.back().address(), .key = key};
   }
 
-  AuthToken const* lookup_auth_token(uint32_t token_id) const;
+  AuthToken const *lookup_auth_token(uint32_t token_id) const;
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
 
