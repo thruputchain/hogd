@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -398,10 +400,13 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
 
              ReturnBuffer buffer;
              RuntimeMemoryLength written_len = 0;
+             std::array<std::byte, 128> restored_auth_token_ids{};
+             RuntimeMemoryLength restored_auth_token_ids_written_len = 0;
 
              auto [res, _gas] = syscall_GetReturnedBuffer_inner(
                  ctx.handler(), std::as_writable_bytes(std::span(buffer)),
-                 written_len);
+                 written_len, std::span(restored_auth_token_ids),
+                 restored_auth_token_ids_written_len);
              if (!res.has_value()) {
                ADD_FAILURE()
                    << "GetReturnBufferOnFault: Failed to get return buffer";

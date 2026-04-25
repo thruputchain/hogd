@@ -21,6 +21,7 @@
 #include <expected>
 #include <limits>
 #include <memory>
+#include <span>
 #include <utility>
 
 namespace hogd {
@@ -160,7 +161,10 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     }
   }
 
-  auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags);
+  // TODO(geoff): current API does not support passing auth tokens via the mock
+  // frames.
+  auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags,
+                                                   std::span<uint32_t const>{});
   if (stashed_parent_trace) {
     invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
   }

@@ -245,7 +245,10 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetReturnedBuffer_inner(
     SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
-    RuntimeMemoryLength &output_written_len) noexcept
+    RuntimeMemoryLength &output_written_len,
+    [[maybe_unused]] std::span<std::byte> output_restored_auth_token_ids,
+    [[maybe_unused]] RuntimeMemoryLength
+        &output_restored_auth_token_ids_written_len) noexcept
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {

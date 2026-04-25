@@ -47,13 +47,11 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
   assert(frame.should_revert());
   child_return_output_ = std::move(frame.to_return_output_);
 
-
   // reclaim the auth tokens from a reverted frame
-  for (auto token_id : frame.most_recent_child_frame_forwarded_auth_tokens_) {
+  for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
     owned_auth_token_ids_.insert(token_id);
   }
-  frame.most_recent_child_frame_forwarded_auth_tokens_.clear();
-
+  most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
 void
