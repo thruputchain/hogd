@@ -39,15 +39,6 @@ public:
   {}
 };
 
-namespace {
-ContractAddress
-make_test_address(uint32_t index)
-{
-  auto hash = sha256(index);
-  ContractAddress address;
-  std::ranges::copy(hash, address.begin());
-  return address;
-}
 } // namespace
 
 TEST_P(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
