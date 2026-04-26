@@ -109,6 +109,38 @@ TEST(AuthTokenRegistryTest, UnwrapTest)
       registry.lookup_auth_token(result.new_token_id_start + 3);
   ASSERT_EQ(result_4, nullptr);
 }
+
+TEST(AuthTokenRegistryTest, UnwrapTwiceReturnsSameResult)
+{
+  AuthTokenRegistry registry;
+  AuthToken auth_token =
+      AuthToken{.mint_address = make_test_address(1),
+                .expiry_height = 100,
+                .root_node = AuthTokenNode{
+                    .consumer_address = make_test_address(2),
+                    .payload = make_test_payload(0ULL),
+                    .child_nodes = {
+                        AuthTokenNode{.consumer_address = make_test_address(3),
+                                      .payload = make_test_payload(1ULL),
+                                      .child_nodes = {}},
+                        AuthTokenNode{.consumer_address = make_test_address(4),
+                                      .payload = make_test_payload(2ULL),
+                                      .child_nodes = {}}}}};
+  auto token_id_opt = registry.register_auth_token(auth_token);
+  ASSERT_TRUE(token_id_opt.has_value());
+
+  auto first_unwrap = registry.unwrap_auth_token(token_id_opt.value());
+  ASSERT_TRUE(first_unwrap.has_value());
+
+  auto second_unwrap = registry.unwrap_auth_token(token_id_opt.value());
+  ASSERT_TRUE(second_unwrap.has_value());
+
+  ASSERT_EQ(first_unwrap->new_token_id_start,
+            second_unwrap->new_token_id_start);
+  ASSERT_EQ(first_unwrap->new_token_id_count,
+            second_unwrap->new_token_id_count);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

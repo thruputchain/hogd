@@ -29,7 +29,7 @@ AuthToken const *
 AuthTokenRegistry::lookup_auth_token(uint32_t token_id) const
 {
   auto it = auth_tokens_.find(token_id);
-  return it != auth_tokens_.end() ? &it->second : nullptr;
+  return it != auth_tokens_.end() ? &it->second.auth_token : nullptr;
 }
 
 std::optional<AuthTokenUnwrapResult>
@@ -37,7 +37,10 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
 {
   auto it = auth_tokens_.find(token_id);
   CHECK(it != auth_tokens_.end());
-  auto auth_token = it->second;
+  if (it->second.unwrap_result.has_value()) {
+    return it->second.unwrap_result;
+  }
+  auto const &auth_token = it->second.auth_token;
   auto child_nodes = auth_token.root_node.child_nodes;
   if (child_nodes.empty()) {
     return AuthTokenUnwrapResult{.new_token_id_start = 0,
@@ -64,7 +67,9 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
         auth_tokens_.emplace(child_token_id, std::move(child_auth_token));
     assert(success);
   }
-  return AuthTokenUnwrapResult{.new_token_id_start = new_token_id_start,
-                               .new_token_id_count = new_token_id_count};
+  it->second.unwrap_result =
+      AuthTokenUnwrapResult{.new_token_id_start = new_token_id_start,
+                            .new_token_id_count = new_token_id_count};
+  return it->second.unwrap_result;
 }
 } // namespace hogd

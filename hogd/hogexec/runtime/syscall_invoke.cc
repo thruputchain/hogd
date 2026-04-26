@@ -170,10 +170,10 @@ syscall_Invoke_inner(
   std::vector<uint32_t> owned_auth_token_ids_vec;
 
   try {
-    owned_auth_token_ids_vec.reserve(input_owned_auth_token_ids.size() /
-                                     sizeof(uint32_t));
+    owned_auth_token_ids_vec.resize(input_owned_auth_token_ids.size() /
+                                    sizeof(uint32_t));
   } catch (std::exception &e) {
-    error("unrecoverable: failed to reserve owned auth token ids vector: {}",
+    error("unrecoverable: failed to resize owned auth token ids vector: {}",
           e.what());
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
