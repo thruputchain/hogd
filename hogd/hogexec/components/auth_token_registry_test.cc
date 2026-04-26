@@ -28,6 +28,8 @@ make_test_payload(uint32_t index)
 }
 } // namespace
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 TEST(AuthTokenRegistryTest, BasicTest)
 {
   AuthTokenRegistry registry;
@@ -107,5 +109,6 @@ TEST(AuthTokenRegistryTest, UnwrapTest)
       registry.lookup_auth_token(result.new_token_id_start + 3);
   ASSERT_EQ(result_4, nullptr);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

@@ -269,7 +269,7 @@ syscall_MintAuthToken_inner(
   if (!status) {
     return {status.error().code(), WrappedGasAmount{0}};
   }
-  output_token_id = status.value();
+  output_token_id = *status;
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }

@@ -13,6 +13,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"

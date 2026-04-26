@@ -164,11 +164,20 @@ syscall_Invoke_inner(
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
+
   // owned_auth_token_ids may or may not be aligned.
   // Hence we perform a memcpy before passing to the invoke function.
   std::vector<uint32_t> owned_auth_token_ids_vec;
-  owned_auth_token_ids_vec.reserve(input_owned_auth_token_ids.size() /
-                                   sizeof(uint32_t));
+
+  try {
+    owned_auth_token_ids_vec.reserve(input_owned_auth_token_ids.size() /
+                                     sizeof(uint32_t));
+  } catch (std::exception &e) {
+    error("unrecoverable: failed to reserve owned auth token ids vector: {}",
+          e.what());
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
+
   std::memcpy(owned_auth_token_ids_vec.data(),
               input_owned_auth_token_ids.data(),
               input_owned_auth_token_ids.size());
