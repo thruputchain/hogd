@@ -165,7 +165,6 @@ public:
 
   bool check_owns_auth_token(uint32_t token_id) const
   {
-    info("check_owns_auth_token: {} {}", token_id, owned_auth_token_ids_);
     return owned_auth_token_ids_.contains(token_id);
   }
 
