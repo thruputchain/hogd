@@ -216,7 +216,9 @@ private:
       new_contract_deployments_;
 
   std::unordered_set<uint32_t> owned_auth_token_ids_;
-  std::vector<uint32_t> most_recent_child_frame_forwarded_auth_tokens_;  // refunded if the frame reverts
+  std::vector<uint32_t>
+      most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
+                                                      // reverts
 };
 
 // Stack of invocation frames.

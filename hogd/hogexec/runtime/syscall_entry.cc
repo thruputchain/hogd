@@ -24,7 +24,7 @@ namespace {
 
 using SyscallFunc = HostFnStatus<SyscallErrorCode> (*)(
     SystemCallHandler &, Runtime &, SyscallNo, uint64_t, uint64_t, uint64_t,
-    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
     uint64_t) noexcept;
 
 template<size_t... Is>
@@ -85,13 +85,13 @@ extern "C" TrampolineResult
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
               uint64_t arg6, uint64_t arg7, uint64_t arg8, uint64_t arg9,
-              uint64_t arg10, uint64_t arg11) noexcept
+              uint64_t arg10) noexcept
 {
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");
 
   auto err = syscall_entry_inner(call_context, arg0, arg1, arg2, arg3, arg4,
-                                 arg5, arg6, arg7, arg8, arg9, arg10, arg11);
+                                 arg5, arg6, arg7, arg8, arg9, arg10);
   return to_trampoline_result(err);
 }
 

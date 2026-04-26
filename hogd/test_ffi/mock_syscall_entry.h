@@ -14,6 +14,7 @@ namespace hogd {
 
 using MockSyscallFunc = ForeignHostFnResult (*)(SyscallNo, uint64_t, uint64_t,
                                                 uint64_t, uint64_t, uint64_t,
+                                                uint64_t, uint64_t, uint64_t,
                                                 uint64_t, uint64_t);
 
 template<size_t... Is>
@@ -29,14 +30,15 @@ constexpr auto kMockSyscallTable =
 inline ForeignHostFnResult
 mock_syscall_entrypoint(uint64_t syscall, uint64_t arg1, uint64_t arg2,
                         uint64_t arg3, uint64_t arg4, uint64_t arg5,
-                        uint64_t arg6, uint64_t arg7) noexcept
+                        uint64_t arg6, uint64_t arg7, uint64_t arg8,
+                        uint64_t arg9, uint64_t arg10) noexcept
 {
   MockSyscallFunc mock_syscall_func = &mock_syscall_parser<NoSyscallFuncMeta>;
   if (syscall < kMockSyscallTable.size()) {
     mock_syscall_func = kMockSyscallTable[syscall];
   }
   return mock_syscall_func(static_cast<SyscallNo>(syscall), arg1, arg2, arg3,
-                           arg4, arg5, arg6, arg7);
+                           arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 }
 
 } // namespace hogd
