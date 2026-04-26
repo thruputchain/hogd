@@ -39,7 +39,6 @@ public:
   {}
 };
 
-
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 TEST_P(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
