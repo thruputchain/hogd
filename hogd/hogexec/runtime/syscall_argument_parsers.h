@@ -117,7 +117,7 @@ check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
 {
   if (user_offset == 0) {
     // nullptr
-    return std::nullopt;
+    return WritableOutput<T>();
   }
   guard.check_and_register(user_offset, sizeof(T));
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -147,7 +147,8 @@ check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
 {
   if (user_offset == 0) {
     // nullptr
-    return std::nullopt;
+    std::optional<T> result = std::nullopt;
+    return result;
   }
   guard.check_and_register(user_offset, sizeof(T));
   // NOLINTBEGIN(performance-no-int-to-ptr)
