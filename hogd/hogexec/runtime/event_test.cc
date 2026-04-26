@@ -110,11 +110,13 @@ TEST_F(EventTest, EventSuccess)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [addr_emitter](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto status = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_emitter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              [[maybe_unused]] auto gas = GasAmount{0};
              if (!status.has_value()) {
@@ -126,11 +128,13 @@ TEST_F(EventTest, EventSuccess)
              }
 
              auto status2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_emitter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              [[maybe_unused]] auto gas2 = GasAmount{0};
              if (!status2.has_value()) {
@@ -529,11 +533,12 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
              }
 
              auto invoke_status = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_child, 0, ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!invoke_status.has_value()) {
                return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -640,11 +645,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
                Calldata calldata(test_data.begin(), test_data.end());
 
                auto status = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      addr_emitter, 0, ctx.runtime().get_available_gas(),
                      calldata, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                [[maybe_unused]] auto gas = GasAmount{0};
                if (!status.has_value()) {
@@ -671,11 +678,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
                Calldata calldata(test_data.begin(), test_data.end());
 
                auto status = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      addr_emitter, 0, ctx.runtime().get_available_gas(),
                      calldata, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                [[maybe_unused]] auto gas = GasAmount{0};
                if (!status.has_value()) {
@@ -703,11 +712,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  Calldata calldata(test_data.begin(), test_data.end());
 
                  auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   RuntimeMemoryLength output_return_buffer_len = 0,
+                                       output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
                        addr_emitter, 0, ctx.runtime().get_available_gas(),
                        calldata, std::to_underlying(InvokeFlag::None),
-                       output_return_buffer_len);
+                       std::span<uint32_t>{}, output_return_buffer_len,
+                       output_returned_auth_token_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
@@ -726,11 +737,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
                {
                  auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   RuntimeMemoryLength output_return_buffer_len = 0,
+                                       output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
                        addr_manual_revert, 0, ctx.runtime().get_available_gas(),
                        Calldata{}, std::to_underlying(InvokeFlag::None),
-                       output_return_buffer_len);
+                       std::span<uint32_t>{}, output_return_buffer_len,
+                       output_returned_auth_token_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
@@ -752,11 +765,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  Calldata calldata(test_data.begin(), test_data.end());
 
                  auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   RuntimeMemoryLength output_return_buffer_len = 0,
+                                       output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
                        addr_emitter, 0, ctx.runtime().get_available_gas(),
                        calldata, std::to_underlying(InvokeFlag::None),
-                       output_return_buffer_len);
+                       std::span<uint32_t>{}, output_return_buffer_len,
+                       output_returned_auth_token_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
@@ -775,11 +790,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
                {
                  auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   RuntimeMemoryLength output_return_buffer_len = 0,
+                                       output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
                        addr_deterministic, 0, ctx.runtime().get_available_gas(),
                        Calldata{}, std::to_underlying(InvokeFlag::None),
-                       output_return_buffer_len);
+                       std::span<uint32_t>{}, output_return_buffer_len,
+                       output_returned_auth_token_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {
@@ -801,11 +818,13 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  Calldata calldata(test_data.begin(), test_data.end());
 
                  auto status = [&]() {
-                   RuntimeMemoryLength output_return_buffer_len = 0;
+                   RuntimeMemoryLength output_return_buffer_len = 0,
+                                       output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
                        addr_emitter, 0, ctx.runtime().get_available_gas(),
                        calldata, std::to_underlying(InvokeFlag::None),
-                       output_return_buffer_len);
+                       std::span<uint32_t>{}, output_return_buffer_len,
+                       output_returned_auth_token_len);
                  }();
                  [[maybe_unused]] auto gas = GasAmount{0};
                  if (!status.has_value()) {

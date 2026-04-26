@@ -13,6 +13,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -125,7 +126,8 @@ public:
   // Returns the parent trace, if any, which should be stashed and restored in
   // finish_frame
   std::unique_ptr<InvocationFrameTrace>
-  start_frame(Invocation invocation, InvokeFlagSet flags) noexcept;
+  start_frame(Invocation invocation, InvokeFlagSet flags,
+              std::span<uint32_t const> owned_auth_token_ids) noexcept;
   SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
@@ -147,7 +149,7 @@ public:
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
   {
     CHECK(!invocation_frame_stack_.empty());
-    return invocation_frame_stack_.get_active_frame().get_events();
+    return invocation_frame_stack_.copy_active_frame_events();
   }
 
   // Copy events from the last (root) frame after it has finished.
@@ -216,11 +218,12 @@ public:
   // Should be called from within a syscall.
   [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, Runtime::MethodID method,
-         GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags);
+         GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
+         std::span<uint32_t const> owned_auth_token_ids);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
-  ContractAddress get_current_address() const;
+  const ContractAddress &get_current_address() const;
 
   SyscallStatus<ContractAddress> get_msg_sender() const;
   SHA256Hash get_source_tx_hash() const;
@@ -256,8 +259,7 @@ public:
 
   bool is_read_only() const
   {
-    assert(!invocation_frame_stack_.empty());
-    return invocation_frame_stack_.get_active_frame().is_read_only();
+    return invocation_frame_stack_.is_active_frame_read_only();
   }
 
   // === Crypto syscalls ===
@@ -317,6 +319,9 @@ public:
 
   SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
       x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
+
+  // Auth token syscalls
+  SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
 
   // == Block statistics syscalls ==
   // These are based on reading the db tip.

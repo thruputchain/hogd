@@ -118,12 +118,14 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                auto calldata = ctx.handler().get_calldata();
 
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      addr_storage, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -131,11 +133,13 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                }
 
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      addr_storage, 1, ctx.runtime().get_available_gas(),
                      Calldata{}, std::to_underlying(InvokeFlag::None),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r1.has_value()) {
@@ -254,12 +258,14 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
             {0,
              [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -369,23 +375,27 @@ make_try_invoke_handle_errors_context()
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kTryInvokeHandleErrorsWriter, 0,
                    ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kTryInvokeHandleErrorsWriter, 1,
                    ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -395,12 +405,14 @@ make_try_invoke_handle_errors_context()
           {1,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kTryInvokeHandleErrorsWriter, 0,
                    ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -414,12 +426,14 @@ make_try_invoke_handle_errors_context()
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kTryInvokeHandleErrorsWriter, 0,
                    ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -433,23 +447,26 @@ make_try_invoke_handle_errors_context()
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kTryInvokeHandleErrorsFault, 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kTryInvokeHandleErrorsWriter, 1,
                    ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -676,11 +693,13 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                // Invoke callee method 0 in try_invoke frame with arguments [-5]
                Calldata args = {static_cast<uint8_t>(-5)};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressCallee, 0, ctx.runtime().get_available_gas(), args,
                      std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -803,11 +822,13 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                // Try invoke writer method 0 with "hello"
                Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      args_hello, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                if (!r0.has_value() ||
                    r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -817,11 +838,13 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                // Try invoke writer method 0 with "world"
                Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      args_world, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                if (!r1.has_value() ||
                    r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -836,11 +859,13 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                // exclusive lock)
                Calldata args_foo = {'f', 'o', 'o'};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      args_foo, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                if (!r0.has_value()) {
                  ADD_FAILURE() << "should not have system error";
@@ -962,11 +987,13 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                // Try invoke writer method 0 with "hello"
                Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      args_hello, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                if (!r0.has_value() ||
                    r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -976,11 +1003,13 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                // Try invoke writer method 0 with "world"
                Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      args_world, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                if (!r1.has_value() ||
                    r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -995,11 +1024,13 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                // exclusive lock)
                Calldata args_foo = {'f', 'o', 'o'};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(),
                      args_foo, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
                if (!r0.has_value()) {
                  ADD_FAILURE() << "should not have system error";
@@ -1157,11 +1188,13 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Invoke writer method 0 in try_invoke frame with arguments [-5]
                Calldata args = {static_cast<uint8_t>(-5)};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(), args,
                      std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -1182,11 +1215,13 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                // Invoke writer method 0 with arguments [1]
                Calldata args = {1};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      kAddressWriter, 0, ctx.runtime().get_available_gas(), args,
                      std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -1313,12 +1348,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      writer_addr, 0, ctx.runtime().get_available_gas(),
                      args_first_invoke,
                      std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -1332,12 +1369,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                Calldata args_second_invoke = {5, 10};
                auto r1 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      writer_addr, 0, ctx.runtime().get_available_gas(),
                      args_second_invoke,
                      std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r1.has_value()) {
@@ -1361,11 +1400,13 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
                Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
                auto r0 = [&]() {
-                 RuntimeMemoryLength output_return_buffer_len = 0;
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
                      writer_addr, 0, ctx.runtime().get_available_gas(),
                      args_invoke, std::to_underlying(InvokeFlag::TryInvoke),
-                     output_return_buffer_len);
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
                }();
 
                if (!r0.has_value()) {
@@ -1648,11 +1689,13 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // First, try_invoke writer method 1 (should fail)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -1663,11 +1706,13 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
              }
              // Then, try_invoke writer method 0 (should succeed)
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1810,11 +1855,13 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke writer method 0
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1822,11 +1869,13 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              }
              // Try invoke writer method 1
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1834,11 +1883,13 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              }
              // Try invoke writer method 2 (should fail)
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 2, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -2001,11 +2052,13 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke writer method 0 (short)
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2013,11 +2066,13 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              }
              // Try invoke writer method 1 (medium)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2025,11 +2080,13 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              }
              // Try invoke writer method 2 (long) -- should fail
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 2, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -2159,11 +2216,13 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke writer method 0 (long)
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2171,11 +2230,13 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
              }
              // Try invoke writer method 1 (short)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2310,11 +2371,13 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke writer method 1 (short write)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2331,11 +2394,13 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke writer method 0 (long write)
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r0.has_value() ||
                  r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2344,12 +2409,13 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 
              // Regular invoke on intermediate contract (old method 2)
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressTryInvokeThenError, 0,
                    ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -2486,11 +2552,13 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              // Invoke receiver contract to use the tokens
              auto r_receive = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    receiver_addr, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              [[maybe_unused]] auto g_receive = GasAmount{0};
 
@@ -2693,11 +2761,13 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                       .value();
 
           auto r0 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kNNIntInterleavingWriter, 1, ctx.runtime().get_available_gas(),
                 calldata0, std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r0.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -2710,11 +2780,13 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                       .value();
 
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kNNIntInterleavingWriter, 0, ctx.runtime().get_available_gas(),
                 calldata1, std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -2916,7 +2988,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   auto caller_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [=](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_return_buffer_len = 0,
+                                 output_returned_auth_token_len = 0;
              Calldata calldata = {};
              // 1. try_invoke on a missing contract
              {
@@ -2924,7 +2997,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                    missing_contract_addr, 0, 1000,
                    std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
 
                if (!res.has_value() ||
                    res.value() !=
@@ -2939,7 +3013,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                    error_contract_addr, 999, 1000,
                    std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
                if (!res.has_value() ||
                    res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -2954,7 +3029,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                    error_contract_addr, 0, 50,
                    std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
                auto gas_used = gas_before - ctx.runtime().get_available_gas();
                // This should return as a deterministic error (handleable), with
                // 50 gas consumed
@@ -2974,7 +3050,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                    error_contract_addr, 0, 1000,
                    std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
                if (!res.has_value() ||
                    res.value() !=
                        SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
@@ -2988,7 +3065,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                    error_contract_addr, 1, 1000,
                    std::as_bytes(std::span(calldata)),
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
                if (!res.has_value() ||
                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::Deterministic};
@@ -3092,11 +3170,13 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke writer method 0
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -3117,11 +3197,13 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Try invoke middle method 0
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressMiddle, 0, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -3135,11 +3217,13 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
              // Writer storage should not retain the write; verify via writer
              // method 1 (same contract that would have held the key).
              auto r_w = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    kAddressWriter, 1, ctx.runtime().get_available_gas(),
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r_w.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};

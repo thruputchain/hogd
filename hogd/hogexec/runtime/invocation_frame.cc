@@ -1,24 +1,31 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 
+#include <algorithm>
 #include <cassert>
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "auth_token.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/auth_token_registry.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -26,9 +33,12 @@ namespace hogd {
 
 InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags,
-                                 size_t event_count)
+                                 size_t event_count,
+                                 std::span<uint32_t const> owned_auth_token_ids)
   : address_(address), calldata_(std::forward<Calldata>(calldata)),
-    flags_(flags), event_count_(event_count)
+    flags_(flags), event_count_(event_count),
+    owned_auth_token_ids_(owned_auth_token_ids.begin(),
+                          owned_auth_token_ids.end())
 {}
 
 void
@@ -36,6 +46,12 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
 {
   assert(frame.should_revert());
   child_return_output_ = std::move(frame.to_return_output_);
+
+  // reclaim the auth tokens from a reverted frame
+  for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
+    owned_auth_token_ids_.insert(token_id);
+  }
+  most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
 void
@@ -65,6 +81,8 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   }
 
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
+
+  most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
 SystemStatus<void>
@@ -85,6 +103,11 @@ InvocationFrame::commit_failed_child_frame()
 {
   child_return_output_ =
       InvocationFrameOutput{InvocationFrameStatusCode::Fault};
+  // reclaim the auth tokens from a failed frame
+  for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
+    owned_auth_token_ids_.insert(token_id);
+  }
+  most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
 void
@@ -171,13 +194,20 @@ InvocationFrame::collect_storage_deltas(
 }
 
 void
-InvocationFrameStack::start_frame(ContractAddress const &address,
-                                  Calldata &&calldata, InvokeFlagSet flags)
+InvocationFrameStack::start_frame(
+    ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids)
 {
+  assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
+
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
+  if (!frame_stack_.empty()) {
+    frame_stack_.back().remove_auth_tokens(owned_auth_token_ids);
+    frame_stack_.back().set_child_restore_auth_tokens(owned_auth_token_ids);
+  }
   frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                            event_count);
+                            event_count, owned_auth_token_ids);
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>
@@ -289,6 +319,14 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   return {{frame_result, manually_reverted}};
 }
 
+void
+InvocationFrameStack::log_trace_finish(InvocationFrameTrace &trace)
+{
+  assert(!frame_stack_.empty());
+  frame_stack_.back().collect_storage_deltas(trace.storage_writes);
+  trace.status = frame_stack_.back().get_frame_output();
+}
+
 std::optional<ContractAddress>
 InvocationFrameStack::get_msg_sender() const
 {
@@ -351,6 +389,40 @@ ItemView *
 InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
   return get_item_view(get_addrkey(data_key));
+}
+
+AuthToken const *
+InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
+{
+  assert(!frame_stack_.empty());
+  if (frame_stack_.back().check_owns_auth_token(token_id)) {
+    auto const *out = auth_token_registry_.lookup_auth_token(token_id);
+    CHECK_CONST_PTR(out);
+    return out;
+  }
+  return nullptr;
+}
+
+SyscallStatus<uint32_t>
+InvocationFrameStack::mint_auth_token(AuthToken const &auth_token)
+{
+  assert(!frame_stack_.empty());
+  auto token_id = auth_token_registry_.register_auth_token(auth_token);
+  if (!token_id.has_value()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  frame_stack_.back().mint_auth_token(token_id.value());
+  return token_id.value();
+}
+
+bool
+InvocationFrameStack::check_auth_tokens_owned(
+    std::span<uint32_t const> token_ids) const
+{
+  assert(!frame_stack_.empty());
+  return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
+    return frame_stack_.back().check_owns_auth_token(token_id);
+  });
 }
 
 } // namespace hogd

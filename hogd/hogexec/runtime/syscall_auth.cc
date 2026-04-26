@@ -1,5 +1,6 @@
 
 
+#include "auth_token.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -23,6 +24,7 @@
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -240,6 +242,35 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
             e.what());
     }
   }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_MintAuthToken_inner(
+    SystemCallHandler &syscall_handler, BlockHeight input_expiry_height,
+    std::span<const std::byte> input_serialized_auth_token,
+    uint32_t &output_token_id) noexcept
+{
+  AuthToken auth_token{.mint_address = syscall_handler.get_current_address(),
+                       .expiry_height = input_expiry_height};
+  try {
+    x23::deserialize(&auth_token.root_node,
+                     x23::BufView{input_serialized_auth_token});
+  } catch (x23::XdrException &e) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  } catch (...) {
+    error("unrecoverable: failed to deserialize auth token with unknown "
+          "exception");
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
+
+  auto status = syscall_handler.mint_auth_token(auth_token);
+  if (!status) {
+    return {status.error().code(), WrappedGasAmount{0}};
+  }
+  output_token_id = *status;
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 

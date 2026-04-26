@@ -79,22 +79,25 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
            [contract_a_data, contract_a_key,
             contract_b_addr](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Contract A writes its own state
-             auto [res, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), contract_a_key,
-                 std::as_bytes(std::span(contract_a_data)),
+             auto r0 = ctx.syscall<SyscallNo::kBytestringSet>(
+                 contract_a_key, std::as_bytes(std::span(contract_a_data)),
                  std::to_underlying(StorageDeltaFlags::None));
-             if (!res.has_value() ||
-                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
              // Call Contract B (which will revert)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    contract_b_addr, 0, ctx.runtime().get_available_gas(),
-                   Calldata{}, 0, output_return_buffer_len);
+                   Calldata{}, 0, std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -243,10 +246,12 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Call Contract B
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    contract_b_addr, 0, ctx.runtime().get_available_gas(),
-                   Calldata{}, 0, output_return_buffer_len);
+                   Calldata{}, 0, std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -295,10 +300,12 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
              // Call Contract C (which will revert)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    contract_c_addr, 0, ctx.runtime().get_available_gas(),
-                   Calldata{}, 0, output_return_buffer_len);
+                   Calldata{}, 0, std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -453,10 +460,12 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
              // Call Contract B (which will revert)
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    contract_b_addr, 0, ctx.runtime().get_available_gas(),
-                   Calldata{}, 0, output_return_buffer_len);
+                   Calldata{}, 0, std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};

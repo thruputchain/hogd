@@ -118,12 +118,13 @@ TEST_F(NativeContractTest, BasicInstantiate)
                            calldata.data() + sizeof(Runtime::MethodID),
                            invoked_addr.size());
 
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
                    invoked_addr, invoked_id,
                    std::numeric_limits<GasAmount>::max(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
 
                if (invoke_res) {
                  return (invoke_res.value() ==
@@ -212,13 +213,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         // Invoke consumer method 0 three times, with various gas costs
         auto r1 = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
-          RuntimeMemoryLength output_return_buffer_len = 0;
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddressConsumer, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(100)
                       .value(),
-              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
           return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[r1_status, g1] = r1;
@@ -231,13 +234,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
         auto r2 = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
-          RuntimeMemoryLength output_return_buffer_len = 0;
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddressConsumer, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(200)
                       .value(),
-              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
           return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[r2_status, g2] = r2;
@@ -250,13 +255,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
         auto r3 = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
-          RuntimeMemoryLength output_return_buffer_len = 0;
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddressConsumer, 0, UINT64_MAX,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(150)
                       .value(),
-              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
           return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
         }();
         auto const &[r3_status, g3] = r3;
@@ -275,10 +282,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         auto r = [&]() {
           auto gas_before = ctx.runtime().get_available_gas();
-          RuntimeMemoryLength output_return_buffer_len = 0;
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
           auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
               kAddressMiddle, 0, UINT64_MAX, Calldata{},
-              std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
           return std::pair{invoke_status,
                            gas_before - ctx.runtime().get_available_gas()};
         }();

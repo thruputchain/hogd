@@ -7,6 +7,7 @@
 #include <exception>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -135,13 +136,14 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_Invoke_inner(SystemCallHandler &syscall_handler,
-                     WrappedGasAmount remaining_gas,
-                     const ContractAddress &input_address,
-                     uint64_t input_entrypoint_id, GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata,
-                     InvokeFlagSet input_flags,
-                     RuntimeMemoryLength &output_return_buffer_len) noexcept
+syscall_Invoke_inner(
+    SystemCallHandler &syscall_handler, WrappedGasAmount remaining_gas,
+    const ContractAddress &input_address, uint64_t input_entrypoint_id,
+    GasAmount input_gas_limit, std::span<const std::byte> input_calldata,
+    InvokeFlagSet input_flags,
+    std::span<const std::byte> input_owned_auth_token_ids,
+    RuntimeMemoryLength &output_return_buffer_len,
+    RuntimeMemoryLength &output_returned_auth_token_len) noexcept
 {
   Calldata calldata;
   try {
@@ -158,11 +160,33 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                 input_calldata.size());
   }
 
+  if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
+  // owned_auth_token_ids may or may not be aligned.
+  // Hence we perform a memcpy before passing to the invoke function.
+  std::vector<uint32_t> owned_auth_token_ids_vec;
+
+  try {
+    owned_auth_token_ids_vec.resize(input_owned_auth_token_ids.size() /
+                                    sizeof(uint32_t));
+  } catch (std::exception &e) {
+    error("unrecoverable: failed to resize owned auth token ids vector: {}",
+          e.what());
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
+
+  std::memcpy(owned_auth_token_ids_vec.data(),
+              input_owned_auth_token_ids.data(),
+              input_owned_auth_token_ids.size());
+
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.get()),
-                             calldata, input_flags);
+                             calldata, input_flags, owned_auth_token_ids_vec);
 
   // invocation returned successfully
   if (invoke_res.has_value() &&
@@ -187,6 +211,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
+  // TODO(geoff): returning auth tokens unsupported yet
+  output_returned_auth_token_len = 0;
   return {invoke_res, WrappedGasAmount{gas_amount}};
 }
 
@@ -228,7 +254,10 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetReturnedBuffer_inner(
     SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
-    RuntimeMemoryLength &output_written_len) noexcept
+    RuntimeMemoryLength &output_written_len,
+    [[maybe_unused]] std::span<std::byte> output_restored_auth_token_ids,
+    [[maybe_unused]] RuntimeMemoryLength
+        &output_restored_auth_token_ids_written_len) noexcept
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {

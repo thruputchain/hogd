@@ -82,6 +82,7 @@ add_library(runtime_test_objects OBJECT
   fibonacci_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
+  invocation_frame_test.cc
   invoke_error_handling_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_wasm_test.cc
@@ -106,6 +107,7 @@ add_library(runtime_test_objects OBJECT
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
   syscall_auth_config_test.cc
+  syscall_auth_token_test.cc
   syscall_block_data_test.cc
   syscall_entry_outer_tests.cc
   syscall_error_handling_tests.cc
@@ -178,6 +180,7 @@ gtest_discover_tests(runtime_test)
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
+  build_tests # for x23/tests/xdrtest.hh
 )
 
 add_dependencies(

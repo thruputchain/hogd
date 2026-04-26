@@ -1,7 +1,7 @@
-#include <array>
-#include <cstddef>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -118,14 +118,15 @@ public:
     host_call_context->syscall_handler = &handler;
 
     handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::None));
+                        std::to_underlying(InvokeFlag::None),
+                        std::span<uint32_t>{});
 
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
     auto syscall_res =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0);
+                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
@@ -133,7 +134,7 @@ public:
     runtime.set_available_gas(10);
     syscall_res =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0);
+                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
@@ -152,14 +153,15 @@ public:
     host_call_context->syscall_handler = &handler;
 
     handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::None));
+                        std::to_underlying(InvokeFlag::None),
+                        std::span<uint32_t>{});
 
     // Runtime ctor sets host_call_context->runtime
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
     auto syscall_res =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0);
+                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
@@ -167,7 +169,7 @@ public:
     runtime.set_available_gas(10);
     syscall_res =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0);
+                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 
@@ -230,7 +232,8 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None));
+                      std::to_underlying(InvokeFlag::None),
+                      std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -238,7 +241,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   auto syscall_res =
       wrap_outer<NoreturnFailingSyscallMeta>(handler, runtime,
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                             0, 0);
+                                             0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
 }
@@ -276,20 +279,21 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None));
+                      std::to_underlying(InvokeFlag::None),
+                      std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
   runtime.set_available_gas(10000);
   auto syscall_res =
       wrap_outer<NoErrorSyscallMeta>(handler, runtime, kNoTracingSyscall, 0, 0,
-                                     0, 0, 0, 0, 0);
+                                     0, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_TRUE(syscall_res.has_value());
 
   runtime.set_available_gas(10);
   syscall_res =
       wrap_outer<NoErrorSyscallMeta>(handler, runtime, kNoTracingSyscall, 0, 0,
-                                     0, 0, 0, 0, 0);
+                                     0, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 }
@@ -317,7 +321,8 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None));
+                      std::to_underlying(InvokeFlag::None),
+                      std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -325,14 +330,14 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   auto syscall_res =
       wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                             0, 0);
+                                             0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
 
   runtime.set_available_gas(10);
   syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
                                                        kNoTracingSyscall, 0, 0,
-                                                       0, 0, 0, 0, 0);
+                                                       0, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 }
@@ -361,7 +366,8 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::ReadOnly));
+                      std::to_underlying(InvokeFlag::ReadOnly),
+                      std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
   auto runtime = TestRuntime(std::move(host_call_context));
@@ -369,7 +375,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto syscall_res =
       wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime,
                                               kNoTracingSyscall, 0, 0, 0, 0, 0,
-                                              0, 0);
+                                              0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // Gas is not consumed by the syscall.
@@ -381,7 +387,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   runtime.set_available_gas(10);
   syscall_res = wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime,
                                                         kNoTracingSyscall, 0, 0,
-                                                        0, 0, 0, 0, 0);
+                                                        0, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // TODO(geoff): same as above
@@ -408,7 +414,8 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None));
+                      std::to_underlying(InvokeFlag::None),
+                      std::span<uint32_t>{});
 
   // Create a buffer larger than kMaxReturnBufferLen (1024)
   std::array<std::byte, 1025> oversized_buffer{};
@@ -437,7 +444,8 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   host_call_context->syscall_handler = &handler;
 
   handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None));
+                      std::to_underlying(InvokeFlag::None),
+                      std::span<uint32_t>{});
 
   std::array<std::byte, 10> valid_buffer{};
 

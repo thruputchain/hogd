@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -281,12 +282,12 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto res = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kAddressLeaf, 0,
-                                                      UINT64_MAX, Calldata{},
-                                                      std::to_underlying(
-                                                          InvokeFlag::None),
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressLeaf, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -301,12 +302,13 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
           {0,
            [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto res = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle, 0,
-                                                      UINT64_MAX, Calldata{},
-                                                      std::to_underlying(
-                                                          InvokeFlag::ReadOnly),
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kAddressMiddle, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::ReadOnly),
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

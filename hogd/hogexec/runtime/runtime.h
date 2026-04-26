@@ -114,6 +114,21 @@ using HostFn7 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
 using HostFn8 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
                                  uint64_t, uint64_t, uint64_t, uint64_t,
                                  uint64_t, uint64_t) noexcept;
+using HostFn9 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t, uint64_t,
+                                 uint64_t, uint64_t, uint64_t) noexcept;
+using HostFn10 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                  uint64_t, uint64_t, uint64_t, uint64_t,
+                                  uint64_t, uint64_t, uint64_t,
+                                  uint64_t) noexcept;
+using HostFn11 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                  uint64_t, uint64_t, uint64_t, uint64_t,
+                                  uint64_t, uint64_t, uint64_t, uint64_t,
+                                  uint64_t) noexcept;
+using HostFn12 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
+                                  uint64_t, uint64_t, uint64_t, uint64_t,
+                                  uint64_t, uint64_t, uint64_t, uint64_t,
+                                  uint64_t, uint64_t) noexcept;
 using ErasedHostFn = void();
 using ErasedFnPtr = ErasedHostFn *;
 }
@@ -159,6 +174,22 @@ template<> struct HostFnTraits<HostFn7 *> {
 
 template<> struct HostFnTraits<HostFn8 *> {
   static constexpr uint8_t kNargs = 8;
+};
+
+template<> struct HostFnTraits<HostFn9 *> {
+  static constexpr uint8_t kNargs = 9;
+};
+
+template<> struct HostFnTraits<HostFn10 *> {
+  static constexpr uint8_t kNargs = 10;
+};
+
+template<> struct HostFnTraits<HostFn11 *> {
+  static constexpr uint8_t kNargs = 11;
+};
+
+template<> struct HostFnTraits<HostFn12 *> {
+  static constexpr uint8_t kNargs = 12;
 };
 
 template<typename Fn>

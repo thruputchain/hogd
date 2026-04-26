@@ -276,12 +276,13 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_return_buffer_len = 0,
+                                 output_returned_auth_token_len = 0;
              Calldata calldata{};
              auto r = ctx.syscall<SyscallNo::kInvoke>(
                  target_addr, 0, ctx.runtime().get_available_gas(),
-                 std::as_bytes(std::span(calldata)), 0,
-                 output_return_buffer_len);
+                 std::as_bytes(std::span(calldata)), 0, std::span<uint32_t>{},
+                 output_return_buffer_len, output_returned_auth_token_len);
 
              if (!r.has_value() ||
                  r.value() !=
@@ -359,12 +360,13 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   auto caller_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_return_buffer_len = 0,
+                                 output_returned_auth_token_len = 0;
              Calldata calldata{};
              auto r = ctx.syscall<SyscallNo::kInvoke>(
                  callee_addr, 0, ctx.runtime().get_available_gas(),
-                 std::as_bytes(std::span(calldata)), 0,
-                 output_return_buffer_len);
+                 std::as_bytes(std::span(calldata)), 0, std::span<uint32_t>{},
+                 output_return_buffer_len, output_returned_auth_token_len);
 
              if (!r.has_value() ||
                  r.value() !=
@@ -466,12 +468,14 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, [addr_writer](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                Calldata args = {'t', 'e', 's', 't'};
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
                    addr_writer, 0, ctx.runtime().get_available_gas(),
                    std::as_bytes(std::span(args)),
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
 
                return {};
              }}});

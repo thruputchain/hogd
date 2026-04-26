@@ -13,6 +13,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -235,10 +236,10 @@ SystemCallHandler::root_invoke()
           ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
           : 0;
 
-  auto [res, gas_consumed] =
-      invoke(root_invocation.invoked_address,
-             sdk_method_id(root_invocation.entrypoint), available_gas,
-             root_invocation.calldata, std::to_underlying(InvokeFlag::None));
+  auto [res, gas_consumed] = invoke(root_invocation.invoked_address,
+                                    sdk_method_id(root_invocation.entrypoint),
+                                    available_gas, root_invocation.calldata,
+                                    std::to_underlying(InvokeFlag::None), {});
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -280,10 +281,10 @@ SystemCallHandler::get_most_recent_frame_output() const
   }
 
   assert(!invocation_frame_stack_.empty());
-  assert(invocation_frame_stack_.get_active_frame()
-             .child_return_output_.has_value());
+  assert(invocation_frame_stack_.get_active_frame_child_return_output()
+             .has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  return *invocation_frame_stack_.get_active_frame().child_return_output_;
+  return *invocation_frame_stack_.get_active_frame_child_return_output();
 }
 
 InvokeStatus<void>
@@ -418,10 +419,10 @@ SystemCallHandler::abort_transaction()
 
 // can only be called when call_frame_stack_ is nonempty
 // (i.e. while at least one invoke() is running)
-ContractAddress
+const ContractAddress &
 SystemCallHandler::get_current_address() const
 {
-  return invocation_frame_stack_.get_active_frame().address();
+  return invocation_frame_stack_.get_current_address();
 }
 
 SHA256Hash
@@ -444,7 +445,8 @@ SystemCallHandler::get_msg_sender() const
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
-                          Calldata calldata, InvokeFlagSet flags)
+                          Calldata calldata, InvokeFlagSet flags,
+                          std::span<uint32_t const> owned_auth_token_ids)
 {
   if (!validate_flags<InvokeFlag::TryInvoke, InvokeFlag::ReadOnly>(flags)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
@@ -476,7 +478,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  auto stashed_parent_trace = start_frame(invocation, flags);
+  auto stashed_parent_trace =
+      start_frame(invocation, flags, owned_auth_token_ids);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
@@ -503,8 +506,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 std::unique_ptr<InvocationFrameTrace>
-SystemCallHandler::start_frame(Invocation invocation,
-                               InvokeFlagSet flags) noexcept
+SystemCallHandler::start_frame(
+    Invocation invocation, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -524,7 +528,8 @@ SystemCallHandler::start_frame(Invocation invocation,
     panic("Failed to set invocation: {}", e.what());
   }
   invocation_frame_stack_.start_frame(invocation.invoked_address,
-                                      std::move(invocation.calldata), flags);
+                                      std::move(invocation.calldata), flags,
+                                      owned_auth_token_ids);
   return stashed_parent_trace;
 }
 
@@ -536,15 +541,12 @@ SystemCallHandler::finish_frame(
   assert(!invocation_frame_stack_.empty());
   assert(!last_frame_finished_);
   if (!result.has_value()) {
-    invocation_frame_stack_.get_active_frame().set_frame_return(
+    invocation_frame_stack_.set_active_frame_return(
         InvocationFrameOutput(InvocationFrameStatusCode::Fault));
   }
 
   if (invocation_frame_trace_) {
-    invocation_frame_stack_.get_active_frame().collect_storage_deltas(
-        invocation_frame_trace_->storage_writes);
-    invocation_frame_trace_->status =
-        invocation_frame_stack_.get_active_frame().get_frame_output();
+    invocation_frame_stack_.log_trace_finish(*invocation_frame_trace_);
   }
 
   // Restore parent trace and attach child
@@ -651,23 +653,24 @@ SystemStatus<SyscallStatus<const ReturnBuffer *>>
 SystemCallHandler::get_return_buffer() const
 {
   assert(!invocation_frame_stack_.empty());
-  auto const &top_frame = invocation_frame_stack_.get_active_frame();
-  if (!top_frame.child_return_output_.has_value()) {
+  auto const &top_frame_return_output =
+      invocation_frame_stack_.get_active_frame_child_return_output();
+  if (!top_frame_return_output.has_value()) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
 
-  switch (top_frame.child_return_output_.value().status_code()) {
+  switch (top_frame_return_output.value().status_code()) {
   case InvocationFrameStatusCode::Return:
-    return &top_frame.child_return_output_.value().return_buffer();
+    return &top_frame_return_output.value().return_buffer();
   case InvocationFrameStatusCode::Abort:
-    return &top_frame.child_return_output_.value().abort_buffer();
+    return &top_frame_return_output.value().abort_buffer();
   case InvocationFrameStatusCode::Fault:
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
   }
   error("Unrecoverable; Invalid invocation frame status code: {}",
-        top_frame.child_return_output_.value().status_code());
+        top_frame_return_output.value().status_code());
   return SystemError{SystemErrorCode::Unrecoverable};
 }
 
@@ -679,14 +682,12 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
   if (revert_frame) {
     InvocationFrameOutput output(InvocationFrameStatusCode::Abort);
     output.abort_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.get_active_frame().set_frame_return(
-        std::move(output));
+    invocation_frame_stack_.set_active_frame_return(std::move(output));
   }
   else {
     InvocationFrameOutput output(InvocationFrameStatusCode::Return);
     output.return_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.get_active_frame().set_frame_return(
-        std::move(output));
+    invocation_frame_stack_.set_active_frame_return(std::move(output));
   }
 }
 
@@ -744,7 +745,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 Calldata const &
 SystemCallHandler::get_calldata() const
 {
-  return invocation_frame_stack_.get_active_frame().calldata();
+  return invocation_frame_stack_.get_active_frame_calldata();
 }
 
 NondeterministicProposalData const &
@@ -833,9 +834,8 @@ SystemCallHandler::log_event(uint32_t num_topics,
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  auto message = make_tx_emitted_event(
-      invocation_frame_stack_.get_active_frame().address(), num_topics, data);
-  invocation_frame_stack_.get_active_frame().log_event(std::move(message));
+  auto message = make_tx_emitted_event(get_current_address(), num_topics, data);
+  invocation_frame_stack_.log_event(std::move(message));
   return {};
 }
 
@@ -911,8 +911,6 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
-  auto &frame = invocation_frame_stack_.get_active_frame();
-
   auto contract_size = [&] -> uint32_t {
     switch (contract.contract_type()) {
     case ContractType::kNative:
@@ -927,11 +925,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   }();
 
   // deploy new contract
-  frame.deploy_contract(deploy_addr,
-                        DeployedContractHash{.hash = contract_hash,
-                                             .contract_size = contract_size,
-                                             .contract_type =
-                                                 contract.contract_type()});
+  invocation_frame_stack_.deploy_contract(
+      deploy_addr,
+      DeployedContractHash{.hash = contract_hash,
+                           .contract_size = contract_size,
+                           .contract_type = contract.contract_type()});
 
   return deploy_addr;
 }
@@ -1363,7 +1361,7 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   }
 
   assert(!invocation_frame_stack_.empty());
-  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addr = get_current_address();
   AddressAndKey addrkey = auth_data_addrkey(addr);
 
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
@@ -1388,7 +1386,7 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
 {
-  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addr = get_current_address();
   auto addrkey = auth_data_addrkey(addr);
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1412,7 +1410,7 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_address_gas_permission_configs(
     x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
 {
-  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addr = get_current_address();
   auto addrkey = auth_data_addrkey(addr);
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1448,7 +1446,7 @@ SystemCallHandler::sha256_update(uint32_t input_index,
                                  bool input_reset)
 {
   assert(!invocation_frame_stack_.empty());
-  return invocation_frame_stack_.get_active_frame().hash_buffers_.update(
+  return invocation_frame_stack_.get_active_frame_hash_buffers().update(
       input_index, input_buffer, input_reset);
 }
 
@@ -1457,7 +1455,7 @@ SystemCallHandler::sha256_finalize(uint32_t input_index)
 {
   assert(!invocation_frame_stack_.empty());
   size_t output_size = 0;
-  auto r = invocation_frame_stack_.get_active_frame().hash_buffers_.finalize(
+  auto r = invocation_frame_stack_.get_active_frame_hash_buffers().finalize(
       input_index, &output_size);
   if (auto *stats = get_transaction_stats()) {
     stats->sha256_total_bytes_processed += output_size;
@@ -1475,6 +1473,14 @@ SystemCallHandler::get_block_height() const
     return tip.error();
   }
   return tip.value()->height;
+}
+
+// == Auth token syscalls ==
+
+SyscallStatus<uint32_t>
+SystemCallHandler::mint_auth_token(AuthToken const &auth_token)
+{
+  return invocation_frame_stack_.mint_auth_token(auth_token);
 }
 
 } // namespace hogd

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -150,11 +152,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
             addr_3](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // try_invoke addr_1:0
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_1, 0, ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -166,11 +170,12 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 
              // Invoke addr_2:1 (check method) to verify "test1" is absent
              auto r2_check = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_2, 1, ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r2_check.has_value() ||
                  r2_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -181,11 +186,12 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 
              // Invoke addr_3:1 (check method) to verify "test2" is absent
              auto r3_check = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_3, 1, ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r3_check.has_value() ||
                  r3_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -203,11 +209,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [addr_2](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_2, 0, ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -239,11 +247,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              }
 
              auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_3, 0, ctx.runtime().get_available_gas(), Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -370,11 +380,12 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [addr_fault](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r0 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    addr_fault, 0, ctx.runtime().get_available_gas(), Calldata{},
-                   std::to_underlying(InvokeFlag::None),
-                   output_return_buffer_len);
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -389,10 +400,13 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
 
              ReturnBuffer buffer;
              RuntimeMemoryLength written_len = 0;
+             std::array<std::byte, 128> restored_auth_token_ids{};
+             RuntimeMemoryLength restored_auth_token_ids_written_len = 0;
 
              auto [res, _gas] = syscall_GetReturnedBuffer_inner(
                  ctx.handler(), std::as_writable_bytes(std::span(buffer)),
-                 written_len);
+                 written_len, std::span(restored_auth_token_ids),
+                 restored_auth_token_ids_written_len);
              if (!res.has_value()) {
                ADD_FAILURE()
                    << "GetReturnBufferOnFault: Failed to get return buffer";

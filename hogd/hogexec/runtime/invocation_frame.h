@@ -5,23 +5,27 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "auth_token.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/auth_token_registry.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/components/hash_buffers.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -34,7 +38,8 @@ struct InvokeResult;
 class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
-                  InvokeFlagSet flags, size_t event_count);
+                  InvokeFlagSet flags, size_t event_count,
+                  std::span<uint32_t const> owned_auth_token_ids);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -158,7 +163,33 @@ public:
     return committed_contracts;
   }
 
+  bool check_owns_auth_token(uint32_t token_id) const
+  {
+    return owned_auth_token_ids_.contains(token_id);
+  }
+
+  void mint_auth_token(uint32_t token_id)
+  {
+    owned_auth_token_ids_.insert(token_id);
+  }
+
+  void remove_auth_tokens(std::span<uint32_t const> token_ids)
+  {
+    for (auto token_id : token_ids) {
+      owned_auth_token_ids_.erase(token_id);
+    }
+  }
+
   HashBuffers hash_buffers_;
+
+  void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
+  {
+    assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
+    most_recent_child_frame_forwarded_auth_tokens_.reserve(token_ids.size());
+    for (auto token_id : token_ids) {
+      most_recent_child_frame_forwarded_auth_tokens_.push_back(token_id);
+    }
+  }
 
 private:
   const ContractAddress address_;
@@ -182,6 +213,11 @@ private:
   // newly deployed contracts during the current call frame (and child frames)
   std::unordered_map<ContractAddress, DeployedContractHash>
       new_contract_deployments_;
+
+  std::unordered_set<uint32_t> owned_auth_token_ids_;
+  std::vector<uint32_t>
+      most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
+                                                      // reverts
 };
 
 // Stack of invocation frames.
@@ -193,11 +229,18 @@ public:
     : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy)
   {}
 
-  auto &get_active_frame(this auto &self)
+  ContractAddress const &get_current_address() const
   {
-    assert(!self.frame_stack_.empty());
-    return self.frame_stack_.back();
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().address();
   }
+
+  void set_active_frame_return(InvocationFrameOutput &&return_output)
+  {
+    assert(!frame_stack_.empty());
+    frame_stack_.back().set_frame_return(std::move(return_output));
+  }
+
   bool empty() const { return frame_stack_.empty(); }
   size_t event_count() const
   {
@@ -205,13 +248,18 @@ public:
     return frame_stack_.back().event_count();
   }
 
+  // It MUST be the case that the owned_auth_token_ids are owned by the parent
+  // frame. Caller is responsible for checking as much.
   void start_frame(ContractAddress const &address, Calldata &&calldata,
-                   InvokeFlagSet flags);
+                   InvokeFlagSet flags,
+                   std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   SystemStatus<std::pair<InvokeResult, bool>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data);
+
+  void log_trace_finish(InvocationFrameTrace &trace);
 
   std::optional<ContractAddress> get_msg_sender() const;
 
@@ -220,6 +268,51 @@ public:
     return std::ranges::any_of(frame_stack_, [&](const InvocationFrame &frame) {
       return frame.address() == addr;
     });
+  }
+
+  bool is_active_frame_read_only() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().is_read_only();
+  }
+
+  x23::Vec<TxEmittedEvent> copy_active_frame_events() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().get_events();
+  }
+
+  HashBuffers &get_active_frame_hash_buffers()
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().hash_buffers_;
+  }
+
+  std::optional<InvocationFrameOutput> const &
+  get_active_frame_child_return_output() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().child_return_output_;
+  }
+
+  const Calldata &get_active_frame_calldata() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().calldata();
+  }
+
+  void log_event(TxEmittedEvent event)
+  {
+    assert(!frame_stack_.empty());
+    assert(event.contract_address == frame_stack_.back().address());
+    frame_stack_.back().log_event(std::move(event));
+  }
+
+  void deploy_contract(ContractAddress const &addr,
+                       DeployedContractHash const &hash)
+  {
+    assert(!frame_stack_.empty());
+    frame_stack_.back().deploy_contract(addr, hash);
   }
 
   // Lookup the hash of the contract deployed at the queried address,
@@ -241,8 +334,12 @@ public:
   {
     StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = data_key;
-    return AddressAndKey{.address = get_active_frame().address(), .key = key};
+    return AddressAndKey{.address = frame_stack_.back().address(), .key = key};
   }
+
+  AuthToken const *lookup_auth_token(uint32_t token_id) const;
+  SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
+  bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
 
   size_t size() const { return frame_stack_.size(); }
 
@@ -250,6 +347,7 @@ private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
+  AuthTokenRegistry auth_token_registry_;
 };
 
 } // namespace hogd

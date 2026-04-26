@@ -32,8 +32,8 @@
 #include "types.hh"
 #include "x23/debug.h"
 #include "x23/format.h"
-#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -44,6 +44,43 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
                           std::string_view method_name);
 Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
+
+// `T` is a compile-time tag. XDR/TXS/CXS: 0 bytes (same as void / empty struct
+// / `x23::span<std::uint8_t, 0>`). `std::tuple_size` + 0-field `xdr_meta` make
+// `std::tuple<Signer, ...>` a valid `x23::is_xdr_type` struct for calldata.
+//
+// `token_id` is C++ / host state only; it is not an XDR field (never
+// marshaled).
+template<typename T> struct Signer {
+
+  uint32_t token_id_{};
+};
+
+} // namespace hogd
+
+namespace std {
+template<typename T>
+struct tuple_size<hogd::Signer<T>> : std::integral_constant<std::size_t, 0> {};
+} // namespace std
+
+namespace x23 {
+// Same wire format as XDR void; see `serialize_equiv<void, …>` in x23.h.
+template<typename T>
+struct serialize_equiv<void, hogd::Signer<T>> : std::true_type {};
+template<typename T>
+struct serialize_equiv<span<std::uint8_t, 0>, hogd::Signer<T>>
+  : std::true_type {};
+
+// NOLINTBEGIN(readability-identifier-naming)
+template<typename T> struct xdr_meta<hogd::Signer<T>> {
+  static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
+  static constexpr const char *type_name = "Signer";
+  static constexpr std::array<std::string_view, 0> field_names{};
+};
+// NOLINTEND(readability-identifier-naming)
+} // namespace x23
+
+namespace hogd {
 
 // Get the method ID for a given method,
 // at which contracts using the SDK will expect to find it.
@@ -307,7 +344,7 @@ public:
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
-                       UINT64_MAX, calldata, Flags);
+                       UINT64_MAX, calldata, Flags, {});
 
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
 
