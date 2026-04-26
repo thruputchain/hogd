@@ -39,7 +39,8 @@ public:
   {}
 };
 
-} // namespace
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 TEST_P(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
 {
@@ -161,5 +162,7 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, SyscallAuthTokenTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
                          test_db_to_string);
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
