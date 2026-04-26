@@ -1,10 +1,9 @@
-#include <algorithm>
-#include <cstring>
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -14,7 +13,6 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
