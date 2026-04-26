@@ -179,6 +179,7 @@ gtest_discover_tests(runtime_test)
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
+  build_tests # for x23/tests/xdrtest.hh
 )
 
 add_dependencies(
