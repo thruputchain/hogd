@@ -361,8 +361,7 @@ public:
     uint32_t new_token_id_start;
     uint32_t new_token_id_count;
   };
-  SyscallStatus<ConsumeAuthTokenResult>
-  consume_auth_token(uint32_t token_id);
+  SyscallStatus<ConsumeAuthTokenResult> consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
 

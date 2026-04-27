@@ -295,8 +295,8 @@ syscall_ConsumeAuthToken_inner(
 
   auto payload_bytes = std::as_bytes(
       std::span<const uint8_t>{result.payload.data(), result.payload.size()});
-  auto copy_len = std::min<size_t>(payload_bytes.size(),
-                                   output_auth_payload.size());
+  auto copy_len =
+      std::min<size_t>(payload_bytes.size(), output_auth_payload.size());
   if (copy_len > 0) {
     std::memcpy(output_auth_payload.data(), payload_bytes.data(), copy_len);
   }

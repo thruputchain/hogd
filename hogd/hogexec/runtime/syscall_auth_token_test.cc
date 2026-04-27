@@ -189,12 +189,13 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              uint32_t root_id = 0;
              auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
                  BlockHeight{1000},
-                 std::span<const std::byte>{
-                     reinterpret_cast<const std::byte *>(serialized.data()),
-                     serialized.size()},
+                 std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                                serialized.data()),
+                                            serialized.size()},
                  root_id);
              EXPECT_TRUE(mint_res.has_value());
-             EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(mint_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeNone);
 
              // Consume root -> payload=42, 2 children
              std::array<std::byte, 256> payload_buf{};
@@ -203,13 +204,14 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
                  root_id, std::span<std::byte>{payload_buf}, child_start,
                  child_count);
              EXPECT_TRUE(consume_res.has_value());
-             EXPECT_EQ(consume_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(consume_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeNone);
              EXPECT_EQ(child_count, 2U);
              auto expected_root_payload = x23::serialize(42U);
              EXPECT_EQ(std::memcmp(payload_buf.data(),
                                    expected_root_payload.data(),
                                    expected_root_payload.size()),
-                        0);
+                       0);
 
              // Consume child0 -> payload=100, 1 grandchild
              std::array<std::byte, 256> c0_payload{};
@@ -224,7 +226,7 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              EXPECT_EQ(std::memcmp(c0_payload.data(),
                                    expected_c0_payload.data(),
                                    expected_c0_payload.size()),
-                        0);
+                       0);
 
              // Consume child1 -> payload=300, 0 grandchildren
              std::array<std::byte, 256> c1_payload{};
@@ -239,7 +241,7 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              EXPECT_EQ(std::memcmp(c1_payload.data(),
                                    expected_c1_payload.data(),
                                    expected_c1_payload.size()),
-                        0);
+                       0);
 
              // Consume grandchild -> payload=200, 0 children
              std::array<std::byte, 256> gc_payload{};
@@ -254,7 +256,7 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              EXPECT_EQ(std::memcmp(gc_payload.data(),
                                    expected_gc_payload.data(),
                                    expected_gc_payload.size()),
-                        0);
+                       0);
 
              return {};
            }}});
@@ -309,8 +311,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
              EXPECT_TRUE(h_res.has_value());
              EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-             auto make_and_mint =
-                 [&](BlockHeight expiry) -> uint32_t {
+             auto make_and_mint = [&](BlockHeight expiry) -> uint32_t {
                AuthTokenNode node{.consumer_address = kAddr,
                                   .payload = x23::serialize(1U),
                                   .child_nodes = {}};
@@ -340,15 +341,15 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
 
              // expiry < block height: token IS expired
              if (current_height > BlockHeight{0}) {
-               uint32_t id =
-                   make_and_mint(BlockHeight{current_height - 1});
+               uint32_t id = make_and_mint(BlockHeight{current_height - 1});
                std::array<std::byte, 256> buf{};
                uint32_t s = 0, c = 0;
                auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
                    id, std::span<std::byte>{buf}, s, c);
                EXPECT_TRUE(r.has_value());
-               EXPECT_EQ(r.value(),
-                          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+               EXPECT_EQ(
+                   r.value(),
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
              }
 
              return {};

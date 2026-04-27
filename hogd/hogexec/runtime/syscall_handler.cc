@@ -1496,13 +1496,11 @@ SystemCallHandler::consume_auth_token(uint32_t token_id,
 {
   auto const *token = invocation_frame_stack_.lookup_auth_token(token_id);
   if (token == nullptr) {
-    return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   if (token->expiry_height < current_height) {
-    return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   return invocation_frame_stack_.consume_auth_token(token_id);
