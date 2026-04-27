@@ -3,6 +3,7 @@
 #include "auth_token.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -253,6 +254,17 @@ syscall_MintAuthToken_inner(
 {
   AuthToken auth_token{.mint_address = syscall_handler.get_current_address(),
                        .expiry_height = input_expiry_height};
+
+  // Check expiry height is in the future
+  auto height = syscall_handler.get_block_height();
+  if (!height) {
+    return {height.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+  if (input_expiry_height < *height) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
   try {
     x23::deserialize(&auth_token.root_node,
                      x23::BufView{input_serialized_auth_token});
@@ -278,6 +290,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ConsumeAuthToken_inner(
     SystemCallHandler &syscall_handler, uint32_t input_token_id,
     std::span<std::byte> output_auth_payload,
+    RuntimeMemoryLength &output_auth_payload_written_len,
     uint32_t &output_unwrapped_token_id_start,
     uint32_t &output_unwrapped_token_id_count) noexcept
 {
@@ -300,6 +313,7 @@ syscall_ConsumeAuthToken_inner(
   if (copy_len > 0) {
     std::memcpy(output_auth_payload.data(), payload_bytes.data(), copy_len);
   }
+  output_auth_payload_written_len = copy_len;
 
   output_unwrapped_token_id_start = result.new_token_id_start;
   output_unwrapped_token_id_count = result.new_token_id_count;
@@ -310,6 +324,7 @@ syscall_ConsumeAuthToken_inner(
     try {
       trace_data->outputs.emplace(SyscallConsumeAuthTokenOutputs{
           .payload = result.payload,
+          .auth_payload_written_len = output_auth_payload_written_len,
           .unwrapped_token_id_start = result.new_token_id_start,
           .unwrapped_token_id_count = result.new_token_id_count});
     } catch (std::exception &e) {
