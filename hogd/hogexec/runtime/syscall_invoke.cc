@@ -90,15 +90,18 @@ syscall_GetSourceTransactionHash_inner(
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
-                             RuntimeMemoryLength &output_len) noexcept
+                             RuntimeMemoryLength &output_len,
+                             uint32_t &output_auth_token_count) noexcept
 {
   output_len = syscall_handler.get_calldata().size();
+  output_auth_token_count =
+      syscall_handler.get_parent_supplied_auth_tokens().size();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
     try {
-      trace_data->outputs.emplace(
-          SyscallGetCalldataLenOutputs{.len = output_len});
+      trace_data->outputs.emplace(SyscallGetCalldataLenOutputs{
+          .len = output_len, .auth_token_count = output_auth_token_count});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldataLen,
             e.what());
@@ -108,9 +111,11 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
-                          std::span<std::byte> output_buffer,
-                          RuntimeMemoryLength &output_written_len) noexcept
+syscall_GetCalldata_inner(
+    SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
+    RuntimeMemoryLength &output_written_len,
+    std::span<std::byte> output_auth_token_list,
+    RuntimeMemoryLength &output_auth_token_written_len) noexcept
 {
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
@@ -122,11 +127,26 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                 calldata.data(), output_written_len);
   }
 
+  auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
+  auto reinterpreted_span = std::as_bytes(span_auth_token_list);
+  output_auth_token_written_len =
+      std::min<RuntimeMemoryLength>(reinterpreted_span.size(),
+                                    output_auth_token_list.size());
+  if (output_auth_token_written_len > 0) {
+    assert(output_auth_token_list.data() != nullptr);
+    assert(reinterpreted_span.data() != nullptr);
+    std::memcpy(reinterpret_cast<uint8_t *>(output_auth_token_list.data()),
+                reinterpreted_span.data(), output_auth_token_written_len);
+  }
+
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
     try {
+      x23::Vec<uint32_t, 0xffffffff> auth_token_list;
+      auth_token_list.append_range(span_auth_token_list);
       trace_data->outputs.emplace(
-          SyscallGetCalldataOutputs{.calldata = calldata});
+          SyscallGetCalldataOutputs{.calldata = calldata,
+                                    .auth_tokens = auth_token_list});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldata,
             e.what());

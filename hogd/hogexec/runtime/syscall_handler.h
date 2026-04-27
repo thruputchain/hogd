@@ -233,6 +233,11 @@ public:
   // Reference invalidated when call frame changes.
   Calldata const &get_calldata() const;
 
+  // Get the auth tokens supplied by the parent frame.
+  // Incorrect to call method when no invocation is running.
+  // Span invalidated when call frame changes.
+  std::span<const uint32_t> get_parent_supplied_auth_tokens() const;
+
   AuthClaimData const &get_auth_claims() const;
 
   // Get the buffer returned by a child call frame.
