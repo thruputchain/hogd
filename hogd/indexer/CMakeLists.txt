@@ -7,6 +7,7 @@ add_library(indexer STATIC
 
 target_link_libraries(indexer PUBLIC
     rocksdb
+    event
     hogd
 )
 

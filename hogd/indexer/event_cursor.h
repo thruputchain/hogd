@@ -7,8 +7,6 @@
 #include <string>
 #include <string_view>
 
-#include "event.hh"
-#include "indexer.hh"
 #include "pagination.hh"
 #include "types.hh"
 
@@ -71,22 +69,5 @@ clamp_events_limit(uint32_t requested)
   }
   return requested;
 }
-
-// Positional topic-filter match against the topics encoded in an
-// emitted event.
-//
-// Each event's serialized_event starts with `num_topics * 32` bytes
-// of topic data (per protocol/event.x), followed by the event payload.
-// The filter specifies, per position (0, 1, 2):
-//   - empty list -> match anything at that position (wildcard);
-//   - non-empty list -> match iff the event's topic at that position
-//     is in the list.
-//
-// AND across positions, OR within each position.  Partial match: a
-// filter specifying only topic0 matches events with MORE topics than
-// the filter mentions.  If the event has FEWER topics than the filter
-// specifies a non-empty list at, the event fails the match.
-bool event_topics_match(EventTopicFilter const &filter,
-                        TxEmittedEvent const &event);
 
 } // namespace hogd

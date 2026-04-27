@@ -40,6 +40,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/event/topic_layout.h"
 #include "hogd/indexer/event_cursor.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"

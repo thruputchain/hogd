@@ -4,6 +4,7 @@ add_library(event_objects OBJECT
   rpc_from_exec.cc
   rpc_from_sched.cc
   status.cc
+  topic_layout.cc
   utilities.cc
 )
 
@@ -41,6 +42,7 @@ set_property(TARGET event_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 add_library(event_test_objects OBJECT
   event_block_context_test.cc
   event_rpc_test.cc
+  topic_layout_test.cc
 )
 target_link_libraries(
   event_test_objects
