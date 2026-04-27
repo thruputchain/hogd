@@ -124,6 +124,9 @@ SyscallHandlerContext::root_invoke()
     // db block
     return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
   }
+  error("Unrecoverable: unrecognized invoke error code: {}",
+        res.result_.error().code());
+  return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
 }
 
 TestFFIErrorCode
