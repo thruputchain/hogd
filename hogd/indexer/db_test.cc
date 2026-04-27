@@ -21,8 +21,8 @@
 namespace hogd {
 
 // basic tests on open/close db ops
-class IndexDBTest
-  : public ::testing::Test { // NOLINT(misc-use-internal-linkage)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class IndexDBTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
@@ -555,6 +555,91 @@ TEST_F(IndexDBTest, GetEventsAnchorAtHeightInclusive)
   ASSERT_EQ(page->events.size(), 2);
   EXPECT_EQ(page->events[0].block_height, 10);
   EXPECT_EQ(page->events[1].block_height, 15);
+}
+
+// Parity port of the legacy ConsumeAndLookupContractEvents test.
+// Mixed-contract events within a single TxEventLog (the loop in
+// consume_events indexes per-event, not per-tx); per-contract
+// filtering returns the right counts and orderings; a contract
+// with no events yields an empty page.
+TEST_F(IndexDBTest, GetEventsMultiContractInOneTx)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  BlockHeight block_height = 200;
+  SHA256Hash tx_hash1, tx_hash2;
+  std::ranges::fill(tx_hash1, 0x10);
+  std::ranges::fill(tx_hash2, 0x20);
+
+  ContractAddress contract_addr1, contract_addr2;
+  std::ranges::fill(contract_addr1, 0xCC);
+  std::ranges::fill(contract_addr2, 0xDD);
+
+  // First tx: two events, both from contract1.
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx_hash1;
+  event_log1.events.push_back(make_event(contract_addr1, 0, 0));
+  event_log1.events.push_back(make_event(contract_addr1, 2, 0));
+
+  // Second tx: one event from contract1 (seq 0), one from
+  // contract2 (seq 1) — interleaved within the same TxEventLog.
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx_hash2;
+  event_log2.events.push_back(make_event(contract_addr1, 1, 0));
+  event_log2.events.push_back(make_event(contract_addr2, 0, 0));
+
+  ASSERT_TRUE(
+      db->consume_events(block_height, std::vector{event_log1, event_log2}));
+
+  // Query contract1: expect 3 events (tx1 seq 0, tx1 seq 1, tx2 seq 0).
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({contract_addr1}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 3);
+    EXPECT_EQ(page->events[0].proposed_tx_hash, tx_hash1);
+    EXPECT_EQ(page->events[0].sequence_number, 0);
+    EXPECT_EQ(page->events[0].emitted_event.contract_address, contract_addr1);
+    EXPECT_EQ(page->events[1].proposed_tx_hash, tx_hash1);
+    EXPECT_EQ(page->events[1].sequence_number, 1);
+    EXPECT_EQ(page->events[1].emitted_event.contract_address, contract_addr1);
+    EXPECT_EQ(page->events[2].proposed_tx_hash, tx_hash2);
+    EXPECT_EQ(page->events[2].sequence_number, 0);
+    EXPECT_EQ(page->events[2].emitted_event.contract_address, contract_addr1);
+  }
+
+  // Query contract2: expect 1 event (tx2 seq 1, since the contract2
+  // event was the second in event_log2's events vector).
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({contract_addr2}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].proposed_tx_hash, tx_hash2);
+    EXPECT_EQ(page->events[0].sequence_number, 1);
+    EXPECT_EQ(page->events[0].emitted_event.contract_address, contract_addr2);
+  }
+
+  // Query a contract address with no events: expect an empty page.
+  {
+    ContractAddress contract_addr3;
+    std::ranges::fill(contract_addr3, 0xEE);
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({contract_addr3}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    EXPECT_TRUE(page->events.empty());
+    EXPECT_TRUE(page->cursor.empty());
+  }
 }
 
 TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
