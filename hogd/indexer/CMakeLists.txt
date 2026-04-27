@@ -1,5 +1,6 @@
 add_library(indexer STATIC
     db.cc
+    event_cursor.cc
     key_format.cc
     status.cc
 )

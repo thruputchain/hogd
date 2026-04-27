@@ -38,15 +38,16 @@ public:
     co_return ret;
   }
 
-  x23::Async<IdentifiedEventBatch>
-  get_contract_events(const ContractAddress &address, BlockHeight start_height,
-                      BlockHeight end_height)
+  x23::Async<EventPage> get_events(EventQuery query)
   {
-    auto status = db_.get_contract_events(start_height, end_height, address);
+    auto status = db_.get_events(query);
     if (!status) {
-      co_return IdentifiedEventBatch{};
+      // Return an empty page on db-level error.  Currently the only
+      // way to hit this is kDBNotOpen; higher layers surface that
+      // out-of-band.
+      co_return EventPage{};
     }
-    co_return IdentifiedEventBatch(std::from_range, std::move(*status));
+    co_return std::move(*status);
   }
 
 private:

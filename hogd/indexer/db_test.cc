@@ -1,20 +1,27 @@
 #include <algorithm>
 #include <gtest/gtest.h>
 
+#include <cstddef> // NOLINT(misc-include-cleaner)
+#include <cstdint> // NOLINT(misc-include-cleaner)
 #include <filesystem>
+#include <initializer_list>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "event.hh"
 #include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
+#include "indexer.hh"
+#include "pagination.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
 
 // basic tests on open/close db ops
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class IndexDBTest : public ::testing::Test {
 protected:
   void SetUp() override
@@ -143,13 +150,423 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   EXPECT_EQ(included3.error(), IndexerErrorCode::kDBNotFound);
 }
 
-// Test consuming events and looking them up by contract address
-TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
+// -------------------------------------------------------------------
+// get_events tests
+// -------------------------------------------------------------------
+
+// NOLINTBEGIN(misc-include-cleaner)
+namespace {
+
+// Build a TxEmittedEvent with num_topics topics (each uniformly filled
+// with the given byte), plus 4 bytes of payload.  serialized_event
+// layout is num_topics * 32 bytes of topic data followed by payload.
+TxEmittedEvent
+make_event(ContractAddress const &contract, uint32_t num_topics,
+           uint8_t topic_fill_start)
+{
+  TxEmittedEvent e;
+  e.contract_address = contract;
+  e.num_topics = num_topics;
+  e.serialized_event.resize((num_topics * 32) + 4);
+  for (uint32_t t = 0; t < num_topics; ++t) {
+    for (size_t i = 0; i < 32; ++i) {
+      e.serialized_event[(t * 32) + i] = topic_fill_start + t;
+    }
+  }
+  // Payload bytes
+  for (size_t i = 0; i < 4; ++i) {
+    e.serialized_event[(num_topics * 32) + i] = 0xAB;
+  }
+  return e;
+}
+
+Topic
+topic_filled(uint8_t fill)
+{
+  Topic t;
+  std::ranges::fill(t, fill);
+  return t;
+}
+
+// Build an EventQuery with sensible defaults.
+EventQuery
+make_query(EventFilterList filters, IterationOrder order,
+           BlockAnchor const &anchor, uint32_t limit = 50)
+{
+  EventQuery q;
+  q.filters = std::move(filters);
+  q.order = order;
+  q.anchor = anchor;
+  q.limit = limit;
+  return q;
+}
+
+BlockAnchor
+anchor_at_height(BlockHeight h)
+{
+  BlockAnchor a(BlockAnchorKind::AnchorAtHeight);
+  a.height() = h;
+  return a;
+}
+
+EventFilter
+filter_with_contracts_no_topics(std::initializer_list<ContractAddress> addrs)
+{
+  EventFilter f;
+  for (auto const &a : addrs) {
+    f.contract_addresses.push_back(a);
+  }
+  return f;
+}
+
+} // namespace
+
+TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
 {
   auto db = IndexDB::make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
 
-  // Create test events with multiple contracts
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx1, tx2;
+  std::ranges::fill(tx1, 0x01);
+  std::ranges::fill(tx2, 0x02);
+
+  // Block 10: one event; block 20: two events.
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx1;
+  event_log1.events.push_back(make_event(addr, 0, 0));
+
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
+  event_log2.events.push_back(make_event(addr, 0, 0));
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
+  ASSERT_TRUE(db->consume_events(20, std::vector{event_log2}));
+
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+
+  auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->events.size(), 3);
+  EXPECT_EQ(page->events[0].block_height, 10);
+  EXPECT_EQ(page->events[1].block_height, 20);
+  EXPECT_EQ(page->events[1].sequence_number, 0);
+  EXPECT_EQ(page->events[2].block_height, 20);
+  EXPECT_EQ(page->events[2].sequence_number, 1);
+  EXPECT_EQ(page->latest_block, 20);
+  // Full exhaustion: cursor is empty.
+  EXPECT_TRUE(page->cursor.empty());
+}
+
+TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx1, tx2;
+  std::ranges::fill(tx1, 0x01);
+  std::ranges::fill(tx2, 0x02);
+
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx1;
+  event_log1.events.push_back(make_event(addr, 0, 0));
+
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
+  ASSERT_TRUE(db->consume_events(20, std::vector{event_log2}));
+
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+
+  auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderDescending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtEnd)));
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->events.size(), 2);
+  EXPECT_EQ(page->events[0].block_height, 20);
+  EXPECT_EQ(page->events[1].block_height, 10);
+}
+
+TEST_F(IndexDBTest, GetEventsPaginationWithCursor)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  // Five blocks each with one matching event.
+  for (int i = 0; i < 5; ++i) {
+    SHA256Hash tx;
+    std::ranges::fill(tx, 0x10 + i);
+    TxEventLog log;
+    log.proposed_tx_hash = tx;
+    log.events.push_back(make_event(addr, 0, 0));
+    ASSERT_TRUE(db->consume_events(10 + i, std::vector{log}));
+  }
+
+  EventFilterList filters1;
+  filters1.push_back(filter_with_contracts_no_topics({addr}));
+
+  // First page: ascending from beginning, limit=2.
+  auto page1 = db->get_events(
+      make_query(std::move(filters1), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning),
+                 /*limit=*/2));
+  ASSERT_TRUE(page1.has_value());
+  ASSERT_EQ(page1->events.size(), 2);
+  EXPECT_EQ(page1->events[0].block_height, 10);
+  EXPECT_EQ(page1->events[1].block_height, 11);
+  ASSERT_FALSE(page1->cursor.empty());
+
+  // Second page: same filter, cursor passed back.
+  EventFilterList filters2;
+  filters2.push_back(filter_with_contracts_no_topics({addr}));
+  EventQuery q2 =
+      make_query(std::move(filters2), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning),
+                 /*limit=*/2);
+  q2.cursor = page1->cursor;
+  auto page2 = db->get_events(q2);
+  ASSERT_TRUE(page2.has_value());
+  ASSERT_EQ(page2->events.size(), 2);
+  EXPECT_EQ(page2->events[0].block_height, 12);
+  EXPECT_EQ(page2->events[1].block_height, 13);
+  ASSERT_FALSE(page2->cursor.empty());
+
+  // Third page exhausts.
+  EventFilterList filters3;
+  filters3.push_back(filter_with_contracts_no_topics({addr}));
+  EventQuery q3 =
+      make_query(std::move(filters3), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning),
+                 /*limit=*/2);
+  q3.cursor = page2->cursor;
+  auto page3 = db->get_events(q3);
+  ASSERT_TRUE(page3.has_value());
+  ASSERT_EQ(page3->events.size(), 1);
+  EXPECT_EQ(page3->events[0].block_height, 14);
+  EXPECT_TRUE(page3->cursor.empty());
+}
+
+TEST_F(IndexDBTest, GetEventsTopicFilterPartialMatch)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx;
+  std::ranges::fill(tx, 0x01);
+
+  // Two events on the same contract:
+  //   ev[0]: num_topics=1, topic0 = 0x10 fill
+  //   ev[1]: num_topics=3, topic0 = 0x20, topic1 = 0x21, topic2 = 0x22
+  // Filter specifies topic0 == 0x20 only.  ev[1] should match (even
+  // though it has extra topics); ev[0] should NOT (topic0 differs).
+  TxEventLog log;
+  log.proposed_tx_hash = tx;
+  log.events.push_back(make_event(addr, 1, 0x10));
+  log.events.push_back(make_event(addr, 3, 0x20));
+  ASSERT_TRUE(db->consume_events(5, std::vector{log}));
+
+  EventFilter f;
+  f.contract_addresses.push_back(addr);
+  f.topics.topic0.push_back(topic_filled(0x20));
+  EventFilterList filters;
+  filters.push_back(f);
+
+  auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->events.size(), 1);
+  EXPECT_EQ(page->events[0].sequence_number, 1);
+}
+
+TEST_F(IndexDBTest, GetEventsOrAcrossFilters)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  // Wallet-style use case: "transfers to OR from me".  We fake it
+  // with two filters that differ by topic1 vs topic2.
+  ContractAddress token;
+  std::ranges::fill(token, 0xAA);
+
+  // Three events, all on `token`:
+  //   ev[0]: topic0=0x10 (wrong), topic1=0x42 (me)
+  //   ev[1]: topic0=0x10, topic1=0x42 (me), topic2=0x99
+  //   ev[2]: topic0=0x10, topic1=0x99, topic2=0x42 (me)
+  // With topic0 wrong in ev[0], it shouldn't match; ev[1] matches
+  // "me in topic1"; ev[2] matches "me in topic2".
+  //
+  // But make_event fills all topics with a linear pattern so we
+  // need a more careful constructor for this — inline below.
+  auto make_event_manual = [&](uint32_t n,
+                               std::initializer_list<uint8_t> topic_fills) {
+    TxEmittedEvent e;
+    e.contract_address = token;
+    e.num_topics = n;
+    e.serialized_event.resize(n * 32);
+    size_t idx = 0;
+    for (uint8_t f : topic_fills) {
+      for (size_t i = 0; i < 32; ++i) {
+        e.serialized_event[(idx * 32) + i] = f;
+      }
+      ++idx;
+    }
+    return e;
+  };
+
+  SHA256Hash tx;
+  std::ranges::fill(tx, 0x01);
+  TxEventLog log;
+  log.proposed_tx_hash = tx;
+  log.events.push_back(make_event_manual(2, {0x55, 0x42}));       // ev[0]
+  log.events.push_back(make_event_manual(3, {0x10, 0x42, 0x99})); // ev[1]
+  log.events.push_back(make_event_manual(3, {0x10, 0x99, 0x42})); // ev[2]
+  ASSERT_TRUE(db->consume_events(5, std::vector{log}));
+
+  // Transfer-topic value 0x10, me 0x42.
+  Topic transfer_topic = topic_filled(0x10);
+  Topic me_topic = topic_filled(0x42);
+
+  EventFilter from_me;
+  from_me.contract_addresses.push_back(token);
+  from_me.topics.topic0.push_back(transfer_topic);
+  from_me.topics.topic1.push_back(me_topic);
+
+  EventFilter to_me;
+  to_me.contract_addresses.push_back(token);
+  to_me.topics.topic0.push_back(transfer_topic);
+  to_me.topics.topic2.push_back(me_topic);
+
+  EventFilterList filters;
+  filters.push_back(from_me);
+  filters.push_back(to_me);
+
+  auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->events.size(), 2);
+  EXPECT_EQ(page->events[0].sequence_number, 1);
+  EXPECT_EQ(page->events[1].sequence_number, 2);
+}
+
+TEST_F(IndexDBTest, GetEventsDedupContractAcrossFilters)
+{
+  // Two filters both include the same contract.  An event on that
+  // contract that matches both filters' topics must be emitted
+  // exactly once.
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx;
+  std::ranges::fill(tx, 0x01);
+
+  TxEventLog log;
+  log.proposed_tx_hash = tx;
+  log.events.push_back(make_event(addr, 0, 0));
+  ASSERT_TRUE(db->consume_events(1, std::vector{log}));
+
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+
+  auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+  ASSERT_TRUE(page.has_value());
+  EXPECT_EQ(page->events.size(), 1);
+}
+
+TEST_F(IndexDBTest, GetEventsRejectsEmptyFilters)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  EventQuery q;
+  q.order = IterationOrder::IterationOrderAscending;
+  q.anchor = BlockAnchor(BlockAnchorKind::AnchorAtBeginning);
+  q.limit = 10;
+  // q.filters is empty.
+
+  auto page = db->get_events(q);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_EQ(page->events.size(), 0);
+  EXPECT_TRUE(page->cursor.empty());
+}
+
+TEST_F(IndexDBTest, GetEventsRejectsEmptyContractAddresses)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  EventFilterList filters;
+  filters.push_back(EventFilter{}); // contract_addresses empty
+  EventQuery q;
+  q.filters = filters;
+  q.order = IterationOrder::IterationOrderAscending;
+  q.anchor = BlockAnchor(BlockAnchorKind::AnchorAtBeginning);
+  q.limit = 10;
+
+  auto page = db->get_events(q);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_EQ(page->events.size(), 0);
+}
+
+TEST_F(IndexDBTest, GetEventsAnchorAtHeightInclusive)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  for (int h : {5, 10, 15}) {
+    SHA256Hash tx;
+    std::ranges::fill(tx, static_cast<uint8_t>(h));
+    TxEventLog log;
+    log.proposed_tx_hash = tx;
+    log.events.push_back(make_event(addr, 0, 0));
+    ASSERT_TRUE(db->consume_events(h, std::vector{log}));
+  }
+
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+  auto page = db->get_events(make_query(std::move(filters),
+                                        IterationOrder::IterationOrderAscending,
+                                        anchor_at_height(10)));
+  ASSERT_TRUE(page.has_value());
+  // Anchor=10 inclusive, ascending -> blocks 10 and 15.
+  ASSERT_EQ(page->events.size(), 2);
+  EXPECT_EQ(page->events[0].block_height, 10);
+  EXPECT_EQ(page->events[1].block_height, 15);
+}
+
+// Parity port of the legacy ConsumeAndLookupContractEvents test.
+// Mixed-contract events within a single TxEventLog (the loop in
+// consume_events indexes per-event, not per-tx); per-contract
+// filtering returns the right counts and orderings; a contract
+// with no events yields an empty page.
+TEST_F(IndexDBTest, GetEventsMultiContractInOneTx)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
   BlockHeight block_height = 200;
   SHA256Hash tx_hash1, tx_hash2;
   std::ranges::fill(tx_hash1, 0x10);
@@ -159,85 +576,156 @@ TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
   std::ranges::fill(contract_addr1, 0xCC);
   std::ranges::fill(contract_addr2, 0xDD);
 
-  // First transaction has events from contract1
+  // First tx: two events, both from contract1.
   TxEventLog event_log1;
   event_log1.proposed_tx_hash = tx_hash1;
-  TxEmittedEvent event1a;
-  event1a.contract_address = contract_addr1;
-  event1a.num_topics = 0;
-  event1a.serialized_event.resize(5);
-  std::ranges::fill(event1a.serialized_event, 0x33);
-  event_log1.events.push_back(event1a);
+  event_log1.events.push_back(make_event(contract_addr1, 0, 0));
+  event_log1.events.push_back(make_event(contract_addr1, 2, 0));
 
-  TxEmittedEvent event1b;
-  event1b.contract_address = contract_addr1;
-  event1b.num_topics = 2;
-  event1b.serialized_event.resize(15);
-  std::ranges::fill(event1b.serialized_event, 0x44);
-  event_log1.events.push_back(event1b);
-
-  // Second transaction has events from contract1 and contract2
+  // Second tx: one event from contract1 (seq 0), one from
+  // contract2 (seq 1) — interleaved within the same TxEventLog.
   TxEventLog event_log2;
   event_log2.proposed_tx_hash = tx_hash2;
-  TxEmittedEvent event2a;
-  event2a.contract_address = contract_addr1;
-  event2a.num_topics = 1;
-  event2a.serialized_event.resize(8);
-  std::ranges::fill(event2a.serialized_event, 0x55);
-  event_log2.events.push_back(event2a);
+  event_log2.events.push_back(make_event(contract_addr1, 1, 0));
+  event_log2.events.push_back(make_event(contract_addr2, 0, 0));
 
-  TxEmittedEvent event2b;
-  event2b.contract_address = contract_addr2;
-  event2b.num_topics = 0;
-  event2b.serialized_event.resize(12);
-  std::ranges::fill(event2b.serialized_event, 0x66);
-  event_log2.events.push_back(event2b);
+  ASSERT_TRUE(
+      db->consume_events(block_height, std::vector{event_log1, event_log2}));
 
-  std::vector<TxEventLog> events = {event_log1, event_log2};
+  // Query contract1: expect 3 events (tx1 seq 0, tx1 seq 1, tx2 seq 0).
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({contract_addr1}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 3);
+    EXPECT_EQ(page->events[0].proposed_tx_hash, tx_hash1);
+    EXPECT_EQ(page->events[0].sequence_number, 0);
+    EXPECT_EQ(page->events[0].emitted_event.contract_address, contract_addr1);
+    EXPECT_EQ(page->events[1].proposed_tx_hash, tx_hash1);
+    EXPECT_EQ(page->events[1].sequence_number, 1);
+    EXPECT_EQ(page->events[1].emitted_event.contract_address, contract_addr1);
+    EXPECT_EQ(page->events[2].proposed_tx_hash, tx_hash2);
+    EXPECT_EQ(page->events[2].sequence_number, 0);
+    EXPECT_EQ(page->events[2].emitted_event.contract_address, contract_addr1);
+  }
 
-  // Consume events
-  auto result = db->consume_events(block_height, events);
-  ASSERT_TRUE(result.has_value());
+  // Query contract2: expect 1 event (tx2 seq 1, since the contract2
+  // event was the second in event_log2's events vector).
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({contract_addr2}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].proposed_tx_hash, tx_hash2);
+    EXPECT_EQ(page->events[0].sequence_number, 1);
+    EXPECT_EQ(page->events[0].emitted_event.contract_address, contract_addr2);
+  }
 
-  // Lookup events for contract1 (should have 3 events)
-  auto contract1_events =
-      db->get_contract_events(block_height, block_height + 1, contract_addr1);
-  ASSERT_TRUE(contract1_events.has_value());
-  EXPECT_EQ(contract1_events->size(), 3);
-
-  // Verify the events are correct
-  EXPECT_EQ((*contract1_events)[0].proposed_tx_hash, tx_hash1);
-  EXPECT_EQ((*contract1_events)[0].sequence_number, 0);
-  EXPECT_EQ((*contract1_events)[0].emitted_event.contract_address,
-            contract_addr1);
-
-  EXPECT_EQ((*contract1_events)[1].proposed_tx_hash, tx_hash1);
-  EXPECT_EQ((*contract1_events)[1].sequence_number, 1);
-  EXPECT_EQ((*contract1_events)[1].emitted_event.contract_address,
-            contract_addr1);
-
-  EXPECT_EQ((*contract1_events)[2].proposed_tx_hash, tx_hash2);
-  EXPECT_EQ((*contract1_events)[2].sequence_number, 0);
-  EXPECT_EQ((*contract1_events)[2].emitted_event.contract_address,
-            contract_addr1);
-
-  // Lookup events for contract2 (should have 1 event)
-  auto contract2_events =
-      db->get_contract_events(block_height, block_height + 1, contract_addr2);
-  ASSERT_TRUE(contract2_events.has_value());
-  EXPECT_EQ(contract2_events->size(), 1);
-  EXPECT_EQ((*contract2_events)[0].proposed_tx_hash, tx_hash2);
-  EXPECT_EQ((*contract2_events)[0].sequence_number, 1);
-  EXPECT_EQ((*contract2_events)[0].emitted_event.contract_address,
-            contract_addr2);
-
-  // Lookup events for non-existent contract
-  ContractAddress contract_addr3;
-  std::ranges::fill(contract_addr3, 0xEE);
-  auto contract3_events =
-      db->get_contract_events(block_height, block_height + 1, contract_addr3);
-  ASSERT_TRUE(contract3_events.has_value());
-  EXPECT_TRUE(contract3_events->empty());
+  // Query a contract address with no events: expect an empty page.
+  {
+    ContractAddress contract_addr3;
+    std::ranges::fill(contract_addr3, 0xEE);
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({contract_addr3}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
+    ASSERT_TRUE(page.has_value());
+    EXPECT_TRUE(page->events.empty());
+    EXPECT_TRUE(page->cursor.empty());
+  }
 }
+
+TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  // Initial: no ingestion, latest is 0.
+  EXPECT_EQ(db->latest_block(), 0);
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx;
+  std::ranges::fill(tx, 0x01);
+  TxEventLog log;
+  log.proposed_tx_hash = tx;
+  log.events.push_back(make_event(addr, 0, 0));
+
+  ASSERT_TRUE(db->consume_events(42, std::vector{log}));
+  EXPECT_EQ(db->latest_block(), 42);
+
+  // Non-regressing on a smaller block height (shouldn't happen in
+  // practice but the invariant should hold).
+  SHA256Hash tx2;
+  std::ranges::fill(tx2, 0x02);
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}));
+  EXPECT_EQ(db->latest_block(), 42);
+}
+
+// Regression: with the SeekToLast() initializer, a database whose
+// max-block-height entry lives under a contract that is NOT
+// lexicographically last reported the wrong [latest_block] after
+// restart.  The meta-key initializer must return the true max.
+TEST_F(IndexDBTest, LatestBlockSurvivesRestartWithLowAddrHighBlock)
+{
+  // Low address, high block.
+  ContractAddress addr_low;
+  std::ranges::fill(addr_low, 0x01);
+  SHA256Hash tx_low;
+  std::ranges::fill(tx_low, 0x10);
+  TxEventLog log_low;
+  log_low.proposed_tx_hash = tx_low;
+  log_low.events.push_back(make_event(addr_low, 0, 0));
+
+  // High address, low block.
+  ContractAddress addr_high;
+  std::ranges::fill(addr_high, 0xFF);
+  SHA256Hash tx_high;
+  std::ranges::fill(tx_high, 0x20);
+  TxEventLog log_high;
+  log_high.proposed_tx_hash = tx_high;
+  log_high.events.push_back(make_event(addr_high, 0, 0));
+
+  {
+    auto db = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(db.has_value());
+    ASSERT_TRUE(db->consume_events(500, std::vector{log_low}));
+    ASSERT_TRUE(db->consume_events(100, std::vector{log_high}));
+    EXPECT_EQ(db->latest_block(), 500);
+  }
+
+  // Reopen.  SeekToLast on contract_index would land on addr_high
+  // (block 100); the meta key keeps us at 500.
+  auto db = IndexDB::open(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+  EXPECT_EQ(db->latest_block(), 500);
+}
+
+// Databases that predate the meta key open cleanly: the missing key
+// is treated as an empty database, latest_block defaults to 0, and
+// the next consume_events writes the key.
+TEST_F(IndexDBTest, LatestBlockRecoversAfterRestartWithoutMetaKey)
+{
+  {
+    auto db = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(db.has_value());
+    EXPECT_EQ(db->latest_block(), 0);
+  }
+  auto db = IndexDB::open(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+  EXPECT_EQ(db->latest_block(), 0);
+}
+
+// NOLINTEND(misc-include-cleaner)
 
 } // namespace hogd
