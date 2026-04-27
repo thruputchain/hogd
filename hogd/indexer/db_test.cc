@@ -233,17 +233,17 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
   std::ranges::fill(tx2, 0x02);
 
   // Block 10: one event; block 20: two events.
-  TxEventLog log1;
-  log1.proposed_tx_hash = tx1;
-  log1.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx1;
+  event_log1.events.push_back(make_event(addr, 0, 0));
 
-  TxEventLog log2;
-  log2.proposed_tx_hash = tx2;
-  log2.events.push_back(make_event(addr, 0, 0));
-  log2.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
+  event_log2.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{log1}));
-  ASSERT_TRUE(db->consume_events(20, std::vector{log2}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
+  ASSERT_TRUE(db->consume_events(20, std::vector{event_log2}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -274,16 +274,16 @@ TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
   std::ranges::fill(tx1, 0x01);
   std::ranges::fill(tx2, 0x02);
 
-  TxEventLog log1;
-  log1.proposed_tx_hash = tx1;
-  log1.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx1;
+  event_log1.events.push_back(make_event(addr, 0, 0));
 
-  TxEventLog log2;
-  log2.proposed_tx_hash = tx2;
-  log2.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{log1}));
-  ASSERT_TRUE(db->consume_events(20, std::vector{log2}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}));
+  ASSERT_TRUE(db->consume_events(20, std::vector{event_log2}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
@@ -580,11 +580,65 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   // practice but the invariant should hold).
   SHA256Hash tx2;
   std::ranges::fill(tx2, 0x02);
-  TxEventLog log2;
-  log2.proposed_tx_hash = tx2;
-  log2.events.push_back(make_event(addr, 0, 0));
-  ASSERT_TRUE(db->consume_events(10, std::vector{log2}));
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}));
   EXPECT_EQ(db->latest_block(), 42);
+}
+
+// Regression: with the SeekToLast() initializer, a database whose
+// max-block-height entry lives under a contract that is NOT
+// lexicographically last reported the wrong [latest_block] after
+// restart.  The meta-key initializer must return the true max.
+TEST_F(IndexDBTest, LatestBlockSurvivesRestartWithLowAddrHighBlock)
+{
+  // Low address, high block.
+  ContractAddress addr_low;
+  std::ranges::fill(addr_low, 0x01);
+  SHA256Hash tx_low;
+  std::ranges::fill(tx_low, 0x10);
+  TxEventLog log_low;
+  log_low.proposed_tx_hash = tx_low;
+  log_low.events.push_back(make_event(addr_low, 0, 0));
+
+  // High address, low block.
+  ContractAddress addr_high;
+  std::ranges::fill(addr_high, 0xFF);
+  SHA256Hash tx_high;
+  std::ranges::fill(tx_high, 0x20);
+  TxEventLog log_high;
+  log_high.proposed_tx_hash = tx_high;
+  log_high.events.push_back(make_event(addr_high, 0, 0));
+
+  {
+    auto db = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(db.has_value());
+    ASSERT_TRUE(db->consume_events(500, std::vector{log_low}));
+    ASSERT_TRUE(db->consume_events(100, std::vector{log_high}));
+    EXPECT_EQ(db->latest_block(), 500);
+  }
+
+  // Reopen.  SeekToLast on contract_index would land on addr_high
+  // (block 100); the meta key keeps us at 500.
+  auto db = IndexDB::open(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+  EXPECT_EQ(db->latest_block(), 500);
+}
+
+// Databases that predate the meta key open cleanly: the missing key
+// is treated as an empty database, latest_block defaults to 0, and
+// the next consume_events writes the key.
+TEST_F(IndexDBTest, LatestBlockRecoversAfterRestartWithoutMetaKey)
+{
+  {
+    auto db = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(db.has_value());
+    EXPECT_EQ(db->latest_block(), 0);
+  }
+  auto db = IndexDB::open(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+  EXPECT_EQ(db->latest_block(), 0);
 }
 
 // NOLINTEND(misc-include-cleaner)
