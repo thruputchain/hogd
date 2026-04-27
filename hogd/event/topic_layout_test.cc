@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #include "event.hh"
 #include "indexer.hh"
@@ -54,6 +53,7 @@ TEST(TopicLayoutTest, TopicViewZeroTopicsReturnsNullopt)
   EXPECT_FALSE(topic_view(e, 2).has_value());
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(TopicLayoutTest, TopicViewMaxTopicsReturnsCorrectSlices)
 {
   auto e = make_event(/*num_topics=*/3, /*topic_fill_start=*/0x10);
@@ -70,6 +70,7 @@ TEST(TopicLayoutTest, TopicViewMaxTopicsReturnsCorrectSlices)
   ASSERT_TRUE(t2.has_value());
   EXPECT_EQ((*t2)[0], 0x12);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 TEST(TopicLayoutTest, TopicViewIndexPastNumTopicsReturnsNullopt)
 {

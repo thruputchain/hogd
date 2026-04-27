@@ -9,6 +9,7 @@
 
 #include "event_cursor_internal.hh"
 #include "pagination.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -29,6 +30,7 @@ make_payload(IterationOrder order, BlockHeight block, std::uint8_t tx_fill,
 
 } // namespace
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(EventCursorTest, RoundTripAscending)
 {
   auto in =
@@ -36,10 +38,7 @@ TEST(EventCursorTest, RoundTripAscending)
   std::string encoded = cursor::encode(in);
   auto decoded = cursor::decode(encoded);
   ASSERT_TRUE(decoded.has_value());
-  EXPECT_EQ(decoded->order, in.order);
-  EXPECT_EQ(decoded->block_height, in.block_height);
-  EXPECT_EQ(decoded->tx_hash, in.tx_hash);
-  EXPECT_EQ(decoded->sequence_number, in.sequence_number);
+  ASSERT_EQ(*decoded, in);
 }
 
 TEST(EventCursorTest, RoundTripDescending)
@@ -49,11 +48,9 @@ TEST(EventCursorTest, RoundTripDescending)
   std::string encoded = cursor::encode(in);
   auto decoded = cursor::decode(encoded);
   ASSERT_TRUE(decoded.has_value());
-  EXPECT_EQ(decoded->order, in.order);
-  EXPECT_EQ(decoded->block_height, in.block_height);
-  EXPECT_EQ(decoded->tx_hash, in.tx_hash);
-  EXPECT_EQ(decoded->sequence_number, in.sequence_number);
+  ASSERT_EQ(*decoded, in);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 TEST(EventCursorTest, EmptyInputRejected)
 {
@@ -80,7 +77,7 @@ TEST(EventCursorTest, VersionMismatchRejected)
   // kCursorVersion.  Decode should reject.
   auto in = make_payload(IterationOrder::IterationOrderAscending, 1, 0x01, 0);
   std::string encoded = cursor::encode(in);
-  ASSERT_GE(encoded.size(), 4u);
+  ASSERT_GE(encoded.size(), 4U);
   // XDR encodes uint32 big-endian at offset 0.  Set to 0xFFFFFFFF.
   encoded[0] = static_cast<char>(0xFF);
   encoded[1] = static_cast<char>(0xFF);
@@ -89,6 +86,7 @@ TEST(EventCursorTest, VersionMismatchRejected)
   EXPECT_FALSE(cursor::decode(encoded).has_value());
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(EventCursorTest, EncodeOverwritesSchemaVersion)
 {
   // encode() always stamps `kCursorVersion`, even if the caller
@@ -100,5 +98,6 @@ TEST(EventCursorTest, EncodeOverwritesSchemaVersion)
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(decoded->schema_version, cursor::kCursorVersion);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

@@ -44,7 +44,7 @@ TEST_F(IndexDBTest, CreateNew)
 TEST_F(IndexDBTest, ClampEventsLimitDefaultsAndCaps)
 {
   EXPECT_EQ(IndexDB::clamp_events_limit(0), IndexDB::kEventsDefaultLimit);
-  EXPECT_EQ(IndexDB::clamp_events_limit(1), 1u);
+  EXPECT_EQ(IndexDB::clamp_events_limit(1), 1U);
   EXPECT_EQ(IndexDB::clamp_events_limit(IndexDB::kEventsMaxLimit),
             IndexDB::kEventsMaxLimit);
   EXPECT_EQ(IndexDB::clamp_events_limit(IndexDB::kEventsMaxLimit + 1),

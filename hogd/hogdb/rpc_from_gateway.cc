@@ -1,6 +1,7 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 
 #include <algorithm>
+#include <cstring>
 #include <span>
 #include <utility>
 

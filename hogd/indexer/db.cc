@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1133,7 +1135,9 @@ IndexDB::get_events(EventQuery const &query) const
   }
 
   // Seek each iterator to the anchor.
-  Position cursor_pos{cursor_block, cursor_tx, cursor_seq};
+  Position cursor_pos{.block = cursor_block,
+                      .tx = cursor_tx,
+                      .seq = cursor_seq};
   for (ContractIter &ci : iters) {
     ci.seek(anchor_block, order);
     if (have_cursor && ci.has_current()) {
