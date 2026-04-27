@@ -355,6 +355,15 @@ public:
 
   AuthToken const *lookup_auth_token(uint32_t token_id) const;
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
+
+  struct ConsumeAuthTokenResult {
+    AuthTokenPayload payload;
+    uint32_t new_token_id_start;
+    uint32_t new_token_id_count;
+  };
+  SyscallStatus<ConsumeAuthTokenResult>
+  consume_auth_token(uint32_t token_id);
+
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
 
   size_t size() const { return frame_stack_.size(); }

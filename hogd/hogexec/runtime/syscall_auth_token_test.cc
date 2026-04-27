@@ -155,6 +155,232 @@ TEST_P(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+class SyscallAuthTokenConsumeTest : public ::testing::Test,
+                                    public NativeContractTestFramework {
+public:
+  SyscallAuthTokenConsumeTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
+};
+
+TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  auto contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             AuthTokenNode grandchild{.consumer_address = kAddr,
+                                      .payload = x23::serialize(200U),
+                                      .child_nodes = {}};
+             AuthTokenNode child0{.consumer_address = kAddr,
+                                  .payload = x23::serialize(100U),
+                                  .child_nodes = {grandchild}};
+             AuthTokenNode child1{.consumer_address = kAddr,
+                                  .payload = x23::serialize(300U),
+                                  .child_nodes = {}};
+             AuthTokenNode root{.consumer_address = kAddr,
+                                .payload = x23::serialize(42U),
+                                .child_nodes = {child0, child1}};
+
+             auto serialized = x23::serialize(root);
+             uint32_t root_id = 0;
+             auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+                 BlockHeight{1000},
+                 std::span<const std::byte>{
+                     reinterpret_cast<const std::byte *>(serialized.data()),
+                     serialized.size()},
+                 root_id);
+             EXPECT_TRUE(mint_res.has_value());
+             EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+             // Consume root -> payload=42, 2 children
+             std::array<std::byte, 256> payload_buf{};
+             uint32_t child_start = 0, child_count = 0;
+             auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                 root_id, std::span<std::byte>{payload_buf}, child_start,
+                 child_count);
+             EXPECT_TRUE(consume_res.has_value());
+             EXPECT_EQ(consume_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(child_count, 2U);
+             auto expected_root_payload = x23::serialize(42U);
+             EXPECT_EQ(std::memcmp(payload_buf.data(),
+                                   expected_root_payload.data(),
+                                   expected_root_payload.size()),
+                        0);
+
+             // Consume child0 -> payload=100, 1 grandchild
+             std::array<std::byte, 256> c0_payload{};
+             uint32_t gc_start = 0, gc_count = 0;
+             auto c0_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                 child_start, std::span<std::byte>{c0_payload}, gc_start,
+                 gc_count);
+             EXPECT_TRUE(c0_res.has_value());
+             EXPECT_EQ(c0_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(gc_count, 1U);
+             auto expected_c0_payload = x23::serialize(100U);
+             EXPECT_EQ(std::memcmp(c0_payload.data(),
+                                   expected_c0_payload.data(),
+                                   expected_c0_payload.size()),
+                        0);
+
+             // Consume child1 -> payload=300, 0 grandchildren
+             std::array<std::byte, 256> c1_payload{};
+             uint32_t unused_start = 0, c1_count = 0;
+             auto c1_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                 child_start + 1, std::span<std::byte>{c1_payload},
+                 unused_start, c1_count);
+             EXPECT_TRUE(c1_res.has_value());
+             EXPECT_EQ(c1_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(c1_count, 0U);
+             auto expected_c1_payload = x23::serialize(300U);
+             EXPECT_EQ(std::memcmp(c1_payload.data(),
+                                   expected_c1_payload.data(),
+                                   expected_c1_payload.size()),
+                        0);
+
+             // Consume grandchild -> payload=200, 0 children
+             std::array<std::byte, 256> gc_payload{};
+             uint32_t gc_unused_start = 0, gc_gc_count = 0;
+             auto gc_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                 gc_start, std::span<std::byte>{gc_payload}, gc_unused_start,
+                 gc_gc_count);
+             EXPECT_TRUE(gc_res.has_value());
+             EXPECT_EQ(gc_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(gc_gc_count, 0U);
+             auto expected_gc_payload = x23::serialize(200U);
+             EXPECT_EQ(std::memcmp(gc_payload.data(),
+                                   expected_gc_payload.data(),
+                                   expected_gc_payload.size()),
+                        0);
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+class SyscallAuthTokenExpiryTest : public ::testing::Test,
+                                   public NativeContractTestFramework {
+public:
+  SyscallAuthTokenExpiryTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
+};
+
+TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  auto contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             BlockHeight current_height{};
+             auto h_res =
+                 ctx.syscall<SyscallNo::kGetBlockHeight>(current_height);
+             EXPECT_TRUE(h_res.has_value());
+             EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+             auto make_and_mint =
+                 [&](BlockHeight expiry) -> uint32_t {
+               AuthTokenNode node{.consumer_address = kAddr,
+                                  .payload = x23::serialize(1U),
+                                  .child_nodes = {}};
+               auto serialized = x23::serialize(node);
+               uint32_t id = 0;
+               auto r = ctx.syscall<SyscallNo::kMintAuthToken>(
+                   expiry,
+                   std::span<const std::byte>{
+                       reinterpret_cast<const std::byte *>(serialized.data()),
+                       serialized.size()},
+                   id);
+               EXPECT_TRUE(r.has_value());
+               EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+               return id;
+             };
+
+             // expiry == block height: token is NOT expired (< is false)
+             {
+               uint32_t id = make_and_mint(current_height);
+               std::array<std::byte, 256> buf{};
+               uint32_t s = 0, c = 0;
+               auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                   id, std::span<std::byte>{buf}, s, c);
+               EXPECT_TRUE(r.has_value());
+               EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             }
+
+             // expiry < block height: token IS expired
+             if (current_height > BlockHeight{0}) {
+               uint32_t id =
+                   make_and_mint(BlockHeight{current_height - 1});
+               std::array<std::byte, 256> buf{};
+               uint32_t s = 0, c = 0;
+               auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                   id, std::span<std::byte>{buf}, s, c);
+               EXPECT_TRUE(r.has_value());
+               EXPECT_EQ(r.value(),
+                          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, SyscallAuthTokenTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

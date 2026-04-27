@@ -274,4 +274,51 @@ syscall_MintAuthToken_inner(
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_ConsumeAuthToken_inner(
+    SystemCallHandler &syscall_handler, uint32_t input_token_id,
+    std::span<std::byte> output_auth_payload,
+    uint32_t &output_unwrapped_token_id_start,
+    uint32_t &output_unwrapped_token_id_count) noexcept
+{
+  auto height = syscall_handler.get_block_height();
+  if (!height) {
+    return {height.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+
+  auto status = syscall_handler.consume_auth_token(input_token_id, *height);
+  if (!status) {
+    return {status.error().code(), WrappedGasAmount{0}};
+  }
+
+  auto const &result = *status;
+
+  auto payload_bytes = std::as_bytes(
+      std::span<const uint8_t>{result.payload.data(), result.payload.size()});
+  auto copy_len = std::min<size_t>(payload_bytes.size(),
+                                   output_auth_payload.size());
+  if (copy_len > 0) {
+    std::memcpy(output_auth_payload.data(), payload_bytes.data(), copy_len);
+  }
+
+  output_unwrapped_token_id_start = result.new_token_id_start;
+  output_unwrapped_token_id_count = result.new_token_id_count;
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kConsumeAuthToken>()) {
+    try {
+      trace_data->outputs.emplace(SyscallConsumeAuthTokenOutputs{
+          .payload = result.payload,
+          .unwrapped_token_id_start = result.new_token_id_start,
+          .unwrapped_token_id_count = result.new_token_id_count});
+    } catch (std::exception &e) {
+      panic("Failed to trace syscall {}: {}", SyscallNo::kConsumeAuthToken,
+            e.what());
+    }
+  }
+
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
 } // namespace hogd

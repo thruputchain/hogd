@@ -327,6 +327,8 @@ public:
 
   // Auth token syscalls
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
+  SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
+  consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
   // == Block statistics syscalls ==
   // These are based on reading the db tip.
