@@ -33,7 +33,8 @@ class SyscallAuthTokenTest : public ::testing::Test,
 public:
   SyscallAuthTokenTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB)
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
   {}
 };
 
