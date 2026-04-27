@@ -202,8 +202,8 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              uint32_t child_start = 0, child_count = 0;
              RuntimeMemoryLength payload_written_len = 0;
              auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 root_id, std::span<std::byte>{payload_buf}, payload_written_len, child_start,
-                 child_count);
+                 root_id, std::span<std::byte>{payload_buf},
+                 payload_written_len, child_start, child_count);
              EXPECT_TRUE(consume_res.has_value());
              EXPECT_EQ(consume_res.value(),
                        SyscallErrorCode::kSyscallErrorCodeNone);
@@ -220,8 +220,8 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              RuntimeMemoryLength c0_payload_written_len = 0;
              uint32_t gc_start = 0, gc_count = 0;
              auto c0_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 child_start, std::span<std::byte>{c0_payload}, c0_payload_written_len, gc_start,
-                 gc_count);
+                 child_start, std::span<std::byte>{c0_payload},
+                 c0_payload_written_len, gc_start, gc_count);
              EXPECT_TRUE(c0_res.has_value());
              EXPECT_EQ(c0_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
              EXPECT_EQ(gc_count, 1U);
@@ -253,8 +253,8 @@ TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
              RuntimeMemoryLength gc_payload_written_len = 0;
              uint32_t gc_unused_start = 0, gc_gc_count = 0;
              auto gc_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 gc_start, std::span<std::byte>{gc_payload}, gc_payload_written_len, gc_unused_start,
-                 gc_gc_count);
+                 gc_start, std::span<std::byte>{gc_payload},
+                 gc_payload_written_len, gc_unused_start, gc_gc_count);
              EXPECT_TRUE(gc_res.has_value());
              EXPECT_EQ(gc_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
              EXPECT_EQ(gc_gc_count, 0U);
@@ -415,19 +415,18 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
              auto past = try_mint(BlockHeight{current_height - 1});
              EXPECT_TRUE(past.has_value());
              EXPECT_EQ(past.value(),
-                        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
              // current height: accepted (< is false)
              auto present = try_mint(current_height);
              EXPECT_TRUE(present.has_value());
              EXPECT_EQ(present.value(),
-                        SyscallErrorCode::kSyscallErrorCodeNone);
+                       SyscallErrorCode::kSyscallErrorCodeNone);
 
              // future height: accepted
              auto future = try_mint(BlockHeight{current_height + 1});
              EXPECT_TRUE(future.has_value());
-             EXPECT_EQ(future.value(),
-                        SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(future.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
              return {};
            }}});
