@@ -1112,7 +1112,7 @@ IndexDB::get_events(EventQuery const &query) const
   uint32_t cursor_seq = 0;
 
   if (!query.cursor.empty()) {
-    auto decoded = EventCursor::decode(
+    auto decoded = cursor::decode(
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
     if (!decoded) {
@@ -1290,9 +1290,12 @@ IndexDB::get_events(EventQuery const &query) const
 
   if (any_more) {
     if (any_emitted) {
-      std::string encoded =
-          EventCursor::encode(order, last_emitted_block, last_emitted_tx,
-                              last_emitted_seq);
+      EventCursorPayload payload;
+      payload.order = order;
+      payload.block_height = last_emitted_block;
+      payload.tx_hash = last_emitted_tx;
+      payload.sequence_number = last_emitted_seq;
+      std::string encoded = cursor::encode(payload);
       page.cursor.append_range(std::span<const uint8_t>(
           reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
     }

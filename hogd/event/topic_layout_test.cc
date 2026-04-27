@@ -110,7 +110,7 @@ TEST(TopicLayoutTest, EventTopicsMatchPositionalAndAcrossOrWithin)
   filter.topic1.push_back(topic_filled(0x43));
 
   // Match: topic0=0x10, topic1=0x42, topic2=anything (3 topics).
-  auto match = make_event(3, 0x10); // fill 0x10, 0x11, 0x12
+  auto match = make_event(3, 0x10);                // fill 0x10, 0x11, 0x12
   EXPECT_FALSE(event_topics_match(filter, match)); // topic1=0x11, not 0x42/43
 
   // Build an event with explicitly-controlled topics.

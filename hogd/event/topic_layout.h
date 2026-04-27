@@ -41,7 +41,7 @@ topic_view(TxEmittedEvent const &event, std::uint32_t index);
 // than the filter mentions.  If the event has FEWER topics than
 // the filter specifies a non-empty list at, the event fails the
 // match.
-[[nodiscard]] bool
-event_topics_match(EventTopicFilter const &filter, TxEmittedEvent const &event);
+[[nodiscard]] bool event_topics_match(EventTopicFilter const &filter,
+                                      TxEmittedEvent const &event);
 
 } // namespace hogd

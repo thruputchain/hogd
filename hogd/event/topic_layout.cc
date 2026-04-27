@@ -17,8 +17,7 @@ topic_view(TxEmittedEvent const &event, std::uint32_t index)
   if (index >= event.num_topics) {
     return std::nullopt;
   }
-  const std::size_t offset =
-      static_cast<std::size_t>(index) * kTopicSizeBytes;
+  const std::size_t offset = static_cast<std::size_t>(index) * kTopicSizeBytes;
   if (event.serialized_event.size() < offset + kTopicSizeBytes) {
     // Malformed event: num_topics claims more topics than
     // serialized_event can hold.  Treat as no topic at this
