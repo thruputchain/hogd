@@ -41,6 +41,17 @@ TEST_F(IndexDBTest, CreateNew)
   EXPECT_TRUE(db->is_open());
 }
 
+TEST_F(IndexDBTest, ClampEventsLimitDefaultsAndCaps)
+{
+  EXPECT_EQ(IndexDB::clamp_events_limit(0), IndexDB::kEventsDefaultLimit);
+  EXPECT_EQ(IndexDB::clamp_events_limit(1), 1u);
+  EXPECT_EQ(IndexDB::clamp_events_limit(IndexDB::kEventsMaxLimit),
+            IndexDB::kEventsMaxLimit);
+  EXPECT_EQ(IndexDB::clamp_events_limit(IndexDB::kEventsMaxLimit + 1),
+            IndexDB::kEventsMaxLimit);
+  EXPECT_EQ(IndexDB::clamp_events_limit(1'000'000), IndexDB::kEventsMaxLimit);
+}
+
 // Test that creating a new database fails if one already exists
 TEST_F(IndexDBTest, CreateNewFailsIfExists)
 {

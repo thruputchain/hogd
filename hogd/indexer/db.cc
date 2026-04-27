@@ -1101,7 +1101,7 @@ IndexDB::get_events(EventQuery const &query) const
   }
 
   // Clamp limit.
-  const uint32_t limit = clamp_events_limit(query.limit);
+  const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
 
   // Decode cursor if present; else use the query's anchor/order.
   IterationOrder order;

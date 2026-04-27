@@ -31,8 +31,8 @@ make_payload(IterationOrder order, BlockHeight block, std::uint8_t tx_fill,
 
 TEST(EventCursorTest, RoundTripAscending)
 {
-  auto in = make_payload(IterationOrder::IterationOrderAscending, 100, 0xAB,
-                         42);
+  auto in =
+      make_payload(IterationOrder::IterationOrderAscending, 100, 0xAB, 42);
   std::string encoded = cursor::encode(in);
   auto decoded = cursor::decode(encoded);
   ASSERT_TRUE(decoded.has_value());
@@ -44,8 +44,8 @@ TEST(EventCursorTest, RoundTripAscending)
 
 TEST(EventCursorTest, RoundTripDescending)
 {
-  auto in = make_payload(IterationOrder::IterationOrderDescending, 9999, 0x77,
-                         0);
+  auto in =
+      make_payload(IterationOrder::IterationOrderDescending, 9999, 0x77, 0);
   std::string encoded = cursor::encode(in);
   auto decoded = cursor::decode(encoded);
   ASSERT_TRUE(decoded.has_value());
@@ -99,15 +99,6 @@ TEST(EventCursorTest, EncodeOverwritesSchemaVersion)
   auto decoded = cursor::decode(encoded);
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(decoded->schema_version, cursor::kCursorVersion);
-}
-
-TEST(EventCursorTest, ClampLimitDefaultsAndCaps)
-{
-  EXPECT_EQ(clamp_events_limit(0), kEventsDefaultLimit);
-  EXPECT_EQ(clamp_events_limit(1), 1u);
-  EXPECT_EQ(clamp_events_limit(kEventsMaxLimit), kEventsMaxLimit);
-  EXPECT_EQ(clamp_events_limit(kEventsMaxLimit + 1), kEventsMaxLimit);
-  EXPECT_EQ(clamp_events_limit(1'000'000), kEventsMaxLimit);
 }
 
 } // namespace hogd

@@ -31,24 +31,3 @@ inline constexpr std::size_t kMaxCursorBytes = 256;
 [[nodiscard]] std::optional<EventCursorPayload> decode(std::string_view bytes);
 
 } // namespace hogd::cursor
-
-namespace hogd {
-
-// Limit clamping constants for get_events.  Limit of 0 is interpreted
-// as "server default"; any value outside [1, kMax] is clamped.
-inline constexpr std::uint32_t kEventsDefaultLimit = 50;
-inline constexpr std::uint32_t kEventsMaxLimit = 200;
-
-[[nodiscard]] inline std::uint32_t
-clamp_events_limit(std::uint32_t requested)
-{
-  if (requested == 0) {
-    return kEventsDefaultLimit;
-  }
-  if (requested > kEventsMaxLimit) {
-    return kEventsMaxLimit;
-  }
-  return requested;
-}
-
-} // namespace hogd
