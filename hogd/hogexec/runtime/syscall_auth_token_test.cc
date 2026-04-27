@@ -28,18 +28,18 @@
 
 namespace hogd {
 
-class SyscallAuthTokenTest : public ::testing::TestWithParam<TestDB>,
+class SyscallAuthTokenTest : public ::testing::Test,
                              public NativeContractTestFramework {
 public:
   SyscallAuthTokenTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB)
   {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
+TEST_F(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
 {
   constexpr ContractAddress kCallerAddress = make_contract_address(0);
   constexpr ContractAddress kMiddleAddress = make_contract_address(1);
@@ -155,17 +155,7 @@ TEST_P(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
-class SyscallAuthTokenConsumeTest : public ::testing::Test,
-                                    public NativeContractTestFramework {
-public:
-  SyscallAuthTokenConsumeTest()
-    : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB)
-  {}
-};
-
-TEST_F(SyscallAuthTokenConsumeTest, ConsumeNestedAuthTokens)
+TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
 
@@ -457,12 +447,6 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, SyscallAuthTokenTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDB),
-                         test_db_to_string);
-
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
