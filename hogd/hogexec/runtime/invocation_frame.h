@@ -191,6 +191,11 @@ public:
     }
   }
 
+  std::span<const uint32_t> get_child_forwarded_auth_tokens() const
+  {
+    return most_recent_child_frame_forwarded_auth_tokens_;
+  }
+
 private:
   const ContractAddress address_;
   const Calldata calldata_;
@@ -299,6 +304,17 @@ public:
   {
     assert(!frame_stack_.empty());
     return frame_stack_.back().calldata();
+  }
+
+  std::span<const uint32_t>
+  get_current_frame_parent_supplied_auth_tokens() const
+  {
+    assert(!frame_stack_.empty());
+    if (frame_stack_.size() < 2) {
+      return std::span<const uint32_t>();
+    }
+    return frame_stack_[frame_stack_.size() - 2]
+        .get_child_forwarded_auth_tokens();
   }
 
   void log_event(TxEmittedEvent event)
