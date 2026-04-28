@@ -2,6 +2,10 @@ echo "prepare the environment for building hogd"
 
 set -ex
 
+echo 'setting up ssh-agent'
+eval "$(ssh-agent -s)" || true
+ssh-add ~/.ssh/id_* 2>/dev/null || true
+
 echo 'setting up cargo'
 source ./scripts/ci/setup_cargo.sh
 
