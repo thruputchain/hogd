@@ -990,6 +990,10 @@ public:
       if (!at_or_past_cursor) {
         // Iterator is still behind the cursor — shouldn't happen
         // after a correct seek, but advance defensively.
+        // advance(order) calls Next() ascending and Prev()
+        // descending, so each iteration converges toward (and
+        // eventually past) the cursor; the loop terminates once
+        // the comparison flips or the iterator runs out.
         advance(order);
         continue;
       }

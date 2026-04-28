@@ -26,6 +26,12 @@ decode(std::string_view bytes)
     return std::nullopt;
   }
   EventCursorPayload payload;
+  // Only XdrException is caught: the payload schema is fixed-size
+  // (no Vec / opaque<>), so x23::deserialize doesn't allocate and
+  // can't throw bad_alloc.  If a future schema change adds a
+  // variable-length field, broaden this catch to std::exception so
+  // an allocation failure surfaces as a rejected cursor rather than
+  // killing the gateway handler.
   try {
     x23::deserialize(&payload,
                      x23::BufView{reinterpret_cast<const std::uint8_t *>(
