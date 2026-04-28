@@ -100,6 +100,70 @@ Scheduler::get_account_state(const ContractAddress &address)
   return {value_ptr, std::move(lock)};
 }
 
+void
+Scheduler::start_pending_nomination(BlockID block_id)
+{
+  CHECK_EQ(pending_nomination_.block_id, 0UL);
+  pending_nomination_.block_id = block_id;
+}
+
+void
+Scheduler::commit_pending_nomination(BlockID block_id)
+{
+  CHECK_NE(block_id, 0UL);
+  CHECK_EQ(pending_nomination_.block_id, block_id);
+  std::unordered_set<ContractAddress> touched_accounts =
+      pending_nomination_.touched_accounts;
+  for (const auto &[account, hog_age] : pending_nomination_.hog_ages) {
+    auto [account_state, lock] = get_account_state(account);
+    account_state->hog_age = hog_age;
+  }
+  pending_nomination_.clear();
+  refresh_ready_accounts(touched_accounts);
+}
+
+void
+Scheduler::abandon_pending_nomination(BlockID block_id)
+{
+  CHECK_NE(block_id, 0UL);
+  CHECK_EQ(pending_nomination_.block_id, block_id);
+  std::unordered_set<ContractAddress> touched_accounts =
+      pending_nomination_.touched_accounts;
+  pending_nomination_.clear();
+  refresh_ready_accounts(touched_accounts);
+}
+
+x23::Async<void>
+Scheduler::apply_committed_block_hog_ages(
+    const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height)
+{
+  const auto &[_, missing] = co_await read_average_hog_ages(txs);
+  CHECK(missing.empty());
+
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
+
+  std::unordered_map<ContractAddress, uint128_t> hogs_spent_by_account;
+  hogs_spent_by_account.reserve(txs.size());
+  std::unordered_set<ContractAddress> touched_accounts;
+  touched_accounts.reserve(txs.size());
+
+  for (const SignedTransaction &tx : txs) {
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    touched_accounts.insert(account);
+    apply_committed_tx_hog_age(tx, hogs_spent_by_account);
+  }
+  for (const auto &[account, num_hogs] : hogs_spent_by_account) {
+    if (!num_hogs) {
+      continue;
+    }
+    auto [account_state, lock] = get_account_state(account);
+    move_hogs_to_already_scheduled_group(account_state->hog_age, num_hogs,
+                                         block_height);
+  }
+  refresh_ready_accounts(touched_accounts);
+}
+
 x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 {
@@ -203,9 +267,36 @@ Scheduler::AccountKey
 Scheduler::get_account_key(const ContractAddress &account)
 {
   // TODO(jhumphri): If the age is 0 (due to no hogs), set the age to INT_MAX.
-  const auto [hog_age, lock] = get_cached_hog_age(account);
-  BlockHeight average_hog_age = hog_age->average_ages[kHogAgeGroupToSchedule];
+  const auto [account_state, lock] = get_account_state(account);
+  const HogAge &hog_age = get_hog_age_for_account(*account_state, account);
+  BlockHeight average_hog_age = hog_age.average_ages[kHogAgeGroupToSchedule];
   return {.average_hog_age = average_hog_age, .account = account};
+}
+
+HogAge *
+Scheduler::get_hog_age_for_schedule(AccountState &account_state,
+                                    const ContractAddress &account)
+{
+  if (!pending_nomination_.block_id) {
+    return &account_state.hog_age;
+  }
+  auto [it, inserted] =
+      pending_nomination_.hog_ages.try_emplace(account, account_state.hog_age);
+  pending_nomination_.touched_accounts.insert(account);
+  return &it->second;
+}
+
+const HogAge &
+Scheduler::get_hog_age_for_account(const AccountState &account_state,
+                                   const ContractAddress &account) const
+{
+  if (pending_nomination_.block_id) {
+    auto it = pending_nomination_.hog_ages.find(account);
+    if (it != pending_nomination_.hog_ages.end()) {
+      return it->second;
+    }
+  }
+  return account_state.hog_age;
 }
 
 bool
@@ -299,55 +390,50 @@ void
 Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 {
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
-    auto [hog_age, lock] = get_cached_hog_age(account);
-
-    const uint128_t to_schedule =
-        from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]);
-    const BlockHeight to_schedule_age =
-        hog_age->average_ages[kHogAgeGroupToSchedule];
-
-    const uint128_t already_scheduled =
-        from_xdr(hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]);
-    const BlockHeight already_scheduled_age =
-        hog_age->average_ages[kHogAgeGroupAlreadyScheduled];
-
-    const uint128_t received =
-        from_xdr(hog_age->num_hogs[kHogAgeGroupReceived]);
-    const BlockHeight received_age =
-        hog_age->average_ages[kHogAgeGroupReceived];
-
-    bool already_scheduled_average_older = false;
-    bool combined_averages_older = false;
-    if (already_scheduled > 0) {
-      already_scheduled_average_older =
-          (already_scheduled_age < to_schedule_age);
-      combined_averages_older =
-          (received > 0) &&
-          (compute_average_age(already_scheduled, already_scheduled_age,
-                               received, received_age) < to_schedule_age);
-    }
-    else {
-      combined_averages_older =
-          (received > 0) && (received_age < to_schedule_age);
-    }
-
-    // We should cycle if either of the following is true:
-    // 1. Cycling will increase the average age of the
-    //    [kHogAgeGroupToSchedule] group. These are the first two operands of
-    //    the boolean OR statement.
-    //
-    // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
-    //    schedule a tx that requires [gas_limit] hogs, but cycling will add
-    //    enough hogs to the group to schedule it. This is the third operand
-    //    of the boolean OR statement.
-    if (already_scheduled_average_older || combined_averages_older ||
-        gas_limit > to_schedule) {
-      cycle_groups(*hog_age);
-    }
-    else {
+    auto [account_state, lock] = get_account_state(account);
+    HogAge *hog_age = get_hog_age_for_schedule(*account_state, account);
+    if (!cycle_if_needed(*hog_age, gas_limit)) {
       break;
     }
   }
+}
+
+bool
+Scheduler::cycle_if_needed(HogAge &hog_age, GasAmount gas_limit)
+{
+  const uint128_t to_schedule =
+      from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
+  const BlockHeight to_schedule_age =
+      hog_age.average_ages[kHogAgeGroupToSchedule];
+
+  const uint128_t already_scheduled =
+      from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const BlockHeight already_scheduled_age =
+      hog_age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+  const uint128_t received = from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]);
+  const BlockHeight received_age = hog_age.average_ages[kHogAgeGroupReceived];
+
+  bool already_scheduled_average_older = false;
+  bool combined_averages_older = false;
+  if (already_scheduled > 0) {
+    already_scheduled_average_older = (already_scheduled_age < to_schedule_age);
+    combined_averages_older =
+        (received > 0) &&
+        (compute_average_age(already_scheduled, already_scheduled_age, received,
+                             received_age) < to_schedule_age);
+  }
+  else {
+    combined_averages_older =
+        (received > 0) && (received_age < to_schedule_age);
+  }
+
+  if (already_scheduled_average_older || combined_averages_older ||
+      gas_limit > to_schedule) {
+    cycle_groups(hog_age);
+    return true;
+  }
+  return false;
 }
 
 void
@@ -477,6 +563,28 @@ Scheduler::process_transfers_helper(const Delta &delta,
   *const_cast<HogAge *>(averages) = new_averages;
 }
 
+void
+Scheduler::apply_committed_tx_hog_age(
+    const SignedTransaction &tx,
+    std::unordered_map<ContractAddress, uint128_t> &hogs_spent_by_account)
+{
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const GasAmount gas_limit = tx.tx.invocation.gas_limit;
+  auto [account_state, lock] = get_account_state(account);
+  HogAge &hog_age = account_state->hog_age;
+
+  for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
+    if (!cycle_if_needed(hog_age, gas_limit)) {
+      break;
+    }
+  }
+
+  uint128_t hogs_available = from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
+  CHECK_GE(hogs_available, static_cast<uint128_t>(gas_limit));
+  hog_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(hogs_available - gas_limit);
+  hogs_spent_by_account[account] += gas_limit;
+}
+
 x23::Async<void>
 Scheduler::process_transfers(const HogsTransferred &transfers)
 {
@@ -508,6 +616,29 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
+  }
+}
+
+void
+Scheduler::erase_ready_account(const ContractAddress &account)
+{
+  for (auto it = ready_accounts_.begin(); it != ready_accounts_.end(); it++) {
+    if (it->account == account) {
+      ready_accounts_.erase(it);
+      return;
+    }
+  }
+}
+
+void
+Scheduler::refresh_ready_accounts(
+    const std::unordered_set<ContractAddress> &accounts)
+{
+  for (const ContractAddress &account : accounts) {
+    erase_ready_account(account);
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      ready_accounts_.insert(get_account_key(account));
+    }
   }
 }
 
@@ -619,7 +750,7 @@ Scheduler::schedule(size_t num_txs,
     const AccountKey account_key = *account_it;
     const ContractAddress account = account_key.account;
     auto [account_state, account_lock] = get_account_state(account);
-    HogAge *hog_ages = &account_state->hog_age;
+    HogAge *hog_ages = get_hog_age_for_schedule(*account_state, account);
     std::map<TxKey, std::shared_ptr<TxValue>> &txs_to_schedule =
         account_state->txs;
     uint128_t hogs_spent_by_account = 0;

@@ -162,6 +162,50 @@ TEST(Scheduler, Single)
             age->average_ages[kHogAgeGroupToSchedule] + 1);
 }
 
+TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]})();
+
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  auto [before_commit, before_lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(before_commit->num_hogs[kHogAgeGroupToSchedule]),
+            5'000'000'000 * 10);
+  EXPECT_EQ(from_xdr(before_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            0UL);
+  before_lock.unlock();
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+
+  auto [during_nomination, during_lock] =
+      scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(during_nomination->num_hogs[kHogAgeGroupToSchedule]),
+            5'000'000'000 * 10);
+  EXPECT_EQ(from_xdr(during_nomination->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            0UL);
+  during_lock.unlock();
+
+  scheduler->commit_pending_nomination(/*block_id=*/1);
+
+  auto [after_commit, after_lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupToSchedule]),
+            (5'000'000'000 * 10) - gas_limit);
+  EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            gas_limit);
+  EXPECT_EQ(after_commit->average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  after_lock.unlock();
+}
+
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
 {
   constexpr BlockHeight kBlock = 5;
@@ -182,6 +226,29 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
             static_cast<uint128_t>(5'000'000'000));
   EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+}
+
+TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->apply_committed_block_hog_ages({txs[0]}, /*block_height=*/1)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), gas_limit);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 1);
 }
 
 TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)

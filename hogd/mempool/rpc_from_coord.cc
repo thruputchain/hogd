@@ -941,6 +941,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // call with the block initialization work.
     x23::CoroGuard cg;
     co_await cg(scheduler_->global_lock_);
+    scheduler_->start_pending_nomination(nominated_block_cache_.block_id);
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
@@ -959,6 +960,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // adding complexity and overhead in the common case to for full recovery
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
+    {
+      x23::CoroGuard cg;
+      co_await cg(scheduler_->global_lock_);
+      scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
+    }
     last_ = std::chrono::steady_clock::now();
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
@@ -1726,6 +1732,27 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   const size_t remove_from_scheduler_size = remove_from_scheduler->size();
   co_await scheduler_->remove_from_scheduler(
       x23::span<const SignedTransactionHash>(*remove_from_scheduler));
+  if (nominated_block_cache_.block_id &&
+      nominated_block_cache_.block_id == block_id) {
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
+    scheduler_->commit_pending_nomination(block_id);
+  }
+  else {
+    if (nominated_block_cache_.block_id) {
+      x23::CoroGuard cg;
+      co_await cg(scheduler_->global_lock_);
+      scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
+    }
+    const PendingBlock *committed_cache = nullptr;
+    auto it = validated_block_cache_.find(block_id);
+    if (it != validated_block_cache_.end()) {
+      committed_cache = &it->second;
+    }
+    CHECK_CONST_PTR(committed_cache);
+    co_await scheduler_->apply_committed_block_hog_ages(
+        committed_cache->txs, committed_cache->db_tip.height);
+  }
   record_stage(stage_remove_from_scheduler);
 
   for (x23::Async<void> &handle : commit_handles) {
