@@ -415,6 +415,39 @@ InvocationFrameStack::mint_auth_token(AuthToken const &auth_token)
   return token_id.value();
 }
 
+SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
+InvocationFrameStack::consume_auth_token(uint32_t token_id)
+{
+  assert(!frame_stack_.empty());
+  if (!frame_stack_.back().check_owns_auth_token(token_id)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  auto const *token = auth_token_registry_.lookup_auth_token(token_id);
+  CHECK_CONST_PTR(token);
+
+  if (token->root_node.consumer_address != frame_stack_.back().address()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  auto unwrap_result = auth_token_registry_.unwrap_auth_token(token_id);
+  if (!unwrap_result.has_value()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  for (uint32_t i = 0; i < unwrap_result->new_token_id_count; i++) {
+    frame_stack_.back().mint_auth_token(unwrap_result->new_token_id_start + i);
+  }
+
+  frame_stack_.back().remove_auth_tokens(
+      std::span<uint32_t const>{&token_id, 1});
+
+  return ConsumeAuthTokenResult{.payload = token->root_node.payload,
+                                .new_token_id_start =
+                                    unwrap_result->new_token_id_start,
+                                .new_token_id_count =
+                                    unwrap_result->new_token_id_count};
+}
+
 bool
 InvocationFrameStack::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
