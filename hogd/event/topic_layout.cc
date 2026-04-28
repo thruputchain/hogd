@@ -1,8 +1,8 @@
 #include "hogd/event/topic_layout.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <optional>
 #include <span>
 
@@ -47,7 +47,7 @@ topic_matches_list(
     return false;
   }
   for (Topic const &t : filter_list) {
-    if (std::memcmp(t.data(), event_topic->data(), kTopicSizeBytes) == 0) {
+    if (std::ranges::equal(t, *event_topic)) {
       return true;
     }
   }
@@ -59,18 +59,11 @@ topic_matches_list(
 bool
 event_topics_match(EventTopicFilter const &filter, TxEmittedEvent const &event)
 {
-  // x23::Vec<Topic, ...> exposes data()/size(); construct an
-  // explicit std::span to keep the matcher's interface concrete
-  // (no templates over container type).
-  return topic_matches_list(std::span<const Topic>(filter.topic0.data(),
-                                                   filter.topic0.size()),
-                            topic_view(event, 0)) &&
-         topic_matches_list(std::span<const Topic>(filter.topic1.data(),
-                                                   filter.topic1.size()),
-                            topic_view(event, 1)) &&
-         topic_matches_list(std::span<const Topic>(filter.topic2.data(),
-                                                   filter.topic2.size()),
-                            topic_view(event, 2));
+  // x23::Vec<Topic, N> models std::ranges::contiguous_range, so it
+  // converts implicitly to std::span<const Topic>.
+  return topic_matches_list(filter.topic0, topic_view(event, 0)) &&
+         topic_matches_list(filter.topic1, topic_view(event, 1)) &&
+         topic_matches_list(filter.topic2, topic_view(event, 2));
 }
 
 } // namespace hogd
