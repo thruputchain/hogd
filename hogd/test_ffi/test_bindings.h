@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 12
-#define TEST_FFI_VERSION_PATCH 3
+#define TEST_FFI_VERSION_MINOR 13
+#define TEST_FFI_VERSION_PATCH 2
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -218,11 +218,11 @@ enum TestFFIErrorCode pop_context();
 
 enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
-struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
-                                                   uint64_t arg1, uint64_t arg2,
-                                                   uint64_t arg3, uint64_t arg4,
-                                                   uint64_t arg5, uint64_t arg6,
-                                                   uint64_t arg7);
+struct ForeignHostFnResult
+mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
+                        uint64_t arg3, uint64_t arg4, uint64_t arg5,
+                        uint64_t arg6, uint64_t arg7, uint64_t arg8,
+                        uint64_t arg9, uint64_t arg10);
 
 struct ForeignTracedInvokeResult root_invoke(void *syscall_handler,
                                              uint8_t enable_tracing);

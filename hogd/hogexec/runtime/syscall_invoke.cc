@@ -7,6 +7,7 @@
 #include <exception>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -89,15 +90,18 @@ syscall_GetSourceTransactionHash_inner(
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
-                             RuntimeMemoryLength &output_len) noexcept
+                             RuntimeMemoryLength &output_len,
+                             uint32_t &output_auth_token_count) noexcept
 {
   output_len = syscall_handler.get_calldata().size();
+  output_auth_token_count =
+      syscall_handler.get_parent_supplied_auth_tokens().size();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
     try {
-      trace_data->outputs.emplace(
-          SyscallGetCalldataLenOutputs{.len = output_len});
+      trace_data->outputs.emplace(SyscallGetCalldataLenOutputs{
+          .len = output_len, .auth_token_count = output_auth_token_count});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldataLen,
             e.what());
@@ -107,9 +111,11 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
-                          std::span<std::byte> output_buffer,
-                          RuntimeMemoryLength &output_written_len) noexcept
+syscall_GetCalldata_inner(
+    SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
+    RuntimeMemoryLength &output_written_len,
+    std::span<std::byte> output_auth_token_list,
+    RuntimeMemoryLength &output_auth_token_written_len) noexcept
 {
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
@@ -121,11 +127,26 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                 calldata.data(), output_written_len);
   }
 
+  auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
+  auto reinterpreted_span = std::as_bytes(span_auth_token_list);
+  output_auth_token_written_len =
+      std::min<RuntimeMemoryLength>(reinterpreted_span.size(),
+                                    output_auth_token_list.size());
+  if (output_auth_token_written_len > 0) {
+    assert(output_auth_token_list.data() != nullptr);
+    assert(reinterpreted_span.data() != nullptr);
+    std::memcpy(reinterpret_cast<uint8_t *>(output_auth_token_list.data()),
+                reinterpreted_span.data(), output_auth_token_written_len);
+  }
+
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
     try {
+      x23::Vec<uint32_t, 0xffffffff> auth_token_list;
+      auth_token_list.append_range(span_auth_token_list);
       trace_data->outputs.emplace(
-          SyscallGetCalldataOutputs{.calldata = calldata});
+          SyscallGetCalldataOutputs{.calldata = calldata,
+                                    .auth_tokens = auth_token_list});
     } catch (std::exception &e) {
       panic("Failed to trace syscall {}: {}", SyscallNo::kGetCalldata,
             e.what());
@@ -135,13 +156,14 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_Invoke_inner(SystemCallHandler &syscall_handler,
-                     WrappedGasAmount remaining_gas,
-                     const ContractAddress &input_address,
-                     uint64_t input_entrypoint_id, GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata,
-                     InvokeFlagSet input_flags,
-                     RuntimeMemoryLength &output_return_buffer_len) noexcept
+syscall_Invoke_inner(
+    SystemCallHandler &syscall_handler, WrappedGasAmount remaining_gas,
+    const ContractAddress &input_address, uint64_t input_entrypoint_id,
+    GasAmount input_gas_limit, std::span<const std::byte> input_calldata,
+    InvokeFlagSet input_flags,
+    std::span<const std::byte> input_owned_auth_token_ids,
+    RuntimeMemoryLength &output_return_buffer_len,
+    RuntimeMemoryLength &output_returned_auth_token_len) noexcept
 {
   Calldata calldata;
   try {
@@ -158,11 +180,33 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                 input_calldata.size());
   }
 
+  if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
+  // owned_auth_token_ids may or may not be aligned.
+  // Hence we perform a memcpy before passing to the invoke function.
+  std::vector<uint32_t> owned_auth_token_ids_vec;
+
+  try {
+    owned_auth_token_ids_vec.resize(input_owned_auth_token_ids.size() /
+                                    sizeof(uint32_t));
+  } catch (std::exception &e) {
+    error("unrecoverable: failed to resize owned auth token ids vector: {}",
+          e.what());
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
+
+  std::memcpy(owned_auth_token_ids_vec.data(),
+              input_owned_auth_token_ids.data(),
+              input_owned_auth_token_ids.size());
+
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.get()),
-                             calldata, input_flags);
+                             calldata, input_flags, owned_auth_token_ids_vec);
 
   // invocation returned successfully
   if (invoke_res.has_value() &&
@@ -187,6 +231,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
+  // TODO(geoff): returning auth tokens unsupported yet
+  output_returned_auth_token_len = 0;
   return {invoke_res, WrappedGasAmount{gas_amount}};
 }
 
@@ -228,7 +274,10 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetReturnedBuffer_inner(
     SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
-    RuntimeMemoryLength &output_written_len) noexcept
+    RuntimeMemoryLength &output_written_len,
+    [[maybe_unused]] std::span<std::byte> output_restored_auth_token_ids,
+    [[maybe_unused]] RuntimeMemoryLength
+        &output_restored_auth_token_ids_written_len) noexcept
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {

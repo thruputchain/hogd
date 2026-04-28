@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -100,10 +101,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
           {0,
            [kCalleeAddress](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto r = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 0,
-                                                      UINT64_MAX, Calldata{}, 0,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kCalleeAddress, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -112,10 +115,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 1,
-                                                      UINT64_MAX, Calldata{}, 0,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kCalleeAddress, 1, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value() ||
                  r2.value() !=
@@ -127,10 +132,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              // Out of gas in child becomes deterministic (handleable) error in
              // caller
              auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 2,
-                                                      UINT64_MAX, Calldata{}, 0,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kCalleeAddress, 2, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r3.has_value() ||
                  r3.value() !=
@@ -140,10 +147,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto r4 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 3,
-                                                      UINT64_MAX, Calldata{}, 0,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kCalleeAddress, 3, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (r4.has_value() ||
                  r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
@@ -152,10 +161,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto r5 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 4,
-                                                      UINT64_MAX, Calldata{}, 0,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kCalleeAddress, 4, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (r5.has_value() ||
                  r5.error() !=
@@ -165,10 +176,12 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              }
 
              auto r6 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress, 5,
-                                                      UINT64_MAX, Calldata{}, 0,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   kCalleeAddress, 5, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (r6.has_value() ||
                  r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
@@ -236,11 +249,13 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              // Valid flags should succeed
              auto r1 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    target_address, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value() ||
                  r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -249,12 +264,13 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
              }
 
              auto r2 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(target_address, 0,
-                                                      UINT64_MAX, Calldata{},
-                                                      std::to_underlying(
-                                                          InvokeFlag::ReadOnly),
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   target_address, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::ReadOnly),
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r2.has_value() ||
                  r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -264,12 +280,14 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              // Combined valid flags should succeed
              auto r3 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
                    target_address, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke) |
                        std::to_underlying(InvokeFlag::ReadOnly),
-                   output_return_buffer_len);
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r3.has_value() ||
                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -280,11 +298,12 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
              auto r4 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(target_address, 0,
-                                                      UINT64_MAX, Calldata{},
-                                                      0x4,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   target_address, 0, UINT64_MAX, Calldata{}, 0x4,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r4.has_value() ||
                  r4.value() !=
@@ -295,11 +314,12 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              // Arbitrary garbage bits
              auto r5 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(target_address, 0,
-                                                      UINT64_MAX, Calldata{},
-                                                      0xFF,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   target_address, 0, UINT64_MAX, Calldata{}, 0xFF,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r5.has_value() ||
                  r5.value() !=
@@ -310,11 +330,12 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
              // High bits set
              auto r6 = [&]() {
-               RuntimeMemoryLength output_return_buffer_len = 0;
-               return ctx.syscall<SyscallNo::kInvoke>(target_address, 0,
-                                                      UINT64_MAX, Calldata{},
-                                                      0x7FFF'FFFF,
-                                                      output_return_buffer_len);
+               RuntimeMemoryLength output_return_buffer_len = 0,
+                                   output_returned_auth_token_len = 0;
+               return ctx.syscall<SyscallNo::kInvoke>(
+                   target_address, 0, UINT64_MAX, Calldata{}, 0x7FFF'FFFF,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r6.has_value() ||
                  r6.value() !=

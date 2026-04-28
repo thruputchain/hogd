@@ -165,12 +165,14 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_a,
            uint32_t consume_b) -> InvokeStatus<void> {
           // consume -> delete -> consume
-          RuntimeMemoryLength written_len = 0;
+          RuntimeMemoryLength written_len = 0,
+                              output_returned_auth_token_len = 0;
 
           auto r1 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
-              written_len);
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -188,7 +190,8 @@ protected:
           auto r3 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
-              written_len);
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
 
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -206,11 +209,14 @@ protected:
            uint32_t consume_b) -> InvokeStatus<void> {
           // consume (nothing observed) -> delete -> consume
 
-          RuntimeMemoryLength written_len = 0;
+          RuntimeMemoryLength written_len = 0,
+                              output_returned_auth_token_len = 0;
 
           auto r1 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
-              Calldata{}, std::to_underlying(InvokeFlag::None), written_len);
+              Calldata{}, std::to_underlying(InvokeFlag::None),
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume(expect none)";
@@ -236,7 +242,8 @@ protected:
           auto r3 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
-              written_len);
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -252,12 +259,14 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t consume_b) -> InvokeStatus<void> {
           // insert() -> delete -> consume
-          RuntimeMemoryLength written_len = 0;
+          RuntimeMemoryLength written_len = 0,
+                              output_returned_auth_token_len = 0;
 
           auto r1 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
-              written_len);
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
@@ -275,7 +284,8 @@ protected:
           auto r3 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
               x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
-              written_len);
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke consume";
@@ -290,7 +300,8 @@ protected:
         13,
         [](NativeSyscallContext &ctx, uint32_t insert_1) -> InvokeStatus<void> {
           // delete -> insert()
-          RuntimeMemoryLength written_len = 0;
+          RuntimeMemoryLength written_len = 0,
+                              output_returned_auth_token_len = 0;
           auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
               kStorageKey, std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
@@ -302,7 +313,8 @@ protected:
           auto r2 = ctx.syscall<SyscallNo::kInvoke>(
               kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
               x23::serialize(insert_1), std::to_underlying(InvokeFlag::None),
-              written_len);
+              std::span<uint32_t>{}, written_len,
+              output_returned_auth_token_len);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to invoke insert";
@@ -319,11 +331,13 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -340,11 +354,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -353,11 +369,13 @@ protected:
           }
 
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_c), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -376,11 +394,13 @@ protected:
            uint32_t insert_b) -> InvokeStatus<void> {
           // insert(a)
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -390,11 +410,13 @@ protected:
 
           // consume(a)
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -413,11 +435,13 @@ protected:
 
           // insert(b)
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -427,11 +451,13 @@ protected:
 
           // consume(b)
           auto r5 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -454,11 +480,13 @@ protected:
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -474,11 +502,13 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         18, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -495,11 +525,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -517,11 +549,13 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -538,11 +572,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -559,11 +595,13 @@ protected:
           }
 
           auto r5 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_c), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -591,11 +629,13 @@ protected:
 
           // insert(a)
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -614,11 +654,13 @@ protected:
 
           // insert(b)
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -628,11 +670,13 @@ protected:
 
           // consume(b) -- self entry consumed before concurrent
           auto r5 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -642,11 +686,13 @@ protected:
 
           // consume(c) -- concurrent entry
           auto r6 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_c), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -690,11 +736,13 @@ protected:
 
           // consume (should get same entry since peek doesn't advance)
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(expected), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -715,11 +763,13 @@ protected:
            uint32_t concurrent_value) -> InvokeStatus<void> {
           // consume past block entry
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(past_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -738,11 +788,13 @@ protected:
 
           // insert new entry
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -752,11 +804,13 @@ protected:
 
           // consume self entry (self entries consumed before concurrent)
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -766,11 +820,13 @@ protected:
 
           // consume concurrent entry
           auto r5 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -790,11 +846,13 @@ protected:
            uint32_t insert_value) -> InvokeStatus<void> {
           // consume retrocausal item
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -854,11 +912,13 @@ protected:
 
           // insert item
           auto r7 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r7.has_value() ||
               r7.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -911,11 +971,13 @@ protected:
         [](NativeSyscallContext &ctx,
            uint32_t expected_value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 25, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
@@ -928,11 +990,13 @@ protected:
 
           // queue should be intact after reverted delete
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(expected_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -949,11 +1013,13 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t peek_val, uint32_t consume_a,
            uint32_t consume_b) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(peek_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -962,11 +1028,13 @@ protected:
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(peek_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -975,11 +1043,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -988,11 +1058,13 @@ protected:
           }
 
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1011,11 +1083,13 @@ protected:
            uint32_t concurrent_val) -> InvokeStatus<void> {
           // insert(self_val)
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(self_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1025,11 +1099,13 @@ protected:
 
           // try_invoke delete (reverted via inner error)
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 25, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
@@ -1042,11 +1118,13 @@ protected:
 
           // consume(self_val) - self entries consumed first
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(self_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1056,11 +1134,13 @@ protected:
 
           // consume(concurrent_val)
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_val),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1085,11 +1165,13 @@ protected:
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(val_a), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1098,11 +1180,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(val_b), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1133,11 +1217,13 @@ protected:
         [](NativeSyscallContext &ctx,
            uint32_t expected_value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 31, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
@@ -1151,11 +1237,13 @@ protected:
 
           // queue still intact
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(expected_value),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1172,11 +1260,13 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t old_val,
            uint32_t peek_val) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(old_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1193,11 +1283,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(peek_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1214,11 +1306,13 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t old_val,
            uint32_t new_val) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(old_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1235,11 +1329,13 @@ protected:
           }
 
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(new_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1248,11 +1344,13 @@ protected:
           }
 
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(new_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1269,11 +1367,13 @@ protected:
         34,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1289,11 +1389,13 @@ protected:
         35,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1308,12 +1410,14 @@ protected:
         36,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
@@ -1326,11 +1430,13 @@ protected:
 
           // queue should be empty after reverted insert
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1347,12 +1453,14 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t real_val) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(revert_val),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
@@ -1361,11 +1469,13 @@ protected:
 
           // successful insert
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(real_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1375,11 +1485,13 @@ protected:
 
           // only real_val should be consumable
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(real_val), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1395,12 +1507,14 @@ protected:
         38,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
@@ -1413,11 +1527,13 @@ protected:
 
           // entry should still be available after reverted consume
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1433,12 +1549,14 @@ protected:
         39,
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
@@ -1451,11 +1569,13 @@ protected:
 
           // entry should still be visible via peek
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 24, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1472,12 +1592,14 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
           // first reverted consume
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (1st)";
@@ -1491,12 +1613,14 @@ protected:
 
           // second reverted consume
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 35, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume (2nd)";
@@ -1510,11 +1634,13 @@ protected:
 
           // entry should still be available
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(value), std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1534,12 +1660,14 @@ protected:
            uint32_t insert_val) -> InvokeStatus<void> {
           // try_invoke: consume + insert, both reverted
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 42, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_val, insert_val),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume+insert";
@@ -1552,11 +1680,13 @@ protected:
 
           // original entry still available
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_val),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1566,11 +1696,13 @@ protected:
 
           // reverted insert should be gone
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1588,11 +1720,13 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_val,
            uint32_t insert_val) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(consume_val),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1601,11 +1735,13 @@ protected:
           }
 
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 0, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(insert_val),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1622,12 +1758,14 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t concurrent_val) -> InvokeStatus<void> {
           auto r1 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 34, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(revert_val),
                 std::to_underlying(InvokeFlag::TryInvoke),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
@@ -1636,11 +1774,13 @@ protected:
 
           // consume concurrent entry (unaffected by reverted insert)
           auto r2 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_val),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1690,11 +1830,13 @@ protected:
 
           // consume concurrent entry -- the consume should succeed
           auto r4 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 1, std::numeric_limits<GasAmount>::max(),
                 x23::serialize(concurrent_val),
-                std::to_underlying(InvokeFlag::None), output_return_buffer_len);
+                std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                output_return_buffer_len, output_returned_auth_token_len);
           }();
           if (r4.has_value() &&
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1734,11 +1876,13 @@ protected:
           // consume concurrent entry -- the consume should fail because the
           // bytestring exists there
           auto r3 = [&]() {
-            RuntimeMemoryLength output_return_buffer_len = 0;
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, 4, std::numeric_limits<GasAmount>::max(),
                 Calldata{}, std::to_underlying(InvokeFlag::None),
-                output_return_buffer_len);
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {

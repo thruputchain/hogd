@@ -31,6 +31,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -192,9 +193,10 @@ template<typename SyscallMeta>
 ForeignHostFnResult
 mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
                     uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6,
-                    uint64_t arg7)
+                    uint64_t arg7, uint64_t arg8, uint64_t arg9, uint64_t arg10)
 {
-  auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
+  auto input_args =
+      std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10};
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
 
@@ -208,6 +210,8 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
 
   auto *mock_runtime = handler->get_mock_runtime();
   CHECK(mock_runtime != nullptr);
+
+  std::println("syscall args: {}", input_args);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context

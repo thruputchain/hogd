@@ -2,6 +2,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/components/execution_mode.h"
+#include "hogd/init.h"
 #include "retrocausal_queue.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -170,3 +171,13 @@ TEST(ExecutionModeTest, NondeterministicBitOverflowGuard)
 }
 
 } // namespace hogd
+
+int
+main(int argc, char *argv[])
+{
+  auto ret = hogd::hogd_init(argc, argv, false);
+  if (ret != 0)
+    return ret;
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

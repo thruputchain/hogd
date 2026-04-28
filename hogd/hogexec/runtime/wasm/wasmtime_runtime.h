@@ -7,6 +7,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 #include "contract.hh"
 #include "hogd/base/types.h"

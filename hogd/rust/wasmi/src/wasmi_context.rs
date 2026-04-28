@@ -239,6 +239,30 @@ impl WasmiContext {
                     entry.module(),
                     entry.function(),
                 ),
+                9 => Self::link_function_9args(
+                    &mut linker,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
+                ),
+                10 => Self::link_function_10args(
+                    &mut linker,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
+                ),
+                11 => Self::link_function_11args(
+                    &mut linker,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
+                ),
+                12 => Self::link_function_12args(
+                    &mut linker,
+                    entry.fn_pointer(),
+                    entry.module(),
+                    entry.function(),
+                ),
                 _ => {
                     panic!(
                         "Unsupported number of arguments: {}",
@@ -335,6 +359,64 @@ impl WasmiContext {
         arg6,
         arg7,
         arg8
+    );
+    link_function_nargs!(
+        link_function_9args,
+        c_call_9args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8,
+        arg9
+    );
+    link_function_nargs!(
+        link_function_10args,
+        c_call_10args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8,
+        arg9,
+        arg10
+    );
+    link_function_nargs!(
+        link_function_11args,
+        c_call_11args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8,
+        arg9,
+        arg10,
+        arg11
+    );
+    link_function_nargs!(
+        link_function_12args,
+        c_call_12args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8,
+        arg9,
+        arg10,
+        arg11,
+        arg12
     );
 }
 

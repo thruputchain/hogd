@@ -45,6 +45,13 @@ public:
   static constexpr const char *kTxIndexColumnFamily = "tx_index";
   static constexpr const char *kContractIndexColumnFamily = "contract_index";
 
+  // Default-CF meta key holding the highest block_height ever observed
+  // by consume_events, encoded as 8 bytes big-endian.  Read once on
+  // open to seed [highest_indexed_block_]; updated on every advance
+  // inside consume_events.  Absent on databases that predate this key.
+  static constexpr const char *kHighestIndexedBlockMetaKey =
+      "meta:highest_indexed_block";
+
   // Transaction index key format:
   //   tx_hash (32 bytes)
   // Total: 32 bytes

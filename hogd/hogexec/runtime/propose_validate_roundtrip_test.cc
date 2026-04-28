@@ -156,10 +156,12 @@ protected:
   // try_invoke helper for use inside A-contract lambdas.
   static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
-    RuntimeMemoryLength output_return_buffer_len = 0;
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
     return ctx.syscall<SyscallNo::kInvoke>(
         kAddrB, method, ctx.runtime().get_available_gas(), Calldata{},
-        std::to_underlying(InvokeFlag::TryInvoke), output_return_buffer_len);
+        std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+        output_return_buffer_len, output_returned_auth_token_len);
   }
 
   // Build a NativeContext with a single no-op contract (for structural

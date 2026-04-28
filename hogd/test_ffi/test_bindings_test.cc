@@ -1103,14 +1103,19 @@ HostFnStatus<SyscallErrorCode>
 test_ffi_invoke(const ContractAddress &input_address,
                 uint64_t input_entrypoint_id, GasAmount input_gas_limit,
                 Calldata const &input_calldata, InvokeFlagSet input_flags,
-                RuntimeMemoryLength &output_return_buffer_len)
+                std::span<uint32_t const> input_owned_auth_token_ids,
+                RuntimeMemoryLength &output_return_buffer_len,
+                RuntimeMemoryLength &output_returned_auth_token_len)
 {
   auto result = mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kInvoke),
       reinterpret_cast<uint64_t>(input_address.data()), input_entrypoint_id,
       input_gas_limit, reinterpret_cast<uint64_t>(input_calldata.data()),
       input_calldata.size(), input_flags,
-      reinterpret_cast<uint64_t>(&output_return_buffer_len));
+      reinterpret_cast<uint64_t>(input_owned_auth_token_ids.data()),
+      input_owned_auth_token_ids.size(),
+      reinterpret_cast<uint64_t>(&output_return_buffer_len),
+      reinterpret_cast<uint64_t>(&output_returned_auth_token_len));
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1124,7 +1129,7 @@ test_ffi_get_msg_sender(ContractAddress &output_sender)
   auto result =
       mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetMsgSender),
                               reinterpret_cast<uint64_t>(output_sender.data()),
-                              0, 0, 0, 0, 0, 0);
+                              0, 0, 0, 0, 0, 0, 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1138,7 +1143,7 @@ test_ffi_get_current_address(ContractAddress &output_address)
   auto result =
       mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetCurrentAddress),
                               reinterpret_cast<uint64_t>(output_address.data()),
-                              0, 0, 0, 0, 0, 0);
+                              0, 0, 0, 0, 0, 0, 0, 0, 0);
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1324,9 +1329,11 @@ mock_contract_nested_invoke(void *ctx, uint64_t /*method_number*/)
   }
 
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
   auto res = test_ffi_invoke(data->target, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_len);
   if (!res.has_value() ||
       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
     return ForeignInvokeResult{
@@ -1378,10 +1385,12 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
 
   // Invoke the contract from within the mock frame
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
 
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_len);
 
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
@@ -1439,9 +1448,11 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -1594,9 +1605,11 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
 
   // Invoke contract B from the mock frame (A -> B -> C)
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
-  auto res = test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
+  auto res =
+      test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{}, {},
+                      output_return_buffer_len, output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -1650,9 +1663,11 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
 
   // Create specific calldata
   Calldata calldata = {0x01, 0x02, 0x03, 0xFF};
-  RuntimeMemoryLength output_return_buffer_len = 0;
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -1704,9 +1719,11 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -1765,9 +1782,11 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeFrameReverted);
 
@@ -1842,9 +1861,11 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
   Calldata calldata;
-  RuntimeMemoryLength output_return_buffer_len = 0;
-  auto res = test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata,
-                             InvokeFlagSet{}, output_return_buffer_len);
+  RuntimeMemoryLength output_return_buffer_len = 0,
+                      output_returned_auth_token_len = 0;
+  auto res =
+      test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{}, {},
+                      output_return_buffer_len, output_returned_auth_token_len);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -2540,7 +2561,7 @@ trace_contract_fibonacci(void * /*unused*/, uint64_t /*method_number*/)
                               reinterpret_cast<uint64_t>(sha_input),
                               sizeof(sha_input),
                               reinterpret_cast<uint64_t>(sha_output.data()),
-                              sizeof(sha_output), 0, 0, 0);
+                              sizeof(sha_output), 0, 0, 0, 0, 0, 0);
 
   // If SHA256 ran out of gas, panic propagates:
   // trace shows panic=1 (OutOfGas) here
@@ -2570,20 +2591,21 @@ trace_contract_fibonacci_call(void *foreign_context, uint64_t method_number)
   if (method_number == kTraceMethodSecond) {
     // Second call: invoke contract 2 with gas_limit=1000
     // Match trace line 65: kInvoke(syscall=5) with arg3=1000
-    RuntimeMemoryLength output_return_buffer_len = 0;
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
     Calldata empty_calldata;
-    auto invoke_res = mock_syscall_entrypoint(
-        std::to_underlying(SyscallNo::kInvoke),
-        reinterpret_cast<uint64_t>(contract_2_addr->data()), kTraceMethodFib,
-        1000, // gas_limit = 1000, matching the trace
-        reinterpret_cast<uint64_t>(empty_calldata.data()),
-        empty_calldata.size(), 0,
-        reinterpret_cast<uint64_t>(&output_return_buffer_len));
+    auto invoke_res =
+        test_ffi_invoke(*contract_2_addr, kTraceMethodFib,
+                        1000, // gas_limit = 1000, matching the trace
+                        empty_calldata, InvokeFlagSet{}, {},
+                        output_return_buffer_len,
+                        output_returned_auth_token_len);
 
     // The inner call should have failed (out of gas).
     // Trace shows result_code=-1 here (line 70).
-    if (invoke_res.panic != 0) {
-      return ForeignInvokeResult{.panic = invoke_res.panic};
+    if (!invoke_res.has_value()) {
+      return ForeignInvokeResult{
+          .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
     }
 
     // Even if panic==0, a nonzero result_code indicates error
@@ -2609,48 +2631,49 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
 
   // Step 1: kInvoke to contract 1, first call (trace lines 40-53)
   {
-    RuntimeMemoryLength output_return_buffer_len = 0;
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
     Calldata empty_calldata;
-    auto res = mock_syscall_entrypoint(
-        std::to_underlying(SyscallNo::kInvoke),
-        reinterpret_cast<uint64_t>(ctx->contract_1_addr.data()),
-        kTraceMethodFirst, UINT64_MAX,
-        reinterpret_cast<uint64_t>(empty_calldata.data()),
-        empty_calldata.size(), 0,
-        reinterpret_cast<uint64_t>(&output_return_buffer_len));
+    auto res = test_ffi_invoke(ctx->contract_1_addr, kTraceMethodFirst,
+                               UINT64_MAX, empty_calldata, InvokeFlagSet{}, {},
+                               output_return_buffer_len,
+                               output_returned_auth_token_len);
 
-    if (res.panic != 0) {
-      return ForeignInvokeResult{.panic = res.panic};
+    if (!res.has_value()) {
+      return ForeignInvokeResult{
+          .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
     }
   }
 
   // Step 2: kGetReturnedBuffer (trace line 54)
   {
-    uint8_t return_buf[500] = {};
-    RuntimeMemoryLength return_len = 0;
+    uint8_t return_buf[500] = {}, return_auth_token_buf[500] = {};
+    RuntimeMemoryLength return_len = 0, return_auth_token_len = 0;
     mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetReturnedBuffer),
                             reinterpret_cast<uint64_t>(return_buf),
                             sizeof(return_buf),
-                            reinterpret_cast<uint64_t>(&return_len), 0, 0, 0,
-                            0);
+                            reinterpret_cast<uint64_t>(&return_len),
+                            reinterpret_cast<uint64_t>(return_auth_token_buf),
+                            sizeof(return_auth_token_buf),
+                            reinterpret_cast<uint64_t>(&return_auth_token_len),
+                            0, 0, 0, 0);
   }
 
   // Step 3: kInvoke to contract 1, second call (trace lines 56-70)
   // This is where contract 1 will call contract 2 with gas=1000
   // and contract 2 will run out of gas -> potential SIGABRT
   {
-    RuntimeMemoryLength output_return_buffer_len = 0;
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
     Calldata empty_calldata;
-    auto res = mock_syscall_entrypoint(
-        std::to_underlying(SyscallNo::kInvoke),
-        reinterpret_cast<uint64_t>(ctx->contract_1_addr.data()),
-        kTraceMethodSecond, UINT64_MAX,
-        reinterpret_cast<uint64_t>(empty_calldata.data()),
-        empty_calldata.size(), 0,
-        reinterpret_cast<uint64_t>(&output_return_buffer_len));
+    auto res = test_ffi_invoke(ctx->contract_1_addr, kTraceMethodSecond,
+                               UINT64_MAX, empty_calldata, InvokeFlagSet{}, {},
+                               output_return_buffer_len,
+                               output_returned_auth_token_len);
 
-    if (res.panic != 0) {
-      return ForeignInvokeResult{.panic = res.panic};
+    if (!res.has_value()) {
+      return ForeignInvokeResult{
+          .panic = std::to_underlying(InvokeErrorCode::Unrecoverable)};
     }
   }
 

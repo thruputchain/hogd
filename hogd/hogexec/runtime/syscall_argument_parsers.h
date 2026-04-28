@@ -115,6 +115,10 @@ requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
 WritableOutput<T>
 check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
 {
+  if (user_offset == 0) {
+    // nullptr
+    return WritableOutput<T>();
+  }
   guard.check_and_register(user_offset, sizeof(T));
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   auto *ptr = reinterpret_cast<void *>(user_offset);
@@ -141,6 +145,11 @@ requires (std::is_trivially_copyable_v<T> && std::is_const_v<T>)
 std::optional<T>
 check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
 {
+  if (user_offset == 0) {
+    // nullptr
+    std::optional<T> result = std::nullopt;
+    return result;
+  }
   guard.check_and_register(user_offset, sizeof(T));
   // NOLINTBEGIN(performance-no-int-to-ptr)
   return read_unaligned<std::remove_cvref_t<T>>(

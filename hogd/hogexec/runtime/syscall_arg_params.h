@@ -235,6 +235,10 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   constexpr static std::optional<std::span<const std::byte>>
   parse_mock(AliasGuard &guard, uint64_t offset, uint64_t len)
   {
+    if (offset == 0 && len != 0) {
+      // nullptr with non-zero length is invalid in native exec
+      return std::nullopt;
+    }
     guard.check_and_register(offset, len);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const auto *output_pointer = reinterpret_cast<const std::byte *>(offset);
