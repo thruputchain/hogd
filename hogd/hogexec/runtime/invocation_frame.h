@@ -55,6 +55,7 @@ public:
   // The value of the last _child_ call frame's return value.
   // Set to nullopt before any child call happens.
   std::optional<InvocationFrameOutput> child_return_output_ = std::nullopt;
+  std::vector<uint32_t> child_returned_auth_token_ids_;
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
@@ -73,7 +74,8 @@ public:
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
-  void set_frame_return(InvocationFrameOutput &&return_output);
+  void set_frame_return(InvocationFrameOutput &&return_output,
+                        std::vector<uint32_t> &&returned_auth_token_ids = {});
 
   // add a log message to the output of the transaction, associated with the
   // current call frame.
@@ -196,12 +198,20 @@ public:
     return most_recent_child_frame_forwarded_auth_tokens_;
   }
 
+  void
+  set_returned_auth_token_ids(std::vector<uint32_t> &&returned_auth_token_ids)
+  {
+    returned_auth_token_ids_ = std::move(returned_auth_token_ids);
+  }
+
 private:
   const ContractAddress address_;
   const Calldata calldata_;
 
   // buffer to return to parent
-  InvocationFrameOutput to_return_output_;
+  InvocationFrameOutput to_return_output_ =
+      InvocationFrameOutput{InvocationFrameStatusCode::Return};
+  std::vector<uint32_t> returned_auth_token_ids_;
 
   // flags on the invocation
   const InvokeFlagSet flags_;
@@ -240,10 +250,13 @@ public:
     return frame_stack_.back().address();
   }
 
-  void set_active_frame_return(InvocationFrameOutput &&return_output)
+  void
+  set_active_frame_return(InvocationFrameOutput &&return_output,
+                          std::vector<uint32_t> &&returned_auth_token_ids = {})
   {
     assert(!frame_stack_.empty());
-    frame_stack_.back().set_frame_return(std::move(return_output));
+    frame_stack_.back().set_frame_return(std::move(return_output),
+                                         std::move(returned_auth_token_ids));
   }
 
   bool empty() const { return frame_stack_.empty(); }
@@ -298,6 +311,13 @@ public:
   {
     assert(!frame_stack_.empty());
     return frame_stack_.back().child_return_output_;
+  }
+
+  std::span<const uint32_t>
+  get_active_frame_child_returned_auth_token_ids() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().child_returned_auth_token_ids_;
   }
 
   const Calldata &get_active_frame_calldata() const

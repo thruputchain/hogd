@@ -243,10 +243,13 @@ public:
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
   SystemStatus<SyscallStatus<const ReturnBuffer *>> get_return_buffer() const;
+  std::span<const uint32_t> get_returned_auth_token_ids() const;
+  bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
-  void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame);
+  void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame,
+                         std::vector<uint32_t> returned_auth_token_ids = {});
 
   SyscallStatus<void> log_event(Topic const *topic0, Topic const *topic1,
                                 Topic const *topic2,

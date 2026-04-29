@@ -46,6 +46,7 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
 {
   assert(frame.should_revert());
   child_return_output_ = std::move(frame.to_return_output_);
+  child_returned_auth_token_ids_.clear();
 
   // reclaim the auth tokens from a reverted frame
   for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
@@ -82,6 +83,12 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
 
+  // Reclaim auth tokens the child returned via the Return syscall
+  for (auto token_id : frame.returned_auth_token_ids_) {
+    owned_auth_token_ids_.insert(token_id);
+  }
+  child_returned_auth_token_ids_ = std::move(frame.returned_auth_token_ids_);
+
   most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
@@ -103,6 +110,7 @@ InvocationFrame::commit_failed_child_frame()
 {
   child_return_output_ =
       InvocationFrameOutput{InvocationFrameStatusCode::Fault};
+  child_returned_auth_token_ids_.clear();
   // reclaim the auth tokens from a failed frame
   for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
     owned_auth_token_ids_.insert(token_id);
@@ -118,9 +126,15 @@ InvocationFrame::log_event(TxEmittedEvent event)
 }
 
 void
-InvocationFrame::set_frame_return(InvocationFrameOutput &&return_output)
+InvocationFrame::set_frame_return(
+    InvocationFrameOutput &&return_output,
+    std::vector<uint32_t> &&returned_auth_token_ids)
 {
   to_return_output_ = std::move(return_output);
+  // only return auth tokens in frame success
+  assert(returned_auth_token_ids.empty() ||
+         to_return_output_.status_code() == InvocationFrameStatusCode::Return);
+  returned_auth_token_ids_ = std::move(returned_auth_token_ids);
 }
 
 namespace {

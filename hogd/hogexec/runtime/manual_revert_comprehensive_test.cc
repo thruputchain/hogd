@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -223,11 +224,16 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
-             ReturnBuffer buffer;
-             buffer.resize_uninitialized(child_return_data.size());
-             std::memcpy(buffer.data(), child_return_data.data(),
-                         child_return_data.size());
-             ctx.handler().set_return_buffer(std::move(buffer), true);
+             auto ret = ctx.syscall<SyscallNo::kReturn>(
+                 std::as_bytes(std::span(child_return_data)), true,
+                 std::span<const std::byte>{});
+
+             if (!ret.has_value() ||
+                 ret.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
+                                "return from child contract";
+               return InvokeError{InvokeErrorCode::Unrecoverable};
+             }
              return {};
            }},
       });
