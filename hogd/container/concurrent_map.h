@@ -262,7 +262,7 @@ public:
           size_t end = std::min<size_t>(start + width, buckets_.size());
           for (size_t i = start; i < end; i++) {
             value_bucket_t *bucket =
-                buckets_[i].load(std::memory_order_relaxed);
+                buckets_[i].load(std::memory_order_acquire);
             value_bucket_t::for_each_destructive(bucket, f);
           }
           if (start + width >= buckets_.size()) {
