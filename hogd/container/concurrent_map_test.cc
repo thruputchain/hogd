@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cstring>
@@ -9,6 +10,7 @@
 #include <ranges>
 #include <set>
 #include <span>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -202,6 +204,73 @@ TEST(ConcurrentMap, ForEachParallelDestructive)
   ASSERT_TRUE(values.contains(6));
   ASSERT_TRUE(values.contains(7));
   ASSERT_TRUE(values.contains(8));
+}
+
+struct TsanPatternValue {
+  explicit TsanPatternValue(uint64_t seed) : seed_(seed), inverse_(~seed)
+  {
+    for (size_t i = 0; i < words_.size(); ++i) {
+      words_[i] = seed ^ (0x9e37'79b9'7f4a'7c15ULL + i);
+    }
+  }
+
+  bool valid() const
+  {
+    if (inverse_ != ~seed_) {
+      return false;
+    }
+    for (size_t i = 0; i < words_.size(); ++i) {
+      if (words_[i] != (seed_ ^ (0x9e37'79b9'7f4a'7c15ULL + i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  uint64_t seed_;
+  uint64_t inverse_;
+  std::array<uint64_t, 16> words_;
+};
+
+TEST(ConcurrentMap, InsertOrGetMissingAcquireTsanRace)
+{
+  constexpr size_t kThreads = 16;
+  constexpr size_t kRounds = 64;
+
+  std::atomic<bool> observed_invalid = false;
+  for (size_t round = 0; round < kRounds; ++round) {
+    ConcurrentMap<uint64_t, TsanPatternValue> map(1024);
+    std::atomic<size_t> ready = 0;
+    std::atomic<bool> start = false;
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (size_t thread_id = 0; thread_id < kThreads; ++thread_id) {
+      threads.emplace_back([&, thread_id] {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!start.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+
+        TsanPatternValue *value = map.insert_or_get(0x1234'5678'9abc'def0ULL,
+                                                    (round << 8) | thread_id);
+        if (!value->valid()) {
+          observed_invalid.store(true, std::memory_order_relaxed);
+        }
+      });
+    }
+
+    while (ready.load(std::memory_order_acquire) != kThreads) {
+      std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+
+    for (auto &thread : threads) {
+      thread.join();
+    }
+  }
+
+  EXPECT_FALSE(observed_invalid.load(std::memory_order_relaxed));
 }
 
 } // namespace hogd

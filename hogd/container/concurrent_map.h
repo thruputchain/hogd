@@ -124,7 +124,7 @@ public:
     value_bucket_t *new_value_bucket = nullptr;
 
     value_bucket_t *next_value_bucket =
-        scan_ptr->load(std::memory_order_relaxed);
+        scan_ptr->load(std::memory_order_acquire);
 
     while (true) {
       // If we're at the end of the list, try to insert.
@@ -144,7 +144,7 @@ public:
         if (scan_ptr->compare_exchange_strong(next_value_bucket,
                                               new_value_bucket,
                                               std::memory_order_release,
-                                              std::memory_order_relaxed)) {
+                                              std::memory_order_acquire)) {
           return &new_value_bucket->value_;
         }
 
