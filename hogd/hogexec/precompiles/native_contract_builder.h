@@ -20,7 +20,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "types.hh"
-#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -173,15 +172,15 @@ public:
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        ctx.handler().set_return_buffer(std::move(return_buffer.value()),
-                                        false);
+        ctx.handler().set_return_buffer(std::move(return_buffer.value()), false,
+                                        {});
         return {};
       };
 
       // Serialize error as (u64 selector, CXS body) and set as revert buffer.
       auto do_revert = [&ctx](auto const &err_value) -> InvokeStatus<void> {
         auto buf = err_value.serialize();
-        ctx.handler().set_return_buffer(std::move(buf), true);
+        ctx.handler().set_return_buffer(std::move(buf), true, {});
         return {};
       };
 

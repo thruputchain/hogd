@@ -148,7 +148,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              buffer.resize_uninitialized(contract_b_return_data.size());
              std::memcpy(buffer.data(), contract_b_return_data.data(),
                          contract_b_return_data.size());
-             ctx.handler().set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true, {});
              return {};
            }}});
 
@@ -336,7 +336,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              buffer.resize_uninitialized(contract_b_return_data.size());
              std::memcpy(buffer.data(), contract_b_return_data.data(),
                          contract_b_return_data.size());
-             ctx.handler().set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true, {});
              return {};
            }}});
 
@@ -362,7 +362,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              buffer.resize_uninitialized(contract_c_return_data.size());
              std::memcpy(buffer.data(), contract_c_return_data.data(),
                          contract_c_return_data.size());
-             ctx.handler().set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true, {});
              return {};
            }}});
 
@@ -505,7 +505,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              buffer.resize_uninitialized(contract_b_return_data.size());
              std::memcpy(buffer.data(), contract_b_return_data.data(),
                          contract_b_return_data.size());
-             ctx.handler().set_return_buffer(std::move(buffer), true);
+             ctx.handler().set_return_buffer(std::move(buffer), true, {});
              return {};
            }}});
 
