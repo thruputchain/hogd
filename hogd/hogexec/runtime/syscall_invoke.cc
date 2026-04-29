@@ -257,7 +257,7 @@ syscall_Return_inner(
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
-  if (input_returned_auth_token_ids.size() > 0 && input_revert_frame) {
+  if (!input_returned_auth_token_ids.empty() && input_revert_frame) {
     // Cannot revert the frame and also return auth tokens
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
