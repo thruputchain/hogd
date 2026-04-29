@@ -141,5 +141,18 @@ mod tests {
         };
 
         assert_eq!(result1, result2);
+
+        let empty: &[u8] = &[];
+        let result_non_null = unsafe {
+            siphash24_hash(
+                1,
+                2,
+                MessageSpan {
+                    message_ptr: empty.as_ptr(),
+                    message_len: 0,
+                },
+            )
+        };
+        assert_eq!(result1, result_non_null);
     }
 }
