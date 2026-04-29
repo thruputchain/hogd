@@ -293,7 +293,6 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --num-blocks 1000 \
   --storage-dir "$logdir"/chuckd-storage \
   --out-addr :50000 \
-  --wallet-addr :40000 \
   --loadgen-addr "$(hog_ip "$loadgen_server")":$LOADGEN_PORT \
   --sched-addr "$(hog_ip "$mempool_server")":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path "$logdir"/scpd.dev \
