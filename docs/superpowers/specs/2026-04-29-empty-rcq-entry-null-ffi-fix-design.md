@@ -43,9 +43,13 @@ To:
 debug_assert!(data.message_len == 0 || !data.message_ptr.is_null());
 ```
 
-**File**: `hogd/rust/crypto/src/ed25519.rs` (line 41)
+**File**: `hogd/rust/crypto/src/ed25519.rs`
 
-Same change for `ed25519_dalek_verify`'s message assertion, for consistency with `MessageSpan::to_slice()`'s contract.
+Same change for all three FFI entry points that assert `!message.message_ptr.is_null()`:
+- `ed25519_dalek_verify` (line 41)
+- `ed25519_dalek_sign` (line 135)
+
+(`ed25519_dalek_verify_batch` asserts on the array pointer, not individual message pointers — no change needed there.)
 
 ### 3. Rust unit tests
 
