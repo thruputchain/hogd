@@ -763,4 +763,23 @@ TEST(ItemLockTest, FinalizedFastPathRelaxedLoadDataRace)
   }
 }
 
+TEST(ItemLockTest, EmptyRCQEntryCommitDoesNotCrash)
+{
+  RetrocausalQueueDelta delta;
+  QueueEntry empty_entry;
+  ASSERT_EQ(empty_entry.size(), 0U);
+  ASSERT_EQ(empty_entry.data(), nullptr);
+  delta.insert.added_entries.push_back(empty_entry);
+
+  ItemChange change(RetrocausalQueueIt(std::move(delta)));
+
+  ItemLock lock(0);
+  auto ctx = make_rcq_context();
+  auto lock_status = lock.try_atomic_change_lock(nullptr, &change, ctx);
+  ASSERT_TRUE(lock_status.has_value());
+
+  auto cost = lock.commit_change(change, ctx);
+  EXPECT_EQ(cost, kTestCostModel.get_retrocausal_queue_cost(1));
+}
+
 } // namespace hogd
