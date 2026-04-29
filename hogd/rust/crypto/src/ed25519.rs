@@ -27,7 +27,8 @@ pub enum Ed25519Result {
 ///
 /// # Safety
 /// Caller must ensure:
-/// - message_span.message_ptr points to valid message_span.message_len bytes
+/// - If message_span.message_len == 0, message_span.message_ptr may be null
+/// - If message_span.message_len > 0, message_span.message_ptr must point to valid memory
 /// - public_key points to valid 32 bytes
 /// - signature points to valid 64 bytes
 #[no_mangle]
@@ -123,7 +124,8 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 /// # Safety
 /// Caller must ensure:
 /// - secret_keypair points to valid 64 bytes [public_key, secret_key]
-/// - message.message_ptr points to valid message.message_len bytes
+/// - If message.message_len == 0, message.message_ptr may be null
+/// - If message.message_len > 0, message.message_ptr must point to valid memory
 /// - signature_out points to valid 64-byte buffer
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_sign(
