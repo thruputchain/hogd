@@ -38,7 +38,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 ) -> Ed25519Result {
     debug_assert!(!public_key.is_null());
     debug_assert!(!signature.is_null());
-    debug_assert!(!message.message_ptr.is_null());
+    debug_assert!(message.message_len == 0 || !message.message_ptr.is_null());
 
     let public_key_bytes = unsafe { &*public_key };
     let signature_bytes = unsafe { &*signature };
@@ -132,7 +132,7 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
     signature_out: *mut [u8; 64],
 ) -> u8 {
     debug_assert!(!secret_keypair.is_null());
-    debug_assert!(!message.message_ptr.is_null());
+    debug_assert!(message.message_len == 0 || !message.message_ptr.is_null());
     debug_assert!(!signature_out.is_null());
 
     let secret_keypair_bytes = unsafe { &*secret_keypair };
@@ -312,5 +312,29 @@ mod tests {
         };
 
         assert_eq!(verify_result, Ed25519Result::Success);
+    }
+
+    #[test]
+    fn test_ed25519_verify_empty_message() {
+        let mut csprng = OsRng;
+        let mut secret_key_bytes = [0u8; 32];
+        csprng.fill_bytes(&mut secret_key_bytes);
+        let signing_key = SigningKey::from_bytes(&secret_key_bytes);
+        let verifying_key: [u8; 32] = signing_key.verification_key().into();
+
+        let fake_signature = [0u8; 64];
+
+        let result = unsafe {
+            ed25519_dalek_verify(
+                &verifying_key as *const [u8; 32],
+                &fake_signature as *const [u8; 64],
+                MessageSpan {
+                    message_ptr: std::ptr::null(),
+                    message_len: 0,
+                },
+            )
+        };
+
+        assert_eq!(result, Ed25519Result::VerificationFailed);
     }
 }
