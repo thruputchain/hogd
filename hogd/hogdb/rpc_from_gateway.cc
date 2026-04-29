@@ -1,6 +1,7 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 
 #include <algorithm>
+#include <cstring>
 #include <span>
 #include <utility>
 
@@ -21,6 +22,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/version.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -28,6 +30,13 @@ namespace hogd {
 
 namespace {
 
+// Map a HogDBError to the public RPCError surface.  This is a
+// READ-ONLY path: write-failure codes (`kOverflow`, `kConflict`,
+// `kExists`) shouldn't fire here at all, and the read-relevant
+// codes that *can* surface from a read of corrupted/oversized
+// state (`kTypeMismatch`, `kTooBig`) are unrecoverable for the
+// caller — they don't indicate a write was attempted and rejected.
+// All non-NotFound codes therefore map to `kRPCUnrecoverable`.
 constexpr RPCError
 to_rpc_error(HogDBError err)
 {
@@ -39,7 +48,6 @@ to_rpc_error(HogDBError err)
   case HogDBCode::kExists:
   case HogDBCode::kTypeMismatch:
   case HogDBCode::kTooBig:
-    return RPCError::kRPCStorageWriteFailed;
   case HogDBCode::kInternal:
   case HogDBCode::kCorruption:
   case HogDBCode::kNoMemory:
@@ -133,10 +141,11 @@ read_one_item(HogDBDAO &db, AddressAndKey const &addrkey)
 } // namespace
 
 DbGatewayIntroOutcome
-HogDBGatewayRpc::dbgateway_intro(Protocol const & /*protocol*/)
+HogDBGatewayRpc::dbgateway_intro(Protocol const &protocol)
 {
-  // TODO(rstutsman): compare protocol against expected version and return
-  // DbGatewayIntroMismatchedProtocol on mismatch.  For now we accept any.
+  if (strcmp(protocol.c_str(), version::kHogdProtocol()) != 0) {
+    return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
+  }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;
 }
 

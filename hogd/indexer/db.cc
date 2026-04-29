@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -40,6 +42,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/event/topic_layout.h"
 #include "hogd/indexer/event_cursor.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"
@@ -903,176 +906,142 @@ IndexDB::latest_block() const
 
 namespace {
 
-// Decode a contract_index key into its (contract, block, tx, seq)
-// components.  Returns false on malformed input.
-bool
-parse_contract_key_full(std::string_view key, ContractAddress *address,
-                        BlockHeight *block_height, SHA256Hash *tx_hash,
-                        uint32_t *seq_number)
-{
-  if (key.size() < IndexerKeyFormat::kContractKeySize) {
-    return false;
-  }
-  const auto *p = reinterpret_cast<const uint8_t *>(key.data());
-  if (address != nullptr) {
-    std::memcpy(address->data(), p, 32);
-  }
-  int64_t h = 0;
-  for (size_t i = 0; i < 8; ++i) {
-    h = (h << 8) | p[32 + i];
-  }
-  *block_height = static_cast<BlockHeight>(h);
-  std::memcpy(tx_hash->data(), p + 40, 32);
-  uint32_t s = 0;
-  for (size_t i = 0; i < 4; ++i) {
-    s = (s << 8) | p[72 + i];
-  }
-  *seq_number = s;
-  return true;
-}
+// (block, tx, seq) — the lexicographic key of a single event in
+// the contract_index, modulo the contract prefix.  Default
+// `operator<=>` is the merge-order comparator used by the
+// per-contract walk in get_events.
+struct Position {
+  BlockHeight block;
+  SHA256Hash tx;
+  std::uint32_t seq;
+  auto operator<=>(Position const &) const = default;
+};
 
 // One RocksDB iterator plus the set of filter indices that include
 // this contract.  Each iterator walks the contract_index slice for
 // a single contract address in the requested direction.
-struct ContractIter {
-  ContractAddress contract;
-  std::unique_ptr<rocksdb::Iterator> iter;
-  // filters that include this contract; used for topic post-filter.
-  std::vector<size_t> filter_indices;
-  // cached current position (decoded on last valid advance).
-  BlockHeight current_block = static_cast<BlockHeight>(0);
-  SHA256Hash current_tx_hash{};
-  uint32_t current_seq = 0;
-  bool has_current = false;
+class ContractIter {
+public:
+  ContractIter(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *cf,
+               ContractAddress addr)
+    : contract_(addr), iter_(db->NewIterator(rocksdb::ReadOptions(), cf))
+  {}
+
+  ContractAddress const &contract() const { return contract_; }
+  bool has_current() const { return has_current_; }
+  Position const &current() const { return current_; }
+
+  void add_filter(std::size_t fidx) { filter_indices_.push_back(fidx); }
+  std::vector<std::size_t> const &filter_indices() const
+  {
+    return filter_indices_;
+  }
+
+  // Initial seek, treating `anchor` as an inclusive starting
+  // boundary in the requested direction.
+  void seek(BlockHeight anchor, IterationOrder order)
+  {
+    std::string prefix;
+    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, anchor);
+    if (order == IterationOrder::IterationOrderAscending) {
+      iter_->Seek(prefix);
+    }
+    else {
+      // Descending: we want entries at block <= anchor.  `prefix` lands
+      // at the first key with block == anchor; append all-FF for the
+      // (tx_hash, seq) suffix to push past those entries before
+      // SeekForPrev so we land on (or below) the LAST event at
+      // `anchor`.
+      const std::size_t suffix_size = IndexerKeyFormat::kContractKeySize -
+                                      IndexerKeyFormat::kContractKeyPrefixSize;
+      std::string upper_prefix = prefix;
+      upper_prefix.append(suffix_size, static_cast<char>(0xFF));
+      iter_->SeekForPrev(upper_prefix);
+    }
+    refresh_current();
+  }
+
+  // Step one in the given direction.
+  void advance(IterationOrder order)
+  {
+    if (!iter_->Valid()) {
+      has_current_ = false;
+      return;
+    }
+    if (order == IterationOrder::IterationOrderAscending) {
+      iter_->Next();
+    }
+    else {
+      iter_->Prev();
+    }
+    refresh_current();
+  }
+
+  // Advance past the cursor's last-emitted position (exclusive
+  // resume).  After seek(anchor) with a cursor-encoded anchor,
+  // skip the cursor entry itself if we landed on it.
+  void skip_past(IterationOrder order, Position const &cursor)
+  {
+    while (has_current_) {
+      const bool at_or_past_cursor =
+          (order == IterationOrder::IterationOrderAscending)
+              ? current_ >= cursor
+              : current_ <= cursor;
+      if (!at_or_past_cursor) {
+        // Iterator is still behind the cursor — shouldn't happen
+        // after a correct seek, but advance defensively.
+        // advance(order) calls Next() ascending and Prev()
+        // descending, so each iteration converges toward (and
+        // eventually past) the cursor; the loop terminates once
+        // the comparison flips or the iterator runs out.
+        advance(order);
+        continue;
+      }
+      if (current_ == cursor) {
+        advance(order);
+      }
+      // Either we're already past the cursor, or we just advanced
+      // past an exact-match entry; either way, current_ is now
+      // strictly past the cursor (or has_current_ is false).
+      return;
+    }
+  }
+
+private:
+  // Decode the iterator's current key into `current_`.  Stops
+  // (has_current_=false) on iter end, on a key that has left the
+  // contract's prefix range, or on a malformed key.
+  void refresh_current()
+  {
+    if (!iter_->Valid()) {
+      has_current_ = false;
+      return;
+    }
+    rocksdb::Slice key = iter_->key();
+    const std::string_view key_sv(key.data(), key.size());
+    if (key_sv.size() < IndexerKeyFormat::kContractKeyPrefixSize ||
+        !key_sv.starts_with(
+            std::string_view(reinterpret_cast<const char *>(contract_.data()),
+                             std::tuple_size_v<ContractAddress>))) {
+      has_current_ = false;
+      return;
+    }
+    ContractAddress addr_out;
+    if (!IndexerKeyFormat::parse_contract_key(key_sv, &addr_out,
+                                              &current_.block, &current_.tx,
+                                              &current_.seq)) {
+      has_current_ = false;
+      return;
+    }
+    has_current_ = true;
+  }
+
+  ContractAddress contract_;
+  std::unique_ptr<rocksdb::Iterator> iter_;
+  std::vector<std::size_t> filter_indices_;
+  Position current_{};
+  bool has_current_ = false;
 };
-
-// True iff a < b under lexicographic ordering of (block, tx_hash,
-// sequence_number).  Used to pick the merge winner in ascending
-// iteration; for descending, pass the operands in reverse.
-bool
-position_less(BlockHeight a_block, SHA256Hash const &a_tx, uint32_t a_seq,
-              BlockHeight b_block, SHA256Hash const &b_tx, uint32_t b_seq)
-{
-  if (a_block != b_block) {
-    return static_cast<int64_t>(a_block) < static_cast<int64_t>(b_block);
-  }
-  const int cmp = std::memcmp(a_tx.data(), b_tx.data(), 32);
-  if (cmp != 0) {
-    return cmp < 0;
-  }
-  return a_seq < b_seq;
-}
-
-// Advance an iterator one step in the given direction, updating its
-// has_current / current_* fields.  Stops (has_current=false) when
-// the iterator leaves the contract's prefix range.
-void
-advance_iter(ContractIter &ci, IterationOrder order)
-{
-  if (!ci.iter->Valid()) {
-    ci.has_current = false;
-    return;
-  }
-  if (order == IterationOrder::IterationOrderAscending) {
-    ci.iter->Next();
-  }
-  else {
-    ci.iter->Prev();
-  }
-  if (!ci.iter->Valid()) {
-    ci.has_current = false;
-    return;
-  }
-  rocksdb::Slice key = ci.iter->key();
-  // Verify we're still under this contract's prefix.
-  if (key.size() < 32 || std::memcmp(key.data(), ci.contract.data(), 32) != 0) {
-    ci.has_current = false;
-    return;
-  }
-  ContractAddress addr_out;
-  if (!parse_contract_key_full(std::string_view(key.data(), key.size()),
-                               &addr_out, &ci.current_block,
-                               &ci.current_tx_hash, &ci.current_seq)) {
-    ci.has_current = false;
-    return;
-  }
-  ci.has_current = true;
-}
-
-// Initial seek for an iterator, given the anchor block and order.
-// `anchor_block` is treated as an inclusive starting boundary.
-void
-seek_iter(ContractIter &ci, BlockHeight anchor_block, IterationOrder order)
-{
-  std::string prefix;
-  IndexerKeyFormat::make_contract_key_prefix(prefix, ci.contract, anchor_block);
-  if (order == IterationOrder::IterationOrderAscending) {
-    ci.iter->Seek(prefix);
-  }
-  else {
-    // Descending: we want entries at block <= anchor_block.  The prefix
-    // above lands at the first key with block == anchor_block; append
-    // a trailing all-FF to push past it for SeekForPrev.
-    std::string upper_prefix = prefix;
-    upper_prefix.append(32 + 4, static_cast<char>(0xFF));
-    ci.iter->SeekForPrev(upper_prefix);
-  }
-  if (!ci.iter->Valid()) {
-    ci.has_current = false;
-    return;
-  }
-  rocksdb::Slice key = ci.iter->key();
-  if (key.size() < 32 || std::memcmp(key.data(), ci.contract.data(), 32) != 0) {
-    ci.has_current = false;
-    return;
-  }
-  ContractAddress addr_out;
-  if (!parse_contract_key_full(std::string_view(key.data(), key.size()),
-                               &addr_out, &ci.current_block,
-                               &ci.current_tx_hash, &ci.current_seq)) {
-    ci.has_current = false;
-    return;
-  }
-  ci.has_current = true;
-}
-
-// Advance past the encoded cursor position (exclusive resume).
-// Called after seek_iter(anchor) when the anchor is a cursor-encoded
-// last-emitted position.  Skips any entries up to AND INCLUDING
-// (cursor_block, cursor_tx, cursor_seq).
-void
-skip_past_cursor(ContractIter &ci, IterationOrder order,
-                 BlockHeight cursor_block, SHA256Hash const &cursor_tx,
-                 uint32_t cursor_seq)
-{
-  while (ci.has_current) {
-    const bool at_or_past_cursor =
-        (order == IterationOrder::IterationOrderAscending)
-            ? !position_less(ci.current_block, ci.current_tx_hash,
-                             ci.current_seq, cursor_block, cursor_tx,
-                             cursor_seq)
-            : !position_less(cursor_block, cursor_tx, cursor_seq,
-                             ci.current_block, ci.current_tx_hash,
-                             ci.current_seq);
-    if (!at_or_past_cursor) {
-      // Iterator is still behind the cursor in iteration order —
-      // shouldn't happen after a correct seek, but handle defensively.
-      advance_iter(ci, order);
-      continue;
-    }
-    const bool exactly_at_cursor =
-        ci.current_block == cursor_block &&
-        std::memcmp(ci.current_tx_hash.data(), cursor_tx.data(), 32) == 0 &&
-        ci.current_seq == cursor_seq;
-    if (exactly_at_cursor) {
-      advance_iter(ci, order);
-    }
-    // Either we're past the cursor already, or we just advanced past
-    // an exact-match entry — in both cases the iterator now points at
-    // the first entry strictly past the cursor.
-    return;
-  }
-}
 
 } // namespace
 
@@ -1100,7 +1069,7 @@ IndexDB::get_events(EventQuery const &query) const
   }
 
   // Clamp limit.
-  const uint32_t limit = clamp_events_limit(query.limit);
+  const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
 
   // Decode cursor if present; else use the query's anchor/order.
   IterationOrder order;
@@ -1111,7 +1080,7 @@ IndexDB::get_events(EventQuery const &query) const
   uint32_t cursor_seq = 0;
 
   if (!query.cursor.empty()) {
-    auto decoded = EventCursor::decode(
+    auto decoded = cursor::decode(
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
     if (!decoded) {
@@ -1156,100 +1125,81 @@ IndexDB::get_events(EventQuery const &query) const
   // remember which filter indices included it — we'll run topic
   // post-filter against each when a candidate surfaces.
   std::vector<ContractIter> iters;
-  for (size_t fidx = 0; fidx < query.filters.size(); ++fidx) {
+  for (std::size_t fidx = 0; fidx < query.filters.size(); ++fidx) {
     for (ContractAddress const &addr : query.filters[fidx].contract_addresses) {
-      // Look for an existing iterator for this contract.
-      auto it = std::ranges::find_if(iters, [&](ContractIter const &ci) {
-        return std::memcmp(ci.contract.data(), addr.data(), 32) == 0;
-      });
+      auto it = std::ranges::find(iters, addr, &ContractIter::contract);
       if (it != iters.end()) {
-        it->filter_indices.push_back(fidx);
+        it->add_filter(fidx);
       }
       else {
-        ContractIter ci;
-        ci.contract = addr;
-        ci.filter_indices.push_back(fidx);
-        ci.iter.reset(
-            db_->NewIterator(rocksdb::ReadOptions(), contract_cf_handle_));
-        iters.push_back(std::move(ci));
+        iters.emplace_back(db_.get(), contract_cf_handle_, addr);
+        iters.back().add_filter(fidx);
       }
     }
   }
 
   // Seek each iterator to the anchor.
+  Position cursor_pos{.block = cursor_block,
+                      .tx = cursor_tx,
+                      .seq = cursor_seq};
   for (ContractIter &ci : iters) {
-    seek_iter(ci, anchor_block, order);
-    if (have_cursor && ci.has_current) {
-      skip_past_cursor(ci, order, cursor_block, cursor_tx, cursor_seq);
+    ci.seek(anchor_block, order);
+    if (have_cursor && ci.has_current()) {
+      ci.skip_past(order, cursor_pos);
     }
   }
 
   // Merge-walk.  At each step, pick the iterator whose current
   // position is smallest (ascending) or largest (descending) and
   // consume it.  Stop at `limit` matches or exhaustion.
-  BlockHeight last_emitted_block{0};
-  SHA256Hash last_emitted_tx{};
-  uint32_t last_emitted_seq = 0;
+  Position last_emitted{};
   bool any_emitted = false;
 
   while (page.events.size() < limit) {
     // Find the winner — the valid iterator whose current position
     // leads in the requested direction.
-    size_t winner = iters.size();
-    for (size_t i = 0; i < iters.size(); ++i) {
-      if (!iters[i].has_current) {
+    auto leads = [order](Position const &lhs, Position const &rhs) {
+      return order == IterationOrder::IterationOrderAscending ? lhs < rhs
+                                                              : lhs > rhs;
+    };
+    ContractIter *winner = nullptr;
+    for (ContractIter &ci : iters) {
+      if (!ci.has_current()) {
         continue;
       }
-      if (winner == iters.size()) {
-        winner = i;
-        continue;
-      }
-      const bool i_leads =
-          (order == IterationOrder::IterationOrderAscending)
-              ? position_less(iters[i].current_block, iters[i].current_tx_hash,
-                              iters[i].current_seq, iters[winner].current_block,
-                              iters[winner].current_tx_hash,
-                              iters[winner].current_seq)
-              : position_less(iters[winner].current_block,
-                              iters[winner].current_tx_hash,
-                              iters[winner].current_seq, iters[i].current_block,
-                              iters[i].current_tx_hash, iters[i].current_seq);
-      if (i_leads) {
-        winner = i;
+      if (winner == nullptr || leads(ci.current(), winner->current())) {
+        winner = &ci;
       }
     }
-    if (winner == iters.size()) {
+    if (winner == nullptr) {
       break; // all exhausted
     }
 
-    ContractIter &win = iters[winner];
-    const BlockHeight block = win.current_block;
-    const SHA256Hash tx_hash = win.current_tx_hash;
-    const uint32_t seq = win.current_seq;
+    Position const win_pos = winner->current();
 
     // Hydrate.
-    auto tx_events = get_tx_events(tx_hash);
+    auto tx_events = get_tx_events(win_pos.tx);
     if (!tx_events) {
       error("get_events: tx_index miss for tx {} at block {}",
-            HexArray(tx_hash).str(), static_cast<int64_t>(block));
-      advance_iter(win, order);
+            HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block));
+      winner->advance(order);
       continue;
     }
     const TxEventLog &event_log = tx_events->second;
-    if (seq >= event_log.events.size()) {
-      error("get_events: seq {} out of range ({}) for tx {}", seq,
-            event_log.events.size(), HexArray(tx_hash).str());
-      advance_iter(win, order);
+    if (win_pos.seq >= event_log.events.size()) {
+      error("get_events: seq {} out of range ({}) for tx {}", win_pos.seq,
+            event_log.events.size(), HexArray(win_pos.tx).str());
+      winner->advance(order);
       continue;
     }
-    TxEmittedEvent const &emitted_event = event_log.events[seq];
+    TxEmittedEvent const &emitted_event = event_log.events[win_pos.seq];
 
     // Topic filter: match if ANY filter that includes this contract
     // accepts the event.  One entry in the contract_index = one event
     // = one emission; since dedupe-by-contract is done above, we
     // can't double-emit.
     bool matched = false;
-    for (size_t fidx : win.filter_indices) {
+    for (std::size_t fidx : winner->filter_indices()) {
       if (event_topics_match(query.filters[fidx].topics, emitted_event)) {
         matched = true;
         break;
@@ -1258,18 +1208,16 @@ IndexDB::get_events(EventQuery const &query) const
 
     if (matched) {
       IdentifiedEvent ev;
-      ev.proposed_tx_hash = tx_hash;
-      ev.block_height = block;
-      ev.sequence_number = seq;
+      ev.proposed_tx_hash = win_pos.tx;
+      ev.block_height = win_pos.block;
+      ev.sequence_number = win_pos.seq;
       ev.emitted_event = emitted_event;
       page.events.push_back(std::move(ev));
-      last_emitted_block = block;
-      last_emitted_tx = tx_hash;
-      last_emitted_seq = seq;
+      last_emitted = win_pos;
       any_emitted = true;
     }
 
-    advance_iter(win, order);
+    winner->advance(order);
   }
 
   // Cursor for continuation: non-empty iff we emitted something AND
@@ -1279,19 +1227,18 @@ IndexDB::get_events(EventQuery const &query) const
   // We signal empty cursor only when truly exhausted, to distinguish
   // "more-results-to-scan" (selective filter yielded no matches this
   // window) from "end of data".
-  bool any_more = false;
-  for (ContractIter const &ci : iters) {
-    if (ci.has_current) {
-      any_more = true;
-      break;
-    }
-  }
+  const bool any_more = std::ranges::any_of(iters, [](ContractIter const &ci) {
+    return ci.has_current();
+  });
 
   if (any_more) {
     if (any_emitted) {
-      std::string encoded =
-          EventCursor::encode(order, last_emitted_block, last_emitted_tx,
-                              last_emitted_seq);
+      EventCursorPayload payload;
+      payload.order = order;
+      payload.block_height = last_emitted.block;
+      payload.tx_hash = last_emitted.tx;
+      payload.sequence_number = last_emitted.seq;
+      std::string encoded = cursor::encode(payload);
       page.cursor.append_range(std::span<const uint8_t>(
           reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
     }

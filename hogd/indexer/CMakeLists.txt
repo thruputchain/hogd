@@ -7,6 +7,7 @@ add_library(indexer STATIC
 
 target_link_libraries(indexer PUBLIC
     rocksdb
+    event
     hogd
 )
 
@@ -14,6 +15,7 @@ target_link_libraries(indexer PUBLIC
 add_executable(indexer_test
     indexer_test.cc
     db_test.cc
+    event_cursor_test.cc
     key_format_test.cc
 )
 

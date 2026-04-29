@@ -108,6 +108,24 @@ public:
   // empty regardless of anchor.
   static BlockHeight oldest_block() { return BlockHeight{0}; }
 
+  // get_events `limit` clamping.  A request value of 0 means
+  // "server default" (kEventsDefaultLimit).  Anything above
+  // kEventsMaxLimit is capped to that.
+  static constexpr std::uint32_t kEventsDefaultLimit = 50;
+  static constexpr std::uint32_t kEventsMaxLimit = 200;
+
+  [[nodiscard]] static constexpr std::uint32_t
+  clamp_events_limit(std::uint32_t requested)
+  {
+    if (requested == 0) {
+      return kEventsDefaultLimit;
+    }
+    if (requested > kEventsMaxLimit) {
+      return kEventsMaxLimit;
+    }
+    return requested;
+  }
+
   // Log RocksDB statistics (memory usage, database size, etc.)
   void log_stats() const;
 

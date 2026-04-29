@@ -50,6 +50,7 @@ add_xdr(
   ../../protocol/db_gateway.x
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x
+  event_cursor_internal.x
   syscall.x
 )
 target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
