@@ -228,8 +228,8 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                  std::as_bytes(std::span(child_return_data)), true,
                  std::span<const std::byte>{});
 
-             if (!ret.has_value() ||
-                 ret.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+             if (ret.has_value() ||
+                 ret.error().code() != HostFnErrorCode::Return) {
                ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
                                 "return from child contract";
                return InvokeError{InvokeErrorCode::Unrecoverable};
