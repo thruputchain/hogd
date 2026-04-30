@@ -112,7 +112,6 @@ $1 -l info --stack --config config-hog8.json \
   --num-blocks 100 \
   --storage-dir ./storage-hog8 \
   --out-addr :50000 \
-  --wallet-addr :40000 \
   --loadgen-addr hog7:44400 \
   --sched-addr hog9:8070 \
   --scpd-path $2 \

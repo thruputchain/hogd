@@ -135,7 +135,6 @@ echo 'launch coordinator and scp'
   --num-blocks 1000 \
   --storage-dir $WORK_DIR/chuckd-storage \
   --out-addr :50000 \
-  --wallet-addr :40000 \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path ./$BUILD_DIR/scpd.dev \
