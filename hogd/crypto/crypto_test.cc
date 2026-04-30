@@ -139,6 +139,23 @@ TEST(Ed25519, RandomKeygen)
   EXPECT_NE(sk, sk2);
 }
 
+TEST(Ed25519, SignReturnsNulloptForMismatchedKeypair)
+{
+  auto [pk, sk] = ed25519_keygen();
+  std::string_view msg = "message signed with mismatched keypair";
+  auto msg_bytes = std::as_bytes(std::span(msg));
+
+  auto valid_sig = ed25519_sign(sk, msg_bytes);
+  ASSERT_TRUE(valid_sig.has_value());
+  ASSERT_TRUE(ed25519_verify(pk, valid_sig.value(), msg));
+
+  auto corrupted_sk = sk;
+  corrupted_sk[0] ^= 0x01;
+
+  auto invalid_sig = ed25519_sign(corrupted_sk, msg_bytes);
+  EXPECT_FALSE(invalid_sig.has_value());
+}
+
 TEST(LtHash16, EmptyState)
 {
   LtHash16 h;
