@@ -919,8 +919,9 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithRCQInsert)
 // Push subtransaction 1 with insert({0}), then subtransaction 2 with
 // insert({1}) for the SAME key. The second push calls request_change which
 // calls narrow (checks entries.size() >= earlier.size(), passes because
-// 1 >= 1) and then try_atomic_change_lock which CHECKs that old entries
-// are a prefix of new entries. {0} != {1} -> CHECK crash at line 104.
+// 1 >= 1) and then try_atomic_change_lock. The byte-level prefix check that
+// previously caught this was removed to support self-consume front-pruning,
+// so this case is now accepted.
 TEST_F(DirectRCQTests, StressSameTxNonCumulativeRCQInserts)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -935,12 +936,15 @@ TEST_F(DirectRCQTests, StressSameTxNonCumulativeRCQInserts)
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Subtransaction 2: insert entry {1} (NOT cumulative — omits {0}).
-  // This should trigger CHECK(std::equal(...)) at rcq_lock.cc:104.
-  // This is invalid input from the executor
+  // The prefix check that caught this was removed to support self-consume
+  // pruning. Non-cumulative inserts of the same size from a buggy executor
+  // are no longer detected at the lock layer. This is accepted: the executor
+  // is trusted code, and the entry-level content check was defense-in-depth
+  // incompatible with front-pruning semantics.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                std::to_underlying(StorageDeltaFlags::None));
   r = tx.try_push_current_subtransaction();
-  ASSERT_FALSE(r.has_value());
+  ASSERT_TRUE(r.has_value() && r.value());
 }
 
 TEST_F(DirectRCQTests, RollbackInsertions)
