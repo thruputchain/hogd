@@ -19,6 +19,7 @@ namespace hogd {
 
 // These parsers will need to be rewritten to support big-endian machines.
 static_assert(std::endian::native == std::endian::little);
+static_assert(sizeof(bool) == 1);
 
 template<typename T> class WritableOutput {
 public:
@@ -60,7 +61,11 @@ public:
     if (!value_)
       return;
 
-    if constexpr (requires { value_->data(); }) {
+    if constexpr (std::is_same_v<T, bool>) {
+      uint8_t canonical = value_.value() ? 1 : 0;
+      std::memcpy(original_pointer_, &canonical, 1);
+    }
+    else if constexpr (requires { value_->data(); }) {
       std::memcpy(original_pointer_, value_->data(), sizeof(T));
     }
     else {

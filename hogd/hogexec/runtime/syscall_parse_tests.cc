@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <limits>
 #include <span>
 #include <vector>
@@ -7,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/components/alias_guard.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
+#include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 
 namespace hogd {
 
@@ -270,6 +272,51 @@ TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
   auto bad_arg =
       SyscallArgParams<const uint32_t *>::parse(guard, contract_memory, 16);
   ASSERT_FALSE(SyscallArgParams<const uint32_t *>::validate(bad_arg));
+}
+
+TEST(SyscallParseTests, WritableOutputBool)
+{
+  std::array<uint8_t, 8> memory = {0, 1, 2, 3, 4, 5, 6, 7};
+
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    bool *val = reinterpret_cast<bool *>(&memory[3]);
+    WritableOutput<bool> output(val);
+
+    bool &ref = output.get();
+
+    ref = true;
+  }
+  EXPECT_EQ(memory[3], 1);
+  memory[3] = 3;
+  EXPECT_EQ(memory, (std::array<uint8_t, 8>{0, 1, 2, 3, 4, 5, 6, 7}));
+
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    bool *val = reinterpret_cast<bool *>(&memory[3]);
+    WritableOutput<bool> output(val);
+
+    bool &ref = output.get();
+
+    ref = false;
+  }
+  EXPECT_EQ(memory[3], 0);
+  memory[3] = 3;
+  EXPECT_EQ(memory, (std::array<uint8_t, 8>{0, 1, 2, 3, 4, 5, 6, 7}));
+
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    bool *val = reinterpret_cast<bool *>(&memory[3]);
+    WritableOutput<bool> output(val);
+
+    bool &ref = output.get();
+
+    // NOLINTNEXTLINE(modernize-use-bool-literals,readability-implicit-bool-conversion)
+    ref = 5;
+  }
+  EXPECT_EQ(memory[3], 1);
+  memory[3] = 3;
+  EXPECT_EQ(memory, (std::array<uint8_t, 8>{0, 1, 2, 3, 4, 5, 6, 7}));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
