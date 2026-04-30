@@ -2801,15 +2801,16 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
   Address addr = make_address(kAddress + 99);
   ItemKey rcq_key = make_key(kAddress + 99, 1);
 
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
 
   // T1: fund the fresh address and insert RCQ entries
   ASSERT_TRUE(block_tx.try_acquire_reference());
   {
     InvokeTX itx(block_tx);
-    ASSERT_TRUE(itx.request_nnint128(
-        make_address_balance_item_key(addr), 100'000,
-        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), 100'000,
+                             std::to_underlying(StorageDeltaFlags::None)));
 
     RetrocausalQueueDelta delta;
     for (uint8_t i = 0; i < 10; ++i) {
@@ -2847,7 +2848,8 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
   Address addr = make_address(kAddress + 100);
   ItemKey rcq_key = make_key(kAddress + 100, 1);
 
-  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
 
   // Single tx: fund address, insert RCQ entries, then add a consume in the
   // same invocation via a child frame. The cumulative delta (inserts + consume)
@@ -2858,9 +2860,9 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
   ASSERT_TRUE(block_tx.try_acquire_reference());
   {
     InvokeTX itx(block_tx);
-    ASSERT_TRUE(itx.request_nnint128(
-        make_address_balance_item_key(addr), 100'000,
-        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), 100'000,
+                             std::to_underlying(StorageDeltaFlags::None)));
 
     RetrocausalQueueDelta insert_delta;
     for (uint8_t i = 0; i < 10; ++i) {
@@ -2873,7 +2875,7 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
 
     // Child frame: cumulative delta keeps all inserts and adds a consume.
     // narrow() requires the new delta to be a superset of the earlier one.
-    int sp = itx.create_savepoint();
+    [[maybe_unused]] int sp = itx.create_savepoint();
 
     RetrocausalQueueDelta cumulative_delta;
     for (uint8_t i = 0; i < 10; ++i) {
@@ -2883,9 +2885,9 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
     for (uint8_t i = 0; i < 5; ++i) {
       cumulative_delta.consume->current_block_consumed.push_back(QueueEntry{i});
     }
-    ASSERT_TRUE(itx.request_retrocausal_queue(
-        rcq_key, cumulative_delta,
-        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.request_retrocausal_queue(rcq_key, cumulative_delta,
+                                              std::to_underlying(
+                                                  StorageDeltaFlags::None)));
     ASSERT_TRUE(itx.sync_balance_locks());
 
     ASSERT_NO_THROW(itx.commit())
