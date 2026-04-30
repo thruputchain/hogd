@@ -291,6 +291,27 @@ struct ByteArrayHasher {
 
 } // namespace hogd
 
+// Format ranges is not supported until gcc 15.2
+#if (__cpp_lib_format_ranges < 202207L)
+
+#include "hogd/base/string.h"
+#include <format>
+
+template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
+  static constexpr auto parse(std::format_parse_context &ctx)
+  {
+    return ctx.begin();
+  }
+  static auto format(const std::array<uint8_t, N> &array,
+                     std::format_context &ctx)
+  {
+    return std::format_to(ctx.out(), "{}",
+                          hogd::encode_hex(std::as_bytes(std::span(array))));
+  }
+};
+
+#endif
+
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
   {
