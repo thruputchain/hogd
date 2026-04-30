@@ -126,7 +126,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       consumed_.store(false, std::memory_order_relaxed);
     }
 
-    const size_t entries_to_unreserve = delta.insert.added_entries.size();
+    const size_t entries_to_unreserve = before->max_insert_count();
     if (entries_to_unreserve > 0) {
       reserved_entry_count_.fetch_sub(entries_to_unreserve,
                                       std::memory_order_relaxed);
@@ -144,23 +144,6 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   CHECK(after != nullptr);
   ScopedUndo undo;
   auto const &delta = after->delta();
-
-  // Verify that the shorter insert list is a prefix of the longer one.
-  // During normal execution, after's inserts grow (after >= before).
-  // During rollback, after's inserts may shrink (after < before).
-  if (before != nullptr) {
-    auto const &before_entries = before->delta().insert.added_entries;
-    auto const &after_entries = delta.insert.added_entries;
-    auto const &shorter = (after_entries.size() <= before_entries.size())
-                              ? after_entries
-                              : before_entries;
-    auto const &longer = (after_entries.size() <= before_entries.size())
-                             ? before_entries
-                             : after_entries;
-    if (!std::equal(shorter.begin(), shorter.end(), longer.begin())) {
-      return HogDBError{HogDBCode::kInvalidExecutorBehavior};
-    }
-  }
 
   // Check strict single-consumer constraint
   const bool this_tx_already_consumed =
@@ -210,9 +193,9 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
   // Reserve space in the RCQ block that will be generated. If there are too
   // many inserts in the same block, abort.
-  const size_t new_entries_count = delta.insert.added_entries.size();
+  const size_t new_entries_count = after->max_insert_count();
   const size_t previous_entries_count =
-      (before != nullptr) ? before->delta().insert.added_entries.size() : 0;
+      (before != nullptr) ? before->max_insert_count() : 0;
 
   if (new_entries_count > previous_entries_count) {
     const size_t additional_entries =
