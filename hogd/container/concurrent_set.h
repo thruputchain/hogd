@@ -109,6 +109,10 @@ public:
           // have placed it in the new level. Undo and retry from level 0.
           if (level < levels() - 1) {
             T expected = value;
+            // CAS can only fail if a concurrent erase() already tombstoned
+            // this slot — erase is the only path that overwrites a live value
+            // (with kTombstone). In that case the eraser already incremented
+            // erases_, so our inserts_/erases_ stay balanced without action.
             if (l[index].compare_exchange_strong(expected, Traits::kTombstone,
                                                  std::memory_order_release,
                                                  std::memory_order_relaxed)) {
