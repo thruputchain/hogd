@@ -10,6 +10,7 @@
 #include <ranges>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -275,7 +276,7 @@ TEST(ConcurrentMap, InsertOrGetMissingAcquireTsanRace)
 
 namespace destructive_double_destroy_test {
 
-std::atomic<int> destroy_count{0};
+static std::atomic<int> destroy_count{0};
 
 struct DestroyCounter {
   int id;
@@ -295,7 +296,9 @@ struct IntHasher {
 
 TEST(ConcurrentMap, DestructiveIterationDoubleDestroyOnException)
 {
-  using namespace destructive_double_destroy_test;
+  using destructive_double_destroy_test::destroy_count;
+  using destructive_double_destroy_test::DestroyCounter;
+  using destructive_double_destroy_test::IntHasher;
 
   destroy_count.store(0, std::memory_order_relaxed);
 
