@@ -349,7 +349,7 @@ EventBlockContext::~EventBlockContext()
 void
 EventBlockContext::executor_open_block()
 {
-  open_executor_handles_.fetch_add(1, std::memory_order_relaxed);
+  open_executor_handles_.fetch_add(1, std::memory_order_release);
   x23assert(all_executors_closed_.load() == false);
 }
 
