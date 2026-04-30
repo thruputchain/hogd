@@ -5,9 +5,12 @@
 #include <cstddef>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <format>
+#include <span>
+#include <version>
 #include <memory>
 #include <source_location>
 #include <string_view>
@@ -19,6 +22,7 @@
 #endif
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/string.h"
 #include "hogd/base/sync.h"
 #include "hogd/base/types.h"
 #include "x23/debug.h" // IWYU pragma: keep
@@ -304,6 +308,15 @@ format_arg(T &&t)
     return std::forward<T>(t);
   }
 }
+
+#if (__cpp_lib_format_ranges < 202207L)
+template<std::size_t N>
+auto
+format_arg(const std::array<uint8_t, N> &array)
+{
+  return encode_hex(std::as_bytes(std::span(array)));
+}
+#endif
 
 
 #ifdef __APPLE__

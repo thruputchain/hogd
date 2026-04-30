@@ -301,13 +301,6 @@ show_byte_array(const std::array<uint8_t, N> &array)
 #endif
 }
 
-template<std::size_t N>
-auto
-format_arg(const std::array<uint8_t, N> &array)
-{
-  return show_byte_array(array);
-}
-
 } // namespace hogd
 
 template<> struct std::hash<hogd::AddressAndKey> {
