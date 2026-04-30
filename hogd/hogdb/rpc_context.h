@@ -32,6 +32,7 @@
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/mvar.h"
 #include "x23/rpc.h"
 
 namespace hogd {
@@ -65,8 +66,8 @@ public:
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db. If [ret.has_value()] is false, then no blocks have
       // been committed yet.
-      tip_ = *ret;
-      current_committed_height_ = tip_.height;
+      *tip_.take() = *ret;
+      current_committed_height_ = ret->height;
     }
   }
 
@@ -74,9 +75,8 @@ public:
 
   // getters.
   HogDBDAO &get_db() { return db_; }
-  // The tip height is the height of the next block to be committed.
-  // (Equivalently, the count of the number of blocks that have been committed.)
-  DbTip &get_tip() { return tip_; }
+  DbTip get_tip() { return *tip_.take(); }
+  void set_tip(DbTip new_tip) { *tip_.take() = std::move(new_tip); }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
   {
     return auth_change_subscription_manager_;
@@ -162,9 +162,8 @@ private:
 
   // the database used to persist state.
   HogDBDAO db_;
-  // tracks details about the last committed block.
-  DbTip tip_ = DbTip{.height = -1, .id = UINT64_MAX};
-  std::atomic<BlockHeight> current_committed_height_ = tip_.height;
+  x23::MVar<DbTip> tip_{DbTip{.height = -1, .id = UINT64_MAX}};
+  std::atomic<BlockHeight> current_committed_height_{-1};
   // the storage cost model for computing storage costs at the current block
   // height.
   std::optional<StorageCostModel> cost_model_;
