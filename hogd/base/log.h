@@ -336,7 +336,7 @@ gettid()
       x23::panic("{}:{} (TID {}) CHECK FAILED: {} {} {} [{} {} {}]", __FILE__, \
                  __LINE__, gettid(), CSTR(expr1), CSTR(op), CSTR(expr2),       \
                  hogd::format_arg(__val1), CSTR(invop),                        \
-                 hogd::format_arg(__val2));                                     \
+                 hogd::format_arg(__val2));                                    \
     }                                                                          \
   } while (0)
 
