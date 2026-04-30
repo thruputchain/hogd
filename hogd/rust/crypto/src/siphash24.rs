@@ -23,7 +23,7 @@ pub unsafe extern "C" fn siphash24_hash(
     key2: u64,
     data: MessageSpan,
 ) -> u64 {
-    debug_assert!(!data.message_ptr.is_null());
+    debug_assert!(data.message_len == 0 || !data.message_ptr.is_null());
 
     let data_bytes = data.to_slice();
 
@@ -114,5 +114,45 @@ mod tests {
         };
 
         assert_eq!(result1, result2); // Same input should produce same output
+    }
+
+    #[test]
+    fn test_siphash24_null_zero_length_span() {
+        let result1 = unsafe {
+            siphash24_hash(
+                1,
+                2,
+                MessageSpan {
+                    message_ptr: std::ptr::null(),
+                    message_len: 0,
+                },
+            )
+        };
+
+        let result2 = unsafe {
+            siphash24_hash(
+                1,
+                2,
+                MessageSpan {
+                    message_ptr: std::ptr::null(),
+                    message_len: 0,
+                },
+            )
+        };
+
+        assert_eq!(result1, result2);
+
+        let empty: &[u8] = &[];
+        let result_non_null = unsafe {
+            siphash24_hash(
+                1,
+                2,
+                MessageSpan {
+                    message_ptr: empty.as_ptr(),
+                    message_len: 0,
+                },
+            )
+        };
+        assert_eq!(result1, result_non_null);
     }
 }

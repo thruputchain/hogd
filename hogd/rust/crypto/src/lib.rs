@@ -10,9 +10,14 @@ pub struct MessageSpan {
 
 impl MessageSpan {
     /// # Safety
-    /// `message_ptr` must point to valid memory of at least `message_len` bytes,
-    /// and the memory must remain valid for the lifetime of the returned slice.
+    /// - If `message_len == 0`, `message_ptr` may be null (returns `&[]`).
+    /// - If `message_len > 0`, `message_ptr` must point to valid memory of at
+    ///   least `message_len` bytes, and the memory must remain valid for the
+    ///   lifetime of the returned slice.
     pub unsafe fn to_slice(&self) -> &[u8] {
+        if self.message_len == 0 {
+            return &[];
+        }
         core::slice::from_raw_parts(self.message_ptr, self.message_len)
     }
 }
