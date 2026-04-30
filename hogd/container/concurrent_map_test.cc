@@ -274,9 +274,9 @@ TEST(ConcurrentMap, InsertOrGetMissingAcquireTsanRace)
   EXPECT_FALSE(observed_invalid.load(std::memory_order_relaxed));
 }
 
-namespace destructive_double_destroy_test {
+namespace {
 
-static std::atomic<int> destroy_count{0};
+std::atomic<int> destroy_count{0};
 
 struct DestroyCounter {
   int id;
@@ -292,13 +292,10 @@ struct IntHasher {
   }
 };
 
-} // namespace destructive_double_destroy_test
+} // namespace
 
 TEST(ConcurrentMap, DestructiveIterationDoubleDestroyOnException)
 {
-  using destructive_double_destroy_test::destroy_count;
-  using destructive_double_destroy_test::DestroyCounter;
-  using destructive_double_destroy_test::IntHasher;
 
   destroy_count.store(0, std::memory_order_relaxed);
 
