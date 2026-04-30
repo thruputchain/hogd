@@ -305,6 +305,7 @@ format_arg(T &&t)
   }
 }
 
+
 #ifdef __APPLE__
 inline auto
 gettid()

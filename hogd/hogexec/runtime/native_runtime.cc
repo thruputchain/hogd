@@ -59,7 +59,7 @@ NativeContext::make_new_runtime(
   }
   if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
-          deployed_contract_hash.hash);
+          show_byte_array(deployed_contract_hash.hash));
     return SystemError(SystemErrorCode::Unrecoverable);
   }
 

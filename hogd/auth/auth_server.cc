@@ -17,6 +17,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
