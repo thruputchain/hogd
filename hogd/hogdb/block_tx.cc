@@ -3,7 +3,6 @@
 #include <cassert>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -59,7 +58,7 @@ BlockTX::do_unlock_item(ItemLock &lock, const ItemChange &change,
 void
 BlockTX::release_balance(const Address &addr, int128_t delta)
 {
-  assert(delta > 0);
+  CHECK_GT(delta, 0);
 
   ItemKey key = make_address_balance_item_key(addr);
   auto *lock = addr_balance_locks_.insert_or_get(addr, [&] {
@@ -67,14 +66,22 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   });
   CHECK_PTR(lock);
 
-  ItemChange change = ItemChange(Balance(delta));
-
-  LockContext ctx(&db_, block_height_, key, &cost_model_);
-  if (auto r = do_lock(*lock, change, ctx); !r) [[unlikely]] {
-    throw std::runtime_error("failed to lock balance");
+  if (lock->is_finalized()) {
+    lock->add_committed_balance_credit(delta);
   }
-
-  lock->commit_change(change, ctx);
+  else {
+    // No prior balance lock exists in this block. This happens when
+    // lock_storage was never called for the address (marginal cost was 0)
+    // but commit_change returned a negative cost (e.g., consuming or
+    // deleting snapshot entries). Such an address must have a snapshot
+    // balance — you can't have snapshot storage items without one — so
+    // the fresh-balance guard in try_atomic_change_lock passes.
+    ItemChange change = ItemChange(Balance(delta));
+    LockContext ctx(&db_, block_height_, key, &cost_model_);
+    auto r = do_lock(*lock, change, ctx);
+    CHECK(r.has_value());
+    lock->commit_change(change, ctx);
+  }
 }
 
 HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
