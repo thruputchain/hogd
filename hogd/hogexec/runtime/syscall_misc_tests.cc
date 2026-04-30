@@ -676,4 +676,91 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
+// ── Wasm function that returns without calling the Return syscall ────
+
+TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
+{
+  // Deploy the same wasm at a second address so we can cross-contract
+  // invoke it without reentrance.
+  using syscall_misc_tests_meta =
+      ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+  constexpr ContractAddress kTargetAddress = make_contract_address(1);
+  auto contract = syscall_misc_tests_meta::load_wasm();
+  write_contract(contract);
+  write_deployment(kTargetAddress, contract);
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<"test_invoke_no_return_syscall">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// ── Return auth token edge cases ────────────────────────────────────
+
+TEST_F(SyscallMiscTests, TestReturnMisalignedAuthTokens)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<"test_return_misaligned_auth_tokens">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+TEST_F(SyscallMiscTests, TestReturnRevertWithAuthTokens)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<"test_return_revert_with_auth_tokens">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+TEST_F(SyscallMiscTests, TestReturnWithEmptyAuthTokens)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<"test_return_with_empty_auth_tokens">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+TEST_F(SyscallMiscTests, TestReturnWithAuthTokenIds)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<"test_return_with_auth_token_ids">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  handler.hack_dont_use_test_bypass_allow_reentrance();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
 } // namespace hogd

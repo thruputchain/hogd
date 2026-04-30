@@ -422,7 +422,8 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
 
   auto [status, gas] =
       syscall_Return_inner(handler,
-                           std::span<const std::byte>(oversized_buffer), false);
+                           std::span<const std::byte>(oversized_buffer), false,
+                           {});
 
   // The syscall should fail with Exit
   ASSERT_FALSE(status.has_value());
@@ -451,7 +452,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
   auto [status, gas] =
       syscall_Return_inner(handler, std::span<const std::byte>(valid_buffer),
-                           false);
+                           false, {});
 
   // The syscall should succeed with Return
   ASSERT_FALSE(status.has_value());

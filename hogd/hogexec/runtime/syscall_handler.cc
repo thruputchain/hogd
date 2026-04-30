@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -542,7 +543,7 @@ SystemCallHandler::finish_frame(
   assert(!last_frame_finished_);
   if (!result.has_value()) {
     invocation_frame_stack_.set_active_frame_return(
-        InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+        InvocationFrameOutput(InvocationFrameStatusCode::Fault), {});
   }
 
   if (invocation_frame_trace_) {
@@ -674,20 +675,37 @@ SystemCallHandler::get_return_buffer() const
   return SystemError{SystemErrorCode::Unrecoverable};
 }
 
+bool
+SystemCallHandler::check_auth_tokens_owned(
+    std::span<uint32_t const> token_ids) const
+{
+  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
+}
+
+std::span<const uint32_t>
+SystemCallHandler::get_returned_auth_token_ids() const
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_
+      .get_active_frame_child_returned_auth_token_ids();
+}
+
 void
-SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
-                                     bool revert_frame)
+SystemCallHandler::set_return_buffer(
+    ReturnBuffer &&returned_buffer, bool revert_frame,
+    std::vector<uint32_t> returned_auth_token_ids)
 {
   assert(!invocation_frame_stack_.empty());
   if (revert_frame) {
     InvocationFrameOutput output(InvocationFrameStatusCode::Abort);
     output.abort_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.set_active_frame_return(std::move(output));
+    invocation_frame_stack_.set_active_frame_return(std::move(output), {});
   }
   else {
     InvocationFrameOutput output(InvocationFrameStatusCode::Return);
     output.return_buffer() = std::move(returned_buffer);
-    invocation_frame_stack_.set_active_frame_return(std::move(output));
+    invocation_frame_stack_.set_active_frame_return(
+        std::move(output), std::move(returned_auth_token_ids));
   }
 }
 

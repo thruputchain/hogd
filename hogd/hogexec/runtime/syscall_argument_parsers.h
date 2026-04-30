@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/components/alias_guard.h"
 
@@ -19,6 +20,7 @@ namespace hogd {
 
 // These parsers will need to be rewritten to support big-endian machines.
 static_assert(std::endian::native == std::endian::little);
+static_assert(sizeof(bool) == 1);
 
 template<typename T> class WritableOutput {
 public:
@@ -39,9 +41,9 @@ public:
 
   T &get()
   {
-    assert(value_.has_value());
+    CHECK(value_.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return value_.value();
+    return *value_;
   }
 
   bool has_value() const noexcept { return value_.has_value(); }
@@ -57,14 +59,18 @@ public:
 
   ~WritableOutput()
   {
-    if (!value_)
+    if (!value_.has_value())
       return;
 
-    if constexpr (requires { value_->data(); }) {
+    if constexpr (std::is_same_v<T, bool>) {
+      uint8_t canonical = (*value_) ? 1 : 0;
+      std::memcpy(original_pointer_, &canonical, 1);
+    }
+    else if constexpr (requires { value_->data(); }) {
       std::memcpy(original_pointer_, value_->data(), sizeof(T));
     }
     else {
-      std::memcpy(original_pointer_, &(value_.value()), sizeof(T));
+      std::memcpy(original_pointer_, &(*value_), sizeof(T));
     }
   }
 

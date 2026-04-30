@@ -227,19 +227,21 @@ syscall_Invoke_inner(
     else {
       output_return_buffer_len = 0;
     }
+    output_returned_auth_token_len =
+        syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
     return {*invoke_res, WrappedGasAmount{gas_amount}};
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
-  // TODO(geoff): returning auth tokens unsupported yet
   output_returned_auth_token_len = 0;
   return {invoke_res, WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_Return_inner(SystemCallHandler &syscall_handler,
-                     std::span<const std::byte> input_buffer,
-                     bool input_revert_frame) noexcept
+syscall_Return_inner(
+    SystemCallHandler &syscall_handler, std::span<const std::byte> input_buffer,
+    bool input_revert_frame,
+    std::span<const std::byte> input_returned_auth_token_ids) noexcept
 {
   // If the return buffer is too large, we return a deterministic error`
   // equivalent to a wasm `unreachable` instruction.
@@ -251,9 +253,21 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
+  if (input_returned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
+  if (!input_returned_auth_token_ids.empty() && input_revert_frame) {
+    // Cannot revert the frame and also return auth tokens
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
   ReturnBuffer buffer;
+  std::vector<uint32_t> returned_auth_token_ids_vec;
   try {
     buffer.resize_uninitialized(input_buffer.size());
+    returned_auth_token_ids_vec.resize(input_returned_auth_token_ids.size() /
+                                       sizeof(uint32_t));
   } catch (std::exception &e) {
     error("unrecoverable: failed to resize return buffer: {}", e.what());
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
@@ -265,8 +279,20 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                 reinterpret_cast<const uint8_t *>(input_buffer.data()),
                 input_buffer.size());
   }
+  if (!input_returned_auth_token_ids.empty()) {
+    assert(returned_auth_token_ids_vec.data() != nullptr);
+    assert(input_returned_auth_token_ids.data() != nullptr);
+    std::memcpy(returned_auth_token_ids_vec.data(),
+                input_returned_auth_token_ids.data(),
+                input_returned_auth_token_ids.size());
+  }
 
-  syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame);
+  if (!syscall_handler.check_auth_tokens_owned(returned_auth_token_ids_vec)) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
+  syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame,
+                                    std::move(returned_auth_token_ids_vec));
 
   return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }
@@ -275,9 +301,8 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetReturnedBuffer_inner(
     SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
     RuntimeMemoryLength &output_written_len,
-    [[maybe_unused]] std::span<std::byte> output_restored_auth_token_ids,
-    [[maybe_unused]] RuntimeMemoryLength
-        &output_restored_auth_token_ids_written_len) noexcept
+    std::span<std::byte> output_restored_auth_token_ids,
+    RuntimeMemoryLength &output_restored_auth_token_ids_written_len) noexcept
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {
@@ -297,6 +322,19 @@ syscall_GetReturnedBuffer_inner(
     written = true;
   }
   output_written_len = write_len;
+
+  auto returned_ids = syscall_handler.get_returned_auth_token_ids();
+  auto returned_ids_bytes = std::as_bytes(returned_ids);
+  output_restored_auth_token_ids_written_len =
+      std::min(output_restored_auth_token_ids.size(),
+               returned_ids_bytes.size());
+  if (output_restored_auth_token_ids_written_len > 0) {
+    assert(output_restored_auth_token_ids.data() != nullptr);
+    assert(returned_ids_bytes.data() != nullptr);
+    std::memcpy(output_restored_auth_token_ids.data(),
+                returned_ids_bytes.data(),
+                output_restored_auth_token_ids_written_len);
+  }
 
   if (auto *trace_data =
           syscall_handler
