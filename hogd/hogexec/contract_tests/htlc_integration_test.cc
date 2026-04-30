@@ -125,7 +125,8 @@ protected:
                        erc20_meta::make_calldata<"mint">(kWalletContractAddress,
                                                          make_amount(amount)));
     Ed25519Signature mint_sig =
-        ed25519_sign(wallet_secret_key_, mint_calldata).value(); // NOLINT(bugprone-unchecked-optional-access)
+        ed25519_sign(wallet_secret_key_, mint_calldata)
+            .value(); // NOLINT(bugprone-unchecked-optional-access)
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -157,7 +158,8 @@ protected:
         erc20_meta::make_calldata<"adjust_allowance">(kHTLCContractAddress,
                                                       make_difference(amount)));
     Ed25519Signature approve_sig =
-        ed25519_sign(wallet_secret_key_, approve_calldata).value(); // NOLINT(bugprone-unchecked-optional-access)
+        ed25519_sign(wallet_secret_key_, approve_calldata)
+            .value(); // NOLINT(bugprone-unchecked-optional-access)
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -192,7 +194,8 @@ protected:
                            kReceiverAddress, kERC20ContractAddress,
                            make_difference(amount), expiration_height, hash));
     Ed25519Signature create_sig =
-        ed25519_sign(wallet_secret_key_, create_htlc_calldata).value(); // NOLINT(bugprone-unchecked-optional-access)
+        ed25519_sign(wallet_secret_key_, create_htlc_calldata)
+            .value(); // NOLINT(bugprone-unchecked-optional-access)
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{

@@ -127,7 +127,8 @@ ERC20ExperimentState::generate_experiment()
                                                              1'000'000'000})));
 
     auto calldata = wallet_meta::make_calldata<"do_action">(
-        ed25519_sign(wallets_[0].secret_key, internal_calldata).value(), // NOLINT(bugprone-unchecked-optional-access)
+        ed25519_sign(wallets_[0].secret_key, internal_calldata)
+            .value(), // NOLINT(bugprone-unchecked-optional-access)
         internal_calldata);
 
     auto tx = SignedTransaction{

@@ -152,7 +152,9 @@ TEST(Ed25519, SignReturnsNulloptForMismatchedKeypair)
 
   auto valid_sig = ed25519_sign(sk, msg_bytes);
   ASSERT_TRUE(valid_sig.has_value());
-  ASSERT_TRUE(ed25519_verify(pk, valid_sig.value(), msg)); // NOLINT(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(
+      ed25519_verify(pk, valid_sig.value(),
+                     msg)); // NOLINT(bugprone-unchecked-optional-access)
 
   auto corrupted_sk = sk;
   corrupted_sk[0] ^= 0x01;
