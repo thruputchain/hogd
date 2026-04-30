@@ -110,21 +110,12 @@ file(MAKE_DIRECTORY "${HOGD_BUILT_HEADERS_DIR}")
 
 include(cmake/repro.cmake)
 
-git_describe_string(GIT_HOGD_COMMIT)
-git_describe_string(GIT_PROTOCOL_COMMIT protocol NODIRTY)
 generate_cmake_repro_string(CMAKE_REPRO_COMMAND)
-
-configure_file(
-  ${CMAKE_SOURCE_DIR}/cmake/version.c.in
-  ${CMAKE_BINARY_DIR}/hogd/version.c
-  @ONLY)
 
 # === Interface target that exposes the header and enforces the dep ===
 add_library(built_headers_interface INTERFACE)
 # Only this target provides the include dir where the header lives:
 target_include_directories(built_headers_interface INTERFACE "${BUILT_HEADERS_DIR}")
-# Make anyone who links this depend on header generation:
-add_dependencies(built_headers_interface version)
 
 include(CheckIPOSupported)
 check_ipo_supported()
