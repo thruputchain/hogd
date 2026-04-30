@@ -66,7 +66,6 @@ public:
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
     int backlog = 5 + cp_.pool_.nthreads_;
     auto lfd = x23::tcplisten(port, backlog);
-    listen_fd_ = lfd.get();
     if (port == 0)
       port = x23::get_port(x23::local_addr(lfd));
     port_ = port;
@@ -81,13 +80,13 @@ public:
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
     auto lfd = x23::tcplisten(*addr, backlog);
-    listen_fd_ = lfd.get();
     port_ = x23::get_port(x23::local_addr(lfd));
     return {port_, std::move(lfd)};
   }
 
   void start_accepting(x23::UniqueFd lfd)
   {
+    listen_fd_ = lfd.get();
     x23::start_listening(cp_, lfd,
                          [self = x23::RefPtr(*this),
                           _d = x23::Defer([this] { eof(); })](auto c) {
