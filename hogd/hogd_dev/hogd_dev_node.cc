@@ -126,8 +126,9 @@ HogdDevNode::~HogdDevNode()
     // coroutine. Shut it down before destroying [db_scheduler_server_], or the
     // detached coroutine may send on an invalid file descriptor.
     mempool_coord_server_.impl()->scheduler()->shut_down()();
-    // TODO(jhumphri): Implement clean shutdown for all RPC servers. For now we
-    // need this so the [Executor] destructor does not block.
+    // This mirrors MempoolTestInfra's current shutdown assumption: the RPC
+    // servers do not yet have a coordinated clean-shutdown API, but executor
+    // shutdown is required so the [Executor] destructor does not block.
     executor_.shut_down();
 
     db_auth_server_.reset();

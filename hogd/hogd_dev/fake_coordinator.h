@@ -28,7 +28,9 @@ public:
 
   void shut_down()
   {
-    // TODO(jhumphri): Implement.
+    // v1 mirrors MempoolTestInfra's fake coordinator: there is no persistent
+    // coordinator state to drain, and process shutdown owns the surrounding
+    // server lifetime.
   }
 };
 static_assert(is_CoordScheduler1<DevCoordinatorSchedRpc *, x23::Async>);
