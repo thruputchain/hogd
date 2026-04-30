@@ -16,11 +16,34 @@ add_subdirectory(loadgen)
 add_subdirectory(auth_claim)
 add_subdirectory(auth)
 
+# Generate version.c at build time so git state changes in hogd/protocol do not
+# require a fresh configure step or manual deletion of the old output.
+#
+# Define the custom command in the same directory scope as the hogd target so
+# CMake recognizes the source as generated during a clean configure in CI.
+set(HOGD_VERSION_C "${CMAKE_BINARY_DIR}/hogd/version.c")
+add_custom_command(
+  OUTPUT ${HOGD_VERSION_C}
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DPROJECT_VERSION=${PROJECT_VERSION}
+    -DCMAKE_REPRO_COMMAND=${CMAKE_REPRO_COMMAND}
+    -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+    -DVERSION_TEMPLATE=${CMAKE_SOURCE_DIR}/cmake/version.c.in
+    -DVERSION_OUTPUT=${HOGD_VERSION_C}
+    -P ${CMAKE_SOURCE_DIR}/cmake/write_version_c.cmake
+  DEPENDS
+    ${CMAKE_SOURCE_DIR}/cmake/write_version_c.cmake
+    ${CMAKE_SOURCE_DIR}/cmake/version.c.in
+    ${CMAKE_SOURCE_DIR}/cmake/repro.cmake
+  VERBATIM)
+set_source_files_properties(${HOGD_VERSION_C} PROPERTIES GENERATED TRUE)
+
 # Then combine them into the hogd library (used by all executables below)
 add_library(
   hogd
   init.cc
-  ${CMAKE_BINARY_DIR}/hogd/version.c
+  ${HOGD_VERSION_C}
 )
 add_library(hogd_interface INTERFACE)
 target_link_libraries(
