@@ -1,0 +1,52 @@
+add_library(
+  hogd_dev
+  hogd_dev_node.cc
+  hogd_dev_tmp_dir.cc
+)
+target_link_libraries(
+  hogd_dev
+  auth
+  base
+  exec_interface
+  hogd
+  hogdb
+  mempool
+  protocol
+  ramdb
+  runtime
+  storage_cost
+)
+
+add_executable(
+  hogd_dev_exec
+  hogd_dev.cc
+)
+set_property(TARGET hogd_dev_exec PROPERTY OUTPUT_NAME hogd-dev)
+target_link_libraries(
+  hogd_dev_exec
+  hogd_dev
+)
+
+add_custom_target(hogd-dev DEPENDS hogd_dev_exec)
+
+add_executable(
+  hogd_dev_test
+  hogd_dev_test.cc
+)
+target_compile_definitions(
+  hogd_dev_test
+  PRIVATE
+  HOGD_DEV_BINARY="$<TARGET_FILE:hogd_dev_exec>"
+)
+target_link_libraries(
+  hogd_dev_test
+  genesis
+  hogd_dev
+  storage_cost
+  GTest::gtest
+)
+add_dependencies(
+  hogd_dev_test
+  hogd_dev_exec
+)
+gtest_discover_tests(hogd_dev_test)

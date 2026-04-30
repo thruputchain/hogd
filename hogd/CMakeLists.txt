@@ -47,6 +47,7 @@ add_subdirectory(block_explorer)
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
 add_subdirectory(mempool)
+add_subdirectory(hogd_dev)
 
 # Build utilities
 add_subdirectory(utils)
