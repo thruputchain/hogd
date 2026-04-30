@@ -42,10 +42,6 @@ struct InvokeTxKey {
   };
 };
 
-} // namespace hogd
-
-namespace hogd {
-
 // storage_cost returns the cost in hogs for storage.
 //
 // WARNING: This does not necessarily reflect the real storage cost. It can't
