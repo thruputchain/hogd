@@ -45,6 +45,7 @@
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
@@ -2893,6 +2894,42 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
     ASSERT_NO_THROW(itx.commit())
         << "commit should not throw when crediting a fresh-balance refund";
     itx.release_blocktx_reference();
+  }
+}
+
+TEST(InvokeTxKeyTest, HashAndEquality)
+{
+  hogd::InvokeTxKey k1{17, 29};
+  hogd::InvokeTxKey k2{17, 29};
+  hogd::InvokeTxKey k3{17, 30};
+
+  EXPECT_EQ(k1, k2);
+  EXPECT_NE(k1, k3);
+
+  hogd::InvokeTxKey::Hash hasher;
+  EXPECT_EQ(hasher(k1), hasher(k2));
+  EXPECT_EQ(hasher(k1), std::hash<hogd::BlockTXID>()(k1.block_tx_id) ^
+                             std::hash<hogd::InvokeTXID>()(k1.invoke_tx_id));
+}
+
+TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
+{
+  hogd::SynchronizedMap<hogd::InvokeTxKey, int, hogd::InvokeTxKey::Hash> map(2);
+  hogd::InvokeTxKey key{42, 99};
+
+  {
+    auto [value, lock] = map[key];
+    value = 1234;
+  }
+  {
+    auto [value, lock] = map.find(key);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(*value, 1234);
+  }
+  EXPECT_EQ(map.remove(key), 1U);
+  {
+    auto [value, lock] = map.find(key);
+    EXPECT_EQ(value, nullptr);
   }
 }
 
