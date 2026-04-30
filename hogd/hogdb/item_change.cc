@@ -118,7 +118,7 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
     bool monotonic =
         (ec < nc) ||
         (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
-                     delta_.consume->current_block_consumed.size());
+                         delta_.consume->current_block_consumed.size());
     if (!monotonic) {
       return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
     }

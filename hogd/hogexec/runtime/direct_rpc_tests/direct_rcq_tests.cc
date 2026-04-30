@@ -4066,12 +4066,11 @@ TEST_F(DirectRCQTests, SelfConsumePartialShrinkWithNewInserts)
   auto tx = make_new_per_tx_db_proxy();
 
   // Sub1: insert [A, B, C].
-  tx.add_delta(
-      key,
-      make_rcq_insert_delta(
-          {make_rcq_entry({0x0A}), make_rcq_entry({0x0B}),
-           make_rcq_entry({0x0C})}),
-      std::to_underlying(StorageDeltaFlags::None));
+  tx.add_delta(key,
+               make_rcq_insert_delta({make_rcq_entry({0x0A}),
+                                      make_rcq_entry({0x0B}),
+                                      make_rcq_entry({0x0C})}),
+               std::to_underlying(StorageDeltaFlags::None));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
 

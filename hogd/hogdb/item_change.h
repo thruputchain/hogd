@@ -465,9 +465,8 @@ static_assert(hogd::is_item<hogd::PointerItem<hogd::ReplayCacheIt>>);
 class RetrocausalQueueIt {
 public:
   RetrocausalQueueIt(RetrocausalQueueDelta delta)
-    : delta_(std::move(delta)),
-      max_insert_count_(
-          static_cast<uint16_t>(delta_.insert.added_entries.size()))
+    : delta_(std::move(delta)), max_insert_count_(static_cast<uint16_t>(
+                                    delta_.insert.added_entries.size()))
   {}
 
   HogDBStatus<bool> narrow(const RetrocausalQueueIt &earlier);
