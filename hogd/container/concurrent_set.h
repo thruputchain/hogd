@@ -90,11 +90,28 @@ public:
                                              std::memory_order_relaxed)) {
           inserts_.fetch_add(1, std::memory_order_relaxed);
 
+          // A resize may have added a deeper level between our levels() check
+          // and the CAS. If so, a concurrent inserter of the same value could
+          // have placed it in the new level. Undo and retry from level 0.
+          if (level < levels() - 1) {
+            T expected = value;
+            if (l[index].compare_exchange_strong(expected, Traits::kTombstone,
+                                                 std::memory_order_release,
+                                                 std::memory_order_relaxed)) {
+              erases_.fetch_add(1, std::memory_order_relaxed);
+            }
+            level = static_cast<size_t>(-1);
+            goto outer;
+          }
+
           // It might have been the case that there was sufficient capacity when
           // we started try_insert, but we don't know that our insert didn't
           // raise the load further. So, resize if necessary before retrying.
           try_resize();
           return true;
+        }
+        if (v == value) {
+          return false;
         }
       }
 

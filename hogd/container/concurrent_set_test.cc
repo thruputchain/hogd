@@ -280,4 +280,42 @@ TEST(ConcurrentSet, ParallelInsertAndErase)
   ASSERT_EQ(s.size(), 0);
 }
 
+TEST(ConcurrentSet, ParallelInsertSameKeys)
+{
+  constexpr size_t kNKeys = ConcurrentSetHelper::kInitialCapacity * 64;
+  constexpr size_t kNThreads = 16;
+
+  ConcurrentSet<uint64_t> s;
+  std::vector<std::jthread> threads;
+  threads.reserve(kNThreads);
+  std::barrier barrier(kNThreads);
+
+  std::vector<std::atomic<size_t>> insert_counts(kNKeys);
+
+  for (size_t i = 0; i < kNThreads; ++i) {
+    threads.emplace_back([&s, &barrier, &insert_counts]() {
+      barrier.arrive_and_wait();
+      for (size_t j = 1; j <= kNKeys; ++j) {
+        if (s.try_insert(j)) {
+          insert_counts[j - 1].fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+
+  threads.clear();
+
+  for (size_t j = 1; j <= kNKeys; ++j) {
+    ASSERT_EQ(insert_counts[j - 1].load(), 1)
+        << "key " << j << " was inserted "
+        << insert_counts[j - 1].load() << " times";
+  }
+
+  for (size_t j = 1; j <= kNKeys; ++j) {
+    ASSERT_TRUE(s.erase(j)) << "key " << j << " not found for erase";
+    ASSERT_FALSE(s.contains(j))
+        << "key " << j << " still present after erase (duplicate existed)";
+  }
+}
+
 } // namespace hogd
