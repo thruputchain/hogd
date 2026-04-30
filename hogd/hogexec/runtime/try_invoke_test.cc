@@ -2678,9 +2678,9 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   // check that hogdb streamed out the results correctly
   if (GetParam() == TestDB::kHogDB) {
     auto hogs_transferred = get_hogs_transferred(1);
-    ASSERT_EQ(hogs_transferred.size(), 2);
+    ASSERT_EQ(hogs_transferred.size(), 1);
     ASSERT_EQ(hogs_transferred.at(sender_addr), -write_cost);
-    ASSERT_EQ(hogs_transferred.at(receiver_addr), 0);
+    ASSERT_FALSE(hogs_transferred.contains(receiver_addr));
   }
 }
 

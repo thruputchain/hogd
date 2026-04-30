@@ -10,6 +10,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
@@ -521,6 +522,73 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// Regression test for #1628: self-transfer must not publish a zero delta
+// to the scheduler (which would trip CHECK_NE(num_received, 0)).
+TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
+{
+  constexpr static ContractAddress kOwnerAddr = make_contract_address(184);
+  constexpr static int128_t kInitialBalance = 1'000'000;
+
+  setup_grant_storage_token(kOwnerAddr, kInitialBalance);
+
+  auto owner_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto client = ContractTraitClient<itc_erc20::ERC20>(
+                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+             auto [r, _g] =
+                 client.invoke_opt<"transfer">(ctx.handler(), kOwnerAddr,
+                                               make_amount(37));
+             if (!r.has_value() || !r.value().has_value() ||
+                 !r.value().value().has_value() ||
+                 !r.value().value().value().is_ok()) {
+               ADD_FAILURE() << "self-transfer did not return Ok";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kOwnerNativeId = 28;
+  contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto owner_xdr = make_native_contract(kOwnerNativeId);
+  write_contract(owner_xdr);
+  write_deployment(kOwnerAddr, owner_xdr);
+
+  const BlockHeight committed_block = get_block_number();
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kOwnerAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *runtime_context);
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK)());
+
+  advance_block();
+
+  auto hogs_transferred = get_hogs_transferred(committed_block);
+  EXPECT_TRUE(hogs_transferred.empty())
+      << "zero-delta self-transfer must not be published to scheduler";
+
+  auto balance_item = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kOwnerAddr));
+  ASSERT_TRUE(balance_item.has_value());
+  EXPECT_EQ(from_xdr(balance_item->nnint()), kInitialBalance);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
