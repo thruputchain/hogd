@@ -106,7 +106,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
-    ctx.get_tip() = *tip;
+    ctx.set_tip(*tip);
     if (auto cost_model = ctx.get_db().read_cost_model(); cost_model) {
       ctx.initialize_cost_model(*cost_model);
     }
@@ -117,8 +117,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
   else {
     CHECK_EQ(db_hash, DbHash{});
-    ctx.get_tip().height = -1;
-    ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
+    ctx.set_tip(
+        DbTip{.height = -1, .id = std::numeric_limits<BlockTXID>::max()});
   }
 
   HogDBStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());

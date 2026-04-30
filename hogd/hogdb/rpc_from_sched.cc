@@ -170,13 +170,14 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
   if (!lsn)
     return lsn.error();
 
+  DbTip committed_tip = ctx_.get_tip();
   info("committed block {}: block_hash='{}' events_hash='{}', db_hash='{}', "
        "height='{}', lsn='{}",
-       id, encode_base64(std::as_bytes(std::span(ctx_.get_tip().block_hash))),
-       encode_base64(std::as_bytes(std::span(ctx_.get_tip().events_hash))),
-       encode_base64(std::as_bytes(std::span(ctx_.get_tip().db_hash))),
-       ctx_.get_tip().height, *lsn);
-  CHECK_NE(ctx_.get_tip().height, -1);
+       id, encode_base64(std::as_bytes(std::span(committed_tip.block_hash))),
+       encode_base64(std::as_bytes(std::span(committed_tip.events_hash))),
+       encode_base64(std::as_bytes(std::span(committed_tip.db_hash))),
+       committed_tip.height, *lsn);
+  CHECK_NE(committed_tip.height, -1);
   return {};
 }
 
@@ -187,9 +188,9 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_open(parent_id, new_id);
   }
-  if (parent_id != ctx_.get_tip().id) {
-    error("parent_id {} is not the last committed block {}", parent_id,
-          ctx_.get_tip().id);
+  auto tip_id = ctx_.get_tip().id;
+  if (parent_id != tip_id) {
+    error("parent_id {} is not the last committed block {}", parent_id, tip_id);
     co_return DbSchedResult::DbSchedResultInvalidParentId;
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could

@@ -32,8 +32,9 @@ public:
   explicit HogDBSchedRpc(RPCContext &ctx) : ctx_(ctx)
   {
     if constexpr (is_debug_build()) {
-      if (ctx_.get_tip().id != UINT64_MAX) {
-        block_id_state_manager_.log_block_id_tip(ctx_.get_tip().id);
+      auto tip = ctx_.get_tip();
+      if (tip.id != UINT64_MAX) {
+        block_id_state_manager_.log_block_id_tip(tip.id);
       }
     }
   }
