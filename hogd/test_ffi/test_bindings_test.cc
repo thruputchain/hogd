@@ -2916,22 +2916,22 @@ TEST(TestBindingsTest, OpenSyscallHandlerOversizedAuthClaimsIsDeserializeError)
                                 x23::xdr_size(stx.tx.uniquifier) +
                                 x23::xdr_size(stx.tx.contracts_to_deploy);
   ASSERT_LE(auth_claims_len_offset + sizeof(uint32_t), serialized_stx.size());
-  ASSERT_EQ(
-      x23::getbe<uint32_t>(serialized_stx.data() + auth_claims_len_offset), 0U);
+  ASSERT_EQ(x23::getbe<uint32_t>(serialized_stx.data() +
+                                 auth_claims_len_offset),
+            0U);
 
   x23::putbe<uint32_t>(serialized_stx.data() + auth_claims_len_offset,
                        uint32_t{kMaxAuthClaims + 1});
   SignedTransaction ignored;
-  ASSERT_THROW(x23::deserialize(&ignored,
-                                x23::BufView{serialized_stx.data(),
-                                             serialized_stx.size()}),
+  ASSERT_THROW(x23::deserialize(&ignored, x23::BufView{serialized_stx.data(),
+                                                       serialized_stx.size()}),
                x23::XdrLengthError);
 
   auto result = open_syscall_handler(
       db, rc,
-      FFISerializedSignedTransaction{
-          .data = serialized_stx.data(),
-          .len = static_cast<uint32_t>(serialized_stx.size())});
+      FFISerializedSignedTransaction{.data = serialized_stx.data(),
+                                     .len = static_cast<uint32_t>(
+                                         serialized_stx.size())});
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeDeserializeError);
   EXPECT_EQ(result.syscall_handler, nullptr);
 }
