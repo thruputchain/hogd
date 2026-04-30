@@ -124,6 +124,7 @@ protected:
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"mint">(kWalletContractAddress,
                                                          make_amount(amount)));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature mint_sig =
         ed25519_sign(wallet_secret_key_, mint_calldata).value();
 
@@ -156,6 +157,7 @@ protected:
         GasAmount{UINT64_MAX},
         erc20_meta::make_calldata<"adjust_allowance">(kHTLCContractAddress,
                                                       make_difference(amount)));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature approve_sig =
         ed25519_sign(wallet_secret_key_, approve_calldata).value();
 
@@ -191,6 +193,7 @@ protected:
                        htlc_meta::make_calldata<"create_htlc">(
                            kReceiverAddress, kERC20ContractAddress,
                            make_difference(amount), expiration_height, hash));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature create_sig =
         ed25519_sign(wallet_secret_key_, create_htlc_calldata).value();
 

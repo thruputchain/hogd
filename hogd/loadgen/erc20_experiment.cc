@@ -126,6 +126,7 @@ ERC20ExperimentState::generate_experiment()
                                                          make_amount(uint128_t{
                                                              1'000'000'000})));
 
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto calldata = wallet_meta::make_calldata<"do_action">(
         ed25519_sign(wallets_[0].secret_key, internal_calldata).value(),
         internal_calldata);
@@ -231,6 +232,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
                 .gas_limit = GasAmount{20'000},
+                // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                 .calldata = wallet_meta::make_calldata<"do_action">(
                     ed25519_sign(wallets_[sender].secret_key, internal_calldata)
                         .value(),

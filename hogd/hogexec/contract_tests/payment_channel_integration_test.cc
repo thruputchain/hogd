@@ -197,7 +197,9 @@ protected:
                                                            uint64_t state_nonce)
   {
     auto msg = serialize_state(channel_id, balance_a, balance_b, state_nonce);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature sig_a = ed25519_sign(party_a_secret_, msg).value();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature sig_b = ed25519_sign(party_b_secret_, msg).value();
     return {sig_a, sig_b};
   }
@@ -213,6 +215,7 @@ protected:
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"mint">(wallet,
                                                          make_amount(amount)));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature mint_sig = ed25519_sign(secret_key, mint_calldata).value();
 
     auto &wallet_client =
@@ -249,6 +252,7 @@ protected:
                        erc20_meta::make_calldata<"adjust_allowance">(
                            kPaymentChannelAddress,
                            make_difference(static_cast<int128_t>(amount))));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature approve_sig =
         ed25519_sign(secret_key, approve_calldata).value();
 
@@ -282,6 +286,7 @@ protected:
         pc_meta::make_calldata<"open_channel">(party_a_pubkey_, party_b_pubkey_,
                                                kWalletBAddress, kERC20Address,
                                                make_difference(amount), salt));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature open_sig =
         ed25519_sign(party_a_secret_, open_calldata).value();
 
@@ -315,6 +320,7 @@ protected:
         GasAmount{UINT64_MAX},
         pc_meta::make_calldata<"join_channel">(channel_id,
                                                make_difference(amount)));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature join_sig =
         ed25519_sign(party_b_secret_, join_calldata).value();
 
@@ -530,6 +536,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -587,6 +594,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -645,6 +653,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -693,6 +702,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -742,6 +752,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -794,6 +805,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -850,6 +862,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress,
                            make_amount(uint128_t{deposit_b * 2})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -899,6 +912,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress,
                            make_amount(uint128_t{deposit_b * 2})));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
