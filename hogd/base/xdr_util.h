@@ -16,6 +16,7 @@
 #include "hogd/base/bits.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "parallel.hh"
 #include "types.hh"
@@ -280,37 +281,27 @@ t_to_parallel_batch(const x23::XdrVec<T> &objs)
   co_return parallel;
 }
 
-} // namespace hogd
-
-// Format ranges is not supported until gcc 15.2
-#if (__cpp_lib_format_ranges < 202207L)
-
-#include "hogd/base/string.h"
-#include <format>
-
-template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
-  static constexpr auto parse(std::format_parse_context &ctx)
-  {
-    return ctx.begin();
-  }
-  static auto format(const std::array<uint8_t, N> &array,
-                     std::format_context &ctx)
-  {
-    return std::format_to(ctx.out(), "{}",
-                          hogd::encode_hex(std::as_bytes(std::span(array))));
-  }
-};
-
-#endif
-
-// enable hashing of important XDR types
-template<std::size_t N> struct std::hash<std::array<uint8_t, N>> {
-  std::size_t operator()(const std::array<uint8_t, N> &array) const noexcept
+struct ByteArrayHasher {
+  template<std::size_t N>
+  static std::size_t operator()(const std::array<uint8_t, N> &array) noexcept
   {
     return std::hash<std::string_view>{}(
         std::string_view(reinterpret_cast<const char *>(array.data()), N));
   }
 };
+
+template<std::size_t N>
+auto
+show_byte_array(const std::array<uint8_t, N> &array)
+{
+#if (__cpp_lib_format_ranges >= 202207L)
+  return array;
+#else
+  return encode_hex(std::as_bytes(std::span(array)));
+#endif
+}
+
+} // namespace hogd
 
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept

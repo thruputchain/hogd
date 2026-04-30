@@ -372,8 +372,8 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claims_internal(
     const SignedTransaction &stx, const AddressAuthData *source_auth_data,
-    std::unordered_map<ContractAddress, const AddressAuthData *> const
-        &aux_auth_data,
+    std::unordered_map<ContractAddress, const AddressAuthData *,
+                       ByteArrayHasher> const &aux_auth_data,
     Ed25519SignatureVerifier *signature_verifier)
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
@@ -486,8 +486,8 @@ verify_auth_claims_internal(
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AddressAuthData &source_auth_data,
-            std::unordered_map<ContractAddress, const AddressAuthData *> const
-                &aux_auth_data,
+            std::unordered_map<ContractAddress, const AddressAuthData *,
+                               ByteArrayHasher> const &aux_auth_data,
             Ed25519SignatureVerifier *signature_verifier)
 {
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
@@ -497,8 +497,8 @@ verify_auth(const SignedTransaction &stx,
 AuthVerifyStatus<void>
 lightweight_validate_auth_claims(
     const SignedTransaction &stx, const AddressAuthData &source_auth_data,
-    std::unordered_map<ContractAddress, const AddressAuthData *> const
-        &aux_auth_data)
+    std::unordered_map<ContractAddress, const AddressAuthData *,
+                       ByteArrayHasher> const &aux_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
       stx, &source_auth_data, aux_auth_data, nullptr);
@@ -509,7 +509,9 @@ auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
       stx, nullptr,
-      std::unordered_map<ContractAddress, const AddressAuthData *>{}, nullptr);
+      std::unordered_map<ContractAddress, const AddressAuthData *,
+                         ByteArrayHasher>{},
+      nullptr);
 }
 
 } // namespace hogd

@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -59,7 +60,7 @@ NativeContext::make_new_runtime(
   }
   if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
-          deployed_contract_hash.hash);
+          show_byte_array(deployed_contract_hash.hash));
     return SystemError(SystemErrorCode::Unrecoverable);
   }
 

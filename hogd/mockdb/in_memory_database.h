@@ -104,7 +104,8 @@ private:
   x23::MVar<std::unordered_map<AddressAndKey,
                                std::shared_ptr<const StorageItemWrapper>>>
       items_;
-  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
+  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>,
+                               ByteArrayHasher>>
       contract_creates_;
 
   BlockHeight height_{0};

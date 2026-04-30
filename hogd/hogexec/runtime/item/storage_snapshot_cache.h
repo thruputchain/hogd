@@ -79,16 +79,16 @@ private:
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
-  SynchronizedMap<SHA256Hash, std::optional<const Contract>,
-                  std::hash<SHA256Hash>, std::equal_to<>,
+  SynchronizedMap<SHA256Hash, std::optional<const Contract>, ByteArrayHasher,
+                  std::equal_to<>,
                   std::allocator<std::pair<const SHA256Hash,
                                            std::optional<const Contract>>>,
                   std::shared_mutex>
       contract_cache_;
   // Neither does the deployment cache
   SynchronizedMap<
-      ContractAddress, std::optional<DeployedContractHash>,
-      std::hash<ContractAddress>, std::equal_to<>,
+      ContractAddress, std::optional<DeployedContractHash>, ByteArrayHasher,
+      std::equal_to<>,
       std::allocator<std::pair<const ContractAddress,
                                std::optional<DeployedContractHash>>>,
       std::shared_mutex>

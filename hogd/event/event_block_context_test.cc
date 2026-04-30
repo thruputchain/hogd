@@ -18,7 +18,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep#include "hogd/crypto/crypto.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
@@ -33,10 +33,10 @@ namespace hogd {
 
 class EventBlockContextTest : public ::testing::Test {
 public:
-  static std::unordered_map<SHA256Hash, TxEventLog>
+  static std::unordered_map<SHA256Hash, TxEventLog, ByteArrayHasher>
   parse_event_logs(std::string_view filename)
   {
-    std::unordered_map<SHA256Hash, TxEventLog> event_logs;
+    std::unordered_map<SHA256Hash, TxEventLog, ByteArrayHasher> event_logs;
     auto buf = x23::readfile(filename);
     if (!buf) {
       panic("failed to read file: {}", filename);

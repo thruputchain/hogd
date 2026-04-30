@@ -1686,7 +1686,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // the nominated block. [nominated_block_cache_.tx_hashes] includes every tx
   // we attempted during scheduling, including txs that later failed proposal
   // and were re-added to the scheduler via [failed_txs].
-  static std::unordered_set<SignedTransactionHash> return_to_runqueue;
+  static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+      return_to_runqueue;
   return_to_runqueue.clear();
   const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler = nullptr;
   if (nominated_block_cache_.block_id &&
