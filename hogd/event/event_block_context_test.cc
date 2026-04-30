@@ -33,10 +33,10 @@ namespace hogd {
 
 class EventBlockContextTest : public ::testing::Test {
 public:
-  static std::unordered_map<SHA256Hash, TxEventLog>
+  static std::unordered_map<SHA256Hash, TxEventLog, ByteArrayHasher>
   parse_event_logs(std::string_view filename)
   {
-    std::unordered_map<SHA256Hash, TxEventLog> event_logs;
+    std::unordered_map<SHA256Hash, TxEventLog, ByteArrayHasher> event_logs;
     auto buf = x23::readfile(filename);
     if (!buf) {
       panic("failed to read file: {}", filename);

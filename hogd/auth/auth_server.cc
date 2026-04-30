@@ -203,7 +203,8 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  std::unordered_map<ContractAddress, AddressAuthData> auth_data;
+  std::unordered_map<ContractAddress, AddressAuthData, ByteArrayHasher>
+      auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
@@ -219,7 +220,7 @@ AuthServer::verify_transactions(BlockHeight height,
       auth_data[tx.tx.invocation.invoked_address] = *source_auth_data;
     }
 
-    std::unordered_set<ContractAddress> relevant_contracts =
+    std::unordered_set<ContractAddress, ByteArrayHasher> relevant_contracts =
         get_aux_addresses(tx.tx);
     for (const ContractAddress &contract : relevant_contracts) {
       if (!auth_data.contains(contract)) {
@@ -242,8 +243,8 @@ AuthServer::verify_transactions(BlockHeight height,
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           const std::unordered_map<ContractAddress, AddressAuthData>
-               &auth_data,
+           const std::unordered_map<ContractAddress, AddressAuthData,
+                                    ByteArrayHasher> &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -259,9 +260,10 @@ AuthServer::verify_transactions(BlockHeight height,
             const AddressAuthData &source_auth_data = account_it->second;
 
             // Get the relevant contracts.
-            std::unordered_set<ContractAddress> relevant_contracts =
-                get_aux_addresses(tx.tx);
-            std::unordered_map<ContractAddress, const AddressAuthData *>
+            std::unordered_set<ContractAddress, ByteArrayHasher>
+                relevant_contracts = get_aux_addresses(tx.tx);
+            std::unordered_map<ContractAddress, const AddressAuthData *,
+                               ByteArrayHasher>
                 aux_auth_data;
             for (const ContractAddress &contract : relevant_contracts) {
               const auto contract_it = auth_data.find(contract);
@@ -305,7 +307,9 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     const AddressAuthData *source_auth_data =
         &(source_addr.value()->second.value());
     auto relevant_contracts = get_aux_addresses(tx.tx);
-    std::unordered_map<ContractAddress, const AddressAuthData *> aux_auth_data;
+    std::unordered_map<ContractAddress, const AddressAuthData *,
+                       ByteArrayHasher>
+        aux_auth_data;
     for (const auto &contract : relevant_contracts) {
       auto error = co_await populate_auth_data(height, contract,
                                                aux_auth_data[contract]);

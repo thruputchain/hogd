@@ -117,7 +117,9 @@ SystemCallHandler::SystemCallHandler(
         db_proxy_),
     source_tx_hash_(sha256(tx)), auth_claims_(tx.auth_claims),
     root_invocation_(tx.invocation), newly_created_contracts_([&] {
-      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
+      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
+                         ByteArrayHasher>
+          contracts;
       contracts.reserve(tx.contracts_to_deploy.size());
 
       for (auto const &contract : tx.contracts_to_deploy) {

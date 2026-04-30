@@ -444,7 +444,7 @@ TEST(Scheduler, Fairness)
     scheduler->add_txs(tx)();
   }
 
-  std::unordered_map<ContractAddress, size_t> tx_counts;
+  std::unordered_map<ContractAddress, size_t, ByteArrayHasher> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<SignedTransactionHash> scheduled_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
@@ -483,7 +483,8 @@ TEST(Scheduler, FairnessAcrossBlocks)
   static_assert(kNumRounds % 10 == 0);
 
   std::vector<fib_client_t> fib_clients;
-  std::unordered_map<ContractAddress, SignedTransactionBatch> txs;
+  std::unordered_map<ContractAddress, SignedTransactionBatch, ByteArrayHasher>
+      txs;
   for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
     fib_clients.emplace_back(address);
     // We create enough txs for each account such that each account could fill
@@ -517,7 +518,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
     scheduler->add_txs(tx)();
   }
 
-  std::unordered_map<ContractAddress, size_t> tx_counts;
+  std::unordered_map<ContractAddress, size_t, ByteArrayHasher> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<SignedTransactionHash> scheduled_hashes;
     x23::XdrVec<SignedTransaction> scheduled;

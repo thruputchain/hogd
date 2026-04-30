@@ -747,7 +747,9 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
                      x23::BufView{source_auth_data.data, source_auth_data.len});
 
     // Deserialize auxiliary auth data
-    std::unordered_map<ContractAddress, const AddressAuthData *> aux_data_map;
+    std::unordered_map<ContractAddress, const AddressAuthData *,
+                       ByteArrayHasher>
+        aux_data_map;
     std::vector<std::unique_ptr<AddressAuthData>> aux_data_storage;
 
     if (aux_auth_data.count > 0) {

@@ -155,9 +155,10 @@ public:
     return std::nullopt;
   }
 
-  std::unordered_set<SHA256Hash> get_committed_contracts() const
+  std::unordered_set<SHA256Hash, ByteArrayHasher>
+  get_committed_contracts() const
   {
-    std::unordered_set<SHA256Hash> committed_contracts;
+    std::unordered_set<SHA256Hash, ByteArrayHasher> committed_contracts;
     committed_contracts.reserve(new_contract_deployments_.size());
     for (auto const &[addr, deployment] : new_contract_deployments_) {
       committed_contracts.insert(deployment.hash);
@@ -226,7 +227,7 @@ private:
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
 
   // newly deployed contracts during the current call frame (and child frames)
-  std::unordered_map<ContractAddress, DeployedContractHash>
+  std::unordered_map<ContractAddress, DeployedContractHash, ByteArrayHasher>
       new_contract_deployments_;
 
   std::unordered_set<uint32_t> owned_auth_token_ids_;

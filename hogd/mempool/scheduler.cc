@@ -130,13 +130,13 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 {
-  std::unordered_set<ContractAddress> accounts;
+  std::unordered_set<ContractAddress, ByteArrayHasher> accounts;
   for (const SignedTransaction &tx : txs) {
     accounts.insert(tx.tx.invocation.invoked_address);
   }
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
-  std::unordered_set<ContractAddress> already_found;
+  std::unordered_set<ContractAddress, ByteArrayHasher> already_found;
   already_found.reserve(accounts.size());
 
   x23::CoroGuard cg;
@@ -165,7 +165,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
-  std::unordered_set<ContractAddress> accounts;
+  std::unordered_set<ContractAddress, ByteArrayHasher> accounts;
   for (const Delta &delta : transfers.deltas) {
     accounts.insert(delta.address);
   }
@@ -173,7 +173,7 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
   // TODO(jhumphri): This is the same as the code above.
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
-  std::unordered_set<ContractAddress> already_found;
+  std::unordered_set<ContractAddress, ByteArrayHasher> already_found;
   already_found.reserve(accounts.size());
 
   x23::CoroGuard cg;
@@ -259,26 +259,27 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](const ChunkRange *chunk,
-                         const x23::XdrVec<hogd::SignedTransaction> &txs,
-                         const std::unordered_set<ContractAddress> &missing,
-                         Scheduler &scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
+    handles.push_back(
+        [](const ChunkRange *chunk,
+           const x23::XdrVec<hogd::SignedTransaction> &txs,
+           const std::unordered_set<ContractAddress, ByteArrayHasher> &missing,
+           Scheduler &scheduler) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
 
-      size_t num_added = 0;
-      for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-        if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-          // The account for this tx does not exist in our copy of hogdb, so we
-          // silently drop the tx.
-          continue;
-        }
-        if (scheduler.add_txs_helper(txs[tx_idx])) {
-          num_added++;
-        }
-      }
-      scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
-      co_return;
-    }(&chunk, txs, missing, *this));
+          size_t num_added = 0;
+          for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
+            if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
+              // The account for this tx does not exist in our copy of hogdb, so
+              // we silently drop the tx.
+              continue;
+            }
+            if (scheduler.add_txs_helper(txs[tx_idx])) {
+              num_added++;
+            }
+          }
+          scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
+          co_return;
+        }(&chunk, txs, missing, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -564,7 +565,7 @@ Scheduler::move_hogs_to_already_scheduled_group(HogAge &hog_ages,
 
 void
 Scheduler::cycle_accounts_during_schedule_helper(
-    const std::unordered_set<ContractAddress> &accounts,
+    const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts,
     const TxKey &lower_bound)
 {
   for (const ContractAddress &account : accounts) {
@@ -594,8 +595,9 @@ Scheduler::schedule(size_t num_txs,
                     x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
-  static std::unordered_set<ContractAddress> removed_accounts;
-  static std::unordered_set<ContractAddress> accounts_excluded_from_block;
+  static std::unordered_set<ContractAddress, ByteArrayHasher> removed_accounts;
+  static std::unordered_set<ContractAddress, ByteArrayHasher>
+      accounts_excluded_from_block;
   removed_accounts.clear();
   accounts_excluded_from_block.clear();
 
@@ -722,7 +724,7 @@ Scheduler::remove_from_scheduler(
 {
   co_await default_coropoll().pool_.bg();
 
-  static SynchronizedMap<ContractAddress, char> accounts;
+  static SynchronizedMap<ContractAddress, char, ByteArrayHasher> accounts;
   accounts.clear();
 
   ElapsedTimer timer;
@@ -738,53 +740,55 @@ Scheduler::remove_from_scheduler(
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
-    handles.push_back([](const ChunkRange *chunk,
-                         x23::span<const SignedTransactionHash> tx_hashes,
-                         SynchronizedMap<ContractAddress, char> &accounts,
-                         Scheduler &scheduler) noexcept -> x23::Async<size_t> {
-      co_await default_coropoll().pool_.bg();
+    handles.push_back(
+        [](const ChunkRange *chunk,
+           x23::span<const SignedTransactionHash> tx_hashes,
+           SynchronizedMap<ContractAddress, char, ByteArrayHasher> &accounts,
+           Scheduler &scheduler) noexcept -> x23::Async<size_t> {
+          co_await default_coropoll().pool_.bg();
 
-      x23::span<const SignedTransactionHash> hash_chunk(
-          tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
-      size_t num_removed_from_runqueue = 0;
-      for (const SignedTransactionHash &tx_hash : hash_chunk) {
-        // Even if the *nominated* block is being committed and thus the txs
-        // have been removed from the runqueue, it is possible that the
-        // coordinator called [submit_unvetted()/submit_vetted()] and passed
-        // the same txs to the mempool again, resulting in the txs being added
-        // back onto the runqueue. Thus, we need to check if the txs are on
-        // the runqueue and remove them. We cannot skip this step and just
-        // remove txs from [txs_], even if the *nominated* block is being
-        // committed rather than a *validated* block.
-        auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-        CHECK_PTR(tx_value_ptr);
+          x23::span<const SignedTransactionHash> hash_chunk(
+              tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
+          size_t num_removed_from_runqueue = 0;
+          for (const SignedTransactionHash &tx_hash : hash_chunk) {
+            // Even if the *nominated* block is being committed and thus the txs
+            // have been removed from the runqueue, it is possible that the
+            // coordinator called [submit_unvetted()/submit_vetted()] and passed
+            // the same txs to the mempool again, resulting in the txs being
+            // added back onto the runqueue. Thus, we need to check if the txs
+            // are on the runqueue and remove them. We cannot skip this step and
+            // just remove txs from [txs_], even if the *nominated* block is
+            // being committed rather than a *validated* block.
+            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
+            CHECK_PTR(tx_value_ptr);
 
-        const SignedTransaction &tx = (*tx_value_ptr)->tx;
-        const ContractAddress &account = tx.tx.invocation.invoked_address;
-        const TxKey key = {.expiry_block_height =
-                               tx.tx.uniquifier.block_expiry_height,
-                           .tx_hash = tx_hash};
-        {
-          auto [account_state, account_lock] =
-              scheduler.get_account_state(account);
-          std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
-          // The tx may or may not be on the runqueue. If the tx is included
-          // in a block we are *nominating*, then it has already been taken
-          // off of the runqueue. If the tx is included in a block we are
-          // *validating*, then it is still on the runqueue.
-          if (txs.erase(key)) {
-            num_removed_from_runqueue++;
-            accounts.insert(account, 0);
+            const SignedTransaction &tx = (*tx_value_ptr)->tx;
+            const ContractAddress &account = tx.tx.invocation.invoked_address;
+            const TxKey key = {.expiry_block_height =
+                                   tx.tx.uniquifier.block_expiry_height,
+                               .tx_hash = tx_hash};
+            {
+              auto [account_state, account_lock] =
+                  scheduler.get_account_state(account);
+              std::map<TxKey, std::shared_ptr<TxValue>> &txs =
+                  account_state->txs;
+              // The tx may or may not be on the runqueue. If the tx is included
+              // in a block we are *nominating*, then it has already been taken
+              // off of the runqueue. If the tx is included in a block we are
+              // *validating*, then it is still on the runqueue.
+              if (txs.erase(key)) {
+                num_removed_from_runqueue++;
+                accounts.insert(account, 0);
+              }
+            }
+
+            // Careful! We remove the tx from [txs_] at the bottom here because
+            // once we remove it, the references above become invalidated.
+            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
           }
-        }
 
-        // Careful! We remove the tx from [txs_] at the bottom here because
-        // once we remove it, the references above become invalidated.
-        CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
-      }
-
-      co_return num_removed_from_runqueue;
-    }(&chunks[i], tx_hashes, accounts, *this));
+          co_return num_removed_from_runqueue;
+        }(&chunks[i], tx_hashes, accounts, *this));
   }
   size_t total_removed_from_runqueue = 0;
   // There may be fewer chunks that [kNumThreads], so we iterate through the

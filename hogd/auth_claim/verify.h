@@ -53,8 +53,8 @@ AuthVerifyStatus<void> auth_claim_is_well_formed(const SignedTransaction &stx);
 // and that claims about signature weights are satisfied.
 AuthVerifyStatus<void> lightweight_validate_auth_claims(
     const SignedTransaction &stx, const AddressAuthData &source_auth_data,
-    std::unordered_map<ContractAddress, const AddressAuthData *> const
-        &aux_auth_data);
+    std::unordered_map<ContractAddress, const AddressAuthData *,
+                       ByteArrayHasher> const &aux_auth_data);
 
 // Verifies that the signatures on the transaction match the claims about the
 // transaction in the auth claims field.
@@ -63,8 +63,8 @@ AuthVerifyStatus<void> lightweight_validate_auth_claims(
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AddressAuthData &source_auth_data,
-            std::unordered_map<ContractAddress, const AddressAuthData *> const
-                &aux_auth_data,
+            std::unordered_map<ContractAddress, const AddressAuthData *,
+                               ByteArrayHasher> const &aux_auth_data,
             Ed25519SignatureVerifier *signature_verifier = nullptr);
 
 // Returns the implicit gas claim for the source address.
@@ -87,10 +87,10 @@ calculate_source_address_implicit_gas_claim(const Transaction &tx)
                   .amount = remaining};
 }
 
-inline std::unordered_set<ContractAddress>
+inline std::unordered_set<ContractAddress, ByteArrayHasher>
 get_aux_addresses(const Transaction &tx)
 {
-  std::unordered_set<ContractAddress> aux_addresses;
+  std::unordered_set<ContractAddress, ByteArrayHasher> aux_addresses;
   for (const GasClaim &gas_claim : tx.gas_claims) {
     aux_addresses.insert(gas_claim.sponsored_contract);
   }
