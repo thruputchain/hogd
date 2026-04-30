@@ -273,6 +273,57 @@ TEST(ConcurrentMap, InsertOrGetMissingAcquireTsanRace)
   EXPECT_FALSE(observed_invalid.load(std::memory_order_relaxed));
 }
 
+namespace destructive_double_destroy_test {
+
+std::atomic<int> destroy_count{0};
+
+struct DestroyCounter {
+  int id;
+
+  explicit DestroyCounter(int i) : id(i) {}
+  ~DestroyCounter() { destroy_count.fetch_add(1, std::memory_order_relaxed); }
+};
+
+struct IntHasher {
+  uint64_t operator()(int key) const
+  {
+    return static_cast<uint64_t>(static_cast<unsigned>(key));
+  }
+};
+
+} // namespace destructive_double_destroy_test
+
+TEST(ConcurrentMap, DestructiveIterationDoubleDestroyOnException)
+{
+  using namespace destructive_double_destroy_test;
+
+  destroy_count.store(0, std::memory_order_relaxed);
+
+  constexpr int kNumEntries = 4;
+  constexpr int kThrowAfter = 2;
+
+  {
+    ConcurrentMap<int, DestroyCounter, IntHasher> map(16);
+
+    for (int i = 0; i < kNumEntries; i++) {
+      map.insert_or_get(i, i);
+    }
+
+    std::atomic<int> callback_count{0};
+    EXPECT_THROW(map.for_each_parallel_destructive(
+                     [&](std::pair<const int &, DestroyCounter &>) {
+                       if (callback_count.fetch_add(
+                               1, std::memory_order_relaxed) >= kThrowAfter) {
+                         throw std::runtime_error(
+                             "simulated exception in destructive callback");
+                       }
+                     }),
+                 std::runtime_error);
+  }
+
+  EXPECT_EQ(destroy_count.load(std::memory_order_relaxed), kNumEntries);
+}
+
 } // namespace hogd
 
 int
