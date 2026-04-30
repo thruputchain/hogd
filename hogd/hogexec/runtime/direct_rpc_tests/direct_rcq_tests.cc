@@ -4029,5 +4029,159 @@ TEST_F(DirectRCQTests, PopConsumeAddingSubReleasesConsumerBit)
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 }
 
+TEST_F(DirectRCQTests, SelfConsumeInsertShrinkAccepted)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_self_consume_shrink");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Sub1: insert one entry.
+  tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0xA5})}),
+               std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Sub2: zero inserts (entry was self-consumed by executor).
+  tx.add_delta(key, make_rcq_insert_delta({}),
+               std::to_underlying(StorageDeltaFlags::None));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "self-consume shrink must not be rejected";
+
+  ASSERT_TRUE(tx.commit_transaction().has_value());
+}
+
+TEST_F(DirectRCQTests, SelfConsumePartialShrinkWithNewInserts)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_partial_self_consume");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Sub1: insert [A, B, C].
+  tx.add_delta(
+      key,
+      make_rcq_insert_delta(
+          {make_rcq_entry({0x0A}), make_rcq_entry({0x0B}),
+           make_rcq_entry({0x0C})}),
+      std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Sub2: [C, D] — consumed A and B, inserted D.
+  tx.add_delta(key,
+               make_rcq_insert_delta(
+                   {make_rcq_entry({0x0C}), make_rcq_entry({0x0D})}),
+               std::to_underlying(StorageDeltaFlags::None));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "partial self-consume with new inserts must succeed";
+
+  ASSERT_TRUE(tx.commit_transaction().has_value());
+}
+
+TEST_F(DirectRCQTests, SelfConsumeShrinkThenRollbackRestoresReservation)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_self_consume_rollback");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Sub1: insert [A].
+  tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
+               std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Sub2: zero inserts (self-consumed A).
+  tx.add_delta(key, make_rcq_insert_delta({}),
+               std::to_underlying(StorageDeltaFlags::None));
+  r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Roll back sub2 — restores sub1's state.
+  ASSERT_TRUE(tx.pop_subtransactions(1).has_value());
+
+  // Commit — sub1's insert [A] should be intact.
+  ASSERT_TRUE(tx.commit_transaction().has_value());
+  advance_block();
+
+  auto entry = load_concurrent_entry(key, 0);
+  ASSERT_TRUE(entry.has_value());
+  EXPECT_EQ(*entry, make_rcq_entry({0x0A}));
+}
+
+TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress,
+                                        "rcq_self_consume_reservation");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+
+  // Sub1: insert 500 entries.
+  std::vector<QueueEntry> entries_500;
+  entries_500.reserve(500);
+  for (int i = 0; i < 500; ++i) {
+    entries_500.push_back(make_rcq_entry(
+        {static_cast<uint8_t>(i & 0xFF), static_cast<uint8_t>(i >> 8)}));
+  }
+  tx1.add_delta(key, make_rcq_insert_delta(entries_500),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Sub2: zero inserts (all self-consumed).
+  tx1.add_delta(key, make_rcq_insert_delta({}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Concurrent tx2: try to insert 501 entries.
+  // Reservation from tx1 is pinned at 500 (the peak), so 500 + 501 > 1000
+  // should conflict.
+  std::vector<QueueEntry> entries_501;
+  entries_501.reserve(501);
+  for (int i = 0; i < 501; ++i) {
+    entries_501.push_back(
+        make_rcq_entry({static_cast<uint8_t>((i + 500) & 0xFF),
+                        static_cast<uint8_t>((i + 500) >> 8)}));
+  }
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta(entries_501),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value())
+      << "reservation must be pinned at peak 500; 500 + 501 > 1000 should "
+         "conflict";
+}
+
+TEST_F(DirectRCQTests, OversizedDeltaRejectedAtRPCBoundary)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_oversized_delta");
+
+  auto tx = make_new_per_tx_db_proxy();
+
+  // Build a delta with kRetrocausalQueueBlockEntriesMaxLen + 1 entries.
+  std::vector<QueueEntry> oversized;
+  oversized.reserve(kRetrocausalQueueBlockEntriesMaxLen + 1);
+  for (size_t i = 0; i <= kRetrocausalQueueBlockEntriesMaxLen; ++i) {
+    oversized.push_back(make_rcq_entry(
+        {static_cast<uint8_t>(i & 0xFF), static_cast<uint8_t>(i >> 8)}));
+  }
+  tx.add_delta(key, make_rcq_insert_delta(oversized),
+               std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value())
+      << "delta with entries > kRetrocausalQueueBlockEntriesMaxLen must be "
+         "rejected at the RPC boundary";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
