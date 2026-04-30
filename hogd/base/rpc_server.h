@@ -9,6 +9,7 @@
 #include <string_view>
 #include <sys/socket.h>
 #include <type_traits>
+#include <utility>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
