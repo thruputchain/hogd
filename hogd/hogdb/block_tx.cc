@@ -274,6 +274,10 @@ BlockTX::commit(WorkerPool &pool)
 
         auto value = inner->get_delta();
 
+        if (value == 0) {
+          return;
+        }
+
         balance_deltas->push_back(
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
       },
