@@ -18,7 +18,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep#include "hogd/crypto/crypto.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/init.h"
