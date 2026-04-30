@@ -22,8 +22,6 @@ add_library(
   init.cc
   ${CMAKE_BINARY_DIR}/hogd/version.c
 )
-# The generated source must exist before hogd compiles.
-add_dependencies(hogd generate_version_c)
 add_library(hogd_interface INTERFACE)
 target_link_libraries(
   hogd_interface INTERFACE

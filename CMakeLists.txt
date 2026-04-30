@@ -114,9 +114,12 @@ generate_cmake_repro_string(CMAKE_REPRO_COMMAND)
 
 # Generate version.c at build time so git state changes in hogd/protocol do not
 # require a fresh configure step or manual deletion of the old output.
+#
+# Use a custom command with an OUTPUT so CMake knows this path is generated even
+# in a fresh build directory, which avoids generate-time failures in CI.
 set(HOGD_VERSION_C "${CMAKE_BINARY_DIR}/hogd/version.c")
-add_custom_target(
-  generate_version_c ALL
+add_custom_command(
+  OUTPUT ${HOGD_VERSION_C}
   COMMAND
     ${CMAKE_COMMAND}
     -DPROJECT_VERSION=${PROJECT_VERSION}
@@ -125,8 +128,12 @@ add_custom_target(
     -DVERSION_TEMPLATE=${CMAKE_SOURCE_DIR}/cmake/version.c.in
     -DVERSION_OUTPUT=${HOGD_VERSION_C}
     -P ${CMAKE_SOURCE_DIR}/cmake/write_version_c.cmake
-  BYPRODUCTS ${HOGD_VERSION_C}
+  DEPENDS
+    ${CMAKE_SOURCE_DIR}/cmake/write_version_c.cmake
+    ${CMAKE_SOURCE_DIR}/cmake/version.c.in
+    ${CMAKE_SOURCE_DIR}/cmake/repro.cmake
   VERBATIM)
+set_source_files_properties(${HOGD_VERSION_C} PROPERTIES GENERATED TRUE)
 
 # === Interface target that exposes the header and enforces the dep ===
 add_library(built_headers_interface INTERFACE)
