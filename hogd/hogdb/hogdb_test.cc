@@ -86,6 +86,17 @@ protected:
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
   });
 
+  StorageCostModel cost_model_with_balance_cost_ =
+      StorageCostModel(StorageCostModelXdr{
+          .ext = ExtensionPoint(0),
+          .base_data_item_cost = to_xdr(int128_t{12000}),
+          .bytestring_cost_per_byte = 10,
+          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+          .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+          .balance_cost = to_xdr(int128_t{1000}),
+      });
+
   AuthChangeSubscriptionManager subscription_manager_;
   BackgroundCommitWorker background_commit_worker_ =
       BackgroundCommitWorker(subscription_manager_, nullptr);
@@ -2930,6 +2941,144 @@ TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
   {
     auto [value, lock] = map.find(key);
     EXPECT_EQ(value, nullptr);
+  }
+}
+
+// Tests that the fresh-balance guard in BalanceLock::try_atomic_change_lock
+// is evaluated per-lock-attempt, not against cumulative committed state.
+// A cumulative guard would be nondeterministic under concurrent InvokeTX
+// instances (see #1606 discussion — option 1 was rejected for this reason).
+
+TEST_F(HogDBTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
+{
+  const int128_t kBalanceCost =
+      cost_model_with_balance_cost_.get_balance_cost();
+
+  Address addr = make_address(kAddress + 200);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                 background_commit_worker_, 1);
+
+  // T1: fund the fresh address with enough to cover the balance-row cost.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
+                             std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.sync_balance_locks());
+    itx.commit();
+    itx.release_blocktx_reference();
+  }
+
+  // T2: fund the same fresh address with 1 token (below balance-row cost).
+  // This must always fail, regardless of T1's committed state.
+  // Use savepoint so we can rollback on failure and keep InvokeTX consistent.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    int depth = itx.get_savepoint_head();
+    itx.create_savepoint();
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), 1,
+                             std::to_underlying(StorageDeltaFlags::None)));
+    EXPECT_FALSE(itx.sync_balance_locks());
+    itx.rollback_to_savepoint(depth);
+    itx.release_blocktx_reference();
+  }
+}
+
+TEST_F(HogDBTest, FreshBalanceGuardAbortDoesNotInvalidatePeerLock)
+{
+  const int128_t kBalanceCost =
+      cost_model_with_balance_cost_.get_balance_cost();
+
+  Address addr = make_address(kAddress + 201);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                 background_commit_worker_, 1);
+
+  // T1: fund the fresh address with exactly the balance-row cost.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx1(block_tx);
+  ASSERT_TRUE(
+      itx1.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
+                            std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx1.sync_balance_locks());
+
+  // T2: underfunded — must fail even though T1 has a pending lock.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx2(block_tx);
+    int depth = itx2.get_savepoint_head();
+    itx2.create_savepoint();
+    ASSERT_TRUE(
+        itx2.request_nnint128(make_address_balance_item_key(addr), 1,
+                              std::to_underlying(StorageDeltaFlags::None)));
+    EXPECT_FALSE(itx2.sync_balance_locks());
+    itx2.rollback_to_savepoint(depth);
+    itx2.release_blocktx_reference();
+  }
+
+  // T1 aborts. If a cumulative guard had let T2 through, the balance row
+  // would now have insufficient funds. T1's abort must not retroactively
+  // invalidate any accepted locks (and T2 was correctly rejected above).
+  itx1.abort();
+  itx1.release_blocktx_reference();
+}
+
+TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
+{
+  const int128_t kBalanceCost =
+      cost_model_with_balance_cost_.get_balance_cost();
+
+  Address addr = make_address(kAddress + 202);
+
+  // Run the same scenario twice with different commit orderings.
+  // An underfunded T2 must fail in both orderings.
+  for (int ordering = 0; ordering < 2; ++ordering) {
+    BlockHeight height = ordering + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                   background_commit_worker_, height);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx1(block_tx);
+    ASSERT_TRUE(
+        itx1.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
+                              std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx1.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx2(block_tx);
+
+    if (ordering == 0) {
+      // T1 commits before T2 tries to lock balance
+      itx1.commit();
+      itx1.release_blocktx_reference();
+
+      int depth = itx2.get_savepoint_head();
+      itx2.create_savepoint();
+      ASSERT_TRUE(
+          itx2.request_nnint128(make_address_balance_item_key(addr), 1,
+                                std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_FALSE(itx2.sync_balance_locks())
+          << "underfunded T2 must fail even after T1 committed";
+      itx2.rollback_to_savepoint(depth);
+      itx2.release_blocktx_reference();
+    }
+    else {
+      // T2 tries to lock balance before T1 commits
+      int depth = itx2.get_savepoint_head();
+      itx2.create_savepoint();
+      ASSERT_TRUE(
+          itx2.request_nnint128(make_address_balance_item_key(addr), 1,
+                                std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_FALSE(itx2.sync_balance_locks())
+          << "underfunded T2 must fail even before T1 committed";
+      itx2.rollback_to_savepoint(depth);
+      itx2.release_blocktx_reference();
+
+      itx1.commit();
+      itx1.release_blocktx_reference();
+    }
   }
 }
 
