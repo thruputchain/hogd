@@ -113,7 +113,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
     const HogAgeResult &res = results[i];
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       info("read_average_hog_ages did not return OK for address {}",
-           accounts[i]);
+           show_byte_array(accounts[i]));
       ret.missing.insert(accounts[i]);
       continue;
     }
