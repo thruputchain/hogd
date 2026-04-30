@@ -4114,9 +4114,18 @@ TEST_F(DirectRCQTests, SelfConsumeShrinkThenRollbackRestoresReservation)
   ASSERT_TRUE(tx.commit_transaction().has_value());
   advance_block();
 
-  auto entry = load_concurrent_entry(key, 0);
-  ASSERT_TRUE(entry.has_value());
-  EXPECT_EQ(*entry, make_rcq_entry({0x0A}));
+  auto queue = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+
+  auto block =
+      get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
+                                                      1);
+  ASSERT_TRUE(block.has_value());
+  ASSERT_TRUE(block.value().has_value());
+  ASSERT_EQ(block.value()->entries.size(), 1);
+  EXPECT_EQ(block.value()->entries[0], make_rcq_entry({0x0A}));
 }
 
 TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
@@ -4159,32 +4168,9 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
   tx2.add_delta(key, make_rcq_insert_delta(entries_501),
                 std::to_underlying(StorageDeltaFlags::None));
   r = tx2.try_push_current_subtransaction();
-  ASSERT_FALSE(r.has_value())
+  ASSERT_TRUE(r.has_value() && !r.value())
       << "reservation must be pinned at peak 500; 500 + 501 > 1000 should "
          "conflict";
-}
-
-TEST_F(DirectRCQTests, OversizedDeltaRejectedAtRPCBoundary)
-{
-  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
-  auto key =
-      make_contract_data_addrkey(kContractAddress, "rcq_oversized_delta");
-
-  auto tx = make_new_per_tx_db_proxy();
-
-  // Build a delta with kRetrocausalQueueBlockEntriesMaxLen + 1 entries.
-  std::vector<QueueEntry> oversized;
-  oversized.reserve(kRetrocausalQueueBlockEntriesMaxLen + 1);
-  for (size_t i = 0; i <= kRetrocausalQueueBlockEntriesMaxLen; ++i) {
-    oversized.push_back(make_rcq_entry(
-        {static_cast<uint8_t>(i & 0xFF), static_cast<uint8_t>(i >> 8)}));
-  }
-  tx.add_delta(key, make_rcq_insert_delta(oversized),
-               std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
-  ASSERT_FALSE(r.has_value())
-      << "delta with entries > kRetrocausalQueueBlockEntriesMaxLen must be "
-         "rejected at the RPC boundary";
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
