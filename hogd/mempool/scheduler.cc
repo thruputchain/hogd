@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
