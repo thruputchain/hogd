@@ -98,14 +98,11 @@ ReplayCacheIt::narrow( // NOLINT - lint wants static
 HogDBStatus<bool>
 RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
 {
-  // Inserts are always compatible, but it is probably worth double checking
-  // that the executor didn't do anything weird like drop any inserts compared
-  // with the prior delta for this transaction. An honest executor never does
-  // this, so treat it as an error rather than promoting to exclusive.
-  if (delta_.insert.added_entries.size() <
-      earlier.delta_.insert.added_entries.size()) {
-    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
-  }
+  // Track the high-water mark of insert count across all subtransactions.
+  // The executor's get_delta() prunes self-consumed entries from the front
+  // of the insert list, so the raw size can shrink. The max preserves the
+  // peak for reservation accounting in RetrocausalQueueLock.
+  max_insert_count_ = std::max(max_insert_count_, earlier.max_insert_count_);
 
   // The cumulative delta's consume can only grow within a transaction:
   // each frame inherits the prior frame's ItemView state (including consume),
@@ -121,7 +118,7 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
     bool monotonic =
         (ec < nc) ||
         (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
-                         delta_.consume->current_block_consumed.size());
+                     delta_.consume->current_block_consumed.size());
     if (!monotonic) {
       return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
     }
