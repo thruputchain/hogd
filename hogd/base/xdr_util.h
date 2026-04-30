@@ -283,7 +283,7 @@ t_to_parallel_batch(const x23::XdrVec<T> &objs)
 
 struct ByteArrayHasher {
   template<std::size_t N>
-  std::size_t operator()(const std::array<uint8_t, N> &array) const noexcept
+  static std::size_t operator()(const std::array<uint8_t, N> &array) noexcept
   {
     return std::hash<std::string_view>{}(
         std::string_view(reinterpret_cast<const char *>(array.data()), N));
