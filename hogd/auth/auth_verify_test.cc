@@ -37,6 +37,7 @@ make_self_individual_key_claim(uint8_t id)
   return claim;
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 constexpr DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
                uint32_t public_key_id)
@@ -47,9 +48,10 @@ make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
       ed25519_sign(sk.ed25519(), x23::serialize(tx))
-          .value(); // NOLINT(bugprone-unchecked-optional-access)
+          .value();
   return signature;
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 void
 add_pk_to_auth_data(AddressAuthData &auth_data, uint8_t id, PublicKey const &pk)

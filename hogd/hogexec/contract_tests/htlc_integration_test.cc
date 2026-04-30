@@ -33,6 +33,7 @@
 
 namespace hogd {
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 class HTLCIntegrationTest : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
@@ -126,7 +127,7 @@ protected:
                                                          make_amount(amount)));
     Ed25519Signature mint_sig =
         ed25519_sign(wallet_secret_key_, mint_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -159,7 +160,7 @@ protected:
                                                       make_difference(amount)));
     Ed25519Signature approve_sig =
         ed25519_sign(wallet_secret_key_, approve_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -195,7 +196,7 @@ protected:
                            make_difference(amount), expiration_height, hash));
     Ed25519Signature create_sig =
         ed25519_sign(wallet_secret_key_, create_htlc_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -608,4 +609,5 @@ TEST_F(HTLCIntegrationTest, CannotDoubleRefundInSameBlock)
   advance_block();
 }
 
+// NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd

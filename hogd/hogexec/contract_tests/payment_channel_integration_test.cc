@@ -41,6 +41,7 @@
 
 namespace hogd {
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 class PaymentChannelIntegrationTest : public ::testing::Test,
                                       public NativeContractTestFramework {
 public:
@@ -197,9 +198,7 @@ protected:
                                                            uint64_t state_nonce)
   {
     auto msg = serialize_state(channel_id, balance_a, balance_b, state_nonce);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature sig_a = ed25519_sign(party_a_secret_, msg).value();
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature sig_b = ed25519_sign(party_b_secret_, msg).value();
     return {sig_a, sig_b};
   }
@@ -215,7 +214,6 @@ protected:
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"mint">(wallet,
                                                          make_amount(amount)));
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Ed25519Signature mint_sig = ed25519_sign(secret_key, mint_calldata).value();
 
     auto &wallet_client =
@@ -254,7 +252,7 @@ protected:
                            make_difference(static_cast<int128_t>(amount))));
     Ed25519Signature approve_sig =
         ed25519_sign(secret_key, approve_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
@@ -288,7 +286,7 @@ protected:
                                                make_difference(amount), salt));
     Ed25519Signature open_sig =
         ed25519_sign(party_a_secret_, open_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -322,7 +320,7 @@ protected:
                                                make_difference(amount)));
     Ed25519Signature join_sig =
         ed25519_sign(party_b_secret_, join_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_b_client_.make_invocation<"do_action">(
@@ -538,7 +536,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -596,7 +594,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -655,7 +653,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -704,7 +702,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -754,7 +752,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -807,7 +805,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -864,7 +862,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                            make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -914,7 +912,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                            make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata)
-            .value(); // NOLINT(bugprone-unchecked-optional-access)
+            .value();
 
     auto handler = make_new_system_call_handler(
 
@@ -949,4 +947,5 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
   advance_block();
 }
 
+// NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd
