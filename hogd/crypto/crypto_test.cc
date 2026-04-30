@@ -94,7 +94,7 @@ TEST(Ed25519, BasicUsage)
 
   std::string_view msg = "test message";
   std::string_view msg_wrong = "wrong message";
-  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg)));
+  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg))).value();
   EXPECT_EQ(ed25519_verify(pk, sig, msg), true);
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
 }
@@ -105,7 +105,7 @@ TEST(Ed25519, FFIBug)
   auto [pk, sk] = ed25519_keygen();
   uint64_t v = 0;
   auto msg = sha256(v);
-  auto sig = ed25519_sign(sk, msg);
+  auto sig = ed25519_sign(sk, msg).value();
   EXPECT_TRUE(ed25519_verify(pk, sig, msg));
 }
 
@@ -119,9 +119,9 @@ TEST(Ed25519, BatchUsage)
   std::string_view msg2 = "another message";
   std::string_view msg3 = "yet another message";
 
-  auto sig1 = ed25519_sign(sk1, msg1);
-  auto sig2 = ed25519_sign(sk2, msg2);
-  auto sig3 = ed25519_sign(sk3, msg3);
+  auto sig1 = ed25519_sign(sk1, msg1).value();
+  auto sig2 = ed25519_sign(sk2, msg2).value();
+  auto sig3 = ed25519_sign(sk3, msg3).value();
 
   EXPECT_EQ(ed25519_verify_batch({pk1, pk2, pk3}, {sig1, sig2, sig3},
                                  std::vector<std::span<const std::byte>>{

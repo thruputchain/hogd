@@ -61,7 +61,7 @@ protected:
   {
     Signature sig(CryptographicScheme::Ed25519);
     assert(sk.scheme() == CryptographicScheme::Ed25519);
-    sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
+    sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
     return {.auth_claim_idx = auth_claim_idx,
             .public_key_id = public_key_id,
             .signature = sig};
