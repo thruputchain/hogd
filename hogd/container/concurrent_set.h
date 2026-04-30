@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <functional>
 
 #include "hogd/base/compiler.h"
@@ -80,7 +81,20 @@ public:
         // if we found an empty slot, we can only insert to it if it is the
         // deepest level, otherwise we need to move down to the next level.
         if (level < levels() - 1) {
-          // jump to outer while
+          // Re-read the slot. Between our original load (which saw kEmpty) and
+          // the levels() check above, a concurrent thread may have CAS'd our
+          // value into this slot and then triggered try_resize(), adding a
+          // deeper level. Without this re-read, we would skip to the new
+          // deeper level without ever seeing the concurrent insert, and could
+          // insert a duplicate there. The remaining TOCTOU (value inserted
+          // after this re-read) is covered by the post-CAS undo-retry below.
+          v = l[index].load(std::memory_order_acquire);
+          if (v == value) {
+            return false;
+          }
+          if (v != Traits::kEmpty) {
+            continue;
+          }
           goto outer;
         }
 
