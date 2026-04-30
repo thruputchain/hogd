@@ -90,13 +90,17 @@ HogDBStatus<void>
 RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash,
                          SHA256Hash events_hash, const DbHash &db_hash)
 {
-  tip_.block_hash = block_hash;
-  tip_.events_hash = events_hash;
-  tip_.db_hash = db_hash;
-  tip_.height = tip_.height + 1;
-  tip_.id = bid;
-  current_committed_height_.store(tip_.height);
-  return get_db().write_dbtip(tip_);
+  DbTip new_tip;
+  tip_.with([&](DbTip &tip) {
+    tip.block_hash = block_hash;
+    tip.events_hash = events_hash;
+    tip.db_hash = db_hash;
+    tip.height = tip.height + 1;
+    tip.id = bid;
+    new_tip = tip;
+  });
+  current_committed_height_.store(new_tip.height);
+  return get_db().write_dbtip(new_tip);
 }
 
 RPCContext::~RPCContext()
