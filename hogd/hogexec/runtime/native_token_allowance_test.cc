@@ -537,8 +537,9 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
           {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
-             auto [r, _g] = client.invoke_opt<"transfer">(
-                 ctx.handler(), kOwnerAddr, make_amount(37));
+             auto [r, _g] =
+                 client.invoke_opt<"transfer">(ctx.handler(), kOwnerAddr,
+                                               make_amount(37));
              if (!r.has_value() || !r.value().has_value() ||
                  !r.value().value().has_value() ||
                  !r.value().value().value().is_ok()) {
@@ -583,9 +584,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   EXPECT_TRUE(hogs_transferred.empty())
       << "zero-delta self-transfer must not be published to scheduler";
 
-  auto balance_item =
-      lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-          kOwnerAddr));
+  auto balance_item = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kOwnerAddr));
   ASSERT_TRUE(balance_item.has_value());
   EXPECT_EQ(from_xdr(balance_item->nnint()), kInitialBalance);
 }
