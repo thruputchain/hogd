@@ -54,7 +54,7 @@
     },
     "mempool_config": {
         "transaction_ttl_msec": "2000",
-        "submission_lot_size": "50000",
+        "submission_lot_size": "1000",
         "submission_lot_wait_msec": "50"
     },
     "catchup_config": {
