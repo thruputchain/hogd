@@ -249,7 +249,8 @@ protected:
                        erc20_meta::make_calldata<"adjust_allowance">(
                            kPaymentChannelAddress,
                            make_difference(static_cast<int128_t>(amount))));
-    Ed25519Signature approve_sig = ed25519_sign(secret_key, approve_calldata).value();
+    Ed25519Signature approve_sig =
+        ed25519_sign(secret_key, approve_calldata).value();
 
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
@@ -281,7 +282,8 @@ protected:
         pc_meta::make_calldata<"open_channel">(party_a_pubkey_, party_b_pubkey_,
                                                kWalletBAddress, kERC20Address,
                                                make_difference(amount), salt));
-    Ed25519Signature open_sig = ed25519_sign(party_a_secret_, open_calldata).value();
+    Ed25519Signature open_sig =
+        ed25519_sign(party_a_secret_, open_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -313,7 +315,8 @@ protected:
         GasAmount{UINT64_MAX},
         pc_meta::make_calldata<"join_channel">(channel_id,
                                                make_difference(amount)));
-    Ed25519Signature join_sig = ed25519_sign(party_b_secret_, join_calldata).value();
+    Ed25519Signature join_sig =
+        ed25519_sign(party_b_secret_, join_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_b_client_.make_invocation<"do_action">(

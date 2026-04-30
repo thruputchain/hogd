@@ -232,8 +232,8 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                 .entrypoint = entrypoint_do_action,
                 .gas_limit = GasAmount{20'000},
                 .calldata = wallet_meta::make_calldata<"do_action">(
-                    ed25519_sign(wallets_[sender].secret_key,
-                                 internal_calldata).value(),
+                    ed25519_sign(wallets_[sender].secret_key, internal_calldata)
+                        .value(),
                     internal_calldata),
             };
 

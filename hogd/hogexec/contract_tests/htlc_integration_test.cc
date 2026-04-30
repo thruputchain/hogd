@@ -124,7 +124,8 @@ protected:
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<"mint">(kWalletContractAddress,
                                                          make_amount(amount)));
-    Ed25519Signature mint_sig = ed25519_sign(wallet_secret_key_, mint_calldata).value();
+    Ed25519Signature mint_sig =
+        ed25519_sign(wallet_secret_key_, mint_calldata).value();
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{

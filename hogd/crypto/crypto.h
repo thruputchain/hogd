@@ -278,10 +278,9 @@ inline std::optional<Ed25519Signature>
 ed25519_sign(const Ed25519SecretKey &sk, x23::BufView msg)
 {
   Ed25519Signature sig{};
-  uint8_t ret =
-      ed25519_dalek_sign(detail::span_to_pointer(sk),
-                         detail::span_to_message_span(msg),
-                         detail::span_to_writable_pointer(sig));
+  uint8_t ret = ed25519_dalek_sign(detail::span_to_pointer(sk),
+                                   detail::span_to_message_span(msg),
+                                   detail::span_to_writable_pointer(sig));
   if (ret != 0) {
     return std::nullopt;
   }
