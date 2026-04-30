@@ -161,7 +161,7 @@ make_new_db(const uint8_t *serialized_cost_model,
         x23::deserialize(&cost_model_xdr,
                          x23::BufView{serialized_cost_model,
                                       serialized_cost_model_len});
-      } catch (x23::XdrBadInput const &e) {
+      } catch (x23::XdrException const &e) {
         log_error("error deserializing cost model: {}", e);
         return {.db = nullptr,
                 .ffi_error_code = kTestFFIErrorCodeDeserializeError};
@@ -217,7 +217,7 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
     try {
       x23::deserialize(&deserialized_addrkey,
                        x23::BufView{addrkey.data, addrkey.len});
-    } catch (x23::XdrBadInput const &e) {
+    } catch (x23::XdrException const &e) {
       log_error("error deserializing address and key: {}", e);
       return {.data = kNullBuffer,
               .ffi_error_code = kTestFFIErrorCodeDeserializeError};
@@ -344,7 +344,7 @@ open_syscall_handler(void *db, void *rc,
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
     return make_ffi_result_type<OpenSyscallHandlerResult>(
         kTestFFIErrorCodeDeserializeError);
@@ -393,7 +393,7 @@ open_mocked_syscall_handler(void *db, void *rc,
     }
     return {.syscall_handler = static_cast<void *>(handler),
             .ffi_error_code = kTestFFIErrorCodeNone};
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
     return make_ffi_result_type<OpenSyscallHandlerResult>(
         kTestFFIErrorCodeDeserializeError);
@@ -468,7 +468,7 @@ open_mock_invocation_frame(void *syscall_handler,
   try {
     x23::deserialize(&invocation_xdr,
                      x23::BufView{invocation.data, invocation.len});
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing invocation: {}", e);
     return kTestFFIErrorCodeDeserializeError;
   } catch (std::exception const &e) {
@@ -706,7 +706,7 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
     SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     return stx;
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
     if (error_out) {
       *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeDeserializeError);
@@ -779,7 +779,7 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
     return {.auth_error_code = std::to_underlying(result.error().code()),
             .ffi_error_code = kTestFFIErrorCodeNone};
 
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing auth data: {}", e);
     return make_ffi_result_type<VerifyAuthResult>(
         kTestFFIErrorCodeDeserializeError);
