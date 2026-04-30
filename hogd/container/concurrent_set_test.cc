@@ -307,8 +307,8 @@ TEST(ConcurrentSet, ParallelInsertSameKeys)
 
   for (size_t j = 1; j <= kNKeys; ++j) {
     ASSERT_EQ(insert_counts[j - 1].load(), 1)
-        << "key " << j << " was inserted "
-        << insert_counts[j - 1].load() << " times";
+        << "key " << j << " was inserted " << insert_counts[j - 1].load()
+        << " times";
   }
 
   for (size_t j = 1; j <= kNKeys; ++j) {
