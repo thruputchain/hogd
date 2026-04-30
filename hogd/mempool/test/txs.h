@@ -97,6 +97,7 @@ make_sign_claim(uint32_t idx)
   return claim;
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 inline DecoratedSignature
 make_signature(const SecretKey &sk, const Transaction &tx,
                unsigned int auth_claim_idx, unsigned int public_key_id)
@@ -106,9 +107,10 @@ make_signature(const SecretKey &sk, const Transaction &tx,
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
-      ed25519_sign(sk.ed25519(), x23::serialize(tx));
+      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
   return signature;
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 inline void
 set_nonce_key(AddressAuthData &auth_data, size_t idx)

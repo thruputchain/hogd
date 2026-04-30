@@ -415,16 +415,18 @@ make_key_pair()
   return {pk_wrapper, sk_wrapper};
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
                uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
+  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
   return {.auth_claim_idx = auth_claim_idx,
           .public_key_id = public_key_id,
           .signature = sig};
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 constexpr NonceConfig kAnyKeyNonceConfig =
     NonceConfig{.accepted_keys = 0x000F'FFFF, .required_weight = 0};

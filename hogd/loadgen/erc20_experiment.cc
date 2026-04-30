@@ -126,9 +126,11 @@ ERC20ExperimentState::generate_experiment()
                                                          make_amount(uint128_t{
                                                              1'000'000'000})));
 
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     auto calldata = wallet_meta::make_calldata<"do_action">(
-        ed25519_sign(wallets_[0].secret_key, internal_calldata),
+        ed25519_sign(wallets_[0].secret_key, internal_calldata).value(),
         internal_calldata);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 
     auto tx = SignedTransaction{
         .tx =
@@ -227,15 +229,17 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
 
             static auto entrypoint_do_action =
                 wallet_meta::entrypoint<"do_action">();
+            // NOLINTBEGIN(bugprone-unchecked-optional-access)
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
                 .gas_limit = GasAmount{20'000},
                 .calldata = wallet_meta::make_calldata<"do_action">(
-                    ed25519_sign(wallets_[sender].secret_key,
-                                 internal_calldata),
+                    ed25519_sign(wallets_[sender].secret_key, internal_calldata)
+                        .value(),
                     internal_calldata),
             };
+            // NOLINTEND(bugprone-unchecked-optional-access)
 
             work_txs[j] = SignedTransaction{
                 .tx =

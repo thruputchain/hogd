@@ -75,8 +75,11 @@ ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
   assert(wallet_index < wallets_.size());
 
   Signature sig(CryptographicScheme::Ed25519);
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   sig.ed25519() =
-      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx));
+      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx))
+          .value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
   tx.signatures.push_back(DecoratedSignature{
       .auth_claim_idx = 0,
       .public_key_id = 0,

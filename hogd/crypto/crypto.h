@@ -16,6 +16,7 @@ extern "C" {
 #include <cassert>
 #include <cstddef>
 #include <cstdio>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -273,15 +274,16 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
          Ed25519Result::Success;
 }
 
-inline Ed25519Signature
+inline std::optional<Ed25519Signature>
 ed25519_sign(const Ed25519SecretKey &sk, x23::BufView msg)
 {
-  Ed25519Signature sig;
-  [[maybe_unused]] uint8_t ret =
-      ed25519_dalek_sign(detail::span_to_pointer(sk),
-                         detail::span_to_message_span(msg),
-                         detail::span_to_writable_pointer(sig));
-  assert(ret == 0);
+  Ed25519Signature sig{};
+  uint8_t ret = ed25519_dalek_sign(detail::span_to_pointer(sk),
+                                   detail::span_to_message_span(msg),
+                                   detail::span_to_writable_pointer(sig));
+  if (ret != 0) {
+    return std::nullopt;
+  }
   return sig;
 }
 
