@@ -9,13 +9,13 @@
 #include <atomic>
 #include <chrono>
 #include <format>
-#include <span>
-#include <version>
 #include <memory>
 #include <source_location>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <version>
 
 #ifdef __APPLE__
 #include <thread>
@@ -317,7 +317,6 @@ format_arg(const std::array<uint8_t, N> &array)
   return encode_hex(std::as_bytes(std::span(array)));
 }
 #endif
-
 
 #ifdef __APPLE__
 inline auto
