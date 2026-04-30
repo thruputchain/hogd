@@ -105,9 +105,8 @@ make_signature(const SecretKey &sk, const Transaction &tx,
   signature.auth_claim_idx = auth_claim_idx;
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   signature.signature.ed25519() =
-      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value(); // NOLINT(bugprone-unchecked-optional-access)
   return signature;
 }
 
