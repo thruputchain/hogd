@@ -297,6 +297,12 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 
 #undef MAKE_LOG_FUNC_EX
 
+namespace detail {
+template<typename T> struct is_byte_array : std::false_type {};
+template<std::size_t N>
+struct is_byte_array<std::array<uint8_t, N>> : std::true_type {};
+} // namespace detail
+
 template<typename T>
 constexpr auto
 format_arg(T &&t)
@@ -304,19 +310,15 @@ format_arg(T &&t)
   if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::nullptr_t>) {
     return static_cast<const void *>(nullptr);
   }
+#if (__cpp_lib_format_ranges < 202207L)
+  else if constexpr (detail::is_byte_array<std::remove_cvref_t<T>>::value) {
+    return encode_hex(std::as_bytes(std::span(t)));
+  }
+#endif
   else {
     return std::forward<T>(t);
   }
 }
-
-#if (__cpp_lib_format_ranges < 202207L)
-template<std::size_t N>
-auto
-format_arg(const std::array<uint8_t, N> &array)
-{
-  return encode_hex(std::as_bytes(std::span(array)));
-}
-#endif
 
 #ifdef __APPLE__
 inline auto
