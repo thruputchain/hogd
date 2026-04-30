@@ -2796,6 +2796,104 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
   EXPECT_EQ(hash_with_aborted, hash_without_aborted);
 }
 
+TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
+{
+  Address addr = make_address(kAddress + 99);
+  ItemKey rcq_key = make_key(kAddress + 99, 1);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+
+  // T1: fund the fresh address and insert RCQ entries
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    ASSERT_TRUE(itx.request_nnint128(
+        make_address_balance_item_key(addr), 100'000,
+        std::to_underlying(StorageDeltaFlags::None)));
+
+    RetrocausalQueueDelta delta;
+    for (uint8_t i = 0; i < 10; ++i) {
+      delta.insert.added_entries.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
+
+    ASSERT_TRUE(itx.sync_balance_locks());
+    itx.commit();
+    itx.release_blocktx_reference();
+  }
+
+  // T2: consume RCQ entries, producing a small storage refund
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    RetrocausalQueueDelta delta;
+    delta.consume.emplace();
+    for (uint8_t i = 0; i < 5; ++i) {
+      delta.consume->current_block_consumed.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.sync_balance_locks());
+
+    // Before the fix, this throws std::runtime_error("failed to lock balance")
+    ASSERT_NO_THROW(itx.commit());
+    itx.release_blocktx_reference();
+  }
+}
+
+TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
+{
+  Address addr = make_address(kAddress + 100);
+  ItemKey rcq_key = make_key(kAddress + 100, 1);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1);
+
+  // Single tx: fund address, insert RCQ entries, then add a consume in the
+  // same invocation via a child frame. The cumulative delta (inserts + consume)
+  // narrows the RCQ reservation, producing a refund at commit time when the
+  // conservative lock overestimates the actual cost. Without two-phase commit
+  // ordering, the RCQ key may be committed before the balance key, hitting
+  // kUncommitted state.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    ASSERT_TRUE(itx.request_nnint128(
+        make_address_balance_item_key(addr), 100'000,
+        std::to_underlying(StorageDeltaFlags::None)));
+
+    RetrocausalQueueDelta insert_delta;
+    for (uint8_t i = 0; i < 10; ++i) {
+      insert_delta.insert.added_entries.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, insert_delta, std::to_underlying(StorageDeltaFlags::None)));
+
+    ASSERT_TRUE(itx.sync_balance_locks());
+
+    // Child frame: cumulative delta keeps all inserts and adds a consume.
+    // narrow() requires the new delta to be a superset of the earlier one.
+    int sp = itx.create_savepoint();
+
+    RetrocausalQueueDelta cumulative_delta;
+    for (uint8_t i = 0; i < 10; ++i) {
+      cumulative_delta.insert.added_entries.push_back(QueueEntry{i});
+    }
+    cumulative_delta.consume.emplace();
+    for (uint8_t i = 0; i < 5; ++i) {
+      cumulative_delta.consume->current_block_consumed.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, cumulative_delta,
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.sync_balance_locks());
+
+    ASSERT_NO_THROW(itx.commit())
+        << "commit should not throw when crediting a fresh-balance refund";
+    itx.release_blocktx_reference();
+  }
+}
+
 } // namespace hogd
 
 int

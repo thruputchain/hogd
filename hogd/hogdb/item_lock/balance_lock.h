@@ -68,6 +68,8 @@ public:
     return 0;
   }
 
+  void add_committed_credit(int128_t delta);
+
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 

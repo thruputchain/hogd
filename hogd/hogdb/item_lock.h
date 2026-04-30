@@ -84,6 +84,8 @@ public:
   // change must be non-null.
   int128_t commit_change(const ItemChange &change, const LockContext &ctx);
 
+  void add_committed_balance_credit(int128_t delta);
+
   HogDBStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
