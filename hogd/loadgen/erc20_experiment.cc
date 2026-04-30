@@ -128,8 +128,7 @@ ERC20ExperimentState::generate_experiment()
 
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     auto calldata = wallet_meta::make_calldata<"do_action">(
-        ed25519_sign(wallets_[0].secret_key, internal_calldata)
-            .value(),
+        ed25519_sign(wallets_[0].secret_key, internal_calldata).value(),
         internal_calldata);
     // NOLINTEND(bugprone-unchecked-optional-access)
 

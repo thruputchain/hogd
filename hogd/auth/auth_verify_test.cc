@@ -47,8 +47,7 @@ make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
-      ed25519_sign(sk.ed25519(), x23::serialize(tx))
-          .value();
+      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
   return signature;
 }
 // NOLINTEND(bugprone-unchecked-optional-access)

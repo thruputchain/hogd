@@ -251,8 +251,7 @@ protected:
                            kPaymentChannelAddress,
                            make_difference(static_cast<int128_t>(amount))));
     Ed25519Signature approve_sig =
-        ed25519_sign(secret_key, approve_calldata)
-            .value();
+        ed25519_sign(secret_key, approve_calldata).value();
 
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
@@ -285,8 +284,7 @@ protected:
                                                kWalletBAddress, kERC20Address,
                                                make_difference(amount), salt));
     Ed25519Signature open_sig =
-        ed25519_sign(party_a_secret_, open_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, open_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -319,8 +317,7 @@ protected:
         pc_meta::make_calldata<"join_channel">(channel_id,
                                                make_difference(amount)));
     Ed25519Signature join_sig =
-        ed25519_sign(party_b_secret_, join_calldata)
-            .value();
+        ed25519_sign(party_b_secret_, join_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_b_client_.make_invocation<"do_action">(
@@ -535,8 +532,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -593,8 +589,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -652,8 +647,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -701,8 +695,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -751,8 +744,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -804,8 +796,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
                        erc20_meta::make_calldata<"transfer">(
                            kWalletBAddress, make_amount(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -861,8 +852,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                            kWalletBAddress,
                            make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = wallet_a_client_.make_invocation<"do_action">(
@@ -911,8 +901,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                            kWalletBAddress,
                            make_amount(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
-        ed25519_sign(party_a_secret_, transfer_calldata)
-            .value();
+        ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     auto handler = make_new_system_call_handler(
 
