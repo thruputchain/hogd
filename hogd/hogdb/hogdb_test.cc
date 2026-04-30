@@ -41,11 +41,11 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
 #include "hogd/hogdb/hog_types.h"
-#include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
@@ -2909,7 +2909,7 @@ TEST(InvokeTxKeyTest, HashAndEquality)
   hogd::InvokeTxKey::Hash hasher;
   EXPECT_EQ(hasher(k1), hasher(k2));
   EXPECT_EQ(hasher(k1), std::hash<hogd::BlockTXID>()(k1.block_tx_id) ^
-                             std::hash<hogd::InvokeTXID>()(k1.invoke_tx_id));
+                            std::hash<hogd::InvokeTXID>()(k1.invoke_tx_id));
 }
 
 TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
