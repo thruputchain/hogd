@@ -110,21 +110,28 @@ file(MAKE_DIRECTORY "${HOGD_BUILT_HEADERS_DIR}")
 
 include(cmake/repro.cmake)
 
-git_describe_string(GIT_HOGD_COMMIT)
-git_describe_string(GIT_PROTOCOL_COMMIT protocol NODIRTY)
 generate_cmake_repro_string(CMAKE_REPRO_COMMAND)
 
-configure_file(
-  ${CMAKE_SOURCE_DIR}/cmake/version.c.in
-  ${CMAKE_BINARY_DIR}/hogd/version.c
-  @ONLY)
+# Generate version.c at build time so git state changes in hogd/protocol do not
+# require a fresh configure step or manual deletion of the old output.
+set(HOGD_VERSION_C "${CMAKE_BINARY_DIR}/hogd/version.c")
+add_custom_target(
+  generate_version_c ALL
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DPROJECT_VERSION=${PROJECT_VERSION}
+    -DCMAKE_REPRO_COMMAND=${CMAKE_REPRO_COMMAND}
+    -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+    -DVERSION_TEMPLATE=${CMAKE_SOURCE_DIR}/cmake/version.c.in
+    -DVERSION_OUTPUT=${HOGD_VERSION_C}
+    -P ${CMAKE_SOURCE_DIR}/cmake/write_version_c.cmake
+  BYPRODUCTS ${HOGD_VERSION_C}
+  VERBATIM)
 
 # === Interface target that exposes the header and enforces the dep ===
 add_library(built_headers_interface INTERFACE)
 # Only this target provides the include dir where the header lives:
 target_include_directories(built_headers_interface INTERFACE "${BUILT_HEADERS_DIR}")
-# Make anyone who links this depend on header generation:
-add_dependencies(built_headers_interface version)
 
 include(CheckIPOSupported)
 check_ipo_supported()
