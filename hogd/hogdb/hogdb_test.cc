@@ -2918,8 +2918,8 @@ TEST_F(HogDBTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
       cost_model_with_balance_cost_.get_balance_cost();
 
   Address addr = make_address(kAddress + 200);
-  PerThreadARC<BlockTX> block_tx(
-      db_, cost_model_with_balance_cost_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                 background_commit_worker_, 1);
 
   // T1: fund the fresh address with enough to cover the balance-row cost.
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -2956,8 +2956,8 @@ TEST_F(HogDBTest, FreshBalanceGuardAbortDoesNotInvalidatePeerLock)
       cost_model_with_balance_cost_.get_balance_cost();
 
   Address addr = make_address(kAddress + 201);
-  PerThreadARC<BlockTX> block_tx(
-      db_, cost_model_with_balance_cost_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                 background_commit_worker_, 1);
 
   // T1: fund the fresh address with exactly the balance-row cost.
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -2999,8 +2999,8 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
   // An underfunded T2 must fail in both orderings.
   for (int ordering = 0; ordering < 2; ++ordering) {
     BlockHeight height = ordering + 1;
-    PerThreadARC<BlockTX> block_tx(
-        db_, cost_model_with_balance_cost_, background_commit_worker_, height);
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                   background_commit_worker_, height);
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx1(block_tx);
