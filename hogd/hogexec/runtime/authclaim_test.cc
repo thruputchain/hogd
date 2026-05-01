@@ -35,16 +35,12 @@ protected:
   using authclaim_client_t = ContractTraitClient<authclaim_test::AuthClaimTest>;
 
   // Helper to create authclaims matching the hardcoded values in the contract
-  static AuthClaimData make_auth_claims()
+  static AuthClaim make_auth_claim()
   {
-    AuthClaimData auth_claims;
-
-    // Index 0: kSourceAddressSignedWeight with BitMap = 5 (bits 0 and 2)
-    AuthClaim claim0(AuthClaimType::kSourceAddressSignedWeight);
-    claim0.accepted_keys() = 5; // bits 0 and 2 set
-    auth_claims.push_back(claim0);
-
-    return auth_claims;
+    AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+    claim.source_address_claim().allowed_keys = 5; // bits 0 and 2 set
+    claim.source_address_claim().required_weight = 1;
+    return claim;
   }
 
   std::unique_ptr<RuntimeContext> context_;
@@ -61,14 +57,14 @@ TEST_F(AuthClaimTestFixture, TestSourceAddressSignedWeight)
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   authclaim_client_t client(contract_addr);
-  auto auth_claims = make_auth_claims();
+  auto auth_claim = make_auth_claim();
 
   {
     SignedTransaction stx;
     stx.tx.invocation =
         client.make_invocation<"test_source_address_signed_weight">(
             UINT64_MAX);
-    stx.tx.auth_claims = auth_claims;
+    stx.tx.auth_claim = auth_claim;
 
     auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();

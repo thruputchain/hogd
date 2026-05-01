@@ -39,7 +39,7 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = i},
             .contracts_to_deploy = {},
-            .auth_claims = {}}};
+            }};
     txs.push_back(tx);
   }
   return txs;
@@ -73,18 +73,18 @@ get_default_account()
 inline AuthClaim
 make_sign_claim(uint32_t idx)
 {
-  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
-  claim.accepted_keys() = 1 << idx;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1 << idx;
+  claim.source_address_claim().required_weight = 1;
   return claim;
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 inline DecoratedSignature
 make_signature(const SecretKey &sk, const Transaction &tx,
-               unsigned int auth_claim_idx, unsigned int public_key_id)
+               unsigned int public_key_id)
 {
   DecoratedSignature signature;
-  signature.auth_claim_idx = auth_claim_idx;
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =

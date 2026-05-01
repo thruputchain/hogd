@@ -417,14 +417,11 @@ make_key_pair()
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 DecoratedSignature
-make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
-               uint32_t public_key_id)
+make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
   sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
-  return {.auth_claim_idx = auth_claim_idx,
-          .public_key_id = public_key_id,
-          .signature = sig};
+  return {.public_key_id = public_key_id, .signature = sig};
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
@@ -446,18 +443,19 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
   ContractAddress invoked_addr{1};
 
   // Create auth claim
-  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
-  claim.accepted_keys() = 1 << 0;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1 << 0;
+  claim.source_address_claim().required_weight = 1;
 
   // Build transaction
   Transaction tx{};
   tx.invocation.invoked_address = invoked_addr;
   tx.invocation.gas_limit = 100'000;
-  tx.auth_claims = {claim};
+  tx.auth_claim = claim;
 
   // Sign the transaction
   DecoratedSignature sig =
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+      make_signature(sk, tx, /*public_key_id=*/0);
   SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
   // Create auth data
@@ -513,18 +511,19 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   ContractAddress invoked_addr{1};
 
   // Create auth claim
-  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
-  claim.accepted_keys() = 1 << 0;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1 << 0;
+  claim.source_address_claim().required_weight = 1;
 
   // Build transaction
   Transaction tx{};
   tx.invocation.invoked_address = invoked_addr;
   tx.invocation.gas_limit = 100'000;
-  tx.auth_claims = {claim};
+  tx.auth_claim = claim;
 
   // Sign the transaction
   DecoratedSignature sig =
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
+      make_signature(sk, tx, /*public_key_id=*/0);
   SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
   // Create auth data
@@ -567,8 +566,7 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   // Test wrong signature (signed by wrong key)
   {
     DecoratedSignature wrong_sig =
-        make_signature(wrong_sk, tx, /*auth_claim_idx=*/0,
-                       /*public_key_id=*/0);
+        make_signature(wrong_sk, tx, /*public_key_id=*/0);
     SignedTransaction wrong_stx{.tx = tx, .signatures = {wrong_sig}};
 
     auto serialized_wrong_stx = x23::serialize(wrong_stx);
@@ -2816,40 +2814,5 @@ TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
   EXPECT_EQ(result.success, 0);
 }
 
-TEST(TestBindingsTest, OpenSyscallHandlerOversizedAuthClaimsIsDeserializeError)
-{
-  auto *db = make_db();
-  ASSERT_NE(db, nullptr);
-  x23::Defer d([db] { free_db(db); });
-
-  auto *rc = make_runtime_context();
-  ASSERT_NE(rc, nullptr);
-  x23::Defer d2([rc] { close_runtime_context(rc); });
-
-  SignedTransaction stx{};
-  auto serialized_stx = x23::serialize(stx);
-  auto auth_claims_len_offset = x23::xdr_size(stx.tx.invocation) +
-                                x23::xdr_size(stx.tx.uniquifier) +
-                                x23::xdr_size(stx.tx.contracts_to_deploy);
-  ASSERT_LE(auth_claims_len_offset + sizeof(uint32_t), serialized_stx.size());
-  ASSERT_EQ(x23::getbe<uint32_t>(serialized_stx.data() +
-                                 auth_claims_len_offset),
-            0U);
-
-  x23::putbe<uint32_t>(serialized_stx.data() + auth_claims_len_offset,
-                       uint32_t{kMaxAuthClaims + 1});
-  SignedTransaction ignored;
-  ASSERT_THROW(x23::deserialize(&ignored, x23::BufView{serialized_stx.data(),
-                                                       serialized_stx.size()}),
-               x23::XdrLengthError);
-
-  auto result = open_syscall_handler(
-      db, rc,
-      FFISerializedSignedTransaction{.data = serialized_stx.data(),
-                                     .len = static_cast<uint32_t>(
-                                         serialized_stx.size())});
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeDeserializeError);
-  EXPECT_EQ(result.syscall_handler, nullptr);
-}
 
 } // namespace hogd

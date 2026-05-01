@@ -3,14 +3,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <unordered_map>
 #include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/base/log.h"
-#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -200,10 +198,10 @@ verify_auth_claim_internal(AuthClaim const &claim,
   }
 
   switch (claim.claim_type()) {
-  case AuthClaimType::kSourceAddressSignedWeight:
+  case AuthClaimType::kSourceAddressAuthData:
     return verify_weight_key_claim_internal<VerfType>(
-        claim.accepted_keys(), auth_data, sigs, serialized_tx,
-        signature_verifier);
+        claim.source_address_claim().allowed_keys, auth_data, sigs,
+        serialized_tx, signature_verifier);
   case AuthClaimType::kPubkeySignature:
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   default:
@@ -230,58 +228,44 @@ verify_auth_claims_internal(
   }
 
   x23::Buf serialized_tx = x23::serialize(stx.tx);
-  if (stx.tx.auth_claims.size() != stx.signatures.size()) {
-    return AuthVerifyError(AuthVerifyErrorCode::kAuthMalformed);
-  }
 
-  // Verify that each claimed auth has a corresponding set of valid signatures.
-  static PerThread<
-      std::unordered_map<size_t, x23::Vec<const DecoratedSignature *>>>
-      sig_map;
-  sig_map->clear();
+  const AuthClaim &auth_claim = stx.tx.auth_claim;
+
+  // Collect all signatures into a vec for the single claim.
+  x23::Vec<const DecoratedSignature *> sigs;
   for (const DecoratedSignature &sig : stx.signatures) {
-    (*sig_map)[sig.auth_claim_idx].push_back(&sig);
+    sigs.push_back(&sig);
   }
-  for (size_t i = 0; i < stx.tx.auth_claims.size(); i++) {
-    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
-    const x23::Vec<const DecoratedSignature *> &sigs = (*sig_map)[i];
-    const AddressAuthData *auth_data = nullptr;
 
-    if constexpr (verify_weights_against_auth_data(VerfType)) {
-      switch (auth_claim.claim_type()) {
-      case AuthClaimType::kSourceAddressSignedWeight:
-        auth_data = source_auth_data;
-        break;
-      case AuthClaimType::kPubkeySignature:
-        // unimplemented; will be rejected in verify_auth_claim_internal
-        break;
-      default:
-        panic("Unsupported auth claim type: {}", auth_claim.claim_type());
-      }
+  const AddressAuthData *auth_data = nullptr;
+  if constexpr (verify_weights_against_auth_data(VerfType)) {
+    switch (auth_claim.claim_type()) {
+    case AuthClaimType::kSourceAddressAuthData:
+      auth_data = source_auth_data;
+      break;
+    case AuthClaimType::kPubkeySignature:
+      break;
+    default:
+      panic("Unsupported auth claim type: {}", auth_claim.claim_type());
     }
-    if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs,
-                                                      auth_data, serialized_tx,
-                                                      signature_verifier);
-        !r) {
-      return r;
-    }
+  }
+
+  if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs,
+                                                    auth_data, serialized_tx,
+                                                    signature_verifier);
+      !r) {
+    return r;
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(source_auth_data);
-    // Accumulate total weight from all signatures across all claims.
-    // Each unique key is counted only once.
+    if (auth_claim.claim_type() != AuthClaimType::kSourceAddressAuthData) {
+      return {};
+    }
+
     Weight total_weight = 0;
     BitMap seen_keys = 0;
-
     for (const DecoratedSignature &sig : stx.signatures) {
-      if (sig.auth_claim_idx >= stx.tx.auth_claims.size()) {
-        continue;
-      }
-      const AuthClaim &auth_claim = stx.tx.auth_claims[sig.auth_claim_idx];
-      if (auth_claim.claim_type() != AuthClaimType::kSourceAddressSignedWeight) {
-        continue;
-      }
       if ((seen_keys & (uint32_t{1} << sig.public_key_id)) != 0) {
         continue;
       }
@@ -290,7 +274,11 @@ verify_auth_claims_internal(
       total_weight +=
           source_auth_data->public_keys[sig.public_key_id]->max_weight;
     }
-    if (total_weight < source_auth_data->required_weight) {
+
+    Weight required = std::max(
+        source_auth_data->required_weight,
+        auth_claim.source_address_claim().required_weight);
+    if (total_weight < required) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
     }
   }

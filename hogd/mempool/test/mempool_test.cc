@@ -54,12 +54,12 @@ TEST(Mempool, SubmitUnvetted)
       {.address = MempoolTestInfra::kAccountAddresses[0],
        .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   Transaction &tx = txs[0].tx;
-  tx.auth_claims.push_back(make_sign_claim(0));
+  tx.auth_claim = make_sign_claim(0);
 
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
   txs[0].signatures.push_back(
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
+      make_signature(sk, tx, /*public_key_id=*/0));
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
