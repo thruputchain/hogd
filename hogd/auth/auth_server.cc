@@ -312,6 +312,7 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
       if (!entry.has_value()) {
         co_return entry.error().code();
       }
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       aux_auth_data[contract] = &(*entry)->second.value();
       aux_owners.push_back(std::move(*entry));
     }
