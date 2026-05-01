@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
 #include "hogd/init.h"
 
@@ -78,8 +79,9 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink)
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{{\"status\":\"ready\",\"network_id\":\"groundhog-local\","
-                 "\"endpoints\":{{\"scheduler\":\"{}:{}\"}}}}",
-                 node.bind_host(), node.scheduler_port());
+                 "\"endpoints\":{{\"scheduler\":\"{}\"}}}}",
+                 format_advertised_address(node.bind_host(),
+                                           node.scheduler_port()));
     std::fflush(stdout);
   }
 }

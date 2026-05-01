@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/network.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
@@ -96,13 +97,29 @@ parse_readiness(std::string line)
 
   std::string endpoint =
       line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
-  std::size_t colon = endpoint.rfind(':');
-  if (colon == std::string::npos) {
-    throw std::runtime_error(
-        std::format("unexpected scheduler endpoint in readiness: {}", line));
+  std::string host;
+  std::string port_text;
+  if (endpoint.starts_with('[')) {
+    std::size_t close_bracket = endpoint.find(']');
+    if (close_bracket == std::string::npos ||
+        close_bracket + 1 >= endpoint.size() ||
+        endpoint[close_bracket + 1] != ':') {
+      throw std::runtime_error(
+          std::format("unexpected scheduler endpoint in readiness: {}", line));
+    }
+    host = endpoint.substr(1, close_bracket - 1);
+    port_text = endpoint.substr(close_bracket + 2);
+  }
+  else {
+    std::size_t colon = endpoint.rfind(':');
+    if (colon == std::string::npos) {
+      throw std::runtime_error(
+          std::format("unexpected scheduler endpoint in readiness: {}", line));
+    }
+    host = endpoint.substr(0, colon);
+    port_text = endpoint.substr(colon + 1);
   }
 
-  std::string port_text = endpoint.substr(colon + 1);
   std::size_t pos = 0;
   std::uint64_t port = std::stoul(port_text, &pos, 10);
   if (pos != port_text.size() || port == 0 || port > 65535) {
@@ -110,8 +127,7 @@ parse_readiness(std::string line)
         std::format("unexpected scheduler port in readiness: {}", line));
   }
 
-  return {.host = endpoint.substr(0, colon),
-          .port = static_cast<std::uint16_t>(port)};
+  return {.host = std::move(host), .port = static_cast<std::uint16_t>(port)};
 }
 
 class HogdDevProcess {
@@ -336,6 +352,21 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_GT(readiness.port, 0);
 
   expect_clean_exit(process);
+}
+
+TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
+{
+  EXPECT_EQ(format_advertised_address("127.0.0.1", 12345), "127.0.0.1:12345");
+  EXPECT_EQ(format_advertised_address("::1", 12345), "[::1]:12345");
+}
+
+TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6SchedulerEndpoint)
+{
+  Readiness readiness = parse_readiness(
+      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":"[::1]:12345"}})");
+
+  EXPECT_EQ(readiness.host, "::1");
+  EXPECT_EQ(readiness.port, 12345);
 }
 
 TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
