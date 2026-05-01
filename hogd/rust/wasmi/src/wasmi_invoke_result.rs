@@ -8,12 +8,12 @@ pub struct WasmiInvokeResult {
 
 impl WasmiInvokeResult {
     pub fn error(err: InvokeErrorCode) -> WasmiInvokeResult {
-        Self { error: err as i32 }
+        Self { error: err.0 }
     }
 
     pub fn success() -> WasmiInvokeResult {
         Self {
-            error: InvokeErrorCode::kInvokeNone as i32,
+            error: InvokeErrorCode::None.0,
         }
     }
 
@@ -26,9 +26,9 @@ impl WasmiInvokeResult {
         debug_log!(eprintln!("Wasmi trap code: {code:?}"));
         match code {
             wasmi::core::TrapCode::OutOfFuel => {
-                Self::error(InvokeErrorCode::kInvokeOutOfGas)
+                Self::error(InvokeErrorCode::OutOfGas)
             }
-            _ => Self::error(InvokeErrorCode::kInvokeDeterministic),
+            _ => Self::error(InvokeErrorCode::Deterministic),
         }
     }
 }

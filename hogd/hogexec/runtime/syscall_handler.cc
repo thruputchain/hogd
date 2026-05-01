@@ -115,7 +115,7 @@ SystemCallHandler::SystemCallHandler(
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_),
-    source_tx_hash_(sha256(tx)), auth_claims_(tx.auth_claims),
+    source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                          ByteArrayHasher>
@@ -144,7 +144,7 @@ SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context,
-    AuthClaimData auth_claims, SHA256Hash source_tx_hash)
+    AuthClaim auth_claim, SHA256Hash source_tx_hash)
   : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
@@ -152,7 +152,7 @@ SystemCallHandler::SystemCallHandler(
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_),
-    source_tx_hash_(source_tx_hash), auth_claims_(std::move(auth_claims)),
+    source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
     newly_created_contracts_(),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
@@ -1433,10 +1433,10 @@ SystemCallHandler::set_address_required_weight(Weight required_weight)
   return item_view->set(new_item);
 }
 
-const AuthClaimData &
-SystemCallHandler::get_auth_claims() const
+const AuthClaim &
+SystemCallHandler::get_auth_claim() const
 {
-  return auth_claims_;
+  return auth_claim_;
 }
 
 // == Hash buffer syscalls ==

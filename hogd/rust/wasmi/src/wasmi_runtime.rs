@@ -125,7 +125,7 @@ impl WasmiRuntime {
             Some(g) => g,
             None => {
                 eprintln!("Unrecoverable: instrumented module missing __groundhog_stack_limit");
-                return Err(SystemErrorCode::kSystemUnrecoverable);
+                return Err(SystemErrorCode::Unrecoverable);
             }
         };
         // 4096 = 1/4 of max_wasm_stack (16KB) configured in global_context.rs
@@ -134,7 +134,7 @@ impl WasmiRuntime {
             .is_err()
         {
             eprintln!("Unrecoverable: failed to set __groundhog_stack_limit");
-            return Err(SystemErrorCode::kSystemUnrecoverable);
+            return Err(SystemErrorCode::Unrecoverable);
         }
         Ok(Some(Self { store, instance }))
     }
@@ -145,7 +145,7 @@ impl WasmiRuntime {
             _ => {
                 debug_log!(eprintln!("Function {method} not found"));
                 return WasmiInvokeResult::error(
-                    InvokeErrorCode::kInvokeDeterministic,
+                    InvokeErrorCode::Deterministic,
                 );
             }
         };
@@ -156,7 +156,7 @@ impl WasmiRuntime {
                 "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
             ));
             return WasmiInvokeResult::error(
-                InvokeErrorCode::kInvokeDeterministic,
+                InvokeErrorCode::Deterministic,
             );
         }
 
@@ -172,7 +172,7 @@ impl WasmiRuntime {
                             "Unknown error from func.call: {err:?}"
                         ));
                         WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeUnrecoverable,
+                            InvokeErrorCode::Unrecoverable,
                         )
                     },
                     |trampoline_error| {
@@ -197,7 +197,7 @@ pub unsafe extern "C" fn wasmi_invoke(
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
-        return WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic);
+        return WasmiInvokeResult::error(InvokeErrorCode::Deterministic);
     }
 
     let method_name_slice =
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn wasmi_invoke(
         Ok(v) => v,
         _ => {
             return WasmiInvokeResult::error(
-                InvokeErrorCode::kInvokeDeterministic,
+                InvokeErrorCode::Deterministic,
             )
         }
     };
@@ -231,7 +231,7 @@ impl NewWasmiRuntimeResult {
                 context_pointer: ptr,
             },
             Err(code) => Self {
-                err_code: code as i32,
+                err_code: code.0,
                 context_pointer: core::ptr::null_mut(),
             },
         }
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn new_wasmi_runtime(
 ) -> NewWasmiRuntimeResult {
     if hash.is_null() || wasmi_context_ptr.is_null() {
         return NewWasmiRuntimeResult::new(Err(
-            SystemErrorCode::kSystemUnrecoverable,
+            SystemErrorCode::Unrecoverable,
         ));
     }
 

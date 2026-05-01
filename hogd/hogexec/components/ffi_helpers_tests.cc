@@ -4,13 +4,11 @@
 
 #include "auth_claim.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/ffi_helpers.h"
-#include "hogd/rust/contract_types/bindings.h"
+#include "hogd/hogexec/components/ffi_helpers.h"
+#include "hogd/hogexec/components/ffi_types.h"
 #include "types.hh"
 
 namespace hogd {
-
-// Roundtrip tests on the FFI helper types
 
 namespace {
 
@@ -24,19 +22,41 @@ roundtrip_auth_claim(AuthClaim const &auth_claim)
 } // namespace
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST(FFIHelpers, AuthClaimRoundtrip)
+TEST(FFIHelpers, SourceAddressClaimRoundtrip)
 {
-  AuthClaim a(AuthClaimType::kSourceAddressSignedWeight);
-  a.accepted_keys() = 1;
+  AuthClaim a(AuthClaimType::kSourceAddressAuthData);
+  a.source_address_claim().allowed_keys = 1;
+  a.source_address_claim().required_weight = 1;
   auto b = roundtrip_auth_claim(a);
   ASSERT_TRUE(b.has_value());
   ASSERT_EQ(a, *b);
 
-  // Test with different bitmap values
-  a.accepted_keys() = 0x15; // bits 0, 2, 4
+  a.source_address_claim().allowed_keys = 0x15; // bits 0, 2, 4
+  a.source_address_claim().required_weight = 3;
   b = roundtrip_auth_claim(a);
   ASSERT_TRUE(b.has_value());
   ASSERT_EQ(a, *b);
+}
+
+TEST(FFIHelpers, PublicKeyRoundtrip)
+{
+  generated::PublicKey ffi_pk{};
+  ffi_pk.tag = generated::PublicKey::PublicKey_Ed25519;
+  for (size_t i = 0; i < 32; i++) {
+    ffi_pk.ed25519.ed25519[i] = static_cast<uint8_t>(i + 1);
+  }
+  auto cpp_pk = FFIHelperType<generated::PublicKey>::to_cpp(ffi_pk);
+  ASSERT_TRUE(cpp_pk.has_value());
+  ASSERT_EQ(cpp_pk->scheme(), CryptographicScheme::Ed25519);
+  for (size_t i = 0; i < 32; i++) {
+    ASSERT_EQ(cpp_pk->ed25519()[i], static_cast<uint8_t>(i + 1));
+  }
+
+  auto ffi_pk2 = FFIHelperType<generated::PublicKey>::to_ffi(*cpp_pk);
+  ASSERT_EQ(ffi_pk2.tag, generated::PublicKey::PublicKey_Ed25519);
+  for (size_t i = 0; i < 32; i++) {
+    ASSERT_EQ(ffi_pk2.ed25519.ed25519[i], static_cast<uint8_t>(i + 1));
+  }
 }
 
 TEST(FFIHelpers, AuthClaimInvalid)
@@ -47,8 +67,6 @@ TEST(FFIHelpers, AuthClaimInvalid)
   ASSERT_FALSE(b.has_value());
 }
 
-// Verify to_cpp returns nullopt for various out-of-range tag values,
-// simulating corrupted or adversarial FFI data from untrusted WASM memory.
 TEST(FFIHelpers, AuthClaimInvalidTags)
 {
   for (int tag_val :

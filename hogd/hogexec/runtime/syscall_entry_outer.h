@@ -24,7 +24,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/alias_guard.h"
-#include "hogd/hogexec/runtime/ffi_helpers.h"
+#include "hogd/hogexec/components/ffi_helpers.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"

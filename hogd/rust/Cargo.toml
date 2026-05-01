@@ -4,7 +4,6 @@ members = [
     "wasmi",
     "wasmtime",
     "unified",
-    "contract_types",
     "common",
     "synchronized_map",
     "test_ffi_bindings",

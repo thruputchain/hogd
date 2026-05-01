@@ -17,10 +17,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/ffi_helpers.h"
+#include "hogd/hogexec/components/ffi_helpers.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
-#include "hogd/rust/contract_types/bindings.h"
+#include "hogd/hogexec/components/ffi_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -123,34 +123,10 @@ syscall_WriteAddressRequiredWeight_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
-                                uint32_t &output_count) noexcept
-{
-  output_count = syscall_handler.get_auth_claims().size();
-  if (auto *trace_data =
-          syscall_handler
-              .get_syscall_trace_data<SyscallNo::kGetAuthClaimCount>()) {
-    try {
-      trace_data->outputs.emplace(
-          SyscallGetAuthClaimCountOutputs{.count = output_count});
-    } catch (std::exception &e) {
-      panic("Failed to trace syscall {}: {}", SyscallNo::kGetAuthClaimCount,
-            e.what());
-    }
-  }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
-}
-
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
-                           uint32_t input_index,
                            generated::AuthClaim &output_auth_claim) noexcept
 {
-  if (input_index >= syscall_handler.get_auth_claims().size()) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
-  auto const &claim = syscall_handler.get_auth_claims()[input_index];
+  auto const &claim = syscall_handler.get_auth_claim();
   output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
 
   if (auto *trace_data =

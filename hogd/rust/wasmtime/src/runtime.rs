@@ -76,8 +76,8 @@ impl WasmtimeRuntime {
                         // Deterministic trap during instantiation (e.g. OOB
                         // data segment, start function trap including
                         // OutOfFuel).
-                        InvokeErrorCode::kInvokeOutOfGas
-                        | InvokeErrorCode::kInvokeDeterministic => {
+                        InvokeErrorCode::OutOfGas
+                        | InvokeErrorCode::Deterministic => {
                             debug_log!(eprintln!(
                                 "Trap during instantiation: {e:?}"
                             ));
@@ -95,7 +95,7 @@ impl WasmtimeRuntime {
                 debug_log!(eprintln!(
                     "System error during instantiation: {e:?}"
                 ));
-                return Err(SystemErrorCode::kSystemUnrecoverable);
+                return Err(SystemErrorCode::Unrecoverable);
             }
         };
         let stack_limit_global = match instance
@@ -104,7 +104,7 @@ impl WasmtimeRuntime {
             Some(g) => g,
             None => {
                 eprintln!("Unrecoverable: instrumented module missing __groundhog_stack_limit");
-                return Err(SystemErrorCode::kSystemUnrecoverable);
+                return Err(SystemErrorCode::Unrecoverable);
             }
         };
         // 4096 = 1/4 of max_wasm_stack (16KB) configured in global_context.rs
@@ -113,7 +113,7 @@ impl WasmtimeRuntime {
             .is_err()
         {
             eprintln!("Unrecoverable: failed to set __groundhog_stack_limit");
-            return Err(SystemErrorCode::kSystemUnrecoverable);
+            return Err(SystemErrorCode::Unrecoverable);
         }
         Ok(Some(Self { store, instance }))
     }
@@ -124,7 +124,7 @@ impl WasmtimeRuntime {
             _ => {
                 debug_log!(eprintln!("Function {method} not found"));
                 return WasmtimeInvokeResult::error(
-                    InvokeErrorCode::kInvokeDeterministic,
+                    InvokeErrorCode::Deterministic,
                 );
             }
         };
@@ -135,7 +135,7 @@ impl WasmtimeRuntime {
                 "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
             ));
             return WasmtimeInvokeResult::error(
-                InvokeErrorCode::kInvokeDeterministic,
+                InvokeErrorCode::Deterministic,
             );
         }
 
@@ -157,7 +157,7 @@ impl WasmtimeRuntime {
                             "Unrecoverable: Unknown error from func.call: {err:?}"
                         );
                         WasmtimeInvokeResult::error(
-                            InvokeErrorCode::kInvokeUnrecoverable,
+                            InvokeErrorCode::Unrecoverable,
                         )
                     },
                     |trampoline_error| {
@@ -199,7 +199,7 @@ pub unsafe extern "C" fn wasmtime_invoke(
 
     if method_name.is_null() {
         return WasmtimeInvokeResult::error(
-            InvokeErrorCode::kInvokeDeterministic,
+            InvokeErrorCode::Deterministic,
         );
     }
 
@@ -210,7 +210,7 @@ pub unsafe extern "C" fn wasmtime_invoke(
         Ok(v) => v,
         _ => {
             return WasmtimeInvokeResult::error(
-                InvokeErrorCode::kInvokeDeterministic,
+                InvokeErrorCode::Deterministic,
             )
         }
     };
@@ -230,7 +230,7 @@ pub struct NewWasmtimeRuntimeResult {
 impl NewWasmtimeRuntimeResult {
     pub fn err(err_code: SystemErrorCode) -> Self {
         Self {
-            err_code: err_code as i32,
+            err_code: err_code.0,
             runtime_pointer: core::ptr::null_mut(),
         }
     }
@@ -267,7 +267,7 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
     if hash.is_null() || wasmtime_context_ptr.is_null() {
         eprintln!("hash or wasmtime_context_ptr is null");
         return NewWasmtimeRuntimeResult::err(
-            SystemErrorCode::kSystemUnrecoverable,
+            SystemErrorCode::Unrecoverable,
         );
     }
 
