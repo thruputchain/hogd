@@ -9,6 +9,7 @@
 #include <string_view>
 #include <sys/socket.h>
 #include <type_traits>
+#include <utility>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -60,41 +61,55 @@ public:
     destroy_wait();
   }
 
+  std::pair<uint16_t, x23::UniqueFd> bind_server(uint16_t port)
+  {
+    CHECK(!bound_);
+    bound_ = true;
+    int backlog = 5 + cp_.pool_.nthreads_;
+    auto lfd = x23::tcplisten(port, backlog);
+    if (port == 0)
+      port = x23::get_port(x23::local_addr(lfd));
+    port_ = port;
+    return {port_, std::move(lfd)};
+  }
+
+  std::pair<uint16_t, x23::UniqueFd> bind_server(x23::HostPort bind_addr)
+  {
+    CHECK(!bound_);
+    bound_ = true;
+    std::expected<sockaddr_storage, x23::GaiError> addr =
+        bind_addr.to_addr(/*dns=*/false);
+    CHECK(addr.has_value());
+    int backlog = 5 + cp_.pool_.nthreads_;
+    auto lfd = x23::tcplisten(*addr, backlog);
+    port_ = x23::get_port(x23::local_addr(lfd));
+    return {port_, std::move(lfd)};
+  }
+
+  void start_accepting(x23::UniqueFd lfd)
+  {
+    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+    listen_fd_ = lfd.get();
+    x23::start_listening(cp_, lfd,
+                         [self = x23::RefPtr(*this),
+                          _d = x23::Defer([this] { eof(); })](auto c) {
+                           c->max_message_size = self->max_message_size_;
+                           new Conn{*self, c};
+                         });
+  }
+
   uint16_t start_server(uint16_t port)
   {
-    // If this fails, you started the same server twice.
-    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
-
-    // NOLINTBEGIN(readability-identifier-naming)
-    auto [prt, lfd] =
-        tcp_rpc_server(cp_, port,
-                       [self = x23::RefPtr(*this),
-                        _d = x23::Defer([this] { eof(); })](auto c) {
-                         c->max_message_size = self->max_message_size_;
-                         new Conn{*self, c};
-                       });
-    // NOLINTEND(readability-identifier-naming)
-    listen_fd_ = lfd.get();
-    return port_ = prt;
+    auto [p, lfd] = bind_server(port);
+    start_accepting(std::move(lfd));
+    return p;
   }
 
   uint16_t start_server(x23::HostPort bind_addr)
   {
-    // If this fails, you started the same server twice.
-    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
-
-    std::expected<sockaddr_storage, x23::GaiError> addr =
-        bind_addr.to_addr(/*dns=*/false);
-    CHECK(addr.has_value());
-    auto [prt, lfd] =
-        tcp_rpc_server(cp_, *addr,
-                       [self = x23::RefPtr(*this),
-                        _d = x23::Defer([this] { eof(); })](auto c) {
-                         c->max_message_size = self->max_message_size_;
-                         new Conn{*self, c};
-                       });
-    listen_fd_ = lfd.get();
-    return port_ = prt;
+    auto [p, lfd] = bind_server(std::move(bind_addr));
+    start_accepting(std::move(lfd));
+    return p;
   }
 
   Impl *impl() noexcept { return &impl_; }
@@ -146,6 +161,7 @@ private:
 
   Impl impl_;
   x23::MVar<ConnState> cs_;
+  bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 
