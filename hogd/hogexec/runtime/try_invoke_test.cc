@@ -3290,6 +3290,223 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "HogDB-only: this exercises subtransaction narrow() behavior";
+  }
+
+  static constexpr ContractAddress kAddressTarget = make_contract_address(72);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(73);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_target = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("rcq-self-consume");
+               uint8_t entry = 0xA5;
+               auto res = ctx.handler().retrocausal_queue_insert(
+                   key, std::as_bytes(std::span(&entry, 1)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }},
+            {1,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("rcq-self-consume");
+               auto res = ctx.handler().retrocausal_queue_consume(key, false);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto const &entry = res.value().value();
+               if (entry.size() != 1 || entry[0] != 0xA5) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }},
+        });
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto invoke_target = [&](Runtime::MethodID method) {
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     kAddressTarget, method, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
+               };
+
+               auto r0 = invoke_target(0);
+               if (!r0.has_value() ||
+                   r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+
+               auto r1 = invoke_target(1);
+               if (!r1.has_value()) {
+                 if (r1.error().code() == HostFnErrorCode::Unrecoverable) {
+                   return InvokeError{InvokeErrorCode::Unrecoverable};
+                 }
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }},
+        });
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_target));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  ContractAddress addrs[] = {kAddressTarget, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success())
+      << "RCQ self-consume across TryInvoke frames must not be Unrecoverable";
+}
+
+TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
+{
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "HogDB-only: this exercises subtransaction narrow() behavior";
+  }
+
+  static constexpr ContractAddress kAddressTarget = make_contract_address(74);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(75);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_target = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("rcq-multi");
+               uint8_t entry = 0xBB;
+               auto res = ctx.handler().retrocausal_queue_insert(
+                   key, std::as_bytes(std::span(&entry, 1)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }},
+            {1,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto key = make_storage_key("rcq-multi");
+               auto res = ctx.handler().retrocausal_queue_consume(key, false);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }},
+        });
+
+    auto native_contract_orchestrator = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               auto invoke_target = [&](Runtime::MethodID method) {
+                 RuntimeMemoryLength output_return_buffer_len = 0,
+                                     output_returned_auth_token_len = 0;
+                 return ctx.syscall<SyscallNo::kInvoke>(
+                     kAddressTarget, method, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     std::span<uint32_t>{}, output_return_buffer_len,
+                     output_returned_auth_token_len);
+               };
+
+               // insert -> consume -> insert (grow, shrink, grow)
+               for (auto method : {0, 1, 0}) {
+                 auto r = invoke_target(method);
+                 if (!r.has_value()) {
+                   return r.error().code() == HostFnErrorCode::Unrecoverable
+                              ? InvokeError{InvokeErrorCode::Unrecoverable}
+                              : InvokeError{InvokeErrorCode::Deterministic};
+                 }
+                 if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                   return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+               }
+               return {};
+             }},
+        });
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_target));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  ContractAddress addrs[] = {kAddressTarget, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = kAddressOrchestrator,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success())
+      << "insert-consume-insert via TryInvoke must succeed";
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, TryInvokeTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

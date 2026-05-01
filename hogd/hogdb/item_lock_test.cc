@@ -782,4 +782,62 @@ TEST(ItemLockTest, EmptyRCQEntryCommitDoesNotCrash)
   EXPECT_EQ(cost, kTestCostModel.get_retrocausal_queue_cost(1));
 }
 
+TEST(ItemLockTest, RCQNarrowAcceptsShrinkingInserts)
+{
+  // Sub1 inserts [A, B], sub2 inserts [B] (self-consumed A).
+  // narrow() must accept the shrink.
+  RetrocausalQueueDelta delta1;
+  delta1.insert.added_entries.push_back(QueueEntry{0x0A});
+  delta1.insert.added_entries.push_back(QueueEntry{0x0B});
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.insert.added_entries.push_back(QueueEntry{0x0B});
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST(ItemLockTest, RCQNarrowAcceptsShrinkToEmpty)
+{
+  // Sub1 inserts [A], sub2 inserts nothing (fully self-consumed).
+  RetrocausalQueueDelta delta1;
+  delta1.insert.added_entries.push_back(QueueEntry{0x0A});
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST(ItemLockTest, RCQNarrowMaxInsertCountTracksAcrossMultipleNarrows)
+{
+  // Sub1: 3 inserts, Sub2: 1 insert (shrink), Sub3: 4 inserts (grow past peak).
+  RetrocausalQueueDelta d1;
+  d1.insert.added_entries.push_back(QueueEntry{0x01});
+  d1.insert.added_entries.push_back(QueueEntry{0x02});
+  d1.insert.added_entries.push_back(QueueEntry{0x03});
+  auto c1 = ItemChange(RetrocausalQueueIt(std::move(d1)));
+
+  RetrocausalQueueDelta d2;
+  d2.insert.added_entries.push_back(QueueEntry{0x03});
+  auto c2 = ItemChange(RetrocausalQueueIt(std::move(d2)));
+
+  auto r1 = c2.narrow(c1);
+  ASSERT_TRUE(r1.has_value());
+
+  RetrocausalQueueDelta d3;
+  d3.insert.added_entries.push_back(QueueEntry{0x03});
+  d3.insert.added_entries.push_back(QueueEntry{0x04});
+  d3.insert.added_entries.push_back(QueueEntry{0x05});
+  d3.insert.added_entries.push_back(QueueEntry{0x06});
+  auto c3 = ItemChange(RetrocausalQueueIt(std::move(d3)));
+
+  auto r2 = c3.narrow(c2);
+  ASSERT_TRUE(r2.has_value());
+}
+
 } // namespace hogd

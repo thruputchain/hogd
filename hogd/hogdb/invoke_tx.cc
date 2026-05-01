@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -486,6 +487,9 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
                                     const RetrocausalQueueDelta &delta,
                                     StorageDeltaFlagSet flags)
 {
+  if (delta.insert.added_entries.size() > kRetrocausalQueueBlockEntriesMaxLen) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
   auto change = ItemChange(RetrocausalQueueIt(delta));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
