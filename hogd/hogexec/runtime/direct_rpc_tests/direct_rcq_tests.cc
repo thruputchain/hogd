@@ -1937,9 +1937,9 @@ TEST_F(DirectRCQTests,
 // kRetrocausalQueueBlockEntriesMaxLen (1000). It just returns cost(entries).
 // But at commit time, the exclusive downgrade creates a fresh
 // RetrocausalQueueLock and calls try_atomic_change_lock(nullptr, inner, ctx).
-// The fresh lock's reserved_entry_count_ is 0. The insert has 1001 entries.
-// reserved_entry_count_.fetch_add(1001) = 1001 > 1000 -> returns kConflict.
-// CHECK(r.has_value()) at item_lock.cc:130 fires.
+// Inserting > kRetrocausalQueueBlockEntriesMaxLen entries is invalid executor
+// behavior regardless of lock mode. request_retrocausal_queue rejects the
+// delta before constructing RetrocausalQueueIt to prevent uint16_t truncation.
 TEST_F(DirectRCQTests, StressExclusiveFlagInsertOverMaxEntriesPerBlock)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
@@ -1955,11 +1955,8 @@ TEST_F(DirectRCQTests, StressExclusiveFlagInsertOverMaxEntriesPerBlock)
   advance_block();
 
   // Block 2: Insert 1001 entries with exclusive flag.
-  // ExclusiveLock doesn't check entry count. Push succeeds.
-  // At commit: downgrade creates RetrocausalQueueLock with
-  // reserved_entry_count_=0. try_atomic_change_lock: 0 + 1001 > 1000 ->
-  // kConflict -> CHECK fails.
-  // This consitutes invalid input from the executor
+  // request_retrocausal_queue rejects > kRetrocausalQueueBlockEntriesMaxLen
+  // as kInvalidExecutorBehavior before the uint16_t cast.
   std::vector<QueueEntry> entries;
   entries.reserve(1001);
   for (int i = 0; i < 1001; ++i) {
@@ -1970,12 +1967,7 @@ TEST_F(DirectRCQTests, StressExclusiveFlagInsertOverMaxEntriesPerBlock)
   tx.add_delta(key, make_rcq_insert_delta(entries),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   r = tx.try_push_current_subtransaction();
-  // ExclusiveLock rejects > kRetrocausalQueueBlockEntriesMaxLen with kConflict.
-  // kConflict maps to has_value=true, value=false.
-  ASSERT_TRUE(r.has_value() && !r.value());
-
-  ASSERT_TRUE(tx.commit_transaction().has_value());
-  advance_block();
+  ASSERT_FALSE(r.has_value());
 }
 
 // StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch

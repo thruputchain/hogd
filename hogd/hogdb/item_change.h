@@ -477,6 +477,8 @@ public:
 
 private:
   RetrocausalQueueDelta delta_;
+  static_assert(std::numeric_limits<uint16_t>::max() >=
+                kRetrocausalQueueBlockEntriesMaxLen);
   uint16_t max_insert_count_ = 0;
   // Number of entries consumed from past blocks. Calculated during
   // try_atomic_change_lock and used in commit_change.
