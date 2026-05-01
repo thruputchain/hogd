@@ -380,14 +380,14 @@ open_mocked_syscall_handler(void *db, void *rc,
     return kNullptrError;
   }
   try {
-    hogd::AuthClaimData auth_claim_data_xdr;
-    x23::deserialize(&auth_claim_data_xdr,
+    hogd::AuthClaim auth_claim_xdr;
+    x23::deserialize(&auth_claim_xdr,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
     auto *handler =
         new SyscallHandlerContext(runtime_context->get(), *db_context,
-                                  auth_claim_data_xdr, source_hash);
+                                  auth_claim_xdr, source_hash);
     if (enable_tracing) {
       handler->to_handler().enable_tracing();
     }
