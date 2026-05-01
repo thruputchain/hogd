@@ -4172,5 +4172,54 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
          "conflict";
 }
 
+TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
+{
+  setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
+  auto key = make_contract_data_addrkey(kContractAddress,
+                                        "rcq_commit_release_excess");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+
+  // Sub1: insert 500 entries.
+  std::vector<QueueEntry> entries_500;
+  entries_500.reserve(500);
+  for (int i = 0; i < 500; ++i) {
+    entries_500.push_back(make_rcq_entry(
+        {static_cast<uint8_t>(i & 0xFF), static_cast<uint8_t>(i >> 8)}));
+  }
+  tx1.add_delta(key, make_rcq_insert_delta(entries_500),
+                std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Sub2: zero inserts (all self-consumed).
+  tx1.add_delta(key, make_rcq_insert_delta({}),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value());
+
+  // Commit tx1. The commit writes 0 actual entries but the reservation was
+  // pinned at 500 during execution. commit_change must release the excess
+  // so other transactions can use those slots.
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  // tx2: insert 501 entries. After tx1 commits and releases the excess
+  // reservation, the block should have 0 reserved slots, so 501 fits.
+  std::vector<QueueEntry> entries_501;
+  entries_501.reserve(501);
+  for (int i = 0; i < 501; ++i) {
+    entries_501.push_back(
+        make_rcq_entry({static_cast<uint8_t>((i + 500) & 0xFF),
+                        static_cast<uint8_t>((i + 500) >> 8)}));
+  }
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_rcq_insert_delta(entries_501),
+                std::to_underlying(StorageDeltaFlags::None));
+  r = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value() && r.value())
+      << "after tx1 commits 0 actual entries, the 500-slot reservation must "
+         "be released so tx2 can insert 501";
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd

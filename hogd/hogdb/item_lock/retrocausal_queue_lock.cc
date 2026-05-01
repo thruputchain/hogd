@@ -387,6 +387,14 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 
   auto const &delta = change.delta();
 
+  // Release excess reservation from self-consume high-water mark.
+  size_t excess_reserved =
+      change.max_insert_count() - delta.insert.added_entries.size();
+  if (excess_reserved > 0) {
+    reserved_entry_count_.fetch_sub(excess_reserved,
+                                    std::memory_order_relaxed);
+  }
+
   // Apply inserts
   size_t elements_added = 0;
   if (!delta.insert.added_entries.empty()) {
