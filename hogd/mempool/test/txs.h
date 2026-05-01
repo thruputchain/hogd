@@ -39,27 +39,10 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = i},
             .contracts_to_deploy = {},
-            .auth_claims = {},
-            .gas_claims = {}}};
+            .auth_claims = {}}};
     txs.push_back(tx);
   }
   return txs;
-}
-
-inline SignedTransaction
-generate_change_nonce_config(fib_client_t &fib_client, uint32_t required_weight)
-{
-  constexpr char kProgramName[] = "change_nonce_config";
-  return {.tx = Transaction{
-              .invocation = fib_client.make_invocation<kProgramName>(
-                  // TODO(jhumphri): How to get this number automatically?
-                  /*gas_amount=*/5'000'000'000, required_weight),
-              .uniquifier = {.block_expiry_height =
-                                 std::numeric_limits<BlockHeight>::max(),
-                             .nonce = 0},
-              .contracts_to_deploy = {},
-              .auth_claims = {},
-              .gas_claims = {}}};
 }
 
 inline Ed25519SecretKey
@@ -82,18 +65,16 @@ get_default_account()
   for (size_t i = 0; i < kMaxSigners; i++) {
     public_keys[i] = nullptr;
   }
-  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
 
   return AddressAuthData{.public_keys = public_keys,
-                         .gas_permissions = {},
-                         .nonce_config = kNonceConfig};
+                         .required_weight = 0};
 }
 
 inline AuthClaim
 make_sign_claim(uint32_t idx)
 {
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-  claim.invoked_address_signature_id() = idx;
+  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+  claim.accepted_keys() = 1 << idx;
   return claim;
 }
 
@@ -112,26 +93,5 @@ make_signature(const SecretKey &sk, const Transaction &tx,
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-inline void
-set_nonce_key(AddressAuthData &auth_data, size_t idx)
-{
-  CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
-  auth_data.nonce_config.accepted_keys |= (1 << idx);
-}
-
-inline void
-add_gas_config(AddressAuthData &auth_data, GasAmount gas,
-               const x23::Vec<size_t> &keys, Weight required_weight)
-{
-  CHECK_LT(auth_data.gas_permissions.size(),
-           static_cast<size_t>(kMaxGasConfigs));
-  GasPermissionConfig config{.limit = gas,
-                             .accepted_keys = 0,
-                             .required_weight = required_weight};
-  for (const size_t idx : keys) {
-    config.accepted_keys |= (1 << idx);
-  }
-  auth_data.gas_permissions.push_back(config);
-}
 
 } // namespace hogd

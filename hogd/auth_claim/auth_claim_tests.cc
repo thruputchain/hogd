@@ -25,26 +25,8 @@ protected:
 
   static AuthClaim make_individual_key_claim(uint32_t key_id)
   {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = key_id;
-    return claim;
-  }
-
-  static AuthClaim make_aux_individual_key_claim(uint32_t key_id,
-                                                 ContractAddress address)
-  {
-    AuthClaim claim(AuthClaimType::kOtherAddressSignature);
-    claim.other_address_signature_id().key_id = key_id;
-    claim.other_address_signature_id().address = address;
-    return claim;
-  }
-
-  static AuthClaim make_weight_key_claim(uint32_t key_id, Weight weight)
-  {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
-    claim.invoked_address_signed_weight().accepted_keys =
-        static_cast<uint32_t>(1) << key_id;
-    claim.invoked_address_signed_weight().required_weight = weight;
+    AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+    claim.accepted_keys() = static_cast<uint32_t>(1) << key_id;
     return claim;
   }
 
@@ -78,9 +60,6 @@ protected:
     sk_wrapper.ed25519() = sk;
     return {pk_wrapper, sk_wrapper};
   }
-
-  constexpr static NonceConfig kAnyKeyNonceConfig =
-      NonceConfig{.accepted_keys = 0x000F'FFFF, .required_weight = 0};
 };
 
 TEST_F(AuthClaimTests, IndividualKeyClaim)
@@ -102,123 +81,27 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
       AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
                           new PublicKeyConfig{.key = pk,
                                               .max_weight = Weight{1}})},
-                      .nonce_config = kAnyKeyNonceConfig};
+                      .required_weight = 1};
 
-  AddressAuthData missing_key =
-      AddressAuthData{.nonce_config = kAnyKeyNonceConfig};
+  AddressAuthData missing_key = AddressAuthData{.required_weight = 1};
 
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data, {}).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data).has_value());
   EXPECT_FALSE(
-      lightweight_validate_auth_claims(stx, missing_key, {}).has_value());
+      lightweight_validate_auth_claims(stx, missing_key).has_value());
   EXPECT_EQ(
-      lightweight_validate_auth_claims(stx, missing_key, {}).error().code(),
+      lightweight_validate_auth_claims(stx, missing_key).error().code(),
       AuthVerifyErrorCode::kAuthDataMismatch);
 
   AddressAuthData bad_data =
       AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
                           new PublicKeyConfig{.key = pk2,
                                               .max_weight = Weight{1}})},
-                      .nonce_config = kAnyKeyNonceConfig};
+                      .required_weight = 1};
 
-  EXPECT_TRUE(verify_auth(stx, good_data, {}).has_value());
-  EXPECT_FALSE(verify_auth(stx, bad_data, {}).has_value());
-  EXPECT_EQ(verify_auth(stx, bad_data, {}).error().code(),
+  EXPECT_TRUE(verify_auth(stx, good_data).has_value());
+  EXPECT_FALSE(verify_auth(stx, bad_data).has_value());
+  EXPECT_EQ(verify_auth(stx, bad_data).error().code(),
             AuthVerifyErrorCode::kSignatureVerificationFailed);
-}
-
-TEST_F(AuthClaimTests, GasAllSponsored)
-{
-  AuthClaim claim = make_aux_individual_key_claim(0, ContractAddress{1});
-  auto aux_contract = ContractAddress{1};
-
-  auto [pk, sk] = make_key_pair();
-  auto [pk2, sk2] = make_key_pair();
-  auto tx = make_transaction({claim});
-  tx.gas_claims.push_back(
-      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
-  tx.invocation.gas_limit = 100;
-
-  DecoratedSignature sig =
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
-
-  SignedTransaction stx{.tx = tx, .signatures = {sig}};
-
-  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-
-  AddressAuthData aux_data = AddressAuthData{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 100,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 1}},
-      .nonce_config = kAnyKeyNonceConfig,
-  };
-
-  AddressAuthData self_data = AddressAuthData{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 2,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 10}},
-      .nonce_config = kAnyKeyNonceConfig,
-  };
-
-  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, self_data,
-                                               {{aux_contract, &aux_data}})
-                  .has_value());
-  EXPECT_TRUE(
-      verify_auth(stx, self_data, {{aux_contract, &aux_data}}).has_value());
-}
-
-TEST_F(AuthClaimTests, GasSponsorInsufficient)
-{
-  AuthClaim claim = make_aux_individual_key_claim(0, ContractAddress{1});
-  auto aux_contract = ContractAddress{1};
-
-  auto [pk, sk] = make_key_pair();
-  auto [pk2, sk2] = make_key_pair();
-  auto tx = make_transaction({claim});
-  tx.gas_claims.push_back(
-      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
-  tx.invocation.gas_limit = 200;
-
-  DecoratedSignature sig =
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
-
-  SignedTransaction stx{.tx = tx, .signatures = {sig}};
-
-  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-
-  AddressAuthData aux_data = AddressAuthData{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 100,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 1}},
-      .nonce_config = kAnyKeyNonceConfig,
-  };
-
-  AddressAuthData self_data = AddressAuthData{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 2,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 10}},
-      .nonce_config = kAnyKeyNonceConfig,
-  };
-
-  // Gas claims can have 0 weight required, and the sponsored claim is implicit,
-  // so this auth data is plausible.
-  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-  ASSERT_FALSE(lightweight_validate_auth_claims(stx, self_data,
-                                                {{aux_contract, &aux_data}})
-                   .has_value());
-  ASSERT_EQ(lightweight_validate_auth_claims(stx, self_data,
-                                             {{aux_contract, &aux_data}})
-                .error()
-                .code(),
-            AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
 TEST_F(AuthClaimTests, BatchSignatureVerification)
@@ -238,12 +121,12 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
       AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
                           new PublicKeyConfig{.key = pk,
                                               .max_weight = Weight{1}})},
-                      .nonce_config = kAnyKeyNonceConfig};
+                      .required_weight = 1};
 
   {
     Ed25519SignatureVerifier signature_verifier;
     EXPECT_TRUE(
-        verify_auth(stx, good_data, {}, &signature_verifier).has_value());
+        verify_auth(stx, good_data, &signature_verifier).has_value());
 
     EXPECT_TRUE(signature_verifier.verify());
   }
@@ -261,7 +144,7 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
     // checked during verify_auth; they're instead checked when verify() is
     // called on the verifier.
     EXPECT_TRUE(
-        verify_auth(stx2, good_data, {}, &signature_verifier).has_value());
+        verify_auth(stx2, good_data, &signature_verifier).has_value());
     EXPECT_FALSE(signature_verifier.verify());
   }
 }
@@ -270,9 +153,8 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 // bitmap_accepts_key via 1 << idx with out-of-range idx.
 TEST_F(AuthClaimTests, PublicKeyIdShiftUB)
 {
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
-  claim.invoked_address_signed_weight().accepted_keys = 0x1;
-  claim.invoked_address_signed_weight().required_weight = 1;
+  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+  claim.accepted_keys() = 0x1;
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});
@@ -291,7 +173,7 @@ TEST_F(AuthClaimTests, PublicKeyIdShiftUB)
 TEST_F(AuthClaimTests, WeightedClaimRejectsUnacceptedKey)
 {
   // accepted_keys bitmap only has bit 0 set
-  AuthClaim claim = make_weight_key_claim(0, Weight{1});
+  AuthClaim claim = make_individual_key_claim(0);
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});
@@ -308,13 +190,11 @@ TEST_F(AuthClaimTests, WeightedClaimRejectsUnacceptedKey)
 
 TEST_F(AuthClaimTests, WeightedClaimRejectsDuplicateSignerInBucket)
 {
-  AuthClaim real_claim(AuthClaimType::kInvokedAddressSignedWeight);
-  real_claim.invoked_address_signed_weight().accepted_keys = 1 << 0;
-  real_claim.invoked_address_signed_weight().required_weight = 1;
+  AuthClaim real_claim(AuthClaimType::kSourceAddressSignedWeight);
+  real_claim.accepted_keys() = 1 << 0;
 
-  AuthClaim dummy_claim(AuthClaimType::kInvokedAddressSignedWeight);
-  dummy_claim.invoked_address_signed_weight().accepted_keys = 0;
-  dummy_claim.invoked_address_signed_weight().required_weight = 0;
+  AuthClaim dummy_claim(AuthClaimType::kSourceAddressSignedWeight);
+  dummy_claim.accepted_keys() = 0;
 
   auto [ignored_pk, sk] = make_key_pair();
   auto tx = make_transaction({real_claim, dummy_claim});
@@ -332,14 +212,11 @@ TEST_F(AuthClaimTests, WeightedClaimRejectsDuplicateSignerInBucket)
 
 TEST_F(AuthClaimTests, WeightedClaimRejectsOutOfOrderSignerInBucket)
 {
-  AuthClaim real_claim(AuthClaimType::kInvokedAddressSignedWeight);
-  real_claim.invoked_address_signed_weight().accepted_keys =
-      (1 << 0) | (1 << 1);
-  real_claim.invoked_address_signed_weight().required_weight = 2;
+  AuthClaim real_claim(AuthClaimType::kSourceAddressSignedWeight);
+  real_claim.accepted_keys() = (1 << 0) | (1 << 1);
 
-  AuthClaim dummy_claim(AuthClaimType::kInvokedAddressSignedWeight);
-  dummy_claim.invoked_address_signed_weight().accepted_keys = 0;
-  dummy_claim.invoked_address_signed_weight().required_weight = 0;
+  AuthClaim dummy_claim(AuthClaimType::kSourceAddressSignedWeight);
+  dummy_claim.accepted_keys() = 0;
 
   auto [ignored_pk0, sk0] = make_key_pair();
   auto [ignored_pk1, sk1] = make_key_pair();
@@ -355,84 +232,6 @@ TEST_F(AuthClaimTests, WeightedClaimRejectsOutOfOrderSignerInBucket)
   auto result = auth_claim_is_well_formed(stx);
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthMalformed);
-}
-
-TEST_F(AuthClaimTests, NonceCountsSignerOnceAcrossClaims)
-{
-  AuthClaim claim0 = make_individual_key_claim(0);
-  AuthClaim claim1 = make_individual_key_claim(0);
-
-  auto [pk, sk] = make_key_pair();
-  auto tx = make_transaction({claim0, claim1});
-
-  DecoratedSignature sig0 =
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
-  DecoratedSignature sig1 = sig0;
-  sig1.auth_claim_idx = 1;
-
-  SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1}};
-
-  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-
-  AddressAuthData auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .nonce_config =
-          NonceConfig{.accepted_keys = 1 << 0, .required_weight = 2},
-  };
-
-  auto lightweight = lightweight_validate_auth_claims(stx, auth_data, {});
-  EXPECT_FALSE(lightweight.has_value());
-  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
-
-  auto full = verify_auth(stx, auth_data, {});
-  EXPECT_FALSE(full.has_value());
-  EXPECT_EQ(full.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
-}
-
-TEST_F(AuthClaimTests, GasPermissionCountsSignerOncePerConfig)
-{
-  ContractAddress aux_contract{1};
-  AuthClaim claim0 = make_aux_individual_key_claim(0, aux_contract);
-  AuthClaim claim1 = make_aux_individual_key_claim(0, aux_contract);
-
-  auto [aux_pk, aux_sk] = make_key_pair();
-  auto tx = make_transaction({claim0, claim1});
-  tx.gas_claims.push_back(
-      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
-  tx.invocation.gas_limit = 100;
-
-  DecoratedSignature sig0 =
-      make_signature(aux_sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
-  DecoratedSignature sig1 = sig0;
-  sig1.auth_claim_idx = 1;
-
-  SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1}};
-
-  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-
-  AddressAuthData source_data{
-      .nonce_config = NonceConfig{.accepted_keys = 0, .required_weight = 0},
-  };
-
-  AddressAuthData aux_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = aux_pk, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 100,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 2}},
-      .nonce_config = kAnyKeyNonceConfig,
-  };
-
-  auto lightweight =
-      lightweight_validate_auth_claims(stx, source_data,
-                                       {{aux_contract, &aux_data}});
-  EXPECT_FALSE(lightweight.has_value());
-  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
-
-  auto full = verify_auth(stx, source_data, {{aux_contract, &aux_data}});
-  EXPECT_FALSE(full.has_value());
-  EXPECT_EQ(full.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
 TEST_F(AuthClaimTests, SameSignerAcrossClaimsPassesWhenDedupMeetsThreshold)
@@ -455,21 +254,19 @@ TEST_F(AuthClaimTests, SameSignerAcrossClaimsPassesWhenDedupMeetsThreshold)
   AddressAuthData auth_data{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .nonce_config =
-          NonceConfig{.accepted_keys = 1 << 0, .required_weight = 1},
+      .required_weight = 1,
   };
 
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data, {}).has_value());
-  EXPECT_TRUE(verify_auth(stx, auth_data, {}).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, auth_data).has_value());
+  EXPECT_TRUE(verify_auth(stx, auth_data).has_value());
 }
 
 // Verify that very large public_key_id values (UINT32_MAX) are rejected
 // cleanly without UB.
 TEST_F(AuthClaimTests, PublicKeyIdMaxValueRejected)
 {
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
-  claim.invoked_address_signed_weight().accepted_keys = 0x1;
-  claim.invoked_address_signed_weight().required_weight = 1;
+  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+  claim.accepted_keys() = 0x1;
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});

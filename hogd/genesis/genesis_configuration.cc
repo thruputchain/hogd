@@ -96,12 +96,7 @@ GenesisConfigurationLoader::load_genesis_configuration(
   int128_t total_storage_costs = 0;
 
   AddressAuthData deployer_auth_data{};
-  deployer_auth_data.nonce_config.accepted_keys = 0;
-  deployer_auth_data.nonce_config.required_weight = 0;
-  deployer_auth_data.gas_permissions.push_back(
-      GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
-                          .accepted_keys = 0,
-                          .required_weight = 0});
+  deployer_auth_data.required_weight = 0;
   deployer_auth_data.last_written_height = 0;
 
   total_storage_costs +=

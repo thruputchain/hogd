@@ -32,8 +32,8 @@ make_key_pair()
 constexpr AuthClaim
 make_self_individual_key_claim(uint8_t id)
 {
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-  claim.invoked_address_signature_id() = id;
+  AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+  claim.accepted_keys() = static_cast<uint32_t>(1) << id;
   return claim;
 }
 
@@ -74,11 +74,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
   auto [pk, sk] = make_key_pair();
   add_pk_to_auth_data(auth_data, 0, pk);
 
-  auth_data.nonce_config.accepted_keys = 1 << 0;
-  auth_data.nonce_config.required_weight = 1;
-
-  auth_data.gas_permissions.push_back(GasPermissionConfig{
-      .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+  auth_data.required_weight = 1;
 
   mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
@@ -118,17 +114,9 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   add_pk_to_auth_data(auth_data1, 0, pk1);
   add_pk_to_auth_data(auth_data2, 0, pk2);
 
-  auth_data1.nonce_config.accepted_keys = 1 << 0;
-  auth_data1.nonce_config.required_weight = 1;
+  auth_data1.required_weight = 1;
 
-  auth_data1.gas_permissions.push_back(GasPermissionConfig{
-      .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
-
-  auth_data2.nonce_config.accepted_keys = 1 << 0;
-  auth_data2.nonce_config.required_weight = 1;
-
-  auth_data2.gas_permissions.push_back(GasPermissionConfig{
-      .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+  auth_data2.required_weight = 1;
 
   // address3 has no auth data
   ContractAddress address3 = make_test_address(10);
@@ -206,10 +194,7 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 
     AddressAuthData auth_data{};
     add_pk_to_auth_data(auth_data, 0, pk);
-    auth_data.nonce_config.accepted_keys = 1 << 0;
-    auth_data.nonce_config.required_weight = 1;
-    auth_data.gas_permissions.push_back(GasPermissionConfig{
-        .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+    auth_data.required_weight = 1;
 
     mock_db().set(addresses[i], auth_data);
   }

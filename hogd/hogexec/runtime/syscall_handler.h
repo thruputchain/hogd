@@ -323,10 +323,7 @@ public:
                                  PublicKeyConfigOpt new_key);
 
   SystemStatus<SyscallStatus<void>>
-  set_address_nonce_config(NonceConfig const &nonce_config);
-
-  SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
-      x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
+  set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);

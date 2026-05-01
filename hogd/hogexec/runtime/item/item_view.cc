@@ -451,14 +451,9 @@ AddressAuthDataItem::get_delta() const
         AuthDataChangeSigner{.public_key_id = key_index,
                              .public_key = new_key});
   }
-  if (internal_auth_data_->nonce_config_.has_value()) {
-    delta.auth_data_change().new_nonce_config =
-        internal_auth_data_->nonce_config_.value();
-  }
-  if (internal_auth_data_->gas_permission_configs_.has_value()) {
-    delta.auth_data_change().new_gas_config_change = GasConfigChange{
-        .new_gas_permission_configs =
-            internal_auth_data_->gas_permission_configs_.value()};
+  if (internal_auth_data_->required_weight_.has_value()) {
+    delta.auth_data_change().new_required_weight =
+        internal_auth_data_->required_weight_.value();
   }
   // In debug builds, we shuffle the order of public key changes,
   // because the order of pk changes in the delta is not supposed to affect the

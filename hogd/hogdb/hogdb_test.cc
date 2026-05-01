@@ -866,8 +866,7 @@ TEST_F(HogDBTest, DbHashDeltaAuthLockMatchesFullStateHash)
 
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     AuthDataChangeArgs args{};
-    args.new_nonce_config =
-        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    args.new_required_weight = Weight{0};
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });
@@ -2102,8 +2101,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
     InvokeTX invoke_tx(block_tx);
 
     AuthDataChangeArgs args{};
-    args.new_nonce_config =
-        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    args.new_required_weight = Weight{0};
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
 
@@ -2146,11 +2144,10 @@ TEST_F(HogDBTest, AuthDataCreateThenModifyHashCorrectness)
   Address addr = make_address(kAddress + 24);
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
-  // Block 1: create auth data with nonce config
+  // Block 1: create auth data with required weight
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     AuthDataChangeArgs args{};
-    args.new_nonce_config =
-        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    args.new_required_weight = Weight{0};
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });

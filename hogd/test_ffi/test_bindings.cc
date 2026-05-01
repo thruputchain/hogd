@@ -11,7 +11,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -724,8 +723,7 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
 
 VerifyAuthResult
 verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
-                                    FFISourceAuthData source_auth_data,
-                                    FFIAuxiliaryAuthData aux_auth_data) noexcept
+                                    FFISourceAuthData source_auth_data) noexcept
 {
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
@@ -747,34 +745,8 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
     x23::deserialize(&source_data,
                      x23::BufView{source_auth_data.data, source_auth_data.len});
 
-    // Deserialize auxiliary auth data
-    std::unordered_map<ContractAddress, const AddressAuthData *,
-                       ByteArrayHasher>
-        aux_data_map;
-    std::vector<std::unique_ptr<AddressAuthData>> aux_data_storage;
-
-    if (aux_auth_data.count > 0) {
-      if (!aux_auth_data.auth_data) {
-        return kNullptrError;
-      }
-
-      for (uint32_t i = 0; i < aux_auth_data.count; i++) {
-        ContractAddress addr;
-        std::memcpy(addr.data(), aux_auth_data.auth_data[i].address,
-                    addr.size());
-
-        auto aux_data = std::make_unique<AddressAuthData>();
-        x23::deserialize(aux_data.get(),
-                         x23::BufView{aux_auth_data.auth_data[i].data,
-                                      aux_auth_data.auth_data[i].len});
-
-        aux_data_map[addr] = aux_data.get();
-        aux_data_storage.push_back(std::move(aux_data));
-      }
-    }
-
     // Perform the appropriate level of verification
-    AuthVerifyStatus<void> result = verify_auth(stx, source_data, aux_data_map);
+    AuthVerifyStatus<void> result = verify_auth(stx, source_data);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -1197,19 +1169,17 @@ enable_syscall_logging(int32_t level)
 
 VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISourceAuthData source_auth_data,
-                               FFIAuxiliaryAuthData aux_auth_data)
+                               FFISourceAuthData source_auth_data)
 {
   hogd::do_ffi_trace(
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
-      "source_auth_data={}, aux_auth_data={})",
-      signed_tx, source_auth_data, aux_auth_data);
+      "source_auth_data={})",
+      signed_tx, source_auth_data);
   auto result =
-      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
-                                                aux_auth_data);
+      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
-                     "source_auth_data={}, aux_auth_data={}) -> {}",
-                     signed_tx, source_auth_data, aux_auth_data, result);
+                     "source_auth_data={}) -> {}",
+                     signed_tx, source_auth_data, result);
   return result;
 }
 

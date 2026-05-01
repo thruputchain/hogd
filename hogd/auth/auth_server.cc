@@ -4,7 +4,6 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -216,19 +215,6 @@ AuthServer::verify_transactions(BlockHeight height,
       }
       auth_data[tx.tx.invocation.invoked_address] = std::move(entry.value());
     }
-
-    std::unordered_set<ContractAddress, ByteArrayHasher> relevant_contracts =
-        get_aux_addresses(tx.tx);
-    for (const ContractAddress &contract : relevant_contracts) {
-      if (!auth_data.contains(contract)) {
-        auto entry = co_await populate_auth_data(height, contract);
-        if (!entry.has_value()) {
-          results[i] = entry.error().code();
-          continue;
-        }
-        auth_data[contract] = std::move(entry.value());
-      }
-    }
   }
 
   const std::vector<ChunkRange> chunks =
@@ -255,20 +241,8 @@ AuthServer::verify_transactions(BlockHeight height,
             const AddressAuthData &source_auth_data =
                 account_it->second->second.value();
 
-            // Get the relevant contracts.
-            std::unordered_set<ContractAddress, ByteArrayHasher>
-                relevant_contracts = get_aux_addresses(tx.tx);
-            std::unordered_map<ContractAddress, const AddressAuthData *,
-                               ByteArrayHasher>
-                aux_auth_data;
-            for (const ContractAddress &contract : relevant_contracts) {
-              const auto contract_it = auth_data.find(contract);
-              CHECK(contract_it != auth_data.end());
-              aux_auth_data[contract] = &contract_it->second->second.value();
-            }
-
             AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data, aux_auth_data);
+                verify_auth(tx, source_auth_data);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -302,22 +276,8 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     }
     const AddressAuthData *source_auth_data =
         &(source_addr.value()->second.value());
-    auto relevant_contracts = get_aux_addresses(tx.tx);
-    std::vector<AuthCacheEntry> aux_owners;
-    std::unordered_map<ContractAddress, const AddressAuthData *,
-                       ByteArrayHasher>
-        aux_auth_data;
-    for (const auto &contract : relevant_contracts) {
-      auto entry = co_await populate_auth_data(height, contract);
-      if (!entry.has_value()) {
-        co_return entry.error().code();
-      }
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      aux_auth_data[contract] = &(*entry)->second.value();
-      aux_owners.push_back(std::move(*entry));
-    }
 
-    auto verify_result = verify_auth(tx, *source_auth_data, aux_auth_data);
+    auto verify_result = verify_auth(tx, *source_auth_data);
     if (!verify_result.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }

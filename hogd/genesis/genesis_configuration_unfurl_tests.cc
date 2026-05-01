@@ -62,12 +62,7 @@ protected:
   genesis_deployer_storage_costs(StorageCostModel const &cost_model)
   {
     AddressAuthData deployer_auth_data{};
-    deployer_auth_data.nonce_config.accepted_keys = 0;
-    deployer_auth_data.nonce_config.required_weight = 0;
-    deployer_auth_data.gas_permissions.push_back(
-        GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
-                            .accepted_keys = 0,
-                            .required_weight = 0});
+    deployer_auth_data.required_weight = 0;
     deployer_auth_data.last_written_height = 0;
     StorageItemWrapper deployer_auth_item(deployer_auth_data, &cost_model);
     return deployer_auth_item.storage_cost(&cost_model) +

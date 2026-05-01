@@ -30,12 +30,7 @@ public:
   static AddressAuthData preset_deployer_auth_data()
   {
     AddressAuthData deployer_auth_data{};
-    deployer_auth_data.nonce_config.accepted_keys = 0;
-    deployer_auth_data.nonce_config.required_weight = 0;
-    deployer_auth_data.gas_permissions.push_back(
-        GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
-                            .accepted_keys = 0,
-                            .required_weight = 0});
+    deployer_auth_data.required_weight = 0;
     deployer_auth_data.last_written_height = 0;
     return deployer_auth_data;
   }

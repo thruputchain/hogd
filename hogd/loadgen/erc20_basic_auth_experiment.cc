@@ -95,8 +95,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
       ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
   const static AuthClaim self_auth_claim = [] {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = 0;
+    AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+    claim.accepted_keys() = 1 << 0;
     return claim;
   }();
 
@@ -193,8 +193,8 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
                                                  BlockHeight expiry_height)
 {
   const static AuthClaim self_auth_claim = [] {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = 0;
+    AuthClaim claim(AuthClaimType::kSourceAddressSignedWeight);
+    claim.accepted_keys() = 1 << 0;
     return claim;
   }();
 

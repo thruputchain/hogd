@@ -657,17 +657,14 @@ TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
                   .has_value());
 }
 
-TEST(AuthLockTest, SetNonceConfig)
+TEST(AuthLockTest, SetRequiredWeight)
 {
   AddressAuthData base = make_base_auth_data({0, 1});
   AuthLock lock(base);
 
-  // Create an item that sets nonce config
+  // Create an item that sets required weight
   PointerItem<AuthDataItem> item(base);
-  NonceConfig nonce_config;
-  nonce_config.accepted_keys = 0x03; // Accept keys 0 and 1
-  nonce_config.required_weight = Weight{2};
-  item.get()->set_new_nonce(nonce_config);
+  item.get()->set_new_required_weight(Weight{2});
 
   // Acquire lock
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
@@ -681,92 +678,35 @@ TEST(AuthLockTest, SetNonceConfig)
       lock.commit_change(true, snapshot_cost, item, make_dummy_context());
   EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
 
-  // Verify the nonce config was set
+  // Verify the required weight was set
   AddressAuthData result = lock.build_result();
-  EXPECT_EQ(result.nonce_config.accepted_keys, 0x03);
-  EXPECT_EQ(result.nonce_config.required_weight, Weight{2});
+  EXPECT_EQ(result.required_weight, Weight{2});
 }
 
-TEST(AuthLockTest, SetGasPermissionConfigs)
-{
-  AddressAuthData base = make_base_auth_data({0, 1, 2});
-  AuthLock lock(base);
-
-  // Create an item that sets gas permission configs
-  PointerItem<AuthDataItem> item(base);
-
-  GasConfigChange gas_config_change;
-  GasPermissionConfig config0;
-  config0.limit = GasAmount{1000};
-  config0.accepted_keys = 0x01; // Accept key 0
-  config0.required_weight = Weight{1};
-
-  GasPermissionConfig config1;
-  config1.limit = GasAmount{2000};
-  config1.accepted_keys = 0x06; // Accept keys 1 and 2
-  config1.required_weight = Weight{2};
-
-  gas_config_change.new_gas_permission_configs.push_back(config0);
-  gas_config_change.new_gas_permission_configs.push_back(config1);
-
-  item.get()->set_new_gas_configs(gas_config_change);
-
-  // Acquire lock
-  int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(3);
-  auto status =
-      lock.try_atomic_change_lock(nullptr, &item, make_dummy_context());
-  EXPECT_TRUE(status.has_value());
-  EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(3));
-
-  // Commit the change
-  int128_t commit_cost =
-      lock.commit_change(true, snapshot_cost, item, make_dummy_context());
-  EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
-
-  // Verify the gas configs were set
-  AddressAuthData result = lock.build_result();
-  EXPECT_EQ(result.gas_permissions.size(), 2);
-  EXPECT_EQ(result.gas_permissions[0].limit, GasAmount{1000});
-  EXPECT_EQ(result.gas_permissions[0].accepted_keys, 0x01);
-  EXPECT_EQ(result.gas_permissions[0].required_weight, Weight{1});
-  EXPECT_EQ(result.gas_permissions[1].limit, GasAmount{2000});
-  EXPECT_EQ(result.gas_permissions[1].accepted_keys, 0x06);
-  EXPECT_EQ(result.gas_permissions[1].required_weight, Weight{2});
-}
-
-TEST(AuthLockTest, NonceConfigRollback)
+TEST(AuthLockTest, RequiredWeightRollback)
 {
   AddressAuthData base = make_base_auth_data({0, 1});
   AuthLock lock(base);
 
-  // First change: set nonce config
+  // First change: set required weight
   PointerItem<AuthDataItem> item1(base);
-  NonceConfig nonce1;
-  nonce1.accepted_keys = 0x01; // Accept key 0
-  nonce1.required_weight = Weight{1};
-  item1.get()->set_new_nonce(nonce1);
+  item1.get()->set_new_required_weight(Weight{1});
 
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
-  // Second change: change nonce config (this is the "middle" state we'll
+  // Second change: change required weight (this is the "middle" state we'll
   // rollback to)
   PointerItem<AuthDataItem> item2(base);
-  NonceConfig nonce2;
-  nonce2.accepted_keys = 0x03; // Accept keys 0 and 1
-  nonce2.required_weight = Weight{2};
-  item2.get()->set_new_nonce(nonce2);
+  item2.get()->set_new_required_weight(Weight{2});
 
   EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
-  // Third change: change nonce config again
+  // Third change: change required weight again
   PointerItem<AuthDataItem> item3(base);
-  NonceConfig nonce3;
-  nonce3.accepted_keys = 0x07; // Accept keys 0, 1, and 2
-  nonce3.required_weight = Weight{3};
-  item3.get()->set_new_nonce(nonce3);
+  item3.get()->set_new_required_weight(Weight{3});
 
   EXPECT_TRUE(lock.try_atomic_change_lock(&item2, &item3, make_dummy_context())
                   .has_value());
@@ -780,8 +720,7 @@ TEST(AuthLockTest, NonceConfigRollback)
 
   // Verify final state matches item2 (the middle state)
   AddressAuthData result = lock.build_result();
-  EXPECT_EQ(result.nonce_config.accepted_keys, 0x03);
-  EXPECT_EQ(result.nonce_config.required_weight, Weight{2});
+  EXPECT_EQ(result.required_weight, Weight{2});
 }
 
 TEST(AuthLockTest, AllKeysUsed)

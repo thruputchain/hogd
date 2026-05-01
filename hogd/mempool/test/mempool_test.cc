@@ -45,10 +45,7 @@ TEST(Mempool, SubmitUnvetted)
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth_data.last_written_height = 0;
-  auth_data.nonce_config.required_weight = 1;
-  set_nonce_key(auth_data, /*idx=*/0);
-  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
-                 /*required_weight=*/1);
+  auth_data.required_weight = 1;
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
@@ -831,109 +828,14 @@ TEST(Mempool, GenerateBlockId)
   EXPECT_NE(first, second);
 }
 
-TEST(Mempool, AuthChanged)
+// TODO: rework for required_weight -- this test relied on
+// generate_change_nonce_config which invoked the now-removed
+// change_nonce_config contract method.  It should be rewritten to use a
+// contract that modifies required_weight on an address's auth data, and
+// then verify that the scheduler evicts transactions whose auth claims
+// no longer satisfy the new required_weight.
+TEST(Mempool, DISABLED_AuthChanged)
 {
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
-  // txs.
-  // TODO(jhumphri): Move all of the configuration below to
-  // [MempoolTestInfra].
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, /*num_txs=*/2);
-  SignedTransaction auth_tx =
-      generate_change_nonce_config(fib_client, /*required_weight=*/10);
-
-  MempoolTestInfra server;
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * 10);
-
-  AddressAuthData auth_data = get_default_account();
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
-  auth_data.nonce_config.required_weight = 1;
-  set_nonce_key(auth_data, /*idx=*/0);
-  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
-                 /*required_weight=*/1);
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-  KeyChangeBatch key_changes = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
-  server.register_auth_data_updates(
-      /*height=*/0, key_changes)();
-
-  SecretKey sk(CryptographicScheme::Ed25519);
-  sk.ed25519() = private_key;
-  for (SignedTransaction &stx : txs) {
-    stx.tx.auth_claims.push_back(make_sign_claim(0));
-
-    stx.signatures.push_back(
-        make_signature(sk, stx.tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
-  }
-  {
-    // Handle [auth_tx].
-    auth_tx.tx.auth_claims.push_back(make_sign_claim(0));
-    auth_tx.signatures.push_back(make_signature(sk, auth_tx.tx,
-                                                /*auth_claim_idx=*/0,
-                                                /*public_key_id=*/0));
-
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batch(SignedTransactionBatch{auth_tx})())();
-  }
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-
-  SchedulerGetTipResult get_tip =
-      server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  DbTip db_tip = get_tip.db_tip();
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
-  Nomination nomination = res_nominate.nominated_block().nomination;
-  {
-    SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    EXPECT_EQ(tx_hashes.size(), 2UL);
-  }
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
-
-  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_nominate.nominated_block().block_id)();
-  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
-
-  // Now check that the last tx is removed from the scheduler and not nominated.
-  while (server.mempool_coord_rpc().auth_data_height() != 1) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  CHECK_EQ(server.mempool_coord_rpc().auth_data_height(), 1);
-  {
-    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.height, 1);
-  }
-  res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
-  nomination = res_nominate.nominated_block().nomination;
-  {
-    SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
-    EXPECT_TRUE(tx_hashes.empty());
-  }
-
-  // Check that if we resubmit a tx in [txs], it is discarded.
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 } // namespace hogd

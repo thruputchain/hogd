@@ -31,16 +31,6 @@
 
 namespace hogd {
 
-namespace {
-constexpr bool
-valid_accepted_keys_bitmap(BitMap bitmap)
-{
-  static_assert(kMaxSigners <= 32);
-  static_assert(sizeof(BitMap) == sizeof(uint32_t));
-  return (bitmap & (uint64_t{0xFFFF'FFFF} << kMaxSigners)) == 0;
-}
-} // namespace
-
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
@@ -117,82 +107,12 @@ syscall_ChangePublicKeyRegistration_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_WriteAddressNonceConfig_inner(
+syscall_WriteAddressRequiredWeight_inner(
     SystemCallHandler &syscall_handler,
-    const generated::NonceConfig &input_nonce_config) noexcept
+    Weight input_required_weight) noexcept
 {
-  if (!valid_accepted_keys_bitmap(input_nonce_config.accepted_keys)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
-
-  auto nonce_config =
-      FFIHelperType<generated::NonceConfig>::to_cpp(input_nonce_config);
-  auto status = syscall_handler.set_address_nonce_config(nonce_config);
-  if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  if (!status.value()) {
-    return {status.value().error().code(), WrappedGasAmount{0}};
-  }
-
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
-}
-
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_WriteAddressGasPermissionConfigs_inner(
-    SystemCallHandler &syscall_handler,
-    const generated::GasPermissionConfig *optional_input_permission_0,
-    const generated::GasPermissionConfig *optional_input_permission_1,
-    const generated::GasPermissionConfig *optional_input_permission_2,
-    const generated::GasPermissionConfig *optional_input_permission_3,
-    const generated::GasPermissionConfig *optional_input_permission_4) noexcept
-{
-  x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs;
-  bool found_first_empty = false;
-  bool found_gap = false;
-  bool invalid_bitmap = false;
-
-  try {
-    auto add_gas_permission =
-        [&](const generated::GasPermissionConfig *permission) {
-          if (permission) {
-            if (found_first_empty) {
-              found_gap = true;
-              return;
-            }
-            if (!valid_accepted_keys_bitmap(permission->accepted_keys)) {
-              invalid_bitmap = true;
-              return;
-            }
-            gas_permission_configs.push_back(
-                FFIHelperType<generated::GasPermissionConfig>::to_cpp(
-                    *permission));
-          }
-          else {
-            found_first_empty = true;
-          }
-        };
-
-    add_gas_permission(optional_input_permission_0);
-    add_gas_permission(optional_input_permission_1);
-    add_gas_permission(optional_input_permission_2);
-    add_gas_permission(optional_input_permission_3);
-    add_gas_permission(optional_input_permission_4);
-  } catch (std::exception &e) {
-    error("unrecoverable: failed to add bounded number of gas permission "
-          "configs to vector of bounded size: {}",
-          e.what());
-    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-  }
-
-  if (found_gap || invalid_bitmap) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
-
-  auto status = syscall_handler.set_address_gas_permission_configs(
-      std::move(gas_permission_configs));
+  auto status =
+      syscall_handler.set_address_required_weight(input_required_weight);
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }

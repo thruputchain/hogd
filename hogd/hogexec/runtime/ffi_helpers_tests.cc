@@ -26,29 +26,14 @@ roundtrip_auth_claim(AuthClaim const &auth_claim)
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(FFIHelpers, AuthClaimRoundtrip)
 {
-  AuthClaim a(AuthClaimType::kInvokedAddressSignature);
-  a.invoked_address_signature_id() = 1;
+  AuthClaim a(AuthClaimType::kSourceAddressSignedWeight);
+  a.accepted_keys() = 1;
   auto b = roundtrip_auth_claim(a);
-  ASSERT_EQ(a, b);
-
-  a.claim_type(AuthClaimType::kInvokedAddressSignedWeight);
-  a.invoked_address_signed_weight().accepted_keys = 1;
-  a.invoked_address_signed_weight().required_weight = 1;
-  b = roundtrip_auth_claim(a);
   ASSERT_TRUE(b.has_value());
   ASSERT_EQ(a, *b);
 
-  a.claim_type(AuthClaimType::kOtherAddressSignature);
-  a.other_address_signature_id().address = ContractAddress{1};
-  a.other_address_signature_id().key_id = 1;
-  b = roundtrip_auth_claim(a);
-  ASSERT_TRUE(b.has_value());
-  ASSERT_EQ(a, *b);
-
-  a.claim_type(AuthClaimType::kOtherAddressSignedWeight);
-  a.other_address_signed_weight().address = ContractAddress{123};
-  a.other_address_signed_weight().accepted_keys = 1;
-  a.other_address_signed_weight().required_weight = 1;
+  // Test with different bitmap values
+  a.accepted_keys() = 0x15; // bits 0, 2, 4
   b = roundtrip_auth_claim(a);
   ASSERT_TRUE(b.has_value());
   ASSERT_EQ(a, *b);

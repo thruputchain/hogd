@@ -574,22 +574,6 @@ TEST_F(SyscallMiscTests, TestChangePubkeyIndexOob)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-// ── #32: WriteAddressGasPermissionConfigs (non-initial segment) ─────
-
-TEST_F(SyscallMiscTests, TestGasPermsNonInitialSegment)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<"test_gas_perms_non_initial_segment">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-}
-
 // ── #33: DeployContract (not available) ─────────────────────────────
 
 TEST_F(SyscallMiscTests, TestDeployContractNotAvailable)
