@@ -27,6 +27,9 @@ namespace hogd {
 using sched_auth_client_t =
     MempoolAuth1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
+using AuthCacheEntry =
+    std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>;
+
 class AuthServer {
 public:
   explicit AuthServer(dbauth_client_t &&dbauth_client,
@@ -44,8 +47,7 @@ public:
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
 
-  x23::Async<AuthStatus<
-      std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
+  x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
   // This mentod can be called in any order.  However, it is vital for cache
@@ -66,11 +68,8 @@ public:
   }
 
 private:
-  // If this returns AuthErrorCode::kAuthSuccess, then auth_data will be
-  // populated with the auth data for the given address.
-  x23::Async<AuthErrorCode>
-  populate_auth_data(BlockHeight height, ContractAddress const &address,
-                     const AddressAuthData *&auth_data);
+  x23::Async<AuthStatus<AuthCacheEntry>>
+  populate_auth_data(BlockHeight height, ContractAddress const &address);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.

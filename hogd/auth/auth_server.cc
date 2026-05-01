@@ -25,8 +25,7 @@
 
 namespace hogd {
 
-x23::Async<AuthStatus<
-    std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
+x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
   CHECK_NE(height, kUninitializedHeight);
@@ -173,24 +172,22 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
   co_return;
 }
 
-x23::Async<AuthErrorCode>
+x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::populate_auth_data(BlockHeight height,
-                               ContractAddress const &address,
-                               const AddressAuthData *&auth_data)
+                               ContractAddress const &address)
 {
   auto entry = co_await lookup_auth_data(height, address);
   if (!entry.has_value()) {
-    co_return entry.error().code();
+    co_return entry.error();
   }
 
   CHECK_PTR(entry.value().get());
 
   if (!entry.value()->second.has_value()) {
-    co_return AuthErrorCode::kAuthFailed;
+    co_return AuthError(AuthErrorCode::kAuthFailed);
   }
 
-  auth_data = &(entry.value()->second.value());
-  co_return AuthErrorCode::kAuthSuccess;
+  co_return std::move(entry.value());
 }
 
 x23::Async<AuthErrorCodeBatch>
