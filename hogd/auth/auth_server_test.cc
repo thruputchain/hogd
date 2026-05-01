@@ -414,8 +414,9 @@ TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)
 
   mock_db().set(address, old_auth_data);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(
-      0, mock_db().get_key_changes_at_height(0))();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
 
   auto lookup = auth_server().lookup_auth_data(0, address)();
   ASSERT_TRUE(lookup.has_value());
@@ -441,8 +442,9 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
   const ContractAddress address = make_test_address(50);
   mock_db().set(address, make_test_auth_data(1));
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(
-      0, mock_db().get_key_changes_at_height(0))();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
 
   SignedTransaction stx{};
   stx.tx.invocation.invoked_address = address;
@@ -456,8 +458,9 @@ TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
   const ContractAddress address = make_test_address(50);
   mock_db().set(address, make_test_auth_data(1));
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(
-      0, mock_db().get_key_changes_at_height(0))();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
 
   SignedTransaction stx{};
   stx.tx.invocation.invoked_address = address;
