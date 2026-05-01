@@ -218,14 +218,20 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   }
   else if (new_entries_count < previous_entries_count) {
     // Rollback case: unreserve entries that are no longer needed.
+    //
+    // CRITICAL: the consume validation block below has fallible returns
+    // (kInvalidExecutorBehavior checks and DAO reads). If any fired after
+    // this fetch_sub, ScopedUndo would fetch_add the entries back,
+    // potentially pushing reserved_entry_count_ above
+    // kRetrocausalQueueBlockEntriesMaxLen and causing a spurious kConflict
+    // for a concurrent transaction. This fetch_sub is only safe because
+    // this shrink branch is only reachable via rollback_to_savepoint, which
+    // restores a previously-validated change — so the consume checks below
+    // cannot fail again.
     const size_t entries_to_unreserve =
         previous_entries_count - new_entries_count;
     reserved_entry_count_.fetch_sub(entries_to_unreserve,
                                     std::memory_order_relaxed);
-    // NOTE: same defensive-undo rationale as the else-if consumed_ branch
-    // above. The only shrink caller today is pop_subtransactions, which
-    // cannot fail downstream. Kept to preserve the ScopedUndo "owns
-    // rollback" invariant across future edits.
     undo.push([this, entries_to_unreserve] {
       reserved_entry_count_.fetch_add(entries_to_unreserve,
                                       std::memory_order_relaxed);
