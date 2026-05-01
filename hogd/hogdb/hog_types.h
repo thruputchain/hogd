@@ -11,7 +11,6 @@
 #include <functional>
 #include <span>
 #include <string_view>
-#include <utility>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"
@@ -27,18 +26,21 @@ using BlockTXID = uint64_t;
 // a handle for an invocation's transaction.
 using InvokeTXID = uint64_t;
 
-} // namespace hogd
+struct InvokeTxKey {
+  BlockTXID block_tx_id;
+  InvokeTXID invoke_tx_id;
 
-template<> struct std::hash<std::pair<hogd::BlockTXID, hogd::InvokeTXID>> {
-  [[nodiscard, gnu::pure]] static std::size_t
-  operator()(const std::pair<hogd::BlockTXID, hogd::InvokeTXID> &p) noexcept
-  {
-    return std::hash<hogd::BlockTXID>()(p.first) ^
-           std::hash<hogd::InvokeTXID>()(p.second);
-  }
+  bool operator==(const InvokeTxKey &) const = default;
+
+  struct Hash {
+    [[nodiscard, gnu::pure]] std::size_t
+    operator()(const InvokeTxKey &k) const noexcept
+    {
+      return std::hash<BlockTXID>()(k.block_tx_id) ^
+             std::hash<InvokeTXID>()(k.invoke_tx_id);
+    }
+  };
 };
-
-namespace hogd {
 
 // storage_cost returns the cost in hogs for storage.
 //

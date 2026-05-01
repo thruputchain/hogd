@@ -178,7 +178,7 @@ private:
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
-  SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
+  SynchronizedMap<InvokeTxKey, InvokeTX, InvokeTxKey::Hash> invoke_txes_;
   // closed snapshot hashes waiting for commit.
   std::map<BlockTXID, DbHash> db_hashes_;
 
@@ -217,7 +217,7 @@ RPCContext::get_block_tx(BlockTXID bid, bool acquire_reference)
 inline InvokeTX *
 RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 {
-  auto key = std::make_pair(bid, iid);
+  InvokeTxKey key{.block_tx_id = bid, .invoke_tx_id = iid};
   auto [tx, ul] = invoke_txes_.find(key);
   if (!tx) {
     PerThreadARC<BlockTX> *btx = get_block_tx(bid);
@@ -234,7 +234,7 @@ inline void
 RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx)
 {
   bool destroy_blocktx = itx->release_blocktx_reference();
-  invoke_txes_.remove(std::make_pair(bid, iid));
+  invoke_txes_.remove(InvokeTxKey{.block_tx_id = bid, .invoke_tx_id = iid});
   if (destroy_blocktx) {
     remove_shutdown_block_tx(bid);
   }
