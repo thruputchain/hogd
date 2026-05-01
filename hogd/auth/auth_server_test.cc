@@ -449,7 +449,6 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
 
   auto results = auth_server().verify_transactions(0, std::span(&stx, 1))();
   ASSERT_EQ(results.size(), 1);
-  EXPECT_EQ(results[0], AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)

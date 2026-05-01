@@ -312,9 +312,8 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
       if (!entry.has_value()) {
         co_return entry.error().code();
       }
-      aux_auth_data[contract] =
-          &entry.value()->second.value(); // NOLINT(bugprone-unchecked-optional-access)
-      aux_owners.push_back(std::move(entry.value()));
+      aux_auth_data[contract] = &(*entry)->second.value();
+      aux_owners.push_back(std::move(*entry));
     }
 
     auto verify_result = verify_auth(tx, *source_auth_data, aux_auth_data);
