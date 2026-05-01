@@ -63,7 +63,8 @@ public:
 
   std::pair<uint16_t, x23::UniqueFd> bind_server(uint16_t port)
   {
-    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+    CHECK(!bound_);
+    bound_ = true;
     int backlog = 5 + cp_.pool_.nthreads_;
     auto lfd = x23::tcplisten(port, backlog);
     if (port == 0)
@@ -74,7 +75,8 @@ public:
 
   std::pair<uint16_t, x23::UniqueFd> bind_server(x23::HostPort bind_addr)
   {
-    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+    CHECK(!bound_);
+    bound_ = true;
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
@@ -86,6 +88,7 @@ public:
 
   void start_accepting(x23::UniqueFd lfd)
   {
+    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
     listen_fd_ = lfd.get();
     x23::start_listening(cp_, lfd,
                          [self = x23::RefPtr(*this),
@@ -104,7 +107,7 @@ public:
 
   uint16_t start_server(x23::HostPort bind_addr)
   {
-    auto [p, lfd] = bind_server(bind_addr);
+    auto [p, lfd] = bind_server(std::move(bind_addr));
     start_accepting(std::move(lfd));
     return p;
   }
@@ -158,6 +161,7 @@ private:
 
   Impl impl_;
   x23::MVar<ConnState> cs_;
+  bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 

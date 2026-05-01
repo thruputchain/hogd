@@ -24,10 +24,10 @@ Replace the entire public method block (lines 63–98) with:
 ```cpp
   std::pair<uint16_t, x23::UniqueFd> bind_server(uint16_t port)
   {
-    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+    CHECK(!bound_);
+    bound_ = true;
     int backlog = 5 + cp_.pool_.nthreads_;
     auto lfd = x23::tcplisten(port, backlog);
-    listen_fd_ = lfd.get();
     if (port == 0)
       port = x23::get_port(x23::local_addr(lfd));
     port_ = port;
@@ -36,19 +36,21 @@ Replace the entire public method block (lines 63–98) with:
 
   std::pair<uint16_t, x23::UniqueFd> bind_server(x23::HostPort bind_addr)
   {
-    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+    CHECK(!bound_);
+    bound_ = true;
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
     auto lfd = x23::tcplisten(*addr, backlog);
-    listen_fd_ = lfd.get();
     port_ = x23::get_port(x23::local_addr(lfd));
     return {port_, std::move(lfd)};
   }
 
   void start_accepting(x23::UniqueFd lfd)
   {
+    CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
+    listen_fd_ = lfd.get();
     x23::start_listening(cp_, lfd,
                          [self = x23::RefPtr(*this),
                           _d = x23::Defer([this] { eof(); })](auto c) {
