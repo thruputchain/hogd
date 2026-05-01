@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <span>
@@ -2910,9 +2911,9 @@ TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
 
 TEST(InvokeTxKeyTest, HashAndEquality)
 {
-  hogd::InvokeTxKey k1{17, 29};
-  hogd::InvokeTxKey k2{17, 29};
-  hogd::InvokeTxKey k3{17, 30};
+  hogd::InvokeTxKey k1{.block_tx_id = 17, .invoke_tx_id = 29};
+  hogd::InvokeTxKey k2{.block_tx_id = 17, .invoke_tx_id = 29};
+  hogd::InvokeTxKey k3{.block_tx_id = 17, .invoke_tx_id = 30};
 
   EXPECT_EQ(k1, k2);
   EXPECT_NE(k1, k3);
@@ -2926,7 +2927,7 @@ TEST(InvokeTxKeyTest, HashAndEquality)
 TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
 {
   hogd::SynchronizedMap<hogd::InvokeTxKey, int, hogd::InvokeTxKey::Hash> map(2);
-  hogd::InvokeTxKey key{42, 99};
+  hogd::InvokeTxKey key{.block_tx_id = 42, .invoke_tx_id = 99};
 
   {
     auto [value, lock] = map[key];
