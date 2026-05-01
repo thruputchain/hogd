@@ -310,8 +310,6 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
   ASSERT_FALSE(result.value()->second.has_value());
 }
 
-// NOLINTEND(bugprone-unchecked-optional-access)
-
 namespace {
 
 class BlockingIntroDBAuthRpc {
@@ -486,5 +484,7 @@ TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
   }
   done = true;
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
