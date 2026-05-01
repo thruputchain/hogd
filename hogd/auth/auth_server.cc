@@ -25,8 +25,7 @@
 
 namespace hogd {
 
-x23::Async<AuthStatus<
-    std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
+x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
   CHECK_NE(height, kUninitializedHeight);
@@ -173,24 +172,22 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
   co_return;
 }
 
-x23::Async<AuthErrorCode>
+x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::populate_auth_data(BlockHeight height,
-                               ContractAddress const &address,
-                               const AddressAuthData *&auth_data)
+                               ContractAddress const &address)
 {
   auto entry = co_await lookup_auth_data(height, address);
   if (!entry.has_value()) {
-    co_return entry.error().code();
+    co_return entry.error();
   }
 
   CHECK_PTR(entry.value().get());
 
   if (!entry.value()->second.has_value()) {
-    co_return AuthErrorCode::kAuthFailed;
+    co_return AuthError(AuthErrorCode::kAuthFailed);
   }
 
-  auth_data = &(entry.value()->second.value());
-  co_return AuthErrorCode::kAuthSuccess;
+  co_return std::move(entry.value());
 }
 
 x23::Async<AuthErrorCodeBatch>
@@ -204,35 +201,32 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  std::unordered_map<ContractAddress, AddressAuthData, ByteArrayHasher>
+  std::unordered_map<ContractAddress, AuthCacheEntry, ByteArrayHasher>
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
-      const AddressAuthData *source_auth_data;
-      AuthErrorCode error =
-          co_await populate_auth_data(height, tx.tx.invocation.invoked_address,
-                                      source_auth_data);
-      if (error != AuthErrorCode::kAuthSuccess) {
-        trace("Populate auth data error: {}", std::to_underlying(error));
-        results[i] = error;
+      auto entry =
+          co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
+      if (!entry.has_value()) {
+        trace("Populate auth data error: {}",
+              std::to_underlying(entry.error().code()));
+        results[i] = entry.error().code();
         continue;
       }
-      auth_data[tx.tx.invocation.invoked_address] = *source_auth_data;
+      auth_data[tx.tx.invocation.invoked_address] = std::move(entry.value());
     }
 
     std::unordered_set<ContractAddress, ByteArrayHasher> relevant_contracts =
         get_aux_addresses(tx.tx);
     for (const ContractAddress &contract : relevant_contracts) {
       if (!auth_data.contains(contract)) {
-        const AddressAuthData *source_auth_data;
-        AuthErrorCode error =
-            co_await populate_auth_data(height, contract, source_auth_data);
-        if (error != AuthErrorCode::kAuthSuccess) {
-          results[i] = error;
+        auto entry = co_await populate_auth_data(height, contract);
+        if (!entry.has_value()) {
+          results[i] = entry.error().code();
           continue;
         }
-        auth_data[contract] = *source_auth_data;
+        auth_data[contract] = std::move(entry.value());
       }
     }
   }
@@ -244,7 +238,7 @@ AuthServer::verify_transactions(BlockHeight height,
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           const std::unordered_map<ContractAddress, AddressAuthData,
+           const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     ByteArrayHasher> &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
@@ -258,7 +252,8 @@ AuthServer::verify_transactions(BlockHeight height,
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const auto account_it = auth_data.find(account);
             CHECK(account_it != auth_data.end());
-            const AddressAuthData &source_auth_data = account_it->second;
+            const AddressAuthData &source_auth_data =
+                account_it->second->second.value();
 
             // Get the relevant contracts.
             std::unordered_set<ContractAddress, ByteArrayHasher>
@@ -269,7 +264,7 @@ AuthServer::verify_transactions(BlockHeight height,
             for (const ContractAddress &contract : relevant_contracts) {
               const auto contract_it = auth_data.find(contract);
               CHECK(contract_it != auth_data.end());
-              aux_auth_data[contract] = &contract_it->second;
+              aux_auth_data[contract] = &contract_it->second->second.value();
             }
 
             AuthVerifyStatus<void> verify_result =
@@ -308,15 +303,18 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     const AddressAuthData *source_auth_data =
         &(source_addr.value()->second.value());
     auto relevant_contracts = get_aux_addresses(tx.tx);
+    std::vector<AuthCacheEntry> aux_owners;
     std::unordered_map<ContractAddress, const AddressAuthData *,
                        ByteArrayHasher>
         aux_auth_data;
     for (const auto &contract : relevant_contracts) {
-      auto error = co_await populate_auth_data(height, contract,
-                                               aux_auth_data[contract]);
-      if (error != AuthErrorCode::kAuthSuccess) {
-        co_return error;
+      auto entry = co_await populate_auth_data(height, contract);
+      if (!entry.has_value()) {
+        co_return entry.error().code();
       }
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      aux_auth_data[contract] = &(*entry)->second.value();
+      aux_owners.push_back(std::move(*entry));
     }
 
     auto verify_result = verify_auth(tx, *source_auth_data, aux_auth_data);
