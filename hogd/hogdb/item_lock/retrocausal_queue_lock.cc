@@ -391,8 +391,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   size_t excess_reserved =
       change.max_insert_count() - delta.insert.added_entries.size();
   if (excess_reserved > 0) {
-    reserved_entry_count_.fetch_sub(excess_reserved,
-                                    std::memory_order_relaxed);
+    reserved_entry_count_.fetch_sub(excess_reserved, std::memory_order_relaxed);
   }
 
   // Apply inserts

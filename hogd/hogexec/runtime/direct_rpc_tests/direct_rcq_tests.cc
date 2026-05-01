@@ -4175,8 +4175,8 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
 TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000'000);
-  auto key = make_contract_data_addrkey(kContractAddress,
-                                        "rcq_commit_release_excess");
+  auto key =
+      make_contract_data_addrkey(kContractAddress, "rcq_commit_release_excess");
 
   auto tx1 = make_new_per_tx_db_proxy();
 
