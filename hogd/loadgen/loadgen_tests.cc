@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-
 #include "address_auth.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
