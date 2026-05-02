@@ -34,44 +34,91 @@ protected:
 
   using authclaim_client_t = ContractTraitClient<authclaim_test::AuthClaimTest>;
 
-  // Helper to create authclaims matching the hardcoded values in the contract
-  static AuthClaim make_auth_claim()
-  {
-    AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
-    claim.source_address_claim().allowed_keys = 5; // bits 0 and 2 set
-    claim.source_address_claim().required_weight = 1;
-    return claim;
-  }
-
   std::unique_ptr<RuntimeContext> context_;
 
   void SetUp() override { context_ = make_context(); }
-};
 
-TEST_F(AuthClaimTestFixture, TestSourceAddressSignedWeight)
-{
-  auto contract = hogd::load_contract("authclaim_test.wasm");
-  auto contract_addr = make_contract_address(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
+  void setup_contract(authclaim_client_t &client)
+  {
+    auto contract = hogd::load_contract("authclaim_test.wasm");
+    auto contract_addr = client.address();
+    write_contract(contract);
+    write_deployment(contract_addr, contract);
+    setup_grant_storage_token(contract_addr, 1'000'000'000);
+  }
 
-  authclaim_client_t client(contract_addr);
-  auto auth_claim = make_auth_claim();
-
+  ExecResult run_method(auto invocation,
+                        AuthClaim auth_claim = AuthClaim{})
   {
     SignedTransaction stx;
-    stx.tx.invocation =
-        client.make_invocation<"test_source_address_signed_weight">(
-            UINT64_MAX);
-    stx.tx.auth_claim = auth_claim;
+    stx.tx.invocation = std::move(invocation);
+    stx.tx.auth_claim = std::move(auth_claim);
 
     auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    if (!res.is_root_success()) {
+      return ExecResult::ExecResultTxDeterministicError;
+    }
+    return handler.try_commit_transaction();
   }
+};
+
+TEST_F(AuthClaimTestFixture, TestGetAuthClaim)
+{
+  auto contract_addr = make_contract_address(0);
+  authclaim_client_t client(contract_addr);
+  setup_contract(client);
+
+  // Contract expects allowed_keys == 0 && required_weight == 0
+  AuthClaim claim{};
+  auto result = run_method(
+      client.make_invocation<"test_get_auth_claim">(UINT64_MAX),
+      claim);
+  ASSERT_EQ(result, ExecResult::ExecResultOK);
+}
+
+TEST_F(AuthClaimTestFixture, TestSetAddressRequiredWeight)
+{
+  auto contract_addr = make_contract_address(0);
+  authclaim_client_t client(contract_addr);
+  setup_contract(client);
+
+  auto result = run_method(
+      client.make_invocation<"test_set_address_required_weight">(UINT64_MAX));
+  ASSERT_EQ(result, ExecResult::ExecResultOK);
+}
+
+TEST_F(AuthClaimTestFixture, TestAddAddressPublicKey)
+{
+  auto contract_addr = make_contract_address(0);
+  authclaim_client_t client(contract_addr);
+  setup_contract(client);
+
+  auto result = run_method(
+      client.make_invocation<"test_add_address_public_key">(UINT64_MAX));
+  ASSERT_EQ(result, ExecResult::ExecResultOK);
+}
+
+TEST_F(AuthClaimTestFixture, TestRemoveAddressPublicKey)
+{
+  auto contract_addr = make_contract_address(0);
+  authclaim_client_t client(contract_addr);
+  setup_contract(client);
+
+  auto result = run_method(
+      client.make_invocation<"test_remove_address_public_key">(UINT64_MAX));
+  ASSERT_EQ(result, ExecResult::ExecResultOK);
+}
+
+TEST_F(AuthClaimTestFixture, TestAddPubkeyIndexOob)
+{
+  auto contract_addr = make_contract_address(0);
+  authclaim_client_t client(contract_addr);
+  setup_contract(client);
+
+  auto result = run_method(
+      client.make_invocation<"test_add_pubkey_index_oob">(UINT64_MAX));
+  ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
 } // namespace hogd

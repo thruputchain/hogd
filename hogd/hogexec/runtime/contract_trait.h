@@ -315,6 +315,8 @@ public:
     : contract_address_(contract_address)
   {}
 
+  ContractAddress const& address() const { return contract_address_; }
+
   using trait_meta_t = ContractTraitMeta<ContractTrait>;
 
   template<StringLiteral Name, typename... Args>
