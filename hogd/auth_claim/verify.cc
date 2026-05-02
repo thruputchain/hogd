@@ -243,6 +243,7 @@ verify_auth_claims_internal(const SignedTransaction &stx,
       auth_data = source_auth_data;
       break;
     case AuthClaimType::kPubkeySignature:
+      auth_data = source_auth_data;
       break;
     default:
       panic("Unsupported auth claim type: {}", auth_claim.claim_type());
