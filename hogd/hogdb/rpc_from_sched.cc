@@ -41,7 +41,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
-#include "x23/x23.h"
 
 namespace hogd {
 
@@ -388,17 +387,9 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
           }
         }
 
-        GasConfigChange gas_config_change{};
-        for (auto const &gas_permission : auth_data.gas_permissions) {
-          gas_config_change.new_gas_permission_configs.push_back(
-              gas_permission);
-        }
-
         AuthDataChangeArgs auth_data_change = {
             .auth_data_change_signers = auth_data_change_signers,
-            .new_nonce_config = auth_data.nonce_config,
-            .new_gas_config_change =
-                x23::Ptr<GasConfigChange>(gas_config_change),
+            .new_required_weight = auth_data.required_weight,
         };
 
         auto r =

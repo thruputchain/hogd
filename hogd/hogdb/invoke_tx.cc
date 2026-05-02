@@ -454,11 +454,9 @@ InvokeTX::request_auth_data(Address const &addr,
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
   }
-  if (auth_data_change.new_nonce_config) {
-    auth_data_item.set_new_nonce(*auth_data_change.new_nonce_config);
-  }
-  if (auth_data_change.new_gas_config_change) {
-    auth_data_item.set_new_gas_configs(*auth_data_change.new_gas_config_change);
+  if (auth_data_change.new_required_weight) {
+    auth_data_item.set_new_required_weight(
+        *auth_data_change.new_required_weight);
   }
   auto change = ItemChange(std::move(auth_data_item));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {

@@ -29,11 +29,8 @@ AuthLock::build_result() const
       result.public_keys[i] = pk_changes_[i].value();
     }
   }
-  if (nonce_config_.has_value()) {
-    result.nonce_config = nonce_config_.value();
-  }
-  if (gas_permission_configs_.has_value()) {
-    result.gas_permissions = gas_permission_configs_.value();
+  if (required_weight_change_.has_value()) {
+    result.required_weight = required_weight_change_.value();
   }
   return result;
 }
@@ -98,7 +95,6 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
     }
   }
 
-  // TODO(geoff): cost for gas configs
   return ctx.cost_model->get_auth_data_cost(keys);
 }
 
@@ -128,16 +124,9 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
     }
   }
 
-  if (after_item.nonce_change_.has_value()) {
-    nonce_config_ = after_item.nonce_change_.value();
+  if (after_item.required_weight_change_.has_value()) {
+    required_weight_change_ = after_item.required_weight_change_;
   }
-
-  if (after_item.gas_config_change_.has_value()) {
-    gas_permission_configs_ =
-        after_item.gas_config_change_.value().new_gas_permission_configs;
-  }
-
-  // TODO(geoff): cost for gas configs
   int128_t new_cost = ctx.cost_model->get_auth_data_cost(count_active_keys());
   return new_cost - previous_cost;
 }

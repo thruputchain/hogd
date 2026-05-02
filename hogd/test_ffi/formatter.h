@@ -109,26 +109,6 @@ template<> struct formatter<FFISourceAuthData> {
   }
 };
 
-template<> struct formatter<FFISerializedAuthData> {
-  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
-  static auto format(const FFISerializedAuthData &auth_data, auto &ctx)
-  {
-    return format_to(ctx.out(), "address={}, data={}, len={}",
-                     static_cast<const void *>(auth_data.address),
-                     static_cast<const void *>(auth_data.data), auth_data.len);
-  }
-};
-
-template<> struct formatter<FFIAuxiliaryAuthData> {
-  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
-  static auto format(const FFIAuxiliaryAuthData &auth_data, auto &ctx)
-  {
-    return format_to(ctx.out(), "auth_data={}, count={}",
-                     static_cast<const void *>(auth_data.auth_data),
-                     auth_data.count);
-  }
-};
-
 template<> struct formatter<VerifyAuthResult> {
   static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
   static auto format(const VerifyAuthResult &result, auto &ctx)

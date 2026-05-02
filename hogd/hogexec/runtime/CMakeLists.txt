@@ -78,7 +78,6 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   event_test.cc
-  ffi_helpers_tests.cc
   fibonacci_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
@@ -145,7 +144,6 @@ add_dependencies(
   runtime_objects
   generate_syscall_inner_h
   generate_syscall_meta_h
-  generate_contract_types_ffi_h
   protocol
 )
 

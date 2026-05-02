@@ -1,7 +1,5 @@
 #pragma once
 
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "address_auth.hh"
@@ -51,10 +49,9 @@ AuthVerifyStatus<void> auth_claim_is_well_formed(const SignedTransaction &stx);
 // Performs all of the checks of auth_claim_is_well_formed,
 // as well as checks that the signatures correspond to public keys that exist,
 // and that claims about signature weights are satisfied.
-AuthVerifyStatus<void> lightweight_validate_auth_claims(
-    const SignedTransaction &stx, const AddressAuthData &source_auth_data,
-    std::unordered_map<ContractAddress, const AddressAuthData *,
-                       ByteArrayHasher> const &aux_auth_data);
+AuthVerifyStatus<void>
+lightweight_validate_auth_claims(const SignedTransaction &stx,
+                                 const AddressAuthData &source_auth_data);
 
 // Verifies that the signatures on the transaction match the claims about the
 // transaction in the auth claims field.
@@ -63,50 +60,6 @@ AuthVerifyStatus<void> lightweight_validate_auth_claims(
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AddressAuthData &source_auth_data,
-            std::unordered_map<ContractAddress, const AddressAuthData *,
-                               ByteArrayHasher> const &aux_auth_data,
             Ed25519SignatureVerifier *signature_verifier = nullptr);
-
-// Returns the implicit gas claim for the source address.
-// This is calculated as the amount of gas that is not covered by sponsored
-// gas claims attached to the transaction.
-constexpr GasClaim
-calculate_source_address_implicit_gas_claim(const Transaction &tx)
-{
-  GasAmount remaining = tx.invocation.gas_limit;
-  for (const GasClaim &gas_claim : tx.gas_claims) {
-    if (remaining > gas_claim.amount) {
-      remaining -= gas_claim.amount;
-    }
-    else {
-      remaining = 0;
-      break;
-    }
-  }
-  return GasClaim{.sponsored_contract = tx.invocation.invoked_address,
-                  .amount = remaining};
-}
-
-inline std::unordered_set<ContractAddress, ByteArrayHasher>
-get_aux_addresses(const Transaction &tx)
-{
-  std::unordered_set<ContractAddress, ByteArrayHasher> aux_addresses;
-  for (const GasClaim &gas_claim : tx.gas_claims) {
-    aux_addresses.insert(gas_claim.sponsored_contract);
-  }
-  for (const AuthClaim &auth_claim : tx.auth_claims) {
-    switch (auth_claim.claim_type()) {
-    case AuthClaimType::kOtherAddressSignature:
-      aux_addresses.insert(auth_claim.other_address_signature_id().address);
-      break;
-    case AuthClaimType::kOtherAddressSignedWeight:
-      aux_addresses.insert(auth_claim.other_address_signed_weight().address);
-      break;
-    default:
-      break;
-    }
-  }
-  return aux_addresses;
-}
 
 } // namespace hogd

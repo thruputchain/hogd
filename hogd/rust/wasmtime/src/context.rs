@@ -154,7 +154,7 @@ impl WasmtimeContext {
     ) -> Result<Option<Arc<InstancePre<*mut c_void>>>, SystemErrorCode> {
         // Validate engine_index
         if self.engine_index >= self.global_context.engine_count() {
-            return Err(SystemErrorCode::kSystemUnrecoverable);
+            return Err(SystemErrorCode::Unrecoverable);
         }
         // Check cache for this engine's InstancePre
         if let Some(instance_pre) = self
@@ -173,7 +173,7 @@ impl WasmtimeContext {
         let engine = self.engine();
         let module = Module::new(engine, bytes)
             .inspect_err(|_e| debug_log!(eprintln!("Module new error: {_e}")))
-            .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
+            .map_err(|_e| SystemErrorCode::Unrecoverable)?;
 
         if !check_memory_limit(&module) {
             debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
@@ -199,7 +199,7 @@ impl WasmtimeContext {
                         "Unrecoverable: instantiate_pre failed: {_e}"
                     ))
                 })
-                .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?,
+                .map_err(|_e| SystemErrorCode::Unrecoverable)?,
         );
 
         self.global_context.instance_pre_cache().put(

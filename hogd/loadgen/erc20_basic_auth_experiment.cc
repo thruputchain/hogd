@@ -81,7 +81,6 @@ ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
           .value();
   // NOLINTEND(bugprone-unchecked-optional-access)
   tx.signatures.push_back(DecoratedSignature{
-      .auth_claim_idx = 0,
       .public_key_id = 0,
       .signature = sig,
   });
@@ -95,8 +94,9 @@ ERC20BasicAuthExperimentState::generate_experiment()
       ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
   const static AuthClaim self_auth_claim = [] {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = 0;
+    AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+    claim.source_address_claim().allowed_keys = 1 << 0;
+    claim.source_address_claim().required_weight = 1;
     return claim;
   }();
 
@@ -169,7 +169,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                     Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
-                .auth_claims = {self_auth_claim},
+                .auth_claim = self_auth_claim,
             },
     };
     add_signature(tx, 0);
@@ -193,8 +193,9 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
                                                  BlockHeight expiry_height)
 {
   const static AuthClaim self_auth_claim = [] {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = 0;
+    AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+    claim.source_address_claim().allowed_keys = 1 << 0;
+    claim.source_address_claim().required_weight = 1;
     return claim;
   }();
 
@@ -274,7 +275,7 @@ ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
                                       Uniquifier{.block_expiry_height =
                                                      expiry_height,
                                                  .nonce = base_nonce + j},
-                                  .auth_claims = {self_auth_claim}},
+                                  .auth_claim = self_auth_claim},
             };
             add_signature(work_txs[j], sender);
           }

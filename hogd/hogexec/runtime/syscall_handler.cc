@@ -115,7 +115,7 @@ SystemCallHandler::SystemCallHandler(
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_),
-    source_tx_hash_(sha256(tx)), auth_claims_(tx.auth_claims),
+    source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                          ByteArrayHasher>
@@ -144,7 +144,7 @@ SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context,
-    AuthClaimData auth_claims, SHA256Hash source_tx_hash)
+    AuthClaim auth_claim, SHA256Hash source_tx_hash)
   : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
@@ -152,7 +152,7 @@ SystemCallHandler::SystemCallHandler(
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_),
-    source_tx_hash_(source_tx_hash), auth_claims_(std::move(auth_claims)),
+    source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
     newly_created_contracts_(),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
@@ -1411,7 +1411,7 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
 }
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
+SystemCallHandler::set_address_required_weight(Weight required_weight)
 {
   auto addr = get_current_address();
   auto addrkey = auth_data_addrkey(addr);
@@ -1419,7 +1419,7 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
   assert(item_view);
 
   if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
-    address_auth_data_item->set_nonce_config(nonce_config);
+    address_auth_data_item->set_required_weight(required_weight);
     return {};
   }
 
@@ -1429,40 +1429,14 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
   }
   assert(item_view->get<UnmodifiedItem>());
   AddressAuthDataItem new_item;
-  new_item.set_nonce_config(nonce_config);
+  new_item.set_required_weight(required_weight);
   return item_view->set(new_item);
 }
 
-SystemStatus<SyscallStatus<void>>
-SystemCallHandler::set_address_gas_permission_configs(
-    x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
+const AuthClaim &
+SystemCallHandler::get_auth_claim() const
 {
-  auto addr = get_current_address();
-  auto addrkey = auth_data_addrkey(addr);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
-  assert(item_view);
-
-  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
-    address_auth_data_item->set_gas_permission_configs(
-        std::move(gas_permission_configs));
-    return {};
-  }
-
-  if (item_view->get<DeletedItem>()) [[unlikely]] {
-    error("Unrecoverable: unexpected manual delete of authentication data");
-    return SystemError{SystemErrorCode::Unrecoverable};
-  }
-
-  assert(item_view->get<UnmodifiedItem>());
-  AddressAuthDataItem new_item;
-  new_item.set_gas_permission_configs(std::move(gas_permission_configs));
-  return item_view->set(new_item);
-}
-
-const AuthClaimData &
-SystemCallHandler::get_auth_claims() const
-{
-  return auth_claims_;
+  return auth_claim_;
 }
 
 // == Hash buffer syscalls ==

@@ -134,9 +134,7 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   auto auth_it =
       auth_data_map_.find(GenesisConfigurationLoader::kDeployContractAddress);
   ASSERT_NE(auth_it, auth_data_map_.end());
-  EXPECT_EQ(auth_it->second.nonce_config.required_weight, 0);
-  EXPECT_EQ(auth_it->second.gas_permissions.size(), 1);
-  EXPECT_EQ(auth_it->second.gas_permissions[0].required_weight, 0);
+  EXPECT_EQ(auth_it->second.required_weight, 0);
   EXPECT_EQ(get_initial_balance(),
             GenesisConfigurationLoader::initial_hog_token_supply() - 300);
 }

@@ -384,11 +384,7 @@ public:
     assert(key_id < kMaxSigners);
     pk_changes_[key_id].emplace(std::move(pk));
   }
-  void set_new_nonce(NonceConfig nonce) { nonce_change_ = std::move(nonce); }
-  void set_new_gas_configs(GasConfigChange gas_config)
-  {
-    gas_config_change_ = std::move(gas_config);
-  }
+  void set_new_required_weight(Weight w) { required_weight_change_ = w; }
 
   HogDBStatus<bool> narrow(const AuthDataItem &auth_data_item) const;
 
@@ -398,8 +394,7 @@ public:
 
 private:
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
-  std::optional<NonceConfig> nonce_change_;
-  std::optional<GasConfigChange> gas_config_change_;
+  std::optional<Weight> required_weight_change_;
   AddressAuthData base_auth_data_;
 
   friend struct std::formatter<AuthDataItem>;

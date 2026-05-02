@@ -53,9 +53,7 @@ private:
   x23::TestLock lock_;
   bool locked_{false};
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
-  std::optional<NonceConfig> nonce_config_;
-  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
-      gas_permission_configs_;
+  std::optional<Weight> required_weight_change_;
 
   friend class AuthDataItem;
 };

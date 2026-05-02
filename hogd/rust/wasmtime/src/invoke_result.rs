@@ -9,12 +9,12 @@ pub struct WasmtimeInvokeResult {
 
 impl WasmtimeInvokeResult {
     pub fn error(err: InvokeErrorCode) -> WasmtimeInvokeResult {
-        Self { error: err as i32 }
+        Self { error: err.0 }
     }
 
     pub fn success() -> WasmtimeInvokeResult {
         Self {
-            error: InvokeErrorCode::kInvokeNone as i32,
+            error: InvokeErrorCode::None.0,
         }
     }
 
@@ -29,36 +29,24 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
     crate::debug_log!(eprintln!("Wasmtime trap: {trap:?}"));
     match trap {
         // Gas/fuel related - expected during normal operation
-        wasmtime::Trap::OutOfFuel => InvokeErrorCode::kInvokeOutOfGas,
+        wasmtime::Trap::OutOfFuel => InvokeErrorCode::OutOfGas,
 
         // Deterministic errors - these are expected from bad contract code
-        wasmtime::Trap::MemoryOutOfBounds => {
-            InvokeErrorCode::kInvokeDeterministic
-        }
-        wasmtime::Trap::TableOutOfBounds => {
-            InvokeErrorCode::kInvokeDeterministic
-        }
-        wasmtime::Trap::IndirectCallToNull => {
-            InvokeErrorCode::kInvokeDeterministic
-        }
-        wasmtime::Trap::BadSignature => InvokeErrorCode::kInvokeDeterministic,
-        wasmtime::Trap::IntegerOverflow => {
-            InvokeErrorCode::kInvokeDeterministic
-        }
-        wasmtime::Trap::IntegerDivisionByZero => {
-            InvokeErrorCode::kInvokeDeterministic
-        }
+        wasmtime::Trap::MemoryOutOfBounds => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::TableOutOfBounds => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::IndirectCallToNull => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::BadSignature => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::IntegerOverflow => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::IntegerDivisionByZero => InvokeErrorCode::Deterministic,
         wasmtime::Trap::BadConversionToInteger => {
-            InvokeErrorCode::kInvokeDeterministic
+            InvokeErrorCode::Deterministic
         }
         wasmtime::Trap::UnreachableCodeReached => {
-            InvokeErrorCode::kInvokeDeterministic
+            InvokeErrorCode::Deterministic
         }
-        wasmtime::Trap::NullReference => InvokeErrorCode::kInvokeDeterministic,
-        wasmtime::Trap::ArrayOutOfBounds => {
-            InvokeErrorCode::kInvokeDeterministic
-        }
-        wasmtime::Trap::CastFailure => InvokeErrorCode::kInvokeDeterministic,
+        wasmtime::Trap::NullReference => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::ArrayOutOfBounds => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::CastFailure => InvokeErrorCode::Deterministic,
 
         // Errors that should not occur during normal groundhog operation
         // These indicate serious system issues or bugs
@@ -66,89 +54,89 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Stack overflow"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::HeapMisaligned => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Heap misaligned (atomic op?)"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::AtomicWaitNonSharedMemory => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Atomic wait on non-shared memory"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::AllocationTooLarge => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Allocation too large"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::Interrupt => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Interrupt"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
 
         // Component model related (which we should have off)
         wasmtime::Trap::CannotEnterComponent => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot enter component (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::CannotLeaveComponent => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot leave component (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::CannotBlockSyncTask => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Cannot block sync task (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::InvalidChar => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Invalid char (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::StringOutOfBounds => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: String out of bounds (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::ListOutOfBounds => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: List out of bounds (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::InvalidDiscriminant => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Invalid discriminant (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::UnalignedPointer => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Unaligned pointer (component model?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
 
         // Debug assertions (should only fire in debug builds)
         wasmtime::Trap::DebugAssertStringEncodingFinished => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Debug assert string encoding finished"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::DebugAssertEqualCodeUnits => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Debug assert equal code units"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::DebugAssertPointerAligned => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Debug assert pointer aligned"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::DebugAssertUpperBitsUnset => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Debug assert upper bits unset"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
 
         // Async-related (should not occur in our synchronous execution model)
@@ -156,23 +144,23 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: No async result (async?)"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::UnhandledTag => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Unhandled tag (async?)"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::ContinuationAlreadyConsumed => {
             debug_log!(eprintln!("Unrecoverable: Unexpected Wasmtime trap: Continuation already consumed (async?)"));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
         wasmtime::Trap::AsyncDeadlock => {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Async deadlock (async?)"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
 
         // Disabled opcodes (should not occur if validation is correct)
@@ -180,7 +168,7 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Disabled opcode (pulley?)"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
 
         // Catch-all for any future trap variants (enum is non-exhaustive)
@@ -188,7 +176,7 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
             debug_log!(eprintln!(
                 "Unrecoverable: Unexpected Wasmtime trap: Unknown trap: {trap:?}"
             ));
-            InvokeErrorCode::kInvokeUnrecoverable
+            InvokeErrorCode::Unrecoverable
         }
     }
 }

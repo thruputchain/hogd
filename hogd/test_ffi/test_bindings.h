@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 13
-#define TEST_FFI_VERSION_PATCH 3
+#define TEST_FFI_VERSION_MINOR 14
+#define TEST_FFI_VERSION_PATCH 1
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -236,21 +236,6 @@ struct FFISourceAuthData {
   uint32_t len;
 };
 
-// Serialized auth data for a single address
-struct FFISerializedAuthData {
-  uint8_t address[32];
-  const uint8_t *data;
-  uint32_t len;
-};
-
-// Array of auxiliary auth data (for other addresses referenced in auth claims)
-struct FFIAuxiliaryAuthData {
-  // Array of serialized AddressAuthData
-  struct FFISerializedAuthData *auth_data;
-  // Number of auxiliary addresses
-  uint32_t count;
-};
-
 // Result of authorization verification
 struct VerifyAuthResult {
   // 0 if authorization is valid, otherwise AuthVerifyErrorCode as i32
@@ -262,16 +247,10 @@ struct VerifyAuthResult {
 // Verify authorization on a SignedTransaction
 //
 // signed_tx: serialized SignedTransaction
-// source_auth_data: serialized AddressAuthData for the invoked address
-//                   (required for kAuthVerificationLightweight and
-//                   kAuthVerificationFull)
-// aux_auth_data: auxiliary auth data for other addresses
-//                (required for kAuthVerificationLightweight and
-//                kAuthVerificationFull)
+// source_auth_data: serialized AddressAuthData for the source address
 struct VerifyAuthResult
 verify_signed_transaction_auth(struct FFISerializedSignedTransaction signed_tx,
-                               struct FFISourceAuthData source_auth_data,
-                               struct FFIAuxiliaryAuthData aux_auth_data);
+                               struct FFISourceAuthData source_auth_data);
 
 // Note that AuthErrorCode is distinct from AuthVerifyErrorCode.
 // AuthErrorCode includes additional checks, such as missing auth data and block
