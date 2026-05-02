@@ -39,10 +39,9 @@ protected:
 
   void SetUp() override { context_ = make_context(); }
 
-  void setup_contract(authclaim_client_t &client)
+  void setup_contract(ContractAddress const &contract_addr)
   {
     auto contract = hogd::load_contract("authclaim_test.wasm");
-    auto contract_addr = client.address();
     write_contract(contract);
     write_deployment(contract_addr, contract);
     setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -67,7 +66,7 @@ TEST_F(AuthClaimTestFixture, TestGetAuthClaim)
 {
   auto contract_addr = make_contract_address(0);
   authclaim_client_t client(contract_addr);
-  setup_contract(client);
+  setup_contract(contract_addr);
 
   // Contract expects allowed_keys == 0 && required_weight == 0
   AuthClaim claim{};
@@ -81,7 +80,7 @@ TEST_F(AuthClaimTestFixture, TestSetAddressRequiredWeight)
 {
   auto contract_addr = make_contract_address(0);
   authclaim_client_t client(contract_addr);
-  setup_contract(client);
+  setup_contract(contract_addr);
 
   auto result = run_method(
       client.make_invocation<"test_set_address_required_weight">(UINT64_MAX));
@@ -92,7 +91,7 @@ TEST_F(AuthClaimTestFixture, TestAddAddressPublicKey)
 {
   auto contract_addr = make_contract_address(0);
   authclaim_client_t client(contract_addr);
-  setup_contract(client);
+  setup_contract(contract_addr);
 
   auto result = run_method(
       client.make_invocation<"test_add_address_public_key">(UINT64_MAX));
@@ -103,7 +102,7 @@ TEST_F(AuthClaimTestFixture, TestRemoveAddressPublicKey)
 {
   auto contract_addr = make_contract_address(0);
   authclaim_client_t client(contract_addr);
-  setup_contract(client);
+  setup_contract(contract_addr);
 
   auto result = run_method(
       client.make_invocation<"test_remove_address_public_key">(UINT64_MAX));
@@ -114,7 +113,7 @@ TEST_F(AuthClaimTestFixture, TestAddPubkeyIndexOob)
 {
   auto contract_addr = make_contract_address(0);
   authclaim_client_t client(contract_addr);
-  setup_contract(client);
+  setup_contract(contract_addr);
 
   auto result = run_method(
       client.make_invocation<"test_add_pubkey_index_oob">(UINT64_MAX));
