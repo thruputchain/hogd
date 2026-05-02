@@ -19,11 +19,15 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "db_sched.hh"
+#include "event.hh"
+#include "exec_result.hh"
 #include "hogd/base/network.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -34,6 +38,8 @@
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "sched_coord.hh"
+#include "transaction.hh"
+#include "types.hh"
 
 #ifndef HOGD_DEV_BINARY
 #error "HOGD_DEV_BINARY must be defined by CMake"
