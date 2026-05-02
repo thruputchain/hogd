@@ -18,6 +18,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
