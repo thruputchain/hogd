@@ -823,14 +823,52 @@ TEST(Mempool, GenerateBlockId)
   EXPECT_NE(first, second);
 }
 
-// TODO(geoff): rework for required_weight -- this test relied on
-// generate_change_nonce_config which invoked the now-removed
-// change_nonce_config contract method.  It should be rewritten to use a
-// contract that modifies required_weight on an address's auth data, and
-// then verify that the scheduler evicts transactions whose auth claims
-// no longer satisfy the new required_weight.
-TEST(Mempool, DISABLED_AuthChanged)
-{}
+TEST(Mempool, AuthChangedEvictsInvalidTxs)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  KeyChangeBatch key_changes_initial = {
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
+  // Submit the tx — should pass auth (weight 1 >= required 1)
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  // Now raise the required_weight to 10 — the tx (weight 1) no longer qualifies
+  auth_data.required_weight = 10;
+  auth_data.last_written_height = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  KeyChangeBatch key_changes_update = {
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
+
+  server.register_auth_data_updates(0, std::move(key_changes_initial))();
+  server.register_auth_data_updates(1, std::move(key_changes_update))();
+
+  // The auth_data_changed callback should re-verify and evict the tx
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+}
 
 } // namespace hogd
 
