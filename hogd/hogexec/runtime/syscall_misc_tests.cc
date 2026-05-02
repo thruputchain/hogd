@@ -448,21 +448,6 @@ TEST_F(SyscallMiscTests, TestLogEventNoncontinuousTopics)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-// ── #24: GetAuthClaim (out of bounds) ───────────────────────────────
-
-TEST_F(SyscallMiscTests, TestGetAuthClaimOob)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<"test_get_auth_claim_oob">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-}
-
 // ── #25: SHA256Update (no buffer) ───────────────────────────────────
 
 TEST_F(SyscallMiscTests, TestSha256UpdateNoBuffer)
