@@ -69,6 +69,9 @@ wasmi_contract_get_fn(void *host_call_context_ptr,
   try {
     auto const &wasm = (*res)->wasmi_contract().wasm;
 
+    if (wasm.empty()) {
+      return ContractGetResult{.err_code = 0, .data = nullptr, .data_len = 0};
+    }
     return ContractGetResult{.err_code = 0,
                              .data = wasm.data(),
                              .data_len = wasm.size()};
