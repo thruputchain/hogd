@@ -12,7 +12,6 @@
 #include <mutex>
 #include <optional>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -23,7 +22,6 @@
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -1151,6 +1149,7 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
       "arg3={}, arg4={}, arg5={}, arg6={}, arg7={}, arg8={}, arg9={}, "
       "arg10={})",
       syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+  hogd::lazy_init();
   auto result =
       hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4, arg5, arg6,
                                     arg7, arg8, arg9, arg10);
