@@ -19,9 +19,14 @@
 #include <thread>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/fibonacci.h"
 #include "db_sched.hh"
 #include "hogd/base/network.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -39,6 +44,7 @@ namespace {
 
 constexpr auto kStartupTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
+constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 
 struct Readiness {
@@ -153,6 +159,29 @@ parse_readiness(std::string line)
 
   return {.scheduler = parse_endpoint(std::move(scheduler), "scheduler", line),
           .read = parse_endpoint(std::move(read), "read", line)};
+}
+
+SHA256Hash
+make_nonce(std::uint64_t nonce)
+{
+  SHA256Hash out{};
+  std::memcpy(out.data(), &nonce, sizeof(nonce));
+  return out;
+}
+
+GenesisConfigurationBuilder
+make_fibonacci_genesis_builder()
+{
+  auto fibonacci_contract = load_contract("fibonacci.wasm");
+  using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
+
+  GenesisConfigurationBuilder builder;
+  builder.add_initial_config(fibonacci_contract, make_nonce(0),
+                             fibonacci_meta_t::entrypoint<"fibonacci">(),
+                             fibonacci_meta_t::make_calldata<"fibonacci">(
+                                 std::uint32_t{0}),
+                             int128_t{1'000'000'000});
+  return builder;
 }
 
 class HogdDevProcess {
@@ -387,7 +416,7 @@ TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
   EXPECT_EQ(format_advertised_address("::1", 12345), "[::1]:12345");
 }
 
-TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6SchedulerEndpoint)
+TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
 {
   Readiness readiness = parse_readiness(
       R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":"[::1]:12345","read":"[::1]:23456"}})");
@@ -443,6 +472,65 @@ TEST(HogdDev, ReadEndpointServesIndexerBlockExplorer)
     SHA256Hash tx_hash{};
     TxInfoResult result = client.get_transaction_info(tx_hash)();
     EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, CommittedTransactionsPopulateReadEndpoint)
+{
+  HogdDevProcess process = HogdDevProcess::start();
+  Readiness readiness = process.wait_for_readiness();
+
+  {
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.read.host,
+                                                       readiness.read.port,
+                                                       /*retry=*/true)();
+
+    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+              IndexerBlockExplorerIntroOutcome::IntroSuccess);
+
+    GenesisConfigurationBuilder builder = make_fibonacci_genesis_builder();
+    ASSERT_EQ(scheduler.schedcoord_load_genesis_configuration(
+                  builder.build(StorageCostModel::default_cost_model()))(),
+              DbSchedResult::DbSchedResultOK);
+
+    std::vector<SignedTransaction> unfurl_txs =
+        builder.make_unfurl_genesis_transactions();
+    ASSERT_EQ(unfurl_txs.size(), 1UL);
+    const SignedTransactionHash tx_hash = sha256(unfurl_txs[0].tx);
+
+    scheduler.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{unfurl_txs[0]})())();
+
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    SchedulerNominationResult nomination =
+        scheduler.schedulercoord_nominate(tip.db_tip())();
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+    ASSERT_EQ(scheduler.schedulercoord_commit_block(
+                  nomination.nominated_block().block_id)(),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+
+    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+    while (std::chrono::steady_clock::now() < deadline) {
+      result = reader.get_transaction_info(tx_hash)();
+      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 1);
+    EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
+    ASSERT_FALSE(result.info().events.events.empty());
   }
 
   expect_clean_exit(process);

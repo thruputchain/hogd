@@ -40,8 +40,15 @@ target_compile_definitions(
   PRIVATE
   HOGD_DEV_BINARY="$<TARGET_FILE:hogd_dev_exec>"
 )
+target_include_directories(
+  hogd_dev_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
 target_link_libraries(
   hogd_dev_test
+  contract_loader
+  crypto
   genesis
   hogd_dev
   storage_cost
@@ -49,6 +56,7 @@ target_link_libraries(
 )
 add_dependencies(
   hogd_dev_test
+  all_wasm_contracts
   hogd_dev_exec
 )
 gtest_discover_tests(hogd_dev_test)

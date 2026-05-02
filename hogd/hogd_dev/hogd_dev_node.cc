@@ -36,6 +36,10 @@
 
 namespace hogd {
 
+namespace {
+constexpr char kIndexerDbSubdir[] = "indexer-db";
+} // namespace
+
 HogdDevNode::HogdDevNode(std::string bind_host,
                          std::uint16_t requested_scheduler_port)
   : bind_host_(std::move(bind_host)), event_ctx_(event_dir_.directory()),
@@ -162,7 +166,7 @@ void
 HogdDevNode::init_indexer_backend()
 {
   std::filesystem::path db_path =
-      std::filesystem::path(indexer_dir_.directory()) / "indexer-db";
+      std::filesystem::path(indexer_dir_.directory()) / kIndexerDbSubdir;
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
   if (!db_status) {
     panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
