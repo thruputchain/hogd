@@ -79,9 +79,10 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink)
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{{\"status\":\"ready\",\"network_id\":\"groundhog-local\","
-                 "\"endpoints\":{{\"scheduler\":\"{}\"}}}}",
+                 "\"endpoints\":{{\"scheduler\":\"{}\",\"read\":\"{}\"}}}}",
                  format_advertised_address(node.bind_host(),
-                                           node.scheduler_port()));
+                                           node.scheduler_port()),
+                 format_advertised_address(node.bind_host(), node.read_port()));
     std::fflush(stdout);
   }
 }

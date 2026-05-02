@@ -25,6 +25,8 @@
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/version.h"
+#include "indexer.hh"
 #include "sched_coord.hh"
 
 #ifndef HOGD_DEV_BINARY
@@ -40,8 +42,13 @@ constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 
 struct Readiness {
-  std::string host;
-  std::uint16_t port;
+  struct Endpoint {
+    std::string host;
+    std::uint16_t port;
+  };
+
+  Endpoint scheduler;
+  Endpoint read;
 };
 
 std::string
@@ -80,23 +87,10 @@ read_to_end(int fd)
   }
 }
 
-Readiness
-parse_readiness(std::string line)
+Readiness::Endpoint
+parse_endpoint(std::string endpoint, std::string_view name,
+               std::string_view line)
 {
-  if (!line.empty() && line.back() == '\n') {
-    line.pop_back();
-  }
-
-  const std::string prefix =
-      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":")";
-  const std::string suffix = R"("}})";
-  if (!line.starts_with(prefix) || !line.ends_with(suffix)) {
-    throw std::runtime_error(
-        std::format("unexpected readiness line: {}", line));
-  }
-
-  std::string endpoint =
-      line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
   std::string host;
   std::string port_text;
   if (endpoint.starts_with('[')) {
@@ -105,7 +99,7 @@ parse_readiness(std::string line)
         close_bracket + 1 >= endpoint.size() ||
         endpoint[close_bracket + 1] != ':') {
       throw std::runtime_error(
-          std::format("unexpected scheduler endpoint in readiness: {}", line));
+          std::format("unexpected {} endpoint in readiness: {}", name, line));
     }
     host = endpoint.substr(1, close_bracket - 1);
     port_text = endpoint.substr(close_bracket + 2);
@@ -114,7 +108,7 @@ parse_readiness(std::string line)
     std::size_t colon = endpoint.rfind(':');
     if (colon == std::string::npos) {
       throw std::runtime_error(
-          std::format("unexpected scheduler endpoint in readiness: {}", line));
+          std::format("unexpected {} endpoint in readiness: {}", name, line));
     }
     host = endpoint.substr(0, colon);
     port_text = endpoint.substr(colon + 1);
@@ -124,10 +118,41 @@ parse_readiness(std::string line)
   std::uint64_t port = std::stoul(port_text, &pos, 10);
   if (pos != port_text.size() || port == 0 || port > 65535) {
     throw std::runtime_error(
-        std::format("unexpected scheduler port in readiness: {}", line));
+        std::format("unexpected {} port in readiness: {}", name, line));
   }
 
   return {.host = std::move(host), .port = static_cast<std::uint16_t>(port)};
+}
+
+Readiness
+parse_readiness(std::string line)
+{
+  if (!line.empty() && line.back() == '\n') {
+    line.pop_back();
+  }
+
+  const std::string prefix =
+      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":")";
+  const std::string middle = R"(","read":")";
+  const std::string suffix = R"("}})";
+  if (!line.starts_with(prefix) || !line.ends_with(suffix)) {
+    throw std::runtime_error(
+        std::format("unexpected readiness line: {}", line));
+  }
+
+  std::string endpoints =
+      line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
+  std::size_t read_delimiter = endpoints.find(middle);
+  if (read_delimiter == std::string::npos) {
+    throw std::runtime_error(
+        std::format("unexpected readiness line: {}", line));
+  }
+
+  std::string scheduler = endpoints.substr(0, read_delimiter);
+  std::string read = endpoints.substr(read_delimiter + middle.size());
+
+  return {.scheduler = parse_endpoint(std::move(scheduler), "scheduler", line),
+          .read = parse_endpoint(std::move(read), "read", line)};
 }
 
 class HogdDevProcess {
@@ -348,8 +373,10 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   HogdDevProcess process = HogdDevProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
-  EXPECT_EQ(readiness.host, "127.0.0.1");
-  EXPECT_GT(readiness.port, 0);
+  EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
+  EXPECT_GT(readiness.scheduler.port, 0);
+  EXPECT_EQ(readiness.read.host, "127.0.0.1");
+  EXPECT_GT(readiness.read.port, 0);
 
   expect_clean_exit(process);
 }
@@ -363,10 +390,12 @@ TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
 TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6SchedulerEndpoint)
 {
   Readiness readiness = parse_readiness(
-      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":"[::1]:12345"}})");
+      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":"[::1]:12345","read":"[::1]:23456"}})");
 
-  EXPECT_EQ(readiness.host, "::1");
-  EXPECT_EQ(readiness.port, 12345);
+  EXPECT_EQ(readiness.scheduler.host, "::1");
+  EXPECT_EQ(readiness.scheduler.port, 12345);
+  EXPECT_EQ(readiness.read.host, "::1");
+  EXPECT_EQ(readiness.read.port, 23456);
 }
 
 TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
@@ -376,7 +405,8 @@ TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
 
   {
     sched_coord_client_t client =
-        create_client<SchedulerCoord1>(readiness.host, readiness.port,
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
                                        /*retry=*/true)();
 
     SchedulerGetTipResult before = client.schedcoord_get_tip()();
@@ -392,6 +422,27 @@ TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
     ASSERT_EQ(after.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     EXPECT_EQ(after.db_tip().height, 0);
     EXPECT_EQ(after.db_tip().id, 0UL);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, ReadEndpointServesIndexerBlockExplorer)
+{
+  HogdDevProcess process = HogdDevProcess::start();
+  Readiness readiness = process.wait_for_readiness();
+
+  {
+    auto client = create_client<IndexerBlockExplorer1>(readiness.read.host,
+                                                       readiness.read.port,
+                                                       /*retry=*/true)();
+
+    EXPECT_EQ(client.indexer_block_explorer_intro(version::kHogdProtocol())(),
+              IndexerBlockExplorerIntroOutcome::IntroSuccess);
+
+    SHA256Hash tx_hash{};
+    TxInfoResult result = client.get_transaction_info(tx_hash)();
+    EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
   }
 
   expect_clean_exit(process);

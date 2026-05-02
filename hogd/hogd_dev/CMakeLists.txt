@@ -7,9 +7,11 @@ target_link_libraries(
   hogd_dev
   auth
   base
+  event
   exec_interface
   hogd
   hogdb
+  indexer
   mempool
   protocol
   ramdb

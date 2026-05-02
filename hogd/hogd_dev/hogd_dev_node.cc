@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <sys/socket.h>
@@ -19,6 +20,7 @@
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/indexer/status.h"
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/ramdb/db.h"
@@ -36,7 +38,9 @@ namespace hogd {
 
 HogdDevNode::HogdDevNode(std::string bind_host,
                          std::uint16_t requested_scheduler_port)
-  : bind_host_(std::move(bind_host))
+  : bind_host_(std::move(bind_host)), event_ctx_(event_dir_.directory()),
+    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
+    event_indexer_server_(event_ctx_)
 {
   mempool_auth_server_->impl()->register_callback(
       [this](BlockHeight height, KeyChangeBatch key_changes) {
@@ -88,10 +92,17 @@ HogdDevNode::HogdDevNode(std::string bind_host,
   auth_db_server_->impl()->set_auth_server(*auth_server_);
   auth_mempool_server_->impl()->set_auth_server(*auth_server_);
 
+  event_sched_server_.max_message_size_ = kDevRpcMaxMessageSize;
+  event_exec_server_.max_message_size_ = kDevRpcMaxMessageSize;
+  event_indexer_server_.max_message_size_ = kDevRpcMaxMessageSize;
   event_sched_server_.start_server(make_bind_host_port(bind_host_,
                                                        /*port=*/0));
   event_exec_server_.start_server(make_bind_host_port(bind_host_,
                                                       /*port=*/0));
+  event_indexer_server_.start_server(make_bind_host_port(bind_host_,
+                                                         /*port=*/0));
+
+  init_indexer_backend();
 
   // We start the executor server in [register_executor_with_mempool()].
 
@@ -103,6 +114,7 @@ HogdDevNode::HogdDevNode(std::string bind_host,
                                                              /*port=*/0));
 
   // Now have all of the subsystems register themselves with the mempool.
+  register_indexer_with_event_service();
   register_db_with_mempool();
   register_event_with_mempool();
   register_auth_with_mempool();
@@ -144,6 +156,43 @@ HogdDevNode::~HogdDevNode()
     error("~HogdDevNode received exception");
     CHECK(false);
   }
+}
+
+void
+HogdDevNode::init_indexer_backend()
+{
+  std::filesystem::path db_path =
+      std::filesystem::path(indexer_dir_.directory()) / "indexer-db";
+  IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
+  if (!db_status) {
+    panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
+  }
+  IndexDB &db = db_status.value();
+  indexer_db_ = std::make_unique<IndexDB>(std::move(db));
+
+  indexer_event_server_ =
+      std::make_unique<RpcServer<IndexerEventRpc>>(*indexer_db_);
+  indexer_event_server_->max_message_size_ = kDevRpcMaxMessageSize;
+  indexer_event_server_->start_server(make_bind_host_port(bind_host_,
+                                                          /*port=*/0));
+
+  indexer_block_explorer_server_ =
+      std::make_unique<RpcServer<IndexerBlockExplorerRpc>>(*indexer_db_);
+  indexer_block_explorer_server_->max_message_size_ = kDevRpcMaxMessageSize;
+  indexer_block_explorer_server_->start_server(
+      make_bind_host_port(bind_host_, /*port=*/0));
+}
+
+void
+HogdDevNode::register_indexer_with_event_service()
+{
+  auto client =
+      create_client<EventIndexer1>(bind_host_, event_indexer_server_.port())();
+  std::string indexer_event_address =
+      format_advertised_address(bind_host_, indexer_event_server_->port());
+  IndexerCard card{.protocol = version::kHogdProtocol(),
+                   .address_for_event = indexer_event_address.c_str()};
+  client.event_indexer_intro(card)();
 }
 
 void
