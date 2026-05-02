@@ -940,7 +940,7 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
-  AuthClaimData auth_claim_data = {};
+  AuthClaim auth_claim_data = {};
   auto serialized_auth_claim_data = x23::serialize(auth_claim_data);
   FFISerializedAuthClaimData ffi_auth_claim_data = {
       .data = serialized_auth_claim_data.data(),
@@ -1067,7 +1067,7 @@ test_ffi_get_current_address(ContractAddress &output_address)
 OpenSyscallHandlerResult
 make_mocked_handler(void *db, void *rc)
 {
-  AuthClaimData auth_claim_data = {};
+  AuthClaim auth_claim_data = {};
   auto serialized_auth_claim_data = x23::serialize(auth_claim_data);
   FFISerializedAuthClaimData ffi_auth_claim_data = {
       .data = serialized_auth_claim_data.data(),
