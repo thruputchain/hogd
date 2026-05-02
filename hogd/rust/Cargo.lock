@@ -657,7 +657,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "hogexec-internal"
 version = "0.10.0"
-source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#79f5f2aa0b149634d98b9a568b9a9a0a15192ee4"
+source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+checksum = "0f8bc5acf33439473337aa6d4bfe97f8fb872e5b78b2ef8dbd478febd8bcea79"
 dependencies = [
  "xdrs",
 ]
