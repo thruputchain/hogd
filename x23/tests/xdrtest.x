@@ -403,3 +403,9 @@ typedef fix_12 single_vec<1>;
 
 // Very small bounded opaque (length prefix + 1 byte max + padding)
 typedef opaque tiny_opaque<1>;
+
+// Regression: xdr_size_bounds<const S> must work when S contains a union field
+// directly (const propagates through tuple_element_t, and union_ops must handle it).
+enum ConstUnionBugType { kConstBugA = 0 };
+union ConstUnionBugUnion switch (ConstUnionBugType t) { case kConstBugA: int val; };
+struct ConstUnionBugStruct { ConstUnionBugUnion u; };

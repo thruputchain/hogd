@@ -19,6 +19,12 @@ static_assert(!detail::has_fixed_size<sunion>());
 static_assert(detail::xdr_size_bounds<sunion>() == detail::SizeBounds{4, 8});
 static_assert(detail::xdr_size_bounds<test_recursive>() ==
               detail::SizeBounds{12, detail::kNoBound});
+static_assert(detail::xdr_size_bounds<const ConstUnionBugStruct>() ==
+              detail::xdr_size_bounds<ConstUnionBugStruct>());
+static_assert(detail::xdr_size_bounds<const struct_with_union>() ==
+              detail::xdr_size_bounds<struct_with_union>());
+static_assert(detail::xdr_size_bounds<const MutualFrame>() ==
+              detail::xdr_size_bounds<MutualFrame>());
 static_assert(xdr_size(fix_4{}) == 4);
 static_assert(xdr_size(fix_12{}) == 12);
 static_assert(xdr_size(fix_16{}) == 16);
