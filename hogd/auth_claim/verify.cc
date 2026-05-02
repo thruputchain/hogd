@@ -262,12 +262,7 @@ verify_auth_claims_internal(const SignedTransaction &stx,
     }
 
     Weight total_weight = 0;
-    BitMap seen_keys = 0;
     for (const DecoratedSignature &sig : stx.signatures) {
-      if ((seen_keys & (uint32_t{1} << sig.public_key_id)) != 0) {
-        continue;
-      }
-      seen_keys |= uint32_t{1} << sig.public_key_id;
       assert(has_public_key(*source_auth_data, sig.public_key_id));
       total_weight +=
           source_auth_data->public_keys[sig.public_key_id]->max_weight;
