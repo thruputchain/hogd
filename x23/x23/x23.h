@@ -298,7 +298,7 @@ namespace x23 {
 // each union type, we implement the guts of the operations in the
 // friend class union_ops.
 template<is_xdr_union T> struct union_ops {
-  using union_type = T;
+  using union_type = std::remove_cvref_t<T>;
   using meta = xdr_meta<union_type>;
 
   // union_size is one more than the number of non-void arms.
