@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -529,8 +530,14 @@ TEST(HogdDev, CommittedTransactionsPopulateReadEndpoint)
 
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().height, 1);
+    EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
     EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
     ASSERT_FALSE(result.info().events.events.empty());
+    EXPECT_TRUE(std::ranges::any_of(
+        result.info().events.events, [](TxEmittedEvent const &event) {
+          return event.contract_address ==
+                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
+        }));
   }
 
   expect_clean_exit(process);

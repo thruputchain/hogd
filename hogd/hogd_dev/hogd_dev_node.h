@@ -71,9 +71,13 @@ private:
   std::string bind_host_;
 
   HogdDevTmpDir db_dir_;
+  // Declaration order matters: event_ctx_ borrows event_dir_.directory(),
+  // and the event RPC servers below borrow event_ctx_.
   HogdDevTmpDir event_dir_;
   HogdDevTmpDir indexer_dir_;
   std::unique_ptr<IndexDB> indexer_db_;
+  // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
+  // exposed by the event service.
   std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
   std::unique_ptr<RpcServer<IndexerBlockExplorerRpc>>
       indexer_block_explorer_server_;
@@ -86,6 +90,7 @@ private:
 
   EventMempoolServer event_sched_server_;
   EventExecServer event_exec_server_;
+  // EventIndexerServer feeds indexer_event_server_ through the event service.
   EventIndexerServer event_indexer_server_;
 
   Executor executor_;
