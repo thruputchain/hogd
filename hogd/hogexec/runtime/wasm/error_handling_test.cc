@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
+#include "hogd/rust/wasmtime/bindings.h"
 #include "syscall_error.hh"
 
 namespace hogd {
