@@ -19,6 +19,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"

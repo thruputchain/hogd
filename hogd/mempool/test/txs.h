@@ -10,7 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
