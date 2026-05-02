@@ -685,7 +685,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowedAllowancePermitsTransferFrom)
   advance_block();
 
   // Tx 2: adjust +10 (intermediate value = INT128_MAX + 5), then transfer_from
-  // 100. Net allowance delta = -90; committed value = INT128_MAX - 95.
+  // 10000. Net allowance delta = -9990; committed value = INT128_MAX - 9995.
   {
     auto h = make_new_system_call_handler(
         SignedTransaction{
@@ -740,12 +740,24 @@ TEST_F(NativeTokenAllowanceTest,
                  client.invoke_opt<"adjust_allowance">(ctx.handler(),
                                                        kOwnerAddr,
                                                        make_difference(10));
-             (void)r_adj;
+             if (!r_adj.has_value() || !r_adj.value().has_value() ||
+                 !r_adj.value().value().has_value() ||
+                 !r_adj.value().value().value().is_ok()) {
+               ADD_FAILURE()
+                   << "overflowing adjust_allowance(+10) should succeed";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
              auto [r_xfer, _g2] =
                  client.invoke_opt<"transfer_from">(ctx.handler(), kOwnerAddr,
                                                     kReceiverAddr,
                                                     make_amount(3));
-             (void)r_xfer;
+             if (!r_xfer.has_value() || !r_xfer.value().has_value() ||
+                 !r_xfer.value().value().has_value() ||
+                 !r_xfer.value().value().value().is_ok()) {
+               ADD_FAILURE()
+                   << "transfer_from(3) should succeed at invoke time";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
              return {};
            }}});
 
