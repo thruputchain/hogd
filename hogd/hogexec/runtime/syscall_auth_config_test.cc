@@ -19,7 +19,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/rust/contract_types/bindings.h"
+#include "hogd/hogexec/components/ffi_types.h"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"

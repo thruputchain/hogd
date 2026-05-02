@@ -209,7 +209,7 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 
     SignedTransaction stx{};
     stx.tx = tx;
-    stx.signatures.push_back(make_signature(keys[addr_idx].second, tx, 0, 0));
+    stx.signatures.push_back(make_signature(keys[addr_idx].second, tx, 0));
     stx_vec.push_back(std::move(stx));
   }
 
