@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <format>
 #include <gtest/gtest.h>
 #include <optional>
@@ -26,6 +27,7 @@
 #include "db_sched.hh"
 #include "event.hh"
 #include "exec_result.hh"
+#include "hogd/base/json.h"
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -101,14 +103,14 @@ read_to_end(int fd)
 }
 
 Readiness::Endpoint
-parse_endpoint(std::string endpoint, std::string_view name,
+parse_endpoint(std::string_view endpoint, std::string_view name,
                std::string_view line)
 {
   std::string host;
   std::string port_text;
   if (endpoint.starts_with('[')) {
     std::size_t close_bracket = endpoint.find(']');
-    if (close_bracket == std::string::npos ||
+    if (close_bracket == std::string_view::npos ||
         close_bracket + 1 >= endpoint.size() ||
         endpoint[close_bracket + 1] != ':') {
       throw std::runtime_error(
@@ -119,7 +121,7 @@ parse_endpoint(std::string endpoint, std::string_view name,
   }
   else {
     std::size_t colon = endpoint.rfind(':');
-    if (colon == std::string::npos) {
+    if (colon == std::string_view::npos) {
       throw std::runtime_error(
           std::format("unexpected {} endpoint in readiness: {}", name, line));
     }
@@ -137,6 +139,23 @@ parse_endpoint(std::string endpoint, std::string_view name,
   return {.host = std::move(host), .port = static_cast<std::uint16_t>(port)};
 }
 
+std::string_view
+require_string_field(const json::Value &parent, std::string_view key,
+                     std::string_view line)
+{
+  const json::Value *field = parent.find(key);
+  if (field == nullptr) {
+    throw std::runtime_error(
+        std::format("readiness missing field '{}': {}", key, line));
+  }
+  std::optional<std::string_view> value = field->as_string();
+  if (!value.has_value()) {
+    throw std::runtime_error(
+        std::format("readiness field '{}' is not a string: {}", key, line));
+  }
+  return *value;
+}
+
 Readiness
 parse_readiness(std::string line)
 {
@@ -144,28 +163,41 @@ parse_readiness(std::string line)
     line.pop_back();
   }
 
-  const std::string prefix =
-      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":")";
-  const std::string middle = R"(","read":")";
-  const std::string suffix = R"("}})";
-  if (!line.starts_with(prefix) || !line.ends_with(suffix)) {
-    throw std::runtime_error(
-        std::format("unexpected readiness line: {}", line));
+  std::expected<json::Value, json::ParseError> parsed = json::parse(line);
+  if (!parsed.has_value()) {
+    throw std::runtime_error(std::format("readiness JSON parse failed at {}: "
+                                         "{}: {}",
+                                         parsed.error().offset,
+                                         parsed.error().message, line));
   }
 
-  std::string endpoints =
-      line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
-  std::size_t read_delimiter = endpoints.find(middle);
-  if (read_delimiter == std::string::npos) {
+  std::string_view status = require_string_field(*parsed, "status", line);
+  if (status != "ready") {
     throw std::runtime_error(
-        std::format("unexpected readiness line: {}", line));
+        std::format("unexpected readiness status '{}': {}", status, line));
   }
 
-  std::string scheduler = endpoints.substr(0, read_delimiter);
-  std::string read = endpoints.substr(read_delimiter + middle.size());
+  std::string_view network_id =
+      require_string_field(*parsed, "network_id", line);
+  if (network_id != "groundhog-local") {
+    throw std::runtime_error(std::format("unexpected readiness network_id "
+                                         "'{}': {}",
+                                         network_id, line));
+  }
 
-  return {.scheduler = parse_endpoint(std::move(scheduler), "scheduler", line),
-          .read = parse_endpoint(std::move(read), "read", line)};
+  const json::Value *endpoints = parsed->find("endpoints");
+  if (endpoints == nullptr || endpoints->type() != json::Value::Type::kObject) {
+    throw std::runtime_error(
+        std::format("readiness missing endpoints object: {}", line));
+  }
+
+  return {
+      .scheduler =
+          parse_endpoint(require_string_field(*endpoints, "scheduler", line),
+                         "scheduler", line),
+      .read = parse_endpoint(require_string_field(*endpoints, "read", line),
+                             "read", line),
+  };
 }
 
 SHA256Hash

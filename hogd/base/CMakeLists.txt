@@ -3,6 +3,7 @@ add_library(
   base_objects OBJECT
   init.cc
   io.cc
+  json.cc
   log.cc
   os.cc
   status.cc
@@ -26,6 +27,7 @@ add_library(base_test_objects OBJECT
   bits_test.cc
   cpputil_test.cc
   io_test.cc
+  json_test.cc
   perthread_arc_test.cc
   perthread_test.cc
   status_test.cc
