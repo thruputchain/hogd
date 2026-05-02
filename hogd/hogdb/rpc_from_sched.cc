@@ -41,7 +41,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
-#include "x23/x23.h"
 
 namespace hogd {
 

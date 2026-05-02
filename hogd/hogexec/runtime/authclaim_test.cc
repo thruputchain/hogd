@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <utility>
 
 #include "auth_claim.hh"
 #include "built_contracts/authclaim_test.h"

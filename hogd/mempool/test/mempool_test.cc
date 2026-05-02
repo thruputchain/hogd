@@ -1,14 +1,10 @@
-#include <chrono>
 #include <gtest/gtest.h>
 #include <set>
-#include <thread>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "block.hh"
-#include "db_sched.hh"
 #include "discovery.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -827,7 +823,7 @@ TEST(Mempool, GenerateBlockId)
   EXPECT_NE(first, second);
 }
 
-// TODO: rework for required_weight -- this test relied on
+// TODO(geoff): rework for required_weight -- this test relied on
 // generate_change_nonce_config which invoked the now-removed
 // change_nonce_config contract method.  It should be rewritten to use a
 // contract that modifies required_weight on an address's auth data, and

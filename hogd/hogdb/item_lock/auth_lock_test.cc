@@ -12,7 +12,6 @@
 #include "hogd/hogdb/item_lock/auth_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/x23.h"
 

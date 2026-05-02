@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <limits>
 
 #include "address_auth.hh"
 #include "genesis.hh"

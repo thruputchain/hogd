@@ -34,7 +34,7 @@ protected:
   static Transaction make_transaction(AuthClaim auth_claim)
   {
     Transaction tx{};
-    tx.auth_claim = auth_claim;
+    tx.auth_claim = std::move(auth_claim);
     return tx;
   }
 
