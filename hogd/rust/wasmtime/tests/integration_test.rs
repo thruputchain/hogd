@@ -228,10 +228,7 @@ unsafe extern "C" fn test_get_simple_add_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 0) {
         // Contract hash does not match [0;32]: return unrecoverable error.
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
 
     ContractGetResult::new(0, wasm_bytes)
@@ -248,10 +245,7 @@ unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 1) {
         // Contract hash does not match [1;32]: return unrecoverable error.
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
     ContractGetResult::new(0, wasm_bytes)
 }
@@ -558,10 +552,7 @@ unsafe extern "C" fn test_get_oob_data_segment_contract_get_fn(
 
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 2) {
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
     ContractGetResult::new(0, wasm_bytes)
 }
@@ -574,10 +565,7 @@ unsafe extern "C" fn test_get_param_entrypoint_contract_get_fn(
 
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 4) {
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
 
     ContractGetResult::new(0, wasm_bytes)
@@ -591,10 +579,7 @@ unsafe extern "C" fn test_get_oob_element_segment_contract_get_fn(
 
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 3) {
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
     ContractGetResult::new(0, wasm_bytes)
 }
@@ -612,10 +597,7 @@ unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
         let wasm_bytes = load_wasm_file("fibonacci.wasm");
         return ContractGetResult::new(0, wasm_bytes);
     }
-    return ContractGetResult::new(
-        SystemErrorCode::Unrecoverable.0,
-        &[],
-    );
+    return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
 }
 
 #[test]
@@ -881,10 +863,7 @@ unsafe extern "C" fn test_get_simd_contract_get_fn(
 
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 4) {
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
     ContractGetResult::new(0, wasm_bytes)
 }
@@ -1041,10 +1020,7 @@ unsafe extern "C" fn test_get_float_contract_get_fn(
 ) -> ContractGetResult {
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 5) {
-        return ContractGetResult::new(
-            SystemErrorCode::Unrecoverable.0,
-            &[],
-        );
+        return ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[]);
     }
     ContractGetResult::new(0, float_contract_bytes())
 }
