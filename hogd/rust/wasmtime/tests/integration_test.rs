@@ -21,7 +21,7 @@ extern "C" fn c_call_0args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -33,7 +33,7 @@ extern "C" fn c_call_1args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -46,7 +46,7 @@ extern "C" fn c_call_2args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -60,7 +60,7 @@ extern "C" fn c_call_3args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -75,7 +75,7 @@ extern "C" fn c_call_4args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -91,7 +91,7 @@ extern "C" fn c_call_5args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -108,7 +108,7 @@ extern "C" fn c_call_6args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -126,7 +126,7 @@ extern "C" fn c_call_7args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -145,7 +145,7 @@ extern "C" fn c_call_8args(
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result: 0,
-        panic: common::HostFnErrorCode::kHostNoneOrRecoverable as i32,
+        panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
 
@@ -155,7 +155,7 @@ unsafe extern "C" fn no_get_mock_contract_get_fn(
     _userctx: *mut c_void,
     _hash: *const u8,
 ) -> ContractGetResult {
-    ContractGetResult::new(SystemErrorCode::kSystemUnrecoverable as i32, &[])
+    ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[])
 }
 
 // Helper function to load a WASM file from the test_wasms directory
@@ -229,7 +229,7 @@ unsafe extern "C" fn test_get_simple_add_contract_get_fn(
     if hash_slice.iter().any(|&b| b != 0) {
         // Contract hash does not match [0;32]: return unrecoverable error.
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -249,7 +249,7 @@ unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
     if hash_slice.iter().any(|&b| b != 1) {
         // Contract hash does not match [1;32]: return unrecoverable error.
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -538,7 +538,7 @@ fn test_fibonacci_computation_overflow() {
         // Verify we get the expected error code
         assert_ne!(
             result.error,
-            common::InvokeErrorCode::kInvokeUnrecoverable as i32,
+            common::InvokeErrorCode::Unrecoverable.0,
             "Fibonacci invoke should fail with stack overflow"
         );
 
@@ -559,7 +559,7 @@ unsafe extern "C" fn test_get_oob_data_segment_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 2) {
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -575,7 +575,7 @@ unsafe extern "C" fn test_get_param_entrypoint_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 4) {
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -592,7 +592,7 @@ unsafe extern "C" fn test_get_oob_element_segment_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 3) {
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -613,7 +613,7 @@ unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
         return ContractGetResult::new(0, wasm_bytes);
     }
     return ContractGetResult::new(
-        SystemErrorCode::kSystemUnrecoverable as i32,
+        SystemErrorCode::Unrecoverable.0,
         &[],
     );
 }
@@ -844,7 +844,7 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
 
         assert_eq!(
             result.error,
-            common::InvokeErrorCode::kInvokeDeterministic as i32,
+            common::InvokeErrorCode::Deterministic.0,
             "invoke-time signature mismatch should be classified as deterministic"
         );
 
@@ -867,7 +867,7 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
 // module containing any v128 operator therefore:
 //   - verifies and executes on x86_64 + AVX validators, but
 //   - fails Module::new on x86_64 no-AVX or aarch64 validators, which
-//     maps to SystemErrorCode::kSystemUnrecoverable in get_instance_pre.
+//     maps to SystemErrorCode::Unrecoverable in get_instance_pre.
 // Fix: disable the SIMD feature in the production Config. Wasmtime then
 // rejects v128 operators deterministically at the wasmparser validation
 // layer, regardless of host CPU.
@@ -882,7 +882,7 @@ unsafe extern "C" fn test_get_simd_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 4) {
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -987,7 +987,7 @@ fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
         );
         assert_eq!(
             result.err_code(),
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             "Module::new failure on SIMD bytes must map to kSystemUnrecoverable"
         );
 
@@ -1042,7 +1042,7 @@ unsafe extern "C" fn test_get_float_contract_get_fn(
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     if hash_slice.iter().any(|&b| b != 5) {
         return ContractGetResult::new(
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             &[],
         );
     }
@@ -1148,7 +1148,7 @@ fn test_h001_runtime_creation_on_float_returns_system_unrecoverable() {
         );
         assert_eq!(
             result.err_code(),
-            SystemErrorCode::kSystemUnrecoverable as i32,
+            SystemErrorCode::Unrecoverable.0,
             "Module::new failure on float bytes must map to \
              kSystemUnrecoverable"
         );

@@ -162,7 +162,7 @@ impl WasmtimeRuntime {
                         #[cfg(feature = "wasm_debug")]
                         match trampoline_error.error {
                             // We don't print the backtrace for "errors" that correspond to normal shutdown
-                            common::HostFnErrorCode::kHostReturn => {},
+                            common::HostFnErrorCode::Return => {},
                             _ => {
                                 eprintln!("WASM backtrace:\n{:#}", err);
                             }
