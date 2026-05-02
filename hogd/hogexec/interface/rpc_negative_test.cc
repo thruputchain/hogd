@@ -20,7 +20,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"

@@ -7,7 +7,7 @@
 #include "built_contracts/fibonacci_call.h"
 #include "exec_result.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "rpc_types.hh"

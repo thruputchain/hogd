@@ -23,7 +23,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
 #include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/init.h"
 #include "transaction.hh"
