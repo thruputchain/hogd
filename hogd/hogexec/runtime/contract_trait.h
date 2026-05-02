@@ -166,24 +166,14 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   // the index of the function with the given name,
   // (ordered by their listing in ContractTrait::kExportNames)
   template<StringLiteral Name>
-  constexpr static size_t kLookupIndex =
-      []<size_t I, std::size_t... Is>(this auto self,
-                                      std::index_sequence<I, Is...>) {
-        if constexpr (ContractTrait::kExportNames[I] == Name.get()) {
-          return I;
-        }
-        else {
-          if constexpr (sizeof...(Is) == 0) {
-            // more detailed error message (i.e. which name is missing) is a
-            // cpp26 extension
-            static_assert(false, "ContractTraitMeta: Method name not found");
-            std::unreachable();
-          }
-          else {
-            return self(std::index_sequence<Is...>{});
-          }
-        }
-      }(std::make_index_sequence<ContractTrait::kExportNames.size()>{});
+  constexpr static size_t kLookupIndex = [] {
+    for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
+      if (ContractTrait::kExportNames[i] == Name.get()) {
+        return i;
+      }
+    }
+    throw "ContractTraitMeta: Method name not found";
+  }();
 
   // map the i'th function name to the sorted index that it's actually exported
   // at (i.e. the index of the function in the sorted list of exported
