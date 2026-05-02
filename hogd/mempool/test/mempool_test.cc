@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <set>
+#include <utility>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
