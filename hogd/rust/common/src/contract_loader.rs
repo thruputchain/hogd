@@ -44,7 +44,7 @@ impl ContractGetResult {
                 Err(_) => Err(SystemErrorCode::kSystemUnrecoverable),
             };
         }
-        if self.data.is_null() {
+        if self.data.is_null() || self.data_len == 0 {
             return Ok(None);
         }
         Ok(Some(unsafe {

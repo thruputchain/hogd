@@ -391,4 +391,66 @@ INSTANTIATE_TEST_SUITE_P(WasmEngines, WasmiErrorHandlingTest,
                                info.param);
                          });
 
+namespace {
+
+extern "C" ContractGetResult
+return_null_empty_contract(void * /*unused*/,
+                           const uint8_t * /*unused*/) noexcept
+{
+  return ContractGetResult{.err_code = 0, .data = nullptr, .data_len = 0};
+}
+
+extern "C" ContractGetResult
+return_non_null_empty_contract(void * /*unused*/,
+                               const uint8_t * /*unused*/) noexcept
+{
+  static constexpr uint8_t kSentinel = 0;
+  return ContractGetResult{.err_code = 0, .data = &kSentinel, .data_len = 0};
+}
+
+} // namespace
+
+TEST(WasmtimeRuntimeFFITest, EmptyContractNullDataAndEmptySliceDiverge)
+{
+  auto global_context =
+      std::unique_ptr<void, decltype(&free_wasmtime_global_context)>(
+          new_wasmtime_global_context(1), &free_wasmtime_global_context);
+  ASSERT_NE(global_context.get(), nullptr);
+
+  SHA256Hash hash{};
+  uint8_t user_context = 0;
+
+  // Null data pointer: treated as "contract not found" -> null runtime
+  NewWasmtimeRuntimeResult null_result;
+  {
+    auto ctx = std::unique_ptr<void, decltype(&free_wasmtime_context)>(
+        new_wasmtime_context(&return_null_empty_contract, global_context.get()),
+        &free_wasmtime_context);
+    ASSERT_NE(ctx.get(), nullptr);
+
+    null_result = new_wasmtime_runtime(hash.data(), &user_context, ctx.get());
+  }
+
+  // Non-null data pointer with data_len == 0: currently compiled as
+  // empty Wasm module, fails Module::new -> kSystemUnrecoverable
+  NewWasmtimeRuntimeResult non_null_result;
+  {
+    auto ctx = std::unique_ptr<void, decltype(&free_wasmtime_context)>(
+        new_wasmtime_context(&return_non_null_empty_contract,
+                             global_context.get()),
+        &free_wasmtime_context);
+    ASSERT_NE(ctx.get(), nullptr);
+
+    non_null_result =
+        new_wasmtime_runtime(hash.data(), &user_context, ctx.get());
+  }
+
+  EXPECT_EQ(null_result.err_code, 0);
+  EXPECT_EQ(null_result.runtime_pointer, nullptr);
+
+  // Both paths must classify identically: empty contract -> null runtime
+  EXPECT_EQ(non_null_result.err_code, 0);
+  EXPECT_EQ(non_null_result.runtime_pointer, nullptr);
+}
+
 } // namespace hogd
