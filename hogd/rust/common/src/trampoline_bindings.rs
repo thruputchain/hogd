@@ -40,15 +40,11 @@ pub fn to_invoke_result(error: HostFnErrorCode) -> Result<(), InvokeErrorCode> {
     match error {
         HostFnErrorCode::OutOfGas => Err(InvokeErrorCode::OutOfGas),
         HostFnErrorCode::Return => Ok(()),
-        HostFnErrorCode::Exit => {
-            Err(InvokeErrorCode::Deterministic)
-        }
+        HostFnErrorCode::Exit => Err(InvokeErrorCode::Deterministic),
         HostFnErrorCode::ValidationFailure => {
             Err(InvokeErrorCode::ValidationFailure)
         }
-        HostFnErrorCode::Abandon => {
-            Err(InvokeErrorCode::Abandon)
-        }
+        HostFnErrorCode::Abandon => Err(InvokeErrorCode::Abandon),
         _ => Err(InvokeErrorCode::Unrecoverable),
     }
 }

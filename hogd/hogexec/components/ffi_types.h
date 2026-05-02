@@ -49,17 +49,21 @@ struct PubkeyAccountPreimage {
 };
 
 static_assert(std::is_trivially_copyable_v<PubkeyAccountPreimage>);
-static_assert(sizeof(PubkeyAccountPreimage) == sizeof(hogd::PubkeyAccountPreimage));
+static_assert(sizeof(PubkeyAccountPreimage) ==
+              sizeof(hogd::PubkeyAccountPreimage));
 
 union AuthClaim {
   enum Tag : int32_t {
-    AuthClaim_kSourceAddressAuthData = std::to_underlying(hogd::AuthClaimType::kSourceAddressAuthData),
-    AuthClaim_kPubkeySignature = std::to_underlying(hogd::AuthClaimType::kPubkeySignature),
+    AuthClaim_kSourceAddressAuthData =
+        std::to_underlying(hogd::AuthClaimType::kSourceAddressAuthData),
+    AuthClaim_kPubkeySignature =
+        std::to_underlying(hogd::AuthClaimType::kPubkeySignature),
   };
 
   struct AuthClaim_kSourceAddressAuthData_Body {
     Tag tag;
-    using source_claim_t = std::remove_cvref_t<decltype(std::declval<hogd::AuthClaim>().source_address_claim())>;
+    using source_claim_t = std::remove_cvref_t<
+        decltype(std::declval<hogd::AuthClaim>().source_address_claim())>;
     static_assert(std::is_trivially_copyable_v<source_claim_t>);
     source_claim_t source_address_claim;
   };

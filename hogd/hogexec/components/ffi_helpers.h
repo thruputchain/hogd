@@ -34,7 +34,8 @@ template<> struct FFIHelperType<generated::PublicKey> {
       cpp_public_key.ed25519() = ffi_public_key.ed25519.ed25519;
       return cpp_public_key;
     }
-    error("Unknown public key type: {}", static_cast<int32_t>(ffi_public_key.tag));
+    error("Unknown public key type: {}",
+          static_cast<int32_t>(ffi_public_key.tag));
     return std::nullopt;
   }
 
@@ -57,7 +58,8 @@ template<> struct FFIHelperType<generated::PubkeyAccountPreimage> {
   to_cpp(generated::PubkeyAccountPreimage const &ffi_pubkey_account_preimage)
   {
     PubkeyAccountPreimage cpp_pubkey_account_preimage;
-    auto cpp_pk = FFIHelperType<generated::PublicKey>::to_cpp(ffi_pubkey_account_preimage.pubkey);
+    auto cpp_pk = FFIHelperType<generated::PublicKey>::to_cpp(
+        ffi_pubkey_account_preimage.pubkey);
     if (!cpp_pk) {
       return std::nullopt;
     }
@@ -66,10 +68,13 @@ template<> struct FFIHelperType<generated::PubkeyAccountPreimage> {
     return cpp_pubkey_account_preimage;
   }
 
-  static generated::PubkeyAccountPreimage to_ffi(PubkeyAccountPreimage const &cpp_pubkey_account_preimage)
+  static generated::PubkeyAccountPreimage
+  to_ffi(PubkeyAccountPreimage const &cpp_pubkey_account_preimage)
   {
     generated::PubkeyAccountPreimage ffi_pubkey_account_preimage{};
-    ffi_pubkey_account_preimage.pubkey = FFIHelperType<generated::PublicKey>::to_ffi(cpp_pubkey_account_preimage.pubkey);
+    ffi_pubkey_account_preimage.pubkey =
+        FFIHelperType<generated::PublicKey>::to_ffi(
+            cpp_pubkey_account_preimage.pubkey);
     ffi_pubkey_account_preimage.nonce = cpp_pubkey_account_preimage.nonce;
     return ffi_pubkey_account_preimage;
   }
@@ -78,7 +83,8 @@ template<> struct FFIHelperType<generated::PubkeyAccountPreimage> {
 };
 
 static_assert(std::is_trivially_copyable_v<generated::PubkeyAccountPreimage>);
-static_assert(sizeof(generated::PubkeyAccountPreimage) == sizeof(PubkeyAccountPreimage));
+static_assert(sizeof(generated::PubkeyAccountPreimage) ==
+              sizeof(PubkeyAccountPreimage));
 
 template<> struct FFIHelperType<generated::AuthClaim> {
   static std::optional<AuthClaim>
@@ -90,22 +96,24 @@ template<> struct FFIHelperType<generated::AuthClaim> {
     case generated::AuthClaim::AuthClaim_kSourceAddressAuthData:
       auth_claim.claim_type(AuthClaimType::kSourceAddressAuthData);
       auth_claim.source_address_claim().allowed_keys =
-          ffi_auth_claim.k_source_address_auth_data
-              .source_address_claim.allowed_keys;
+          ffi_auth_claim.k_source_address_auth_data.source_address_claim
+              .allowed_keys;
       auth_claim.source_address_claim().required_weight =
-          ffi_auth_claim.k_source_address_auth_data
-              .source_address_claim.required_weight;
+          ffi_auth_claim.k_source_address_auth_data.source_address_claim
+              .required_weight;
       return auth_claim;
     case generated::AuthClaim::AuthClaim_kPubkeySignature:
-      {
-        auth_claim.claim_type(AuthClaimType::kPubkeySignature);
-        auto cpp_pubkey_preimage = FFIHelperType<generated::PubkeyAccountPreimage>::to_cpp(ffi_auth_claim.k_pubkey_signature.pubkey_preimage);
-        if (!cpp_pubkey_preimage) {
-          return std::nullopt;
-        }
-        auth_claim.pubkey_preimage() = *cpp_pubkey_preimage;
-        return auth_claim;
+    {
+      auth_claim.claim_type(AuthClaimType::kPubkeySignature);
+      auto cpp_pubkey_preimage =
+          FFIHelperType<generated::PubkeyAccountPreimage>::to_cpp(
+              ffi_auth_claim.k_pubkey_signature.pubkey_preimage);
+      if (!cpp_pubkey_preimage) {
+        return std::nullopt;
       }
+      auth_claim.pubkey_preimage() = *cpp_pubkey_preimage;
+      return auth_claim;
+    }
     }
     error("Unknown auth claim type: {}",
           static_cast<int32_t>(ffi_auth_claim.tag));

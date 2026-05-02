@@ -155,9 +155,7 @@ impl WasmiRuntime {
             debug_log!(eprintln!(
                 "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
             ));
-            return WasmiInvokeResult::error(
-                InvokeErrorCode::Deterministic,
-            );
+            return WasmiInvokeResult::error(InvokeErrorCode::Deterministic);
         }
 
         match func.call(&mut self.store, &[], &mut []) {
@@ -171,9 +169,7 @@ impl WasmiRuntime {
                         debug_log!(eprintln!(
                             "Unknown error from func.call: {err:?}"
                         ));
-                        WasmiInvokeResult::error(
-                            InvokeErrorCode::Unrecoverable,
-                        )
+                        WasmiInvokeResult::error(InvokeErrorCode::Unrecoverable)
                     },
                     |trampoline_error| {
                         trampoline_error.to_wasmi_invoke_result()
@@ -205,11 +201,7 @@ pub unsafe extern "C" fn wasmi_invoke(
 
     let string = match std::str::from_utf8(method_name_slice) {
         Ok(v) => v,
-        _ => {
-            return WasmiInvokeResult::error(
-                InvokeErrorCode::Deterministic,
-            )
-        }
+        _ => return WasmiInvokeResult::error(InvokeErrorCode::Deterministic),
     };
 
     let r = unsafe { &mut *runtime };
@@ -248,9 +240,7 @@ pub unsafe extern "C" fn new_wasmi_runtime(
     wasmi_context_ptr: *mut c_void,
 ) -> NewWasmiRuntimeResult {
     if hash.is_null() || wasmi_context_ptr.is_null() {
-        return NewWasmiRuntimeResult::new(Err(
-            SystemErrorCode::Unrecoverable,
-        ));
+        return NewWasmiRuntimeResult::new(Err(SystemErrorCode::Unrecoverable));
     }
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };

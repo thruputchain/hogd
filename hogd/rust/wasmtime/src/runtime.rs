@@ -134,9 +134,7 @@ impl WasmtimeRuntime {
             debug_log!(eprintln!(
                 "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
             ));
-            return WasmtimeInvokeResult::error(
-                InvokeErrorCode::Deterministic,
-            );
+            return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic);
         }
 
         match func.call(&mut self.store, &[], &mut []) {
@@ -198,9 +196,7 @@ pub unsafe extern "C" fn wasmtime_invoke(
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
-        return WasmtimeInvokeResult::error(
-            InvokeErrorCode::Deterministic,
-        );
+        return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic);
     }
 
     let method_name_slice =
@@ -209,9 +205,7 @@ pub unsafe extern "C" fn wasmtime_invoke(
     let string = match std::str::from_utf8(method_name_slice) {
         Ok(v) => v,
         _ => {
-            return WasmtimeInvokeResult::error(
-                InvokeErrorCode::Deterministic,
-            )
+            return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic)
         }
     };
 
@@ -266,9 +260,7 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 ) -> NewWasmtimeRuntimeResult {
     if hash.is_null() || wasmtime_context_ptr.is_null() {
         eprintln!("hash or wasmtime_context_ptr is null");
-        return NewWasmtimeRuntimeResult::err(
-            SystemErrorCode::Unrecoverable,
-        );
+        return NewWasmtimeRuntimeResult::err(SystemErrorCode::Unrecoverable);
     }
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };

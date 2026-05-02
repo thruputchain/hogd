@@ -58,8 +58,7 @@ TEST(Mempool, SubmitUnvetted)
 
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
-  txs[0].signatures.push_back(
-      make_signature(sk, tx, /*public_key_id=*/0));
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -835,8 +834,7 @@ TEST(Mempool, GenerateBlockId)
 // then verify that the scheduler evicts transactions whose auth claims
 // no longer satisfy the new required_weight.
 TEST(Mempool, DISABLED_AuthChanged)
-{
-}
+{}
 
 } // namespace hogd
 

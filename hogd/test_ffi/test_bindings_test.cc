@@ -454,15 +454,14 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
   tx.auth_claim = claim;
 
   // Sign the transaction
-  DecoratedSignature sig =
-      make_signature(sk, tx, /*public_key_id=*/0);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
   SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
   // Create auth data
-  AddressAuthData auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .required_weight = 1};
+  AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                                new PublicKeyConfig{.key = pk,
+                                                    .max_weight = Weight{1}})},
+                            .required_weight = 1};
 
   // Serialize everything
   auto serialized_stx = x23::serialize(stx);
@@ -470,10 +469,11 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
 
   // Test good verification
   {
-    VerifyAuthResult result = verify_signed_transaction_auth(
-        {.data = serialized_stx.data(),
-         .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_auth));
+    VerifyAuthResult result =
+        verify_signed_transaction_auth({.data = serialized_stx.data(),
+                                        .len = static_cast<uint32_t>(
+                                            serialized_stx.size())},
+                                       make_source_auth_data(serialized_auth));
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code, 0);
@@ -522,15 +522,14 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   tx.auth_claim = claim;
 
   // Sign the transaction
-  DecoratedSignature sig =
-      make_signature(sk, tx, /*public_key_id=*/0);
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
   SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
   // Create auth data
-  AddressAuthData auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
-      .required_weight = 1};
+  AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                                new PublicKeyConfig{.key = pk,
+                                                    .max_weight = Weight{1}})},
+                            .required_weight = 1};
 
   // Create database and write auth data
   auto *db = make_db();
@@ -542,8 +541,7 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
 
   // Write auth data to database
   auto write_result = dao.write_address_auth_data(invoked_addr, auth_data);
-  ASSERT_TRUE(write_result.has_value())
-      << "Failed to write address auth data";
+  ASSERT_TRUE(write_result.has_value()) << "Failed to write address auth data";
 
   // Advance block so auth data is available
   ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
@@ -2813,6 +2811,5 @@ TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.success, 0);
 }
-
 
 } // namespace hogd

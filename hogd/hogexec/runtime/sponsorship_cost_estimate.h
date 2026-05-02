@@ -43,9 +43,9 @@ struct StorageWriteInfo {
 //
 // Returns the cost of the item as it exists in the snapshot. If the item
 // does not exist (has no type), returns 0.
-inline int128_t compute_snapshot_prior_cost(
-    const SnapshotStorageItem& snapshot,
-    const StorageCostModel& cost_model)
+inline int128_t
+compute_snapshot_prior_cost(const SnapshotStorageItem &snapshot,
+                            const StorageCostModel &cost_model)
 {
   auto item_type = snapshot.type();
   if (!item_type.has_value()) {
@@ -60,9 +60,8 @@ inline int128_t compute_snapshot_prior_cost(
   case ItemViewType::kNativeTokenBalance:
     return cost_model.get_nnint_cost();
   case ItemViewType::kRetrocausalQueue:
-    return cost_model.get_retrocausal_queue_cost(
-        static_cast<int64_t>(
-            snapshot.retrocausal_queue_metadata().live_entries));
+    return cost_model.get_retrocausal_queue_cost(static_cast<int64_t>(
+        snapshot.retrocausal_queue_metadata().live_entries));
   case ItemViewType::kReplayCache:
     // ReplayCacheEntry in snapshot doesn't carry size information.
     // Use kBaseItemCost as a conservative estimate.
@@ -84,13 +83,12 @@ inline int128_t compute_snapshot_prior_cost(
 // - If the item is new / unloaded: 0
 //
 // Takes a non-const ItemView& because ItemView::get<T>() is non-const.
-inline int128_t compute_prior_cost(
-    ItemView& item_view,
-    const StorageCostModel& cost_model)
+inline int128_t
+compute_prior_cost(ItemView &item_view, const StorageCostModel &cost_model)
 {
   // Probe each variant type in order.
 
-  if (auto* unmod = item_view.get<UnmodifiedItem>()) {
+  if (auto *unmod = item_view.get<UnmodifiedItem>()) {
     if (!unmod->is_loaded()) {
       // Snapshot not loaded: blind write, assume new item.
       return 0;
@@ -98,7 +96,7 @@ inline int128_t compute_prior_cost(
     return compute_snapshot_prior_cost(unmod->base_item(), cost_model);
   }
 
-  if (const auto* bs = item_view.get<BytestringItem>()) {
+  if (const auto *bs = item_view.get<BytestringItem>()) {
     return cost_model.get_bytestring_cost(bs->bytestring_.size());
   }
 
@@ -137,9 +135,9 @@ inline int128_t compute_prior_cost(
 }
 
 // Compute the new storage cost for a write operation.
-inline int128_t compute_new_cost(
-    const StorageWriteInfo& write_info,
-    const StorageCostModel& cost_model)
+inline int128_t
+compute_new_cost(const StorageWriteInfo &write_info,
+                 const StorageCostModel &cost_model)
 {
   switch (write_info.type) {
   case StorageWriteInfo::WriteType::kBytestring:
@@ -149,8 +147,8 @@ inline int128_t compute_new_cost(
   case StorageWriteInfo::WriteType::kDelete:
     return 0;
   case StorageWriteInfo::WriteType::kDeployContract:
-    return cost_model.kBaseContractDeploymentCost
-         + cost_model.get_contract_size_cost(write_info.contract_size);
+    return cost_model.kBaseContractDeploymentCost +
+           cost_model.get_contract_size_cost(write_info.contract_size);
   }
   // Unknown write type: should not happen.
   assert(false && "unreachable: unknown WriteType");
@@ -164,10 +162,8 @@ inline int128_t compute_new_cost(
 //
 // Note: the DB version uses `is_permanent_exclusive` which maps to the
 // executor's kStorageDeltaFlagExclusiveLock flag via storage_view.cc.
-inline int128_t marginal_cost_delta(
-    int128_t new_cost,
-    int128_t prior_cost,
-    bool is_exclusive)
+inline int128_t
+marginal_cost_delta(int128_t new_cost, int128_t prior_cost, bool is_exclusive)
 {
   if (is_exclusive) {
     return new_cost - prior_cost;
@@ -188,18 +184,18 @@ inline int128_t marginal_cost_delta(
 // - cost_model: the storage cost model
 //
 // Returns the estimated marginal storage cost.
-inline int128_t estimate_marginal_storage_cost(
-    ItemView& item_view,
-    const StorageWriteInfo& write_info,
-    const StorageCostModel& cost_model)
+inline int128_t
+estimate_marginal_storage_cost(ItemView &item_view,
+                               const StorageWriteInfo &write_info,
+                               const StorageCostModel &cost_model)
 {
   const int128_t new_cost = compute_new_cost(write_info, cost_model);
   const int128_t prior_cost = compute_prior_cost(item_view, cost_model);
 
   const bool is_exclusive =
       (write_info.flags &
-       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock))
-      != 0;
+       std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) !=
+      0;
 
   return marginal_cost_delta(new_cost, prior_cost, is_exclusive);
 }

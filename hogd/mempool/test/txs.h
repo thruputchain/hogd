@@ -39,7 +39,7 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = i},
             .contracts_to_deploy = {},
-            }};
+        }};
     txs.push_back(tx);
   }
   return txs;
@@ -66,8 +66,7 @@ get_default_account()
     public_keys[i] = nullptr;
   }
 
-  return AddressAuthData{.public_keys = public_keys,
-                         .required_weight = 0};
+  return AddressAuthData{.public_keys = public_keys, .required_weight = 0};
 }
 
 inline AuthClaim
@@ -92,6 +91,5 @@ make_signature(const SecretKey &sk, const Transaction &tx,
   return signature;
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
-
 
 } // namespace hogd

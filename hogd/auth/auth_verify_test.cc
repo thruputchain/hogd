@@ -89,8 +89,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   SignedTransaction stx{};
   stx.tx = tx;
-  stx.signatures.push_back(
-      make_signature(sk, tx, /*public_key_id=*/0));
+  stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
@@ -144,18 +143,15 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   // tx1 is signed by the wrong key
   SignedTransaction stx1{};
   stx1.tx = tx1;
-  stx1.signatures.push_back(
-      make_signature(sk2, tx1, /*public_key_id=*/0));
+  stx1.signatures.push_back(make_signature(sk2, tx1, /*public_key_id=*/0));
 
   SignedTransaction stx2{};
   stx2.tx = tx2;
-  stx2.signatures.push_back(
-      make_signature(sk2, tx2, /*public_key_id=*/0));
+  stx2.signatures.push_back(make_signature(sk2, tx2, /*public_key_id=*/0));
 
   SignedTransaction stx3{};
   stx3.tx = tx3;
-  stx3.signatures.push_back(
-      make_signature(sk2, tx3, /*public_key_id=*/0));
+  stx3.signatures.push_back(make_signature(sk2, tx3, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);

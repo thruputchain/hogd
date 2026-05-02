@@ -50,8 +50,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             auto status = ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(
-                 Weight{1});
+             auto status =
+                 ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -129,8 +129,7 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
 
              // 2. Set required weight
              auto weight_status =
-                 ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(
-                     Weight{3});
+                 ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{3});
 
              if (!weight_status.has_value() ||
                  weight_status.value() !=

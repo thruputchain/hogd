@@ -32,22 +32,12 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
         wasmtime::Trap::OutOfFuel => InvokeErrorCode::OutOfGas,
 
         // Deterministic errors - these are expected from bad contract code
-        wasmtime::Trap::MemoryOutOfBounds => {
-            InvokeErrorCode::Deterministic
-        }
-        wasmtime::Trap::TableOutOfBounds => {
-            InvokeErrorCode::Deterministic
-        }
-        wasmtime::Trap::IndirectCallToNull => {
-            InvokeErrorCode::Deterministic
-        }
+        wasmtime::Trap::MemoryOutOfBounds => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::TableOutOfBounds => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::IndirectCallToNull => InvokeErrorCode::Deterministic,
         wasmtime::Trap::BadSignature => InvokeErrorCode::Deterministic,
-        wasmtime::Trap::IntegerOverflow => {
-            InvokeErrorCode::Deterministic
-        }
-        wasmtime::Trap::IntegerDivisionByZero => {
-            InvokeErrorCode::Deterministic
-        }
+        wasmtime::Trap::IntegerOverflow => InvokeErrorCode::Deterministic,
+        wasmtime::Trap::IntegerDivisionByZero => InvokeErrorCode::Deterministic,
         wasmtime::Trap::BadConversionToInteger => {
             InvokeErrorCode::Deterministic
         }
@@ -55,9 +45,7 @@ pub fn wasmtime_trap_to_invoke_error(trap: &wasmtime::Trap) -> InvokeErrorCode {
             InvokeErrorCode::Deterministic
         }
         wasmtime::Trap::NullReference => InvokeErrorCode::Deterministic,
-        wasmtime::Trap::ArrayOutOfBounds => {
-            InvokeErrorCode::Deterministic
-        }
+        wasmtime::Trap::ArrayOutOfBounds => InvokeErrorCode::Deterministic,
         wasmtime::Trap::CastFailure => InvokeErrorCode::Deterministic,
 
         // Errors that should not occur during normal groundhog operation

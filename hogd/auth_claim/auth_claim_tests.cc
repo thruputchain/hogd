@@ -83,11 +83,9 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
   AddressAuthData missing_key = AddressAuthData{.required_weight = 1};
 
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data).has_value());
-  EXPECT_FALSE(
-      lightweight_validate_auth_claims(stx, missing_key).has_value());
-  EXPECT_EQ(
-      lightweight_validate_auth_claims(stx, missing_key).error().code(),
-      AuthVerifyErrorCode::kAuthDataMismatch);
+  EXPECT_FALSE(lightweight_validate_auth_claims(stx, missing_key).has_value());
+  EXPECT_EQ(lightweight_validate_auth_claims(stx, missing_key).error().code(),
+            AuthVerifyErrorCode::kAuthDataMismatch);
 
   AddressAuthData bad_data =
       AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
@@ -121,8 +119,7 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   {
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(
-        verify_auth(stx, good_data, &signature_verifier).has_value());
+    EXPECT_TRUE(verify_auth(stx, good_data, &signature_verifier).has_value());
     EXPECT_TRUE(signature_verifier.verify());
   }
 
@@ -135,8 +132,7 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   {
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(
-        verify_auth(stx2, good_data, &signature_verifier).has_value());
+    EXPECT_TRUE(verify_auth(stx2, good_data, &signature_verifier).has_value());
     EXPECT_FALSE(signature_verifier.verify());
   }
 }

@@ -47,8 +47,7 @@ protected:
     setup_grant_storage_token(contract_addr, 1'000'000'000);
   }
 
-  ExecResult run_method(auto invocation,
-                        AuthClaim auth_claim = AuthClaim{})
+  ExecResult run_method(auto invocation, AuthClaim auth_claim = AuthClaim{})
   {
     SignedTransaction stx;
     stx.tx.invocation = std::move(invocation);
@@ -71,9 +70,9 @@ TEST_F(AuthClaimTestFixture, TestGetAuthClaim)
 
   // Contract expects allowed_keys == 0 && required_weight == 0
   AuthClaim claim{};
-  auto result = run_method(
-      client.make_invocation<"test_get_auth_claim">(UINT64_MAX),
-      claim);
+  auto result =
+      run_method(client.make_invocation<"test_get_auth_claim">(UINT64_MAX),
+                 claim);
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 

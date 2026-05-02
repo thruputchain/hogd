@@ -135,8 +135,7 @@ verify_signatures(VerificationType VerfType)
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_weight_key_claim_internal(
-    BitMap accepted_keys,
-    const AddressAuthData *auth_data,
+    BitMap accepted_keys, const AddressAuthData *auth_data,
     const x23::Vec<const DecoratedSignature *> &sigs,
     x23::BufView serialized_tx, Ed25519SignatureVerifier *signature_verifier)
 {
@@ -212,9 +211,9 @@ verify_auth_claim_internal(AuthClaim const &claim,
 
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
-verify_auth_claims_internal(
-    const SignedTransaction &stx, const AddressAuthData *source_auth_data,
-    Ed25519SignatureVerifier *signature_verifier)
+verify_auth_claims_internal(const SignedTransaction &stx,
+                            const AddressAuthData *source_auth_data,
+                            Ed25519SignatureVerifier *signature_verifier)
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
     assert(!source_auth_data);
@@ -250,8 +249,8 @@ verify_auth_claims_internal(
     }
   }
 
-  if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs,
-                                                    auth_data, serialized_tx,
+  if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs, auth_data,
+                                                    serialized_tx,
                                                     signature_verifier);
       !r) {
     return r;
@@ -275,9 +274,9 @@ verify_auth_claims_internal(
           source_auth_data->public_keys[sig.public_key_id]->max_weight;
     }
 
-    Weight required = std::max(
-        source_auth_data->required_weight,
-        auth_claim.source_address_claim().required_weight);
+    Weight required =
+        std::max(source_auth_data->required_weight,
+                 auth_claim.source_address_claim().required_weight);
     if (total_weight < required) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
     }
@@ -297,8 +296,8 @@ verify_auth(const SignedTransaction &stx,
 }
 
 AuthVerifyStatus<void>
-lightweight_validate_auth_claims(
-    const SignedTransaction &stx, const AddressAuthData &source_auth_data)
+lightweight_validate_auth_claims(const SignedTransaction &stx,
+                                 const AddressAuthData &source_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
       stx, &source_auth_data, nullptr);

@@ -18,9 +18,9 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/ffi_helpers.h"
+#include "hogd/hogexec/components/ffi_types.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
-#include "hogd/hogexec/components/ffi_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -107,9 +107,8 @@ syscall_ChangePublicKeyRegistration_inner(
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_WriteAddressRequiredWeight_inner(
-    SystemCallHandler &syscall_handler,
-    Weight input_required_weight) noexcept
+syscall_WriteAddressRequiredWeight_inner(SystemCallHandler &syscall_handler,
+                                         Weight input_required_weight) noexcept
 {
   auto status =
       syscall_handler.set_address_required_weight(input_required_weight);

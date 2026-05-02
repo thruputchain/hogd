@@ -37,9 +37,10 @@ SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
 
 {}
 
-SyscallHandlerContext::SyscallHandlerContext(
-    MockRuntimeContext *context, DBContext &db,
-    AuthClaim const &auth_claim, SHA256Hash const &source_tx_hash)
+SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
+                                             DBContext &db,
+                                             AuthClaim const &auth_claim,
+                                             SHA256Hash const &source_tx_hash)
   : identifier_(db.allocate_identifier()), db_(db),
     handler_(db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
