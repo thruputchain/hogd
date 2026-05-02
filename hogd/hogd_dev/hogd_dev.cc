@@ -10,6 +10,7 @@
 #include <string>
 #include <utility>
 
+#include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
@@ -73,16 +74,29 @@ wait_for_shutdown(const ShutdownSignals &signals)
 }
 // NOLINTEND(misc-include-cleaner)
 
+std::string
+build_readiness_payload(const HogdDevNode &node)
+{
+  std::string buffer;
+  json::Writer(buffer).object([&](json::Writer &w) {
+    w.field("status", "ready");
+    w.field("network_id", "groundhog-local");
+    w.object_field("endpoints", [&](json::Writer &w) {
+      w.field("scheduler", format_advertised_address(node.bind_host(),
+                                                     node.scheduler_port()));
+      w.field("read",
+              format_advertised_address(node.bind_host(), node.read_port()));
+    });
+  });
+  return buffer;
+}
+
 void
 emit_readiness(const HogdDevNode &node, ReadinessSink sink)
 {
   switch (sink) {
   case ReadinessSink::kStdout:
-    std::println("{{\"status\":\"ready\",\"network_id\":\"groundhog-local\","
-                 "\"endpoints\":{{\"scheduler\":\"{}\",\"read\":\"{}\"}}}}",
-                 format_advertised_address(node.bind_host(),
-                                           node.scheduler_port()),
-                 format_advertised_address(node.bind_host(), node.read_port()));
+    std::println("{}", build_readiness_payload(node));
     std::fflush(stdout);
   }
 }
