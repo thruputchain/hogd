@@ -243,8 +243,7 @@ verify_auth_claims_internal(const SignedTransaction &stx,
       auth_data = source_auth_data;
       break;
     case AuthClaimType::kPubkeySignature:
-      auth_data = source_auth_data;
-      break;
+      panic("Pubkey signature auth claim not supported");
     default:
       panic("Unsupported auth claim type: {}", auth_claim.claim_type());
     }
@@ -258,7 +257,6 @@ verify_auth_claims_internal(const SignedTransaction &stx,
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
-    assert(source_auth_data);
     if (auth_claim.claim_type() != AuthClaimType::kSourceAddressAuthData) {
       return {};
     }
