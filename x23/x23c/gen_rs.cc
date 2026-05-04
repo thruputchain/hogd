@@ -537,7 +537,8 @@ GenRs::show_type(const StructBody &s, string const &tname)
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
-    prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+    if (!array_size)
+      prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
@@ -700,6 +701,35 @@ impl {0} {{
 )",
                                      *array_size, outer_id);
         prtop("{}\n", cfg("xdrs", xdrs_read));
+
+        auto schema_impl = std::format(
+            R"(impl schemars::JsonSchema for {0} {{
+    fn schema_name() -> ::std::string::String {{
+        "{0}".into()
+    }}
+    fn is_referenceable() -> bool {{
+        false
+    }}
+    fn json_schema(_gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {{
+        schemars::schema::SchemaObject {{
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {{
+                min_length: Some({1}),
+                max_length: Some({1}),
+                ..Default::default()
+            }})),
+            extensions: [
+                ("contentEncoding".into(), ::serde_json::Value::String("hex".into())),
+                ("contentMediaType".into(), ::serde_json::Value::String("application/binary".into())),
+            ].into_iter().collect(),
+            ..Default::default()
+        }}
+        .into()
+    }}
+}}
+)",
+            outer_id, std::stoul(*array_size) * 2);
+        prtop("{}\n", cfg("schema", schema_impl));
       }
     }
   }
