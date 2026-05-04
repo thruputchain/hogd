@@ -16,6 +16,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/indexer/db.h"
@@ -50,6 +51,8 @@ public:
   {
     return indexer_block_explorer_server_->port();
   }
+  // Advertised in the readiness JSON as the `gateway` endpoint.
+  std::uint16_t gateway_port() const { return db_gateway_server_->port(); }
 
 private:
   // Numeric chain network id. The readiness network_id is a human protocol
@@ -87,6 +90,7 @@ private:
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
   std::unique_ptr<HogDBAuthServer> db_auth_server_;
+  std::unique_ptr<HogDBGatewayServer> db_gateway_server_;
 
   EventMempoolServer event_sched_server_;
   EventExecServer event_exec_server_;

@@ -85,6 +85,7 @@ add_executable(
   item_lock/replay_cache_lock_test.cc
   mock_authdb_rpc.cc
   recovery_tests.cc
+  rpc_from_gateway_test.cc
 )
 target_link_libraries(
   hogdb_test

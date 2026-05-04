@@ -24,6 +24,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
+#include "db_gateway.hh"
 #include "db_sched.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -39,6 +40,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -64,6 +66,7 @@ struct Readiness {
 
   Endpoint scheduler;
   Endpoint read;
+  Endpoint gateway;
 };
 
 std::string
@@ -197,6 +200,9 @@ parse_readiness(std::string line)
                          "scheduler", line),
       .read = parse_endpoint(require_string_field(*endpoints, "read", line),
                              "read", line),
+      .gateway =
+          parse_endpoint(require_string_field(*endpoints, "gateway", line),
+                         "gateway", line),
   };
 }
 
@@ -445,6 +451,8 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_GT(readiness.scheduler.port, 0);
   EXPECT_EQ(readiness.read.host, "127.0.0.1");
   EXPECT_GT(readiness.read.port, 0);
+  EXPECT_EQ(readiness.gateway.host, "127.0.0.1");
+  EXPECT_GT(readiness.gateway.port, 0);
 
   expect_clean_exit(process);
 }
@@ -457,13 +465,18 @@ TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
 
 TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
 {
-  Readiness readiness = parse_readiness(
-      R"({"status":"ready","network_id":"groundhog-local","endpoints":{"scheduler":"[::1]:12345","read":"[::1]:23456"}})");
+  Readiness readiness =
+      parse_readiness(R"({"status":"ready","network_id":"groundhog-local",)"
+                      R"("endpoints":{"scheduler":"[::1]:12345",)"
+                      R"("read":"[::1]:23456",)"
+                      R"("gateway":"[::1]:34567"}})");
 
   EXPECT_EQ(readiness.scheduler.host, "::1");
   EXPECT_EQ(readiness.scheduler.port, 12345);
   EXPECT_EQ(readiness.read.host, "::1");
   EXPECT_EQ(readiness.read.port, 23456);
+  EXPECT_EQ(readiness.gateway.host, "::1");
+  EXPECT_EQ(readiness.gateway.port, 34567);
 }
 
 TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
@@ -490,6 +503,36 @@ TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
     ASSERT_EQ(after.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     EXPECT_EQ(after.db_tip().height, 0);
     EXPECT_EQ(after.db_tip().id, 0UL);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, GatewayEndpointAnswersIntroAndGetItems)
+{
+  HogdDevProcess process = HogdDevProcess::start();
+  Readiness readiness = process.wait_for_readiness();
+
+  {
+    auto client = create_client<DbGateway1>(readiness.gateway.host,
+                                            readiness.gateway.port,
+                                            /*retry=*/true)();
+
+    EXPECT_EQ(client.dbgateway_intro(version::kHogdProtocol())(),
+              DbGatewayIntroOutcome::DbGatewayIntroSuccess);
+
+    // Empty DB: any address returns per-item kRPCNotFound; outer batch
+    // result is kRPCNone.
+    AddressAndKey query;
+    query.address = ContractAddress{};
+    query.key.key_type(StorageKeyType::FreeNativeTokenBalance);
+    AddressAndKeyBatch batch;
+    batch.push_back(query);
+
+    DbGatewayResult result = client.dbgateway_get_items(batch)();
+    ASSERT_EQ(result.error(), RPCError::kRPCNone);
+    ASSERT_EQ(result.payload().items.size(), 1U);
+    EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
   }
 
   expect_clean_exit(process);

@@ -86,6 +86,8 @@ build_readiness_payload(const HogdDevNode &node)
                                                      node.scheduler_port()));
       w.field("read",
               format_advertised_address(node.bind_host(), node.read_port()));
+      w.field("gateway",
+              format_advertised_address(node.bind_host(), node.gateway_port()));
     });
   });
   return buffer;

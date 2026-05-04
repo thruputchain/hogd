@@ -19,6 +19,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
@@ -86,6 +87,9 @@ HogdDevNode::HogdDevNode(std::string bind_host,
                                                          /*port=*/0));
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
   db_auth_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
+  // Read-only state reads served to the public RPC gateway over x23.
+  db_gateway_server_ = std::make_unique<HogDBGatewayServer>(*ctx_);
+  db_gateway_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
 
   std::string dbauth_address =
       format_advertised_address(bind_host_, db_auth_server_->port());
@@ -151,6 +155,7 @@ HogdDevNode::~HogdDevNode()
     // shutdown is required so the [Executor] destructor does not block.
     executor_.shut_down();
 
+    db_gateway_server_.reset();
     db_auth_server_.reset();
     db_scheduler_server_.reset();
     db_executor_server_.reset();

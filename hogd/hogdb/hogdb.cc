@@ -32,6 +32,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
@@ -63,7 +64,8 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
            const std::string *coordinator_addr, std::string_view bind_ip,
-           uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port)
+           uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
+           uint16_t gateway_port)
 {
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
@@ -152,6 +154,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   CHECK(actual_auth_port == auth_port || auth_port == 0);
   info("PORT hogdb.auth={}", actual_auth_port);
 
+  info("starting gateway server.");
+  HogDBGatewayServer gateway_server(ctx);
+  const uint16_t actual_gateway_port =
+      gateway_server.start_server(make_bind_host_port(bind_ip, gateway_port));
+  CHECK(actual_gateway_port == gateway_port || gateway_port == 0);
+  info("PORT hogdb.gateway={}", actual_gateway_port);
+
   if (coordinator_addr) {
     auto const &client = ctx.get_sched_db_client();
     assert(client);
@@ -191,7 +200,7 @@ usage(char *argv[])
   std::println("usage: {} --db-path <path> --ram-bytes <bytes> "
                "--bind-ip <ip> [--coordinator-addr <host:port>] "
                "[--executor-port <port>] [--mempool-port <port>] "
-               "[--auth-port <port>]",
+               "[--auth-port <port>] [--gateway-port <port>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -224,6 +233,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t exec_port = 0;
   uint16_t mempool_port = 0;
   uint16_t auth_port = 0;
+  uint16_t gateway_port = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -255,6 +265,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       auth_port = parse_port(argv[++i]);
       continue;
     }
+    if (arg == "--gateway-port" && i + 1 < argc) {
+      gateway_port = parse_port(argv[++i]);
+      continue;
+    }
     usage(argv);
   }
 
@@ -266,5 +280,5 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hogdb_init(path, *ram_bytes, coordinator_addr, bind_ip,
-                          exec_port, mempool_port, auth_port);
+                          exec_port, mempool_port, auth_port, gateway_port);
 };
