@@ -95,7 +95,9 @@ struct GenTs {
   static string codec_ref(const string &t)
   {
     if (is_primitive_type(t))
-      return {}; // primitives are serialized inline, no codec object
+      throw std::runtime_error(
+          "codec_ref called on primitive type \"" + t +
+          "\"; use proc_codec_ref for compound codecs that wrap primitives");
     return "proto.codec." + t;
   }
 
@@ -449,7 +451,7 @@ GenTs::show_def(const Typedef &d)
   {
     // Branded nullable
     string tref = ts_ref(base);
-    string cref = codec_ref(base);
+    string cref = proc_codec_ref(base);
     string factory = to_camel_case(d.id);
     prtop("export type {} = ({} | null) & {{ readonly __brand: \"{}\" }};\n",
           d.id, tref, d.id);
@@ -922,7 +924,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     base = parent_name + "_" + d.id;
 
   string indent(sp, ' ');
-  string ref = codec_ref(base);
+  auto ref = [&] { return codec_ref(base); };
 
   switch (d.qual) {
   case Declaration::kScalar:
@@ -930,7 +932,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
       bottom_ += std::format("{}w.{}({});\n", indent, map_write_method(base),
                              val_expr);
     else
-      bottom_ += std::format("{}{}.encode(w, {});\n", indent, ref, val_expr);
+      bottom_ += std::format("{}{}.encode(w, {});\n", indent, ref(), val_expr);
     break;
 
   case Declaration::kArray:
@@ -945,7 +947,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     else
       bottom_ +=
           std::format("{}FixedArrayCodec({}, Number({})).encode(w, {});\n",
-                      indent, ref, bound, val_expr);
+                      indent, ref(), bound, val_expr);
     break;
   }
 
@@ -962,7 +964,7 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     }
     else {
       bottom_ += std::format("{}VarArrayCodec({}, Number({})).encode(w, {});\n",
-                             indent, ref, map_bound(d.bound), val_expr);
+                             indent, ref(), map_bound(d.bound), val_expr);
     }
     break;
 
@@ -972,8 +974,8 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     break;
 
   case Declaration::kPtr:
-    bottom_ += std::format("{}OptionCodec({}).encode(w, {});\n", indent, ref,
-                           val_expr);
+    bottom_ += std::format("{}OptionCodec({}).encode(w, {});\n", indent,
+                           proc_codec_ref(base), val_expr);
     break;
 
   case Declaration::kVoid:
@@ -989,7 +991,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     base = parent_name + "_" + d.id;
 
   string indent(sp, ' ');
-  string ref = codec_ref(base);
+  auto ref = [&] { return codec_ref(base); };
 
   switch (d.qual) {
   case Declaration::kScalar:
@@ -997,7 +999,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       bottom_ += std::format("{}const {} = r.{}();\n", indent, d.id,
                              map_read_method(base));
     else
-      bottom_ += std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref);
+      bottom_ += std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref());
     break;
 
   case Declaration::kArray:
@@ -1014,7 +1016,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     else
       bottom_ += std::format(
           "{}const {} = FixedArrayCodec({}, Number({})).decode(r);\n", indent,
-          d.id, ref, bound);
+          d.id, ref(), bound);
     break;
   }
 
@@ -1034,7 +1036,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     else {
       bottom_ +=
           std::format("{}const {} = VarArrayCodec({}, Number({})).decode(r);\n",
-                      indent, d.id, ref, map_bound(d.bound));
+                      indent, d.id, ref(), map_bound(d.bound));
     }
     break;
 
@@ -1045,7 +1047,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
 
   case Declaration::kPtr:
     bottom_ += std::format("{}const {} = OptionCodec({}).decode(r);\n", indent,
-                           d.id, ref);
+                           d.id, proc_codec_ref(base));
     break;
 
   case Declaration::kVoid:
