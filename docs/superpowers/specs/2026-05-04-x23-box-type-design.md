@@ -71,27 +71,29 @@ serialization framework internals.
 
 ### x23c Codegen
 
-Per-language annotations in end-of-line comments on scalar fields (no `*`
-pointer syntax):
+Per-language annotations in end-of-line comments on pointer (`*`) fields.
+Recursive fields require `*` in XDR syntax to avoid infinite struct size in the
+parser — the annotation controls whether the indirection is nullable (`Ptr`) or
+non-nullable (`Box`):
 
 ```xdr
 struct TreeNode {
   int32 value;
-  TreeNode left;  // #[cpp(box)] #[rust(box)]
-  TreeNode right; // #[cpp(box)] #[rust(box)]
+  TreeNode *left;  // #[cpp(box)] #[rust(box)]
+  TreeNode *right; // #[cpp(box)] #[rust(box)]
 };
 ```
 
 **C++ (`gen_hh.cc`):**
 
-When `#[cpp(box)]` is present on a scalar field, emit `x23::Box<T>` instead of
-`T`.
+When `#[cpp(box)]` is present on a `kPtr` field, emit `x23::Box<T>` instead of
+`x23::Ptr<T>`.
 
 **Rust (`gen_rs.cc`):**
 
-When `#[rust(box)]` is present on a scalar field, emit `Box<T>` instead of `T`.
-This is distinct from the existing `#[rust(box_ptr)]` annotation, which emits
-`Option<Box<T>>` for `Ptr<T>` fields.
+When `#[rust(box)]` is present on a `kPtr` field, emit `Box<T>` instead of
+`Option<T>` or `Option<Box<T>>`. This is distinct from the existing
+`#[rust(box_ptr)]` annotation, which emits `Option<Box<T>>`.
 
 **TypeScript (`gen_ts.cc`):**
 
