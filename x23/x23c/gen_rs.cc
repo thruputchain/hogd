@@ -537,6 +537,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+    prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
@@ -711,6 +712,7 @@ GenRs::show_type(const EnumBody &e, string const &tname)
   prtop("{}\n", feature_attr("serde", "serde(transparent)"));
   prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
   prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+  prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
 #[repr(transparent)]
@@ -845,6 +847,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+    prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
     // it FFI-safe. See Rust RFC 2195:
     // https://github.com/rust-lang/rfcs/blob/master/text/2195-really-tagged-unions.md
