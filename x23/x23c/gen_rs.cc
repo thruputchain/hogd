@@ -704,27 +704,17 @@ impl {0} {{
 
         auto schema_impl = std::format(
             R"(impl schemars::JsonSchema for {0} {{
-    fn schema_name() -> ::std::string::String {{
+    fn schema_name() -> ::std::borrow::Cow<'static, str> {{
         "{0}".into()
     }}
-    fn is_referenceable() -> bool {{
-        false
-    }}
-    fn json_schema(_gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {{
-        schemars::schema::SchemaObject {{
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {{
-                min_length: Some({1}),
-                max_length: Some({1}),
-                ..Default::default()
-            }})),
-            extensions: [
-                ("contentEncoding".into(), ::serde_json::Value::String("hex".into())),
-                ("contentMediaType".into(), ::serde_json::Value::String("application/binary".into())),
-            ].into_iter().collect(),
-            ..Default::default()
-        }}
-        .into()
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {{
+        schemars::json_schema!({{
+            "type": "string",
+            "contentEncoding": "hex",
+            "contentMediaType": "application/binary",
+            "minLength": {1},
+            "maxLength": {1}
+        }})
     }}
 }}
 )",
