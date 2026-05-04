@@ -254,10 +254,29 @@ TEST(Box, RecursiveRoundTrip)
   x23::Box<BoxTree> boxed(tree);
   auto buf = x23::serialize(boxed);
 
-  auto plain_buf = x23::serialize(tree);
-  EXPECT_EQ(buf, plain_buf);
-
   x23::Box<BoxTree> result;
   x23::deserialize(&result, buf);
   EXPECT_EQ(*result, tree);
+}
+
+TEST(Box, GeneratedBoxTree)
+{
+  box_tree tree{
+      .value = 10,
+      .left = box_tree{
+          .value = 5,
+          .left = box_tree{.value = 2},
+          .right = box_tree{.value = 7},
+      },
+      .right = box_tree{.value = 15},
+  };
+
+  auto buf = x23::serialize(tree);
+  box_tree result;
+  x23::deserialize(&result, buf);
+  EXPECT_EQ(result, tree);
+
+  box_tree empty;
+  EXPECT_EQ(empty.left->value, 0);
+  EXPECT_EQ(empty.right->value, 0);
 }

@@ -44,11 +44,15 @@ static_assert(!contains_recursive_xdr<uunion>);
 static_assert(x23::is_xdr_type<x23::Box<fix_4>>);
 static_assert(x23::is_xdr_cat<x23::Box<fix_4>, x23::XdrCategory::kStruct>);
 static_assert(std::tuple_size_v<x23::Box<fix_4>> == 1);
-static_assert(x23::detail::has_fixed_size<x23::Box<fix_4>>());
-static_assert(x23::detail::xdr_size_bounds<x23::Box<fix_4>>() ==
-              x23::detail::SizeBounds{4});
-static_assert(x23::serializes_like<x23::Box<fix_4>, fix_4>);
 static_assert(x23::is_xdr_serializable<x23::Box<fix_4>>);
+
+// box_tree itself is not directly recursive (its fields are Box<box_tree>,
+// not box_tree), but Box<box_tree> is recursive and box_tree contains it.
+static_assert(!x23::is_recursive_xdr<box_tree>);
+static_assert(x23::is_recursive_xdr<x23::Box<box_tree>>);
+static_assert(x23::contains_recursive_xdr<box_tree>);
+static_assert(x23::detail::xdr_size_bounds<box_tree>() ==
+              x23::detail::SizeBounds{12, x23::detail::kNoBound});
 
 struct my_fix_4 {
   int32_t i;
@@ -209,11 +213,10 @@ check_box()
 
   fix_12 plain{.i = 42, .d = 3.14};
   Box<fix_12> boxed(plain);
-  assert(xdr_size(boxed) == xdr_size(plain));
+  // Box serializes with a 4-byte presence flag, so size = 4 + inner size.
+  assert(xdr_size(boxed) == 4 + xdr_size(plain));
 
-  Buf plain_buf = serialize(plain);
   Buf boxed_buf = serialize(boxed);
-  assert(plain_buf == boxed_buf);
 
   Box<fix_12> deserialized;
   deserialize(&deserialized, boxed_buf);
@@ -230,6 +233,10 @@ check_box()
   assert(a != b);
   Box<fix_12> c(fix_12{.i = 1, .d = 0.0});
   assert(a == c);
+
+  // Default-constructed Box is empty (absent) until first access.
+  Box<fix_12> empty;
+  assert(xdr_size(empty) == 4);
 }
 
 int
