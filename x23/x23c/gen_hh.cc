@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <format>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -89,6 +90,20 @@ struct Gen {
   static string map_case(string const &c);
   static string map_bound(string const &bound);
   string type_name(const Declaration &d, bool generate);
+
+  static std::optional<std::string> substring_removed(std::string_view str,
+                                                      std::string_view sub)
+  {
+    auto i = str.find(sub);
+    if (i != std::string::npos) {
+      std::string str2{str};
+      str2.erase(i, sub.length());
+      return str2;
+    }
+    return {};
+  }
+
+  static constexpr std::string_view kCppBox = R"(#[cpp(box)])";
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -806,6 +821,10 @@ Gen::type_name(const Declaration &d, bool generate)
 
   switch (d.qual) {
   case kScalar:
+    if (auto c = substring_removed(d.comment, kCppBox)) {
+      const_cast<Declaration &>(d).comment = *c;
+      return std::format("x23::Box<{}>", tname);
+    }
     return tname;
   case kPtr:
     return std::format("x23::Ptr<{}>", tname);
