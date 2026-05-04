@@ -33,6 +33,43 @@ random_buf()
   return ret;
 }
 
+struct BoxTree {
+  int32_t value;
+  x23::Ptr<BoxTree> left;
+  x23::Ptr<BoxTree> right;
+
+  bool operator==(const BoxTree &) const noexcept = default;
+};
+
+template<size_t I, x23::references<BoxTree> T>
+requires (I < 3)
+decltype(auto)
+get(T &&t)
+{
+  if constexpr (I == 0)
+    return (std::forward<T>(t).value);
+  if constexpr (I == 1)
+    return (std::forward<T>(t).left);
+  if constexpr (I == 2)
+    return (std::forward<T>(t).right);
+}
+
+template<>
+struct std::tuple_size<BoxTree>
+  : std::integral_constant<std::size_t, 3> {};
+template<size_t I> requires (I < 3)
+struct std::tuple_element<I, BoxTree> {
+  using type = decltype(auto(get<I>(std::declval<BoxTree>())));
+};
+
+template<>
+struct x23::xdr_meta<BoxTree> {
+  static constexpr XdrCategory category = XdrCategory::kStruct;
+  static constexpr const char *type_name = "BoxTree";
+  static constexpr std::array<std::string_view, 3> field_names{
+      "value", "left", "right"};
+};
+
 TEST(Deserialize, Fuzz)
 {
   for (int i = 0; i < 10'000; ++i) {
@@ -203,4 +240,24 @@ TEST(XdrPtr, ThreeWayCompareUsesPointeeValue)
   EXPECT_TRUE((a <=> b) == 0);
   EXPECT_LT(a, c);
   EXPECT_TRUE((a <=> c) < 0);
+}
+
+TEST(Box, RecursiveRoundTrip)
+{
+  BoxTree tree{
+      .value = 1,
+      .left = BoxTree{.value = 2},
+      .right = BoxTree{.value = 3,
+                       .left = BoxTree{.value = 4}},
+  };
+
+  x23::Box<BoxTree> boxed(tree);
+  auto buf = x23::serialize(boxed);
+
+  auto plain_buf = x23::serialize(tree);
+  EXPECT_EQ(buf, plain_buf);
+
+  x23::Box<BoxTree> result;
+  x23::deserialize(&result, buf);
+  EXPECT_EQ(*result, tree);
 }
