@@ -566,9 +566,9 @@ GenTs::show_def(const ProgDef &prog)
       // Response codec
       string resp_codec = proc_codec_ref(proc.return_type);
 
-      program_meta_ += std::format(
-          "    {0}: {{ proc: {1}, request: {2}, response: {3} }},\n", proc.id,
-          proc.val, req_codec, resp_codec);
+      program_meta_ += std::format("    {0}: {{ proc: {1}, request: () => {2}, "
+                                   "response: () => {3} }},\n",
+                                   proc.id, proc.val, req_codec, resp_codec);
     }
 
     program_meta_ += "  },\n"
