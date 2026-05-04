@@ -999,7 +999,8 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       bottom_ += std::format("{}const {} = r.{}();\n", indent, d.id,
                              map_read_method(base));
     else
-      bottom_ += std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref());
+      bottom_ +=
+          std::format("{}const {} = {}.decode(r);\n", indent, d.id, ref());
     break;
 
   case Declaration::kArray:
