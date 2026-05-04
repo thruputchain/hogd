@@ -59,4 +59,8 @@ add_dependencies(
   all_wasm_contracts
   hogd_dev_exec
 )
-gtest_discover_tests(hogd_dev_test)
+gtest_discover_tests(
+  hogd_dev_test
+  PROPERTIES
+    RESOURCE_LOCK hogd_dev
+)
