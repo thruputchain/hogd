@@ -409,9 +409,3 @@ typedef opaque tiny_opaque<1>;
 enum ConstUnionBugType { kConstBugA = 0 };
 union ConstUnionBugUnion switch (ConstUnionBugType t) { case kConstBugA: int val; };
 struct ConstUnionBugStruct { ConstUnionBugUnion u; };
-
-struct box_tree {
-  int value;
-  box_tree left;  // #[cpp(box)]
-  box_tree right; // #[cpp(box)]
-};

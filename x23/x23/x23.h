@@ -240,15 +240,9 @@ template<typename T> struct Box : private std::unique_ptr<T> {
   using element_type = T;
   using value_type = T;
 
-  // Default-construct lazily: the inner T is allocated on first access.
-  // This avoids infinite recursion for self-referential types like
-  // struct S { Box<S> child; }.
-  Box() = default;
+  Box() : super(new T{}) {}
 
-  Box(const Box &other)
-    : super(static_cast<const super &>(other)
-                ? new T(*other)
-                : nullptr) {}
+  Box(const Box &other) : super(new T(*other)) {}
   Box(Box &&other) noexcept = default;
 
   Box(value_type t) : super(new T(std::move(t))) {}
@@ -266,42 +260,15 @@ template<typename T> struct Box : private std::unique_ptr<T> {
 
   Box &operator=(const Box &other)
   {
-    if (static_cast<const super &>(other)) {
-      if (super::get())
-        **this = *other;
-      else
-        super::operator=(super(new T(*other)));
-    } else {
-      super::reset();
-    }
+    **this = *other;
     return *this;
   }
   Box &operator=(Box &&other) noexcept = default;
 
-  // Lazily allocate on first access.
-  // Whether the Box holds a value.  A default-constructed Box is empty.
-  bool has_value() const noexcept { return bool(static_cast<const super &>(*this)); }
-  explicit operator bool() const noexcept { return has_value(); }
-
-  // Ensure the Box holds a value, lazily allocating if needed.
-  void ensure()
-  {
-    if (!has_value())
-      super::operator=(super(new T{}));
-  }
-
   T *get() noexcept { return super::get(); }
   const T *get() const noexcept { return super::get(); }
-
   decltype(auto) operator*(this auto &&self) { return *self.get(); }
-  // operator-> lazily allocates so field access (e.g. b->value) on a
-  // default-constructed Box works as if T were value-initialized.
-  T *operator->() noexcept { ensure(); return get(); }
-  const T *operator->() const noexcept
-  {
-    const_cast<Box *>(this)->ensure();
-    return get();
-  }
+  auto operator->(this auto &&self) noexcept { return self.get(); }
 };
 template<typename T> Box(T &&) -> Box<T>;
 
@@ -349,18 +316,14 @@ template<typename T>
 inline bool
 operator==(const Box<T> &a, const Box<T> &b)
 {
-  if (a.has_value() && b.has_value())
-    return *a == *b;
-  return a.has_value() == b.has_value();
+  return *a == *b;
 }
 
 template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Box<T> &a, const Box<T> &b)
 {
-  if (a.has_value() && b.has_value())
-    return *a <=> *b;
-  return a.has_value() <=> b.has_value();
+  return *a <=> *b;
 }
 
 template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};

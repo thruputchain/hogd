@@ -332,15 +332,6 @@ struct Serializer {
       (*this)(e);
   }
 
-  template<is_xdr_type T> void operator()(const Box<T> &b)
-  {
-    if (b.has_value()) {
-      put32(1);
-      (*this)(*b);
-    }
-    else
-      put32(0);
-  }
   template<is_xdr_struct X> void operator()(const X &x)
   {
     visit_fields(*this, x);
@@ -446,15 +437,22 @@ xdr_serialize(auto &serializer, BorrowedPtr<T> p)
 template<typename X, serializes_like<X> T>
 struct serialize_equiv<Ptr<X>, BorrowedPtr<T>> : std::true_type {};
 
-// Box<T> serializes like Ptr<T>: a 4-byte presence flag followed by the
-// value if present.  A default-constructed (empty) Box serializes as
-// absent, which is essential for recursive types to avoid infinite depth.
-template<is_xdr_type T>
+template<is_xdr_serializable T>
 inline size_t
 xdr_size(const Box<T> &b)
 {
-  return b.has_value() ? 4 + xdr_size(*b) : 4;
+  return xdr_size(*b);
 }
+
+template<is_xdr_serializable T>
+void
+xdr_serialize(auto &serializer, const Box<T> &b)
+{
+  serializer(*b);
+}
+
+template<typename X, serializes_like<X> T>
+struct serialize_equiv<X, Box<T>> : std::true_type {};
 
 // A non-owning span that serializes a member projection of each element.
 // Dynamic extent (default) includes a size prefix and serializes like Vec;
@@ -834,16 +832,6 @@ struct Deserializer
     x.resize(b);
     if (b)
       go<Safe>(*x);
-  }
-  template<bool Safe, is_xdr_type T>
-  void go(Box<T> &x)
-  {
-    bool b;
-    go<Safe>(b);
-    if (b) {
-      x.ensure();
-      go<Safe>(*x);
-    }
   }
 
   template<bool Safe, is_xdr_struct X> void go(X &x)
