@@ -340,7 +340,7 @@ template<typename T>
 inline bool
 operator==(const Box<T> &a, const Box<T> &b)
 {
-  const T da{}, db{};
+  static const T da{}, db{};
   return (a.has_value() ? *a : da) == (b.has_value() ? *b : db);
 }
 
@@ -348,7 +348,7 @@ template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Box<T> &a, const Box<T> &b)
 {
-  const T da{}, db{};
+  static const T da{}, db{};
   return (a.has_value() ? *a : da) <=> (b.has_value() ? *b : db);
 }
 
