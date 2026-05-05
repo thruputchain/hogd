@@ -340,18 +340,16 @@ template<typename T>
 inline bool
 operator==(const Box<T> &a, const Box<T> &b)
 {
-  if (a.has_value() && b.has_value())
-    return *a == *b;
-  return a.has_value() == b.has_value();
+  const T da{}, db{};
+  return (a.has_value() ? *a : da) == (b.has_value() ? *b : db);
 }
 
 template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Box<T> &a, const Box<T> &b)
 {
-  if (a.has_value() && b.has_value())
-    return *a <=> *b;
-  return a.has_value() <=> b.has_value();
+  const T da{}, db{};
+  return (a.has_value() ? *a : da) <=> (b.has_value() ? *b : db);
 }
 
 template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};
