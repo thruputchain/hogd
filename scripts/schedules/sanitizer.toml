@@ -19,6 +19,8 @@ source ./scripts/ci/prepare_env.sh
 # (some kind of uninitialized variable in stdlib), so we disable benchmark builds in release mode.
 # We disable it overall just to save build time, but it's required for the gcc release build with asan.
 
+export ASAN_OPTIONS=abort_on_error=1
+
 echo 'build gcc asan'
 ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
