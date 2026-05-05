@@ -21,6 +21,9 @@ namespace hogd {
 
 namespace {
 
+static_assert(sizeof(SHA256Hash) == SHA256Hash{}.size(),
+              "Merkle proof wire format requires sizeof(SHA256Hash) == element count");
+
 template<typename Sink>
 void
 emit_bytes(Sink &sink, std::span<const std::byte> bytes)
@@ -116,7 +119,7 @@ visit_children_encoding(
                            std::span(child->hash.data(), child->hash.size())));
     }
     else {
-      std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};
+      std::array<std::byte, SHA256Hash{}.size()> zero_bytes{};
       emit_bytes(sink, zero_bytes);
     }
   }
@@ -131,7 +134,7 @@ visit_child_encoding(Sink &sink, Node *child)
                          std::span(child->hash.data(), child->hash.size())));
   }
   else {
-    std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};
+    std::array<std::byte, SHA256Hash{}.size()> zero_bytes{};
     emit_bytes(sink, zero_bytes);
   }
 }
