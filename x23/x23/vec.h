@@ -819,6 +819,10 @@ concept is_bytevec = is_bytespan<T> && requires(T t) {
 // Simple byte buffer using Vec.
 using Buf = Vec<uint8_t>;
 
+static_assert(
+    std::is_same_v<std::uint8_t, unsigned char>,
+    "BufView char/uint8_t aliasing requires uint8_t == unsigned char");
+
 // Analogous to std::string_view, but can be initialized from a
 // variety of containers of std::uint8_t or char.
 struct BufView : span<const uint8_t> {
