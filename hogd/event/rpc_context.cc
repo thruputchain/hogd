@@ -128,16 +128,18 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   std::exception_ptr ex;
   try {
     out_hash = context.get().get_root_hash();
+  } catch (const std::exception &e) {
+    error("close_block: get_root_hash threw: {}; draining file_wait before "
+          "rethrowing",
+          e.what());
+    ex = std::current_exception();
   } catch (...) {
+    error("close_block: get_root_hash threw unknown exception; draining "
+          "file_wait before rethrowing");
     ex = std::current_exception();
   }
   if (ex) {
-    error("close_block: get_root_hash threw; draining file_wait before "
-          "rethrowing");
-    try {
-      co_await file_wait;
-    } catch (...) {
-    }
+    co_await file_wait;
     std::rethrow_exception(ex);
   }
   record_stage(stage_prepare_context_and_async);
