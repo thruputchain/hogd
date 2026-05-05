@@ -379,6 +379,67 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
   }
 }
 
+TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
+{
+  constexpr ContractAddress kCalleeAddress = make_contract_address(0);
+  constexpr ContractAddress kCallerAddress = make_contract_address(1);
+
+  auto callee_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+             return {};
+           }}});
+
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [kCalleeAddress](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len = 0,
+                                 output_returned_auth_token_len = 0;
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 kCalleeAddress, 0, UINT64_MAX, Calldata{},
+                 std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                 output_return_buffer_len, output_returned_auth_token_len);
+             if (!r.has_value() ||
+                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Invoke with an empty auth-token span failed";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(callee_contract));
+  contract_map.emplace(1, std::move(caller_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto callee_xdr = make_native_contract(0);
+  write_contract(callee_xdr);
+  write_deployment(kCalleeAddress, callee_xdr);
+
+  auto caller_xdr = make_native_contract(1);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kCallerAddress,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

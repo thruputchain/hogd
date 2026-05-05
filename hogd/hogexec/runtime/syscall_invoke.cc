@@ -198,9 +198,13 @@ syscall_Invoke_inner(
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
-  std::memcpy(owned_auth_token_ids_vec.data(),
-              input_owned_auth_token_ids.data(),
-              input_owned_auth_token_ids.size());
+  if (!input_owned_auth_token_ids.empty()) {
+    assert(owned_auth_token_ids_vec.data() != nullptr);
+    assert(input_owned_auth_token_ids.data() != nullptr);
+    std::memcpy(owned_auth_token_ids_vec.data(),
+                input_owned_auth_token_ids.data(),
+                input_owned_auth_token_ids.size());
+  }
 
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
