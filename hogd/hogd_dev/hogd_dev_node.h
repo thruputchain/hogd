@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "hogd/auth/auth_server.h"
 #include "hogd/base/rpc_server.h"
@@ -11,6 +12,7 @@
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
+#include "hogd/hogd_dev/dev_account_bootstrap.h"
 #include "hogd/hogd_dev/fake_coordinator.h"
 #include "hogd/hogd_dev/hogd_dev_tmp_dir.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -33,7 +35,8 @@ namespace hogd {
 
 class HogdDevNode {
 public:
-  HogdDevNode(std::string bind_host, std::uint16_t requested_scheduler_port);
+  HogdDevNode(std::string bind_host, std::uint16_t requested_scheduler_port,
+              DevAccountBootstrapConfig bootstrap_config = {});
   ~HogdDevNode();
 
   HogdDevNode(HogdDevNode const &) = delete;
@@ -53,6 +56,10 @@ public:
   }
   // Advertised in the readiness JSON as the `gateway` endpoint.
   std::uint16_t gateway_port() const { return db_gateway_server_->port(); }
+  std::vector<DevAccountMetadata> const &dev_accounts() const
+  {
+    return dev_accounts_;
+  }
 
 private:
   // Numeric chain network id. The readiness network_id is a human protocol
@@ -70,8 +77,12 @@ private:
   void register_auth_with_mempool();
   void register_executor_with_mempool();
   x23::Async<void> register_coordinator_with_mempool();
+  void bootstrap_dev_accounts(DevAccountBootstrapConfig const &config);
+  void commit_initialization_batch(SignedTransactionBatch const &txs);
+  void refresh_dev_account_balances();
 
   std::string bind_host_;
+  std::vector<DevAccountMetadata> dev_accounts_;
 
   HogdDevTmpDir db_dir_;
   // Declaration order matters: event_ctx_ borrows event_dir_.directory(),

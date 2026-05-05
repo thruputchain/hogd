@@ -1,5 +1,6 @@
 add_library(
   hogd_dev
+  dev_account_bootstrap.cc
   hogd_dev_node.cc
   hogd_dev_tmp_dir.cc
 )
@@ -7,8 +8,10 @@ target_link_libraries(
   hogd_dev
   auth
   base
+  contract_loader
   event
   exec_interface
+  genesis
   hogd
   hogdb
   indexer
@@ -17,6 +20,16 @@ target_link_libraries(
   ramdb
   runtime
   storage_cost
+)
+add_dependencies(
+  hogd_dev
+  all_wasm_contracts
+  all_wasm_headers
+)
+target_include_directories(
+  hogd_dev
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
 )
 
 add_executable(

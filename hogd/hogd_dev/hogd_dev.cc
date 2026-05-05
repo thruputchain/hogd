@@ -1,18 +1,23 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <limits>
 #include <print>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/string.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
 #include "hogd/init.h"
 
@@ -74,6 +79,13 @@ wait_for_shutdown(const ShutdownSignals &signals)
 }
 // NOLINTEND(misc-include-cleaner)
 
+template<std::size_t N>
+std::string
+format_hex(std::array<std::uint8_t, N> const &bytes)
+{
+  return std::format("0x{}", encode_hex(std::as_bytes(std::span(bytes))));
+}
+
 std::string
 build_readiness_payload(const HogdDevNode &node)
 {
@@ -89,6 +101,22 @@ build_readiness_payload(const HogdDevNode &node)
       w.field("gateway",
               format_advertised_address(node.bind_host(), node.gateway_port()));
     });
+    if (!node.dev_accounts().empty()) {
+      w.array_field("dev_accounts", [&](json::Writer &w) {
+        for (DevAccountMetadata const &account : node.dev_accounts()) {
+          CHECK_LE(account.storage_tokens,
+                   static_cast<std::uint64_t>(
+                       std::numeric_limits<std::int64_t>::max()));
+          w.object([&](json::Writer &w) {
+            w.field("index", static_cast<std::int64_t>(account.index));
+            w.field("address", format_hex(account.address));
+            w.field("public_key", format_hex(account.public_key));
+            w.field("storage_tokens",
+                    static_cast<std::int64_t>(account.storage_tokens));
+          });
+        }
+      });
+    }
   });
   return buffer;
 }
@@ -105,11 +133,13 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink)
 
 int
 hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
-              ReadinessSink readiness_sink)
+              ReadinessSink readiness_sink,
+              DevAccountBootstrapConfig bootstrap_config)
 {
   install_signal_handler();
 
-  HogdDevNode node(std::move(listen_host), requested_scheduler_port);
+  HogdDevNode node(std::move(listen_host), requested_scheduler_port,
+                   std::move(bootstrap_config));
   emit_readiness(node, readiness_sink);
   info("hogd-dev initialization complete.");
 
@@ -129,7 +159,9 @@ usage(char *argv[])
 {
   std::println(stderr,
                "usage: {} [--listen-host <ip>] [--scheduler-port <port>] "
-               "[--readiness stdout]",
+               "[--readiness stdout] [--dev-accounts <count>] "
+               "[--dev-account-seed <seed>] "
+               "[--dev-account-tokens <tokens>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -145,6 +177,31 @@ parse_port(const std::string &value)
   return static_cast<std::uint16_t>(port);
 }
 
+std::uint32_t
+parse_u32(const std::string &value, std::string_view name)
+{
+  std::size_t pos = 0;
+  std::uint64_t parsed = std::stoull(value, &pos, 10);
+  if (pos != value.size() ||
+      parsed > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  }
+  return static_cast<std::uint32_t>(parsed);
+}
+
+std::uint64_t
+parse_u64(const std::string &value, std::string_view name)
+{
+  std::size_t pos = 0;
+  std::uint64_t parsed = std::stoull(value, &pos, 10);
+  if (pos != value.size() ||
+      parsed > static_cast<std::uint64_t>(
+                   std::numeric_limits<std::int64_t>::max())) {
+    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  }
+  return parsed;
+}
+
 } // namespace
 
 int
@@ -158,6 +215,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string listen_host = "127.0.0.1";
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
+  hogd::DevAccountBootstrapConfig bootstrap_config;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -177,9 +235,22 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       readiness_sink = hogd::ReadinessSink::kStdout;
       continue;
     }
+    if (arg == "--dev-accounts" && i + 1 < argc) {
+      bootstrap_config.count = parse_u32(argv[++i], "dev account count");
+      continue;
+    }
+    if (arg == "--dev-account-seed" && i + 1 < argc) {
+      bootstrap_config.seed = argv[++i];
+      continue;
+    }
+    if (arg == "--dev-account-tokens" && i + 1 < argc) {
+      bootstrap_config.storage_tokens =
+          parse_u64(argv[++i], "dev account tokens");
+      continue;
+    }
     usage(argv);
   }
 
   return hogd::hogd_dev_init(std::move(listen_host), scheduler_port,
-                             readiness_sink);
+                             readiness_sink, std::move(bootstrap_config));
 }
