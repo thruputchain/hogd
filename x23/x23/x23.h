@@ -11,8 +11,6 @@
 #include <format>
 #include <initializer_list>
 #include <memory>
-
-#include "x23/debug.h"
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -20,6 +18,7 @@
 #include <utility>
 #include <variant>
 
+#include "x23/debug.h"
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -341,14 +340,18 @@ template<typename T>
 inline bool
 operator==(const Box<T> &a, const Box<T> &b)
 {
-  return *a == *b;
+  if (a.has_value() && b.has_value())
+    return *a == *b;
+  return a.has_value() == b.has_value();
 }
 
 template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Box<T> &a, const Box<T> &b)
 {
-  return *a <=> *b;
+  if (a.has_value() && b.has_value())
+    return *a <=> *b;
+  return a.has_value() <=> b.has_value();
 }
 
 template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};
