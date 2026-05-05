@@ -1114,6 +1114,233 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  auto contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             AuthTokenNode node{.consumer_address = kAddr,
+                                .payload = x23::serialize(
+                                    uint32_t{kAuthTokenMaxDepth}),
+                                .child_nodes = {}};
+             for (uint32_t level = kAuthTokenMaxDepth; level > 0; --level) {
+               node = AuthTokenNode{
+                   .consumer_address = kAddr,
+                   .payload = x23::serialize(level - uint32_t{1}),
+                   .child_nodes = {node}};
+             }
+
+             auto serialized = x23::serialize(node);
+             uint32_t token_id = 0;
+             auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+                 BlockHeight{1000},
+                 std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                                serialized.data()),
+                                            serialized.size()},
+                 token_id);
+             EXPECT_TRUE(mint_res.has_value());
+             EXPECT_EQ(
+                 mint_res.value(),
+                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  auto contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             AuthTokenNode node{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(
+                     uint32_t{kAuthTokenMaxDepth - 1}),
+                 .child_nodes = {}};
+             for (uint32_t level = kAuthTokenMaxDepth - 1; level > 0;
+                  --level) {
+               node = AuthTokenNode{
+                   .consumer_address = kAddr,
+                   .payload = x23::serialize(level - uint32_t{1}),
+                   .child_nodes = {node}};
+             }
+
+             auto serialized = x23::serialize(node);
+             uint32_t root_id = 0;
+             auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+                 BlockHeight{1000},
+                 std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                                serialized.data()),
+                                            serialized.size()},
+                 root_id);
+             EXPECT_TRUE(mint_res.has_value());
+             EXPECT_EQ(mint_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeNone);
+
+             uint32_t token_id = root_id;
+             for (uint32_t level = 0;
+                  level < uint32_t{kAuthTokenMaxDepth};
+                  ++level) {
+               std::array<std::byte, 256> payload_buf{};
+               RuntimeMemoryLength payload_written_len = 0;
+               uint32_t child_start = 0, child_count = 0;
+               auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+                   token_id, std::span<std::byte>{payload_buf},
+                   payload_written_len, child_start, child_count);
+               EXPECT_TRUE(consume_res.has_value());
+               EXPECT_EQ(consume_res.value(),
+                         SyscallErrorCode::kSyscallErrorCodeNone);
+
+               auto expected_payload = x23::serialize(level);
+               EXPECT_EQ(payload_written_len, expected_payload.size());
+               EXPECT_EQ(std::memcmp(payload_buf.data(),
+                                     expected_payload.data(),
+                                     expected_payload.size()),
+                         0);
+
+               if (level < uint32_t{kAuthTokenMaxDepth} - 1) {
+                 EXPECT_EQ(child_count, 1U);
+                 token_id = child_start;
+               } else {
+                 EXPECT_EQ(child_count, 0U);
+               }
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  auto contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             AuthTokenNode too_deep{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(uint32_t{5}),
+                 .child_nodes = {}};
+             AuthTokenNode great_grandchild{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(uint32_t{4}),
+                 .child_nodes = {too_deep}};
+             AuthTokenNode grandchild{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(uint32_t{3}),
+                 .child_nodes = {great_grandchild}};
+             AuthTokenNode child1{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(uint32_t{2}),
+                 .child_nodes = {grandchild}};
+             AuthTokenNode child0{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(uint32_t{1}),
+                 .child_nodes = {}};
+             AuthTokenNode root{
+                 .consumer_address = kAddr,
+                 .payload = x23::serialize(uint32_t{0}),
+                 .child_nodes = {child0, child1}};
+
+             auto serialized = x23::serialize(root);
+             uint32_t token_id = 0;
+             auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+                 BlockHeight{1000},
+                 std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                                serialized.data()),
+                                            serialized.size()},
+                 token_id);
+             EXPECT_TRUE(mint_res.has_value());
+             EXPECT_EQ(
+                 mint_res.value(),
+                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

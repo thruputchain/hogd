@@ -10,6 +10,7 @@
 #include <new>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -141,6 +142,24 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
+static bool
+auth_token_node_within_depth(AuthTokenNode const &root, uint32_t max_depth)
+{
+  std::vector<std::pair<AuthTokenNode const *, uint32_t>> stack;
+  stack.emplace_back(&root, uint32_t{1});
+  while (!stack.empty()) {
+    auto [node, depth] = stack.back();
+    stack.pop_back();
+    if (depth > max_depth) {
+      return false;
+    }
+    for (auto const &child : node->child_nodes) {
+      stack.emplace_back(&child, depth + 1);
+    }
+  }
+  return true;
+}
+
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_MintAuthToken_inner(
     SystemCallHandler &syscall_handler, BlockHeight input_expiry_height,
@@ -170,6 +189,12 @@ syscall_MintAuthToken_inner(
     error("unrecoverable: failed to deserialize auth token with unknown "
           "exception");
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
+
+  if (!auth_token_node_within_depth(auth_token.root_node,
+                                    kAuthTokenMaxDepth)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.mint_auth_token(auth_token);
