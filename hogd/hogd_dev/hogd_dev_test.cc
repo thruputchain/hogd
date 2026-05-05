@@ -53,7 +53,7 @@ namespace hogd {
 
 namespace {
 
-constexpr auto kStartupTimeout = std::chrono::seconds(10);
+constexpr auto kStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
