@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -45,7 +46,6 @@ public:
   InvocationFrame(InvocationFrame const &) = delete;
   InvocationFrame &operator=(InvocationFrame const &) = delete;
 
-  // NOLINTNEXTLINE(bugprone-exception-escape)
   InvocationFrame(InvocationFrame &&) noexcept = default;
   InvocationFrame &operator=(InvocationFrame &&) noexcept = delete;
 
@@ -206,8 +206,8 @@ public:
   }
 
 private:
-  const ContractAddress address_;
-  const Calldata calldata_;
+  ContractAddress address_;
+  Calldata calldata_;
 
   // buffer to return to parent
   InvocationFrameOutput to_return_output_ =
@@ -235,6 +235,8 @@ private:
       most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
                                                       // reverts
 };
+
+static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
 
 // Stack of invocation frames.
 class InvocationFrameStack {
