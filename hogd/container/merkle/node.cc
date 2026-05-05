@@ -183,10 +183,10 @@ get_value_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   idx += kValuePresentSize;
 
   if (value_present) {
-    node.value_hash = SHA256Hash();
-    if (idx + node.value_hash->size() > encodings.size()) {
+    if (idx + SHA256Hash{}.size() > encodings.size()) {
       return false;
     }
+    node.value_hash = SHA256Hash();
     memcpy(node.value_hash->data(), &encodings[idx], node.value_hash->size());
     idx += node.value_hash->size();
   }
