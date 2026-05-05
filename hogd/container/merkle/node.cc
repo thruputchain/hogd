@@ -21,8 +21,9 @@ namespace hogd {
 
 namespace {
 
-static_assert(sizeof(SHA256Hash) == SHA256Hash{}.size(),
-              "Merkle proof wire format requires sizeof(SHA256Hash) == element count");
+static_assert(
+    sizeof(SHA256Hash) == SHA256Hash{}.size(),
+    "Merkle proof wire format requires sizeof(SHA256Hash) == element count");
 
 template<typename Sink>
 void
@@ -237,7 +238,8 @@ get_branches_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   }
   for (size_t i = 0; i < num_branches; i++) {
     size_t start = idx + (i * node.child_hashes[i].size());
-    memcpy(node.child_hashes[i].data(), &encodings[start], node.child_hashes[i].size());
+    memcpy(node.child_hashes[i].data(), &encodings[start],
+           node.child_hashes[i].size());
   }
   idx += branch_encoding_size;
 
