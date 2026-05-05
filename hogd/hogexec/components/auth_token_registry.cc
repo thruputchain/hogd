@@ -37,10 +37,11 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
 {
   auto it = auth_tokens_.find(token_id);
   CHECK(it != auth_tokens_.end());
-  if (it->second.unwrap_result.has_value()) {
-    return it->second.unwrap_result;
+  auto &entry = it->second;
+  if (entry.unwrap_result.has_value()) {
+    return entry.unwrap_result;
   }
-  auto const &auth_token = it->second.auth_token;
+  auto const &auth_token = entry.auth_token;
   auto child_nodes = auth_token.root_node.child_nodes;
   if (child_nodes.empty()) {
     return AuthTokenUnwrapResult{.new_token_id_start = 0,
@@ -67,9 +68,9 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
         auth_tokens_.emplace(child_token_id, std::move(child_auth_token));
     assert(success);
   }
-  it->second.unwrap_result =
+  entry.unwrap_result =
       AuthTokenUnwrapResult{.new_token_id_start = new_token_id_start,
                             .new_token_id_count = new_token_id_count};
-  return it->second.unwrap_result;
+  return entry.unwrap_result;
 }
 } // namespace hogd
