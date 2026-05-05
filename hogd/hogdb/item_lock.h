@@ -111,8 +111,7 @@ private:
                                   const LockContext &ctx,
                                   std::unique_lock<x23::TestLock> const &ul);
 
-  void set_snapshot_data(
-      std::pair<int128_t, ItemLockCacheData> const &snapshot)
+  void set_snapshot_data(std::pair<int128_t, ItemLockCacheData> const &snapshot)
   {
     snapshot_cost_ = snapshot.first;
 
