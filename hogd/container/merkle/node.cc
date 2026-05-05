@@ -231,13 +231,13 @@ bool
 get_branches_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
                            Node::Raw &node, size_t num_branches)
 {
-  size_t branch_encoding_size = num_branches * sizeof(SHA256Hash);
+  size_t branch_encoding_size = num_branches * node.child_hashes[0].size();
   if (idx + branch_encoding_size > encodings.size()) {
     return false;
   }
   for (size_t i = 0; i < num_branches; i++) {
-    size_t start = idx + (i * sizeof(SHA256Hash));
-    memcpy(&node.child_hashes[i], &encodings[start], sizeof(SHA256Hash));
+    size_t start = idx + (i * node.child_hashes[i].size());
+    memcpy(node.child_hashes[i].data(), &encodings[start], node.child_hashes[i].size());
   }
   idx += branch_encoding_size;
 
