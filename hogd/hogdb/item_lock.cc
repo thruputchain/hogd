@@ -170,6 +170,15 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
       lock_contents_);
 }
 
+void
+ItemLock::add_committed_balance_credit(int128_t delta)
+{
+  CHECK_EQ(lock_state_.load(std::memory_order_acquire), kFinalized);
+  auto *inner = std::get_if<BalanceLock>(&lock_contents_);
+  CHECK(inner != nullptr);
+  inner->add_committed_credit(delta);
+}
+
 HogDBStatus<int128_t>
 ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
                                            const ItemChange *after,

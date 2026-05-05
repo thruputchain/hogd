@@ -29,8 +29,6 @@ add_custom_target(
     DEPENDS ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/syscall_inner.h
 )
 
-add_dependencies(generate_syscall_inner_h generate_contract_types_ffi_h)
-
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/syscall_meta.h

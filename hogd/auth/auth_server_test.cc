@@ -8,6 +8,7 @@
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server_test_framework.h"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -309,8 +310,6 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
   ASSERT_FALSE(result.value()->second.has_value());
 }
 
-// NOLINTEND(bugprone-unchecked-optional-access)
-
 namespace {
 
 class BlockingIntroDBAuthRpc {
@@ -402,5 +401,90 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
   EXPECT_EQ(result.value()->first, 1);
   ASSERT_TRUE(result.value()->second.has_value());
 }
+
+TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)
+{
+  const ContractAddress address = make_test_address(101);
+  AddressAuthData old_auth_data = make_test_auth_data(1);
+  old_auth_data.last_written_height = 11;
+  AddressAuthData new_auth_data = make_test_auth_data(2);
+  new_auth_data.last_written_height = 22;
+
+  mock_db().set(address, old_auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto lookup = auth_server().lookup_auth_data(0, address)();
+  ASSERT_TRUE(lookup.has_value());
+  ASSERT_NE(lookup.value(), nullptr);
+  ASSERT_TRUE(lookup.value()->second.has_value());
+
+  auto retained_entry = std::move(lookup.value());
+  const AddressAuthData *raw_ptr = &retained_entry->second.value();
+
+  x23::Ptr<AddressAuthData> updated_auth_data;
+  updated_auth_data.emplace(new_auth_data);
+  KeyChangeBatch key_changes;
+  key_changes.push_back(
+      KeyChange{.address = address, .auth_data = std::move(updated_auth_data)});
+  auth_server().register_auth_data_updates(1, std::move(key_changes))();
+
+  EXPECT_EQ(raw_ptr->last_written_height, 11);
+  EXPECT_EQ(retained_entry->second.value(), old_auth_data);
+}
+
+TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
+{
+  const ContractAddress address = make_test_address(50);
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  SignedTransaction stx{};
+  stx.tx.invocation.invoked_address = address;
+
+  auto results = auth_server().verify_transactions(0, std::span(&stx, 1))();
+  ASSERT_EQ(results.size(), 1);
+}
+
+TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
+{
+  const ContractAddress address = make_test_address(50);
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  SignedTransaction stx{};
+  stx.tx.invocation.invoked_address = address;
+
+  std::atomic<BlockHeight> current_h = 0;
+  std::atomic<bool> done = false;
+
+  std::jthread replacer([&] {
+    for (BlockHeight h = 1; !done.load(std::memory_order_relaxed); h++) {
+      x23::Ptr<AddressAuthData> ptr;
+      ptr.emplace(make_test_auth_data(static_cast<uint8_t>((h % 20) + 1)));
+      KeyChangeBatch changes;
+      changes.push_back(
+          KeyChange{.address = address, .auth_data = std::move(ptr)});
+      auth_server().register_auth_data_updates(h, std::move(changes))();
+      current_h.store(h, std::memory_order_release);
+    }
+  });
+
+  for (int i = 0; i < 1000; i++) {
+    BlockHeight h = current_h.load(std::memory_order_acquire);
+    auth_server().verify_transactions(h, std::span(&stx, 1))();
+  }
+  done = true;
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

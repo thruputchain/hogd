@@ -3,10 +3,10 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <span>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 

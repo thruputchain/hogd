@@ -415,30 +415,15 @@ make_key_pair()
   return {pk_wrapper, sk_wrapper};
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 DecoratedSignature
-make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
-               uint32_t public_key_id)
+make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx));
-  return {.auth_claim_idx = auth_claim_idx,
-          .public_key_id = public_key_id,
-          .signature = sig};
+  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+  return {.public_key_id = public_key_id, .signature = sig};
 }
-
-constexpr NonceConfig kAnyKeyNonceConfig =
-    NonceConfig{.accepted_keys = 0x000F'FFFF, .required_weight = 0};
-
-auto
-make_aux_auth_data(ContractAddress addr, x23::BufView serialized_auth_data)
-    -> FFISerializedAuthData
-{
-  FFISerializedAuthData result;
-  std::memcpy(result.address, addr.data(), addr.size());
-  result.data = serialized_auth_data.data();
-  result.len = static_cast<uint32_t>(serialized_auth_data.size());
-  return result;
-}
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 auto
 make_source_auth_data(x23::BufView serialized_auth_data) -> FFISourceAuthData
@@ -449,70 +434,46 @@ make_source_auth_data(x23::BufView serialized_auth_data) -> FFISourceAuthData
 
 } // namespace
 
-TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaims)
+TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
 {
-  // Test verifying a transaction with:
-  // - One auth claim for the invoked address (key 0)
-  // - One auth claim for an auxiliary address (key 0)
+  // Test verifying a transaction with a source address signed weight claim
 
-  // Generate keys for both addresses
-  auto [invoked_pk, invoked_sk] = make_key_pair();
-  auto [aux_pk, aux_sk] = make_key_pair();
+  auto [pk, sk] = make_key_pair();
 
   ContractAddress invoked_addr{1};
-  ContractAddress aux_addr{2};
 
-  // Create auth claims
-  AuthClaim invoked_claim(AuthClaimType::kInvokedAddressSignature);
-  invoked_claim.invoked_address_signature_id() = 0;
-
-  AuthClaim aux_claim(AuthClaimType::kOtherAddressSignature);
-  aux_claim.other_address_signature_id().address = aux_addr;
-  aux_claim.other_address_signature_id().key_id = 0;
+  // Create auth claim
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1 << 0;
+  claim.source_address_claim().required_weight = 1;
 
   // Build transaction
   Transaction tx{};
   tx.invocation.invoked_address = invoked_addr;
   tx.invocation.gas_limit = 100'000;
-  tx.auth_claims = {invoked_claim, aux_claim};
+  tx.auth_claim = claim;
 
   // Sign the transaction
-  DecoratedSignature invoked_sig =
-      make_signature(invoked_sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
-  DecoratedSignature aux_sig =
-      make_signature(aux_sk, tx, /*auth_claim_idx=*/1, /*public_key_id=*/0);
-  SignedTransaction stx{.tx = tx, .signatures = {{invoked_sig}, {aux_sig}}};
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
-  // Create auth data for both addresses
-  AddressAuthData invoked_auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = invoked_pk, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 100'000,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 1}},
-      .nonce_config = kAnyKeyNonceConfig};
-
-  AddressAuthData aux_auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = aux_pk, .max_weight = Weight{1}})},
-      .nonce_config = kAnyKeyNonceConfig};
+  // Create auth data
+  AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                                new PublicKeyConfig{.key = pk,
+                                                    .max_weight = Weight{1}})},
+                            .required_weight = 1};
 
   // Serialize everything
   auto serialized_stx = x23::serialize(stx);
-  auto serialized_invoked_auth = x23::serialize(invoked_auth_data);
-  auto serialized_aux_auth = x23::serialize(aux_auth_data);
+  auto serialized_auth = x23::serialize(auth_data);
 
   // Test good verification
   {
-    std::vector<FFISerializedAuthData> aux_auth_array = {
-        make_aux_auth_data(aux_addr, serialized_aux_auth)};
-    uint32_t auth_count = aux_auth_array.size();
-
-    VerifyAuthResult result = verify_signed_transaction_auth(
-        {.data = serialized_stx.data(),
-         .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_invoked_auth),
-        {.auth_data = aux_auth_array.data(), .count = auth_count});
+    VerifyAuthResult result =
+        verify_signed_transaction_auth({.data = serialized_stx.data(),
+                                        .len = static_cast<uint32_t>(
+                                            serialized_stx.size())},
+                                       make_source_auth_data(serialized_auth));
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code, 0);
@@ -521,29 +482,17 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaims)
   // Test wrong signature
   {
     auto [wrong_pk, wrong_sk] = make_key_pair();
-    AddressAuthData wrong_invoked_auth{
+    AddressAuthData wrong_auth{
         .public_keys = {x23::Ptr<PublicKeyConfig>(
             new PublicKeyConfig{.key = wrong_pk, .max_weight = Weight{1}})},
-        .gas_permissions = {GasPermissionConfig{.limit = 100'000,
-                                                .accepted_keys = 1 << 0,
-                                                .required_weight = 1}},
-        .nonce_config = kAnyKeyNonceConfig};
+        .required_weight = 1};
 
-    auto serialized_wrong_auth = x23::serialize(wrong_invoked_auth);
-
-    std::vector<uint8_t> addresses(64);
-    std::memcpy(addresses.data(), aux_addr.data(), 32);
-
-    std::vector<FFISerializedAuthData> aux_auth_array = {
-        {.data = serialized_aux_auth.data(),
-         .len = static_cast<uint32_t>(serialized_aux_auth.size())}};
-    uint32_t auth_count = aux_auth_array.size();
+    auto serialized_wrong_auth = x23::serialize(wrong_auth);
 
     VerifyAuthResult result = verify_signed_transaction_auth(
         {.data = serialized_stx.data(),
          .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_wrong_auth),
-        {.auth_data = aux_auth_array.data(), .count = auth_count});
+        make_source_auth_data(serialized_wrong_auth));
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code,
@@ -552,60 +501,35 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaims)
   }
 }
 
-TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
+TEST(TestBindingsTest, VerifyAuthFromDB)
 {
-  // Test verifying a transaction with:
-  // - One auth claim for the invoked address (key 0)
-  // - One auth claim for an auxiliary address (key 0)
-  // This version reads auth data from the database instead of passing it
-  // directly
+  // Test verifying a transaction using auth data from the database
 
-  // Generate keys for both addresses
-  auto [invoked_pk, invoked_sk] = make_key_pair();
-  auto [aux_pk, aux_sk] = make_key_pair();
+  auto [pk, sk] = make_key_pair();
+  auto [wrong_pk, wrong_sk] = make_key_pair();
 
   ContractAddress invoked_addr{1};
-  ContractAddress aux_addr{2};
-  ContractAddress missing_aux_addr = {3};
 
-  // Create auth claims
-  AuthClaim invoked_claim(AuthClaimType::kInvokedAddressSignature);
-  invoked_claim.invoked_address_signature_id() = 0;
-
-  AuthClaim aux_claim(AuthClaimType::kOtherAddressSignature);
-  aux_claim.other_address_signature_id().address = aux_addr;
-  aux_claim.other_address_signature_id().key_id = 0;
-
-  AuthClaim missing_aux_claim(AuthClaimType::kOtherAddressSignature);
-  missing_aux_claim.other_address_signature_id().address = missing_aux_addr;
-  missing_aux_claim.other_address_signature_id().key_id = 0;
+  // Create auth claim
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1 << 0;
+  claim.source_address_claim().required_weight = 1;
 
   // Build transaction
   Transaction tx{};
   tx.invocation.invoked_address = invoked_addr;
   tx.invocation.gas_limit = 100'000;
-  tx.auth_claims = {invoked_claim, aux_claim};
+  tx.auth_claim = claim;
 
   // Sign the transaction
-  DecoratedSignature invoked_sig =
-      make_signature(invoked_sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0);
-  DecoratedSignature aux_sig =
-      make_signature(aux_sk, tx, /*auth_claim_idx=*/1, /*public_key_id=*/0);
-  SignedTransaction stx{.tx = tx, .signatures = {{invoked_sig}, {aux_sig}}};
+  DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
 
-  // Create auth data for both addresses
-  AddressAuthData invoked_auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = invoked_pk, .max_weight = Weight{1}})},
-      .gas_permissions = {GasPermissionConfig{.limit = 100'000,
-                                              .accepted_keys = 1 << 0,
-                                              .required_weight = 1}},
-      .nonce_config = kAnyKeyNonceConfig};
-
-  AddressAuthData aux_auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = aux_pk, .max_weight = Weight{1}})},
-      .nonce_config = kAnyKeyNonceConfig};
+  // Create auth data
+  AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                                new PublicKeyConfig{.key = pk,
+                                                    .max_weight = Weight{1}})},
+                            .required_weight = 1};
 
   // Create database and write auth data
   auto *db = make_db();
@@ -616,14 +540,8 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
   auto &dao = db_context->get_base_db().get_db();
 
   // Write auth data to database
-  auto write_result =
-      dao.write_address_auth_data(invoked_addr, invoked_auth_data);
-  ASSERT_TRUE(write_result.has_value())
-      << "Failed to write invoked address auth data";
-
-  write_result = dao.write_address_auth_data(aux_addr, aux_auth_data);
-  ASSERT_TRUE(write_result.has_value())
-      << "Failed to write aux address auth data";
+  auto write_result = dao.write_address_auth_data(invoked_addr, auth_data);
+  ASSERT_TRUE(write_result.has_value()) << "Failed to write address auth data";
 
   // Advance block so auth data is available
   ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
@@ -643,24 +561,18 @@ TEST(TestBindingsTest, VerifyAuthWithInvokedAndAuxClaimsFromDB)
               std::to_underlying(AuthErrorCode::kAuthSuccess));
   }
 
-  // Test missing auth data
+  // Test wrong signature (signed by wrong key)
   {
-    tx.auth_claims = {invoked_claim, missing_aux_claim};
+    DecoratedSignature wrong_sig =
+        make_signature(wrong_sk, tx, /*public_key_id=*/0);
+    SignedTransaction wrong_stx{.tx = tx, .signatures = {wrong_sig}};
 
-    // Sign the transaction
-    DecoratedSignature invoked_sig =
-        make_signature(invoked_sk, tx, /*auth_claim_idx=*/0,
-                       /*public_key_id=*/0);
-    DecoratedSignature aux_sig =
-        make_signature(aux_sk, tx, /*auth_claim_idx=*/1, /*public_key_id=*/0);
-    SignedTransaction stx{.tx = tx, .signatures = {{invoked_sig}, {aux_sig}}};
-
-    auto serialized_stx = x23::serialize(stx);
+    auto serialized_wrong_stx = x23::serialize(wrong_stx);
 
     VerifyAuthResultFromDBResult result =
         verify_signed_transaction_auth_from_db(
-            db, {.data = serialized_stx.data(),
-                 .len = static_cast<uint32_t>(serialized_stx.size())});
+            db, {.data = serialized_wrong_stx.data(),
+                 .len = static_cast<uint32_t>(serialized_wrong_stx.size())});
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code,
@@ -1028,7 +940,7 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
-  AuthClaimData auth_claim_data = {};
+  AuthClaim auth_claim_data(AuthClaimType::kSourceAddressAuthData);
   auto serialized_auth_claim_data = x23::serialize(auth_claim_data);
   FFISerializedAuthClaimData ffi_auth_claim_data = {
       .data = serialized_auth_claim_data.data(),
@@ -1155,7 +1067,7 @@ test_ffi_get_current_address(ContractAddress &output_address)
 OpenSyscallHandlerResult
 make_mocked_handler(void *db, void *rc)
 {
-  AuthClaimData auth_claim_data = {};
+  AuthClaim auth_claim_data(AuthClaimType::kSourceAddressAuthData);
   auto serialized_auth_claim_data = x23::serialize(auth_claim_data);
   FFISerializedAuthClaimData ffi_auth_claim_data = {
       .data = serialized_auth_claim_data.data(),

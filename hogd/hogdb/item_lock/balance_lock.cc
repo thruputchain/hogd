@@ -57,6 +57,14 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   return 0;
 }
 
+void
+BalanceLock::add_committed_credit(int128_t delta)
+{
+  CHECK_GT(delta, 0);
+  auto ok = delta_bounds_.try_reserve_delta(0, delta, 0, delta, 0, 0);
+  CHECK(ok);
+}
+
 int128_t
 BalanceLock::build_result(LockContext const &ctx) const
 {

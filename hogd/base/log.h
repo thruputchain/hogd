@@ -5,20 +5,24 @@
 #include <cstddef>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <format>
 #include <memory>
 #include <source_location>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <version>
 
 #ifdef __APPLE__
 #include <thread>
 #endif
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/string.h"
 #include "hogd/base/sync.h"
 #include "hogd/base/types.h"
 #include "x23/debug.h" // IWYU pragma: keep
@@ -293,6 +297,12 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 
 #undef MAKE_LOG_FUNC_EX
 
+namespace detail {
+template<typename T> struct is_byte_array : std::false_type {};
+template<std::size_t N>
+struct is_byte_array<std::array<uint8_t, N>> : std::true_type {};
+} // namespace detail
+
 template<typename T>
 constexpr auto
 format_arg(T &&t)
@@ -300,6 +310,11 @@ format_arg(T &&t)
   if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::nullptr_t>) {
     return static_cast<const void *>(nullptr);
   }
+#if (__cpp_lib_format_ranges < 202207L)
+  else if constexpr (detail::is_byte_array<std::remove_cvref_t<T>>::value) {
+    return encode_hex(std::as_bytes(std::span(t)));
+  }
+#endif
   else {
     return std::forward<T>(t);
   }
@@ -320,7 +335,8 @@ gettid()
     if (!(__val1 op __val2)) {                                                 \
       x23::panic("{}:{} (TID {}) CHECK FAILED: {} {} {} [{} {} {}]", __FILE__, \
                  __LINE__, gettid(), CSTR(expr1), CSTR(op), CSTR(expr2),       \
-                 format_arg(__val1), CSTR(invop), format_arg(__val2));         \
+                 hogd::format_arg(__val1), CSTR(invop),                        \
+                 hogd::format_arg(__val2));                                    \
     }                                                                          \
   } while (0)
 

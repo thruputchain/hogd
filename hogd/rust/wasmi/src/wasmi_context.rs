@@ -682,10 +682,7 @@ mod h001_float_rejection_tests {
             _userctx: *mut c_void,
             _hash: *const u8,
         ) -> ContractGetResult {
-            ContractGetResult::new(
-                SystemErrorCode::kSystemUnrecoverable as i32,
-                &[],
-            )
+            ContractGetResult::new(SystemErrorCode::Unrecoverable.0, &[])
         }
 
         let global_context = std::sync::Arc::new(WasmiGlobalContext::default());

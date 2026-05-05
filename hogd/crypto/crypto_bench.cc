@@ -63,8 +63,11 @@ void
 bm_ed25519_sign(benchmark::State &state)
 {
   auto [pk, sk] = ed25519_keygen();
-  bench_func(state,
-             [sk](std::span<std::byte> buf) { return ed25519_sign(sk, buf); });
+  bench_func(state, [sk](std::span<std::byte> buf) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    return ed25519_sign(sk, buf).value();
+    // NOLINTEND(bugprone-unchecked-optional-access)
+  });
 }
 BENCHMARK(bm_ed25519_sign)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
@@ -73,7 +76,9 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
 {
   auto [pk, sk] = ed25519_keygen();
   bench_func(state, [pk, sk](std::span<std::byte> buf) {
-    auto sig = ed25519_sign(sk, buf);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    auto sig = ed25519_sign(sk, buf).value();
+    // NOLINTEND(bugprone-unchecked-optional-access)
     return ed25519_verify(pk, sig, buf);
   });
 }

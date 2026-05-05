@@ -17,9 +17,10 @@ namespace hogd {
 class BorrowedContractBatch {
 public:
   using value_type = Contract;
-  using hash_set_t = std::unordered_set<SHA256Hash>;
+  using hash_set_t = std::unordered_set<SHA256Hash, ByteArrayHasher>;
   using contract_map_t =
-      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>>;
+      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
+                         ByteArrayHasher>;
 
   // NOLINTNEXTLINE(readability-identifier-naming)
   class const_iterator {

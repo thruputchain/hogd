@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <span>
@@ -12,6 +13,7 @@
 
 // xdr types
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "retrocausal_queue.hh"
@@ -41,6 +43,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db_hash.h"
 #include "hogd/hogdb/hog_age_reconciliation.h"
@@ -84,6 +87,17 @@ protected:
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
   });
+
+  StorageCostModel cost_model_with_balance_cost_ =
+      StorageCostModel(StorageCostModelXdr{
+          .ext = ExtensionPoint(0),
+          .base_data_item_cost = to_xdr(int128_t{12000}),
+          .bytestring_cost_per_byte = 10,
+          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+          .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+          .balance_cost = to_xdr(int128_t{1000}),
+      });
 
   AuthChangeSubscriptionManager subscription_manager_;
   BackgroundCommitWorker background_commit_worker_ =
@@ -853,8 +867,7 @@ TEST_F(HogDBTest, DbHashDeltaAuthLockMatchesFullStateHash)
 
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     AuthDataChangeArgs args{};
-    args.new_nonce_config =
-        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    args.new_required_weight = Weight{0};
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });
@@ -2089,8 +2102,7 @@ TEST_F(HogDBTest, AuthDataCreateThenDeleteMatchesEmptyDb)
     InvokeTX invoke_tx(block_tx);
 
     AuthDataChangeArgs args{};
-    args.new_nonce_config =
-        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    args.new_required_weight = Weight{0};
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
 
@@ -2133,11 +2145,10 @@ TEST_F(HogDBTest, AuthDataCreateThenModifyHashCorrectness)
   Address addr = make_address(kAddress + 24);
   ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
 
-  // Block 1: create auth data with nonce config
+  // Block 1: create auth data with required weight
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     AuthDataChangeArgs args{};
-    args.new_nonce_config =
-        NonceConfig{.accepted_keys = 1, .required_weight = 0};
+    args.new_required_weight = Weight{0};
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });
@@ -2794,6 +2805,280 @@ TEST_F(HogDBTest, AbortedFreshHeightHashEquivalentToCleanBlock)
   DbHash hash_with_aborted = run_scenario(true);
   DbHash hash_without_aborted = run_scenario(false);
   EXPECT_EQ(hash_with_aborted, hash_without_aborted);
+}
+
+TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
+{
+  Address addr = make_address(kAddress + 99);
+  ItemKey rcq_key = make_key(kAddress + 99, 1);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+
+  // T1: fund the fresh address and insert RCQ entries
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), 100'000,
+                             std::to_underlying(StorageDeltaFlags::None)));
+
+    RetrocausalQueueDelta delta;
+    for (uint8_t i = 0; i < 10; ++i) {
+      delta.insert.added_entries.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
+
+    ASSERT_TRUE(itx.sync_balance_locks());
+    itx.commit();
+    itx.release_blocktx_reference();
+  }
+
+  // T2: consume RCQ entries, producing a small storage refund
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    RetrocausalQueueDelta delta;
+    delta.consume.emplace();
+    for (uint8_t i = 0; i < 5; ++i) {
+      delta.consume->current_block_consumed.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, delta, std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.sync_balance_locks());
+
+    // Before the fix, this throws std::runtime_error("failed to lock balance")
+    ASSERT_NO_THROW(itx.commit());
+    itx.release_blocktx_reference();
+  }
+}
+
+TEST_F(HogDBTest, ReleaseBalanceRefundOnFreshAddressSameTx)
+{
+  Address addr = make_address(kAddress + 100);
+  ItemKey rcq_key = make_key(kAddress + 100, 1);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+
+  // Single tx: fund address, insert RCQ entries, then add a consume in the
+  // same invocation via a child frame. The cumulative delta (inserts + consume)
+  // narrows the RCQ reservation, producing a refund at commit time when the
+  // conservative lock overestimates the actual cost. Without two-phase commit
+  // ordering, the RCQ key may be committed before the balance key, hitting
+  // kUncommitted state.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), 100'000,
+                             std::to_underlying(StorageDeltaFlags::None)));
+
+    RetrocausalQueueDelta insert_delta;
+    for (uint8_t i = 0; i < 10; ++i) {
+      insert_delta.insert.added_entries.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(
+        rcq_key, insert_delta, std::to_underlying(StorageDeltaFlags::None)));
+
+    ASSERT_TRUE(itx.sync_balance_locks());
+
+    // Child frame: cumulative delta keeps all inserts and adds a consume.
+    // narrow() requires the new delta to be a superset of the earlier one.
+    [[maybe_unused]] int sp = itx.create_savepoint();
+
+    RetrocausalQueueDelta cumulative_delta;
+    for (uint8_t i = 0; i < 10; ++i) {
+      cumulative_delta.insert.added_entries.push_back(QueueEntry{i});
+    }
+    cumulative_delta.consume.emplace();
+    for (uint8_t i = 0; i < 5; ++i) {
+      cumulative_delta.consume->current_block_consumed.push_back(QueueEntry{i});
+    }
+    ASSERT_TRUE(itx.request_retrocausal_queue(rcq_key, cumulative_delta,
+                                              std::to_underlying(
+                                                  StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.sync_balance_locks());
+
+    ASSERT_NO_THROW(itx.commit())
+        << "commit should not throw when crediting a fresh-balance refund";
+    itx.release_blocktx_reference();
+  }
+}
+
+TEST(InvokeTxKeyTest, HashAndEquality)
+{
+  hogd::InvokeTxKey k1{.block_tx_id = 17, .invoke_tx_id = 29};
+  hogd::InvokeTxKey k2{.block_tx_id = 17, .invoke_tx_id = 29};
+  hogd::InvokeTxKey k3{.block_tx_id = 17, .invoke_tx_id = 30};
+
+  EXPECT_EQ(k1, k2);
+  EXPECT_NE(k1, k3);
+
+  hogd::InvokeTxKey::Hash hasher;
+  EXPECT_EQ(hasher(k1), hasher(k2));
+  EXPECT_EQ(hasher(k1), std::hash<hogd::BlockTXID>()(k1.block_tx_id) ^
+                            std::hash<hogd::InvokeTXID>()(k1.invoke_tx_id));
+}
+
+TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
+{
+  hogd::SynchronizedMap<hogd::InvokeTxKey, int, hogd::InvokeTxKey::Hash> map(2);
+  hogd::InvokeTxKey key{.block_tx_id = 42, .invoke_tx_id = 99};
+
+  {
+    auto [value, lock] = map[key];
+    value = 1234;
+  }
+  {
+    auto [value, lock] = map.find(key);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(*value, 1234);
+  }
+  EXPECT_EQ(map.remove(key), 1U);
+  {
+    auto [value, lock] = map.find(key);
+    EXPECT_EQ(value, nullptr);
+  }
+}
+
+// Tests that the fresh-balance guard in BalanceLock::try_atomic_change_lock
+// is evaluated per-lock-attempt, not against cumulative committed state.
+// A cumulative guard would be nondeterministic under concurrent InvokeTX
+// instances (see #1606 discussion — option 1 was rejected for this reason).
+
+TEST_F(HogDBTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
+{
+  const int128_t kBalanceCost =
+      cost_model_with_balance_cost_.get_balance_cost();
+
+  Address addr = make_address(kAddress + 200);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                 background_commit_worker_, 1);
+
+  // T1: fund the fresh address with enough to cover the balance-row cost.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
+                             std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.sync_balance_locks());
+    itx.commit();
+    itx.release_blocktx_reference();
+  }
+
+  // T2: fund the same fresh address with 1 token (below balance-row cost).
+  // This must always fail, regardless of T1's committed state.
+  // Use savepoint so we can rollback on failure and keep InvokeTX consistent.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    int depth = itx.get_savepoint_head();
+    itx.create_savepoint();
+    ASSERT_TRUE(
+        itx.request_nnint128(make_address_balance_item_key(addr), 1,
+                             std::to_underlying(StorageDeltaFlags::None)));
+    EXPECT_FALSE(itx.sync_balance_locks());
+    itx.rollback_to_savepoint(depth);
+    itx.release_blocktx_reference();
+  }
+}
+
+TEST_F(HogDBTest, FreshBalanceGuardAbortDoesNotInvalidatePeerLock)
+{
+  const int128_t kBalanceCost =
+      cost_model_with_balance_cost_.get_balance_cost();
+
+  Address addr = make_address(kAddress + 201);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                 background_commit_worker_, 1);
+
+  // T1: fund the fresh address with exactly the balance-row cost.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx1(block_tx);
+  ASSERT_TRUE(
+      itx1.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
+                            std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx1.sync_balance_locks());
+
+  // T2: underfunded — must fail even though T1 has a pending lock.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx2(block_tx);
+    int depth = itx2.get_savepoint_head();
+    itx2.create_savepoint();
+    ASSERT_TRUE(
+        itx2.request_nnint128(make_address_balance_item_key(addr), 1,
+                              std::to_underlying(StorageDeltaFlags::None)));
+    EXPECT_FALSE(itx2.sync_balance_locks());
+    itx2.rollback_to_savepoint(depth);
+    itx2.release_blocktx_reference();
+  }
+
+  // T1 aborts. If a cumulative guard had let T2 through, the balance row
+  // would now have insufficient funds. T1's abort must not retroactively
+  // invalidate any accepted locks (and T2 was correctly rejected above).
+  itx1.abort();
+  itx1.release_blocktx_reference();
+}
+
+TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
+{
+  const int128_t kBalanceCost =
+      cost_model_with_balance_cost_.get_balance_cost();
+
+  Address addr = make_address(kAddress + 202);
+
+  // Run the same scenario twice with different commit orderings.
+  // An underfunded T2 must fail in both orderings.
+  for (int ordering = 0; ordering < 2; ++ordering) {
+    BlockHeight height = ordering + 1;
+    PerThreadARC<BlockTX> block_tx(db_, cost_model_with_balance_cost_,
+                                   background_commit_worker_, height);
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx1(block_tx);
+    ASSERT_TRUE(
+        itx1.request_nnint128(make_address_balance_item_key(addr), kBalanceCost,
+                              std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx1.sync_balance_locks());
+
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx2(block_tx);
+
+    if (ordering == 0) {
+      // T1 commits before T2 tries to lock balance
+      itx1.commit();
+      itx1.release_blocktx_reference();
+
+      int depth = itx2.get_savepoint_head();
+      itx2.create_savepoint();
+      ASSERT_TRUE(
+          itx2.request_nnint128(make_address_balance_item_key(addr), 1,
+                                std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_FALSE(itx2.sync_balance_locks())
+          << "underfunded T2 must fail even after T1 committed";
+      itx2.rollback_to_savepoint(depth);
+      itx2.release_blocktx_reference();
+    }
+    else {
+      // T2 tries to lock balance before T1 commits
+      int depth = itx2.get_savepoint_head();
+      itx2.create_savepoint();
+      ASSERT_TRUE(
+          itx2.request_nnint128(make_address_balance_item_key(addr), 1,
+                                std::to_underlying(StorageDeltaFlags::None)));
+      EXPECT_FALSE(itx2.sync_balance_locks())
+          << "underfunded T2 must fail even before T1 committed";
+      itx2.rollback_to_savepoint(depth);
+      itx2.release_blocktx_reference();
+
+      itx1.commit();
+      itx1.release_blocktx_reference();
+    }
+  }
 }
 
 } // namespace hogd

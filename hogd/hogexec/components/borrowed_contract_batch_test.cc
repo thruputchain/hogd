@@ -50,8 +50,10 @@ TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
   auto c1_hash = sha256(c1);
   auto c2_hash = sha256(c2);
 
-  std::unordered_set<SHA256Hash> hashes{c1_hash, c2_hash};
-  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
+  std::unordered_set<SHA256Hash, ByteArrayHasher> hashes{c1_hash, c2_hash};
+  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
+                     ByteArrayHasher>
+      contracts;
   contracts.emplace(c1_hash, std::make_unique<const Contract>(c1));
   contracts.emplace(c2_hash, std::make_unique<const Contract>(c2));
 
@@ -63,8 +65,10 @@ TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
 
 TEST(BorrowedContractBatchTest, SerializesEmptyBatch)
 {
-  std::unordered_set<SHA256Hash> hashes;
-  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
+  std::unordered_set<SHA256Hash, ByteArrayHasher> hashes;
+  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
+                     ByteArrayHasher>
+      contracts;
   BorrowedContractBatch borrowed(hashes, contracts);
 
   NewContractBatch owned;
@@ -79,8 +83,10 @@ TEST(BorrowedContractBatchTest, SkipsMissingHashes)
   Contract missing_contract = make_wasm_contract({0x10, 0x20});
   auto missing_hash = sha256(missing_contract);
 
-  std::unordered_set<SHA256Hash> hashes{c1_hash, missing_hash};
-  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
+  std::unordered_set<SHA256Hash, ByteArrayHasher> hashes{c1_hash, missing_hash};
+  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
+                     ByteArrayHasher>
+      contracts;
   contracts.emplace(c1_hash, std::make_unique<const Contract>(c1));
 
   BorrowedContractBatch borrowed(hashes, contracts);

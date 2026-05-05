@@ -124,10 +124,13 @@ private:
     }
   }
 
-  std::unordered_map<ContractAddress, AddressAuthData> current_auth_state_;
-  std::unordered_map<ContractAddress, KeyChange> current_key_changes_;
+  std::unordered_map<ContractAddress, AddressAuthData, ByteArrayHasher>
+      current_auth_state_;
+  std::unordered_map<ContractAddress, KeyChange, ByteArrayHasher>
+      current_key_changes_;
 
-  std::unordered_set<ContractAddress> addresses_that_should_be_cached_;
+  std::unordered_set<ContractAddress, ByteArrayHasher>
+      addresses_that_should_be_cached_;
 
   // Map from block height to the key changes made at that height
   std::map<BlockHeight, KeyChangeBatch> changes_by_height_;

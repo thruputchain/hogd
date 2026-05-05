@@ -19,6 +19,12 @@ static_assert(!detail::has_fixed_size<sunion>());
 static_assert(detail::xdr_size_bounds<sunion>() == detail::SizeBounds{4, 8});
 static_assert(detail::xdr_size_bounds<test_recursive>() ==
               detail::SizeBounds{12, detail::kNoBound});
+static_assert(detail::xdr_size_bounds<const ConstUnionBugStruct>() ==
+              detail::xdr_size_bounds<ConstUnionBugStruct>());
+static_assert(detail::xdr_size_bounds<const struct_with_union>() ==
+              detail::xdr_size_bounds<struct_with_union>());
+static_assert(detail::xdr_size_bounds<const MutualFrame>() ==
+              detail::xdr_size_bounds<MutualFrame>());
 static_assert(xdr_size(fix_4{}) == 4);
 static_assert(xdr_size(fix_12{}) == 12);
 static_assert(xdr_size(fix_16{}) == 16);
@@ -34,6 +40,18 @@ static_assert(!is_recursive_xdr<contains_test_recursive>);
 static_assert(contains_recursive_xdr<contains_test_recursive>);
 static_assert(contains_recursive_xdr<test_recursive>);
 static_assert(!contains_recursive_xdr<uunion>);
+
+static_assert(x23::is_xdr_type<x23::Box<fix_4>>);
+static_assert(x23::is_xdr_cat<x23::Box<fix_4>, x23::XdrCategory::kStruct>);
+static_assert(std::tuple_size_v<x23::Box<fix_4>> == 1);
+static_assert(x23::detail::has_fixed_size<x23::Box<fix_4>>());
+static_assert(x23::detail::xdr_size_bounds<x23::Box<fix_4>>() ==
+              x23::detail::SizeBounds{4});
+static_assert(x23::serializes_like<x23::Box<fix_4>, fix_4>);
+static_assert(x23::is_xdr_serializable<x23::Box<fix_4>>);
+
+static_assert(x23::contains_recursive_xdr<box_add_args>);
+static_assert(x23::contains_recursive_xdr<box_expr>);
 
 struct my_fix_4 {
   int32_t i;
@@ -187,10 +205,41 @@ projected_view()
                                 std::array<int32_t, 2>>);
 }
 
+void
+check_box()
+{
+  using namespace x23;
+
+  fix_12 plain{.i = 42, .d = 3.14};
+  Box<fix_12> boxed(plain);
+  assert(xdr_size(boxed) == xdr_size(plain));
+
+  Buf plain_buf = serialize(plain);
+  Buf boxed_buf = serialize(boxed);
+  assert(plain_buf == boxed_buf);
+
+  Box<fix_12> deserialized;
+  deserialize(&deserialized, boxed_buf);
+  assert(*deserialized == plain);
+
+  Box<fix_12> copied = boxed;
+  assert(*copied == *boxed);
+  Box<fix_12> moved = std::move(copied);
+  assert(*moved == plain);
+
+  Box<fix_12> a(fix_12{.i = 1, .d = 0.0});
+  Box<fix_12> b(fix_12{.i = 2, .d = 0.0});
+  assert(a < b);
+  assert(a != b);
+  Box<fix_12> c(fix_12{.i = 1, .d = 0.0});
+  assert(a == c);
+}
+
 int
 main()
 {
   check_sizes();
   round_trip();
   projected_view();
+  check_box();
 }

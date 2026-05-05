@@ -32,23 +32,24 @@ make_key_pair()
 constexpr AuthClaim
 make_self_individual_key_claim(uint8_t id)
 {
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-  claim.invoked_address_signature_id() = id;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = static_cast<uint32_t>(1) << id;
+  claim.source_address_claim().required_weight = 1;
   return claim;
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 constexpr DecoratedSignature
-make_signature(SecretKey sk, Transaction const &tx, uint32_t auth_claim_idx,
-               uint32_t public_key_id)
+make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   DecoratedSignature signature;
-  signature.auth_claim_idx = auth_claim_idx;
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
-      ed25519_sign(sk.ed25519(), x23::serialize(tx));
+      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
   return signature;
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 void
 add_pk_to_auth_data(AddressAuthData &auth_data, uint8_t id, PublicKey const &pk)
@@ -72,11 +73,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
   auto [pk, sk] = make_key_pair();
   add_pk_to_auth_data(auth_data, 0, pk);
 
-  auth_data.nonce_config.accepted_keys = 1 << 0;
-  auth_data.nonce_config.required_weight = 1;
-
-  auth_data.gas_permissions.push_back(GasPermissionConfig{
-      .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+  auth_data.required_weight = 1;
 
   mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
@@ -88,12 +85,11 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   Transaction tx{};
   tx.invocation.invoked_address = address;
-  tx.auth_claims.push_back(make_self_individual_key_claim(0));
+  tx.auth_claim = make_self_individual_key_claim(0);
 
   SignedTransaction stx{};
   stx.tx = tx;
-  stx.signatures.push_back(
-      make_signature(sk, tx, /*auth_claim_idx=*/0, /*public_key_id=*/0));
+  stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
@@ -116,17 +112,9 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   add_pk_to_auth_data(auth_data1, 0, pk1);
   add_pk_to_auth_data(auth_data2, 0, pk2);
 
-  auth_data1.nonce_config.accepted_keys = 1 << 0;
-  auth_data1.nonce_config.required_weight = 1;
+  auth_data1.required_weight = 1;
 
-  auth_data1.gas_permissions.push_back(GasPermissionConfig{
-      .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
-
-  auth_data2.nonce_config.accepted_keys = 1 << 0;
-  auth_data2.nonce_config.required_weight = 1;
-
-  auth_data2.gas_permissions.push_back(GasPermissionConfig{
-      .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+  auth_data2.required_weight = 1;
 
   // address3 has no auth data
   ContractAddress address3 = make_test_address(10);
@@ -142,31 +130,28 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   Transaction tx1{};
   tx1.invocation.invoked_address = address1;
-  tx1.auth_claims.push_back(make_self_individual_key_claim(0));
+  tx1.auth_claim = make_self_individual_key_claim(0);
 
   Transaction tx2{};
   tx2.invocation.invoked_address = address2;
-  tx2.auth_claims.push_back(make_self_individual_key_claim(0));
+  tx2.auth_claim = make_self_individual_key_claim(0);
 
   Transaction tx3{};
   tx3.invocation.invoked_address = address3;
-  tx3.auth_claims.push_back(make_self_individual_key_claim(0));
+  tx3.auth_claim = make_self_individual_key_claim(0);
 
   // tx1 is signed by the wrong key
   SignedTransaction stx1{};
   stx1.tx = tx1;
-  stx1.signatures.push_back(
-      make_signature(sk2, tx1, /*auth_claim_idx=*/0, /*public_key_id=*/0));
+  stx1.signatures.push_back(make_signature(sk2, tx1, /*public_key_id=*/0));
 
   SignedTransaction stx2{};
   stx2.tx = tx2;
-  stx2.signatures.push_back(
-      make_signature(sk2, tx2, /*auth_claim_idx=*/0, /*public_key_id=*/0));
+  stx2.signatures.push_back(make_signature(sk2, tx2, /*public_key_id=*/0));
 
   SignedTransaction stx3{};
   stx3.tx = tx3;
-  stx3.signatures.push_back(
-      make_signature(sk2, tx3, /*auth_claim_idx=*/0, /*public_key_id=*/0));
+  stx3.signatures.push_back(make_signature(sk2, tx3, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);
@@ -204,10 +189,7 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 
     AddressAuthData auth_data{};
     add_pk_to_auth_data(auth_data, 0, pk);
-    auth_data.nonce_config.accepted_keys = 1 << 0;
-    auth_data.nonce_config.required_weight = 1;
-    auth_data.gas_permissions.push_back(GasPermissionConfig{
-        .limit = 100, .accepted_keys = 1 << 0, .required_weight = 1});
+    auth_data.required_weight = 1;
 
     mock_db().set(addresses[i], auth_data);
   }
@@ -223,11 +205,11 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 
     Transaction tx{};
     tx.invocation.invoked_address = addresses[addr_idx];
-    tx.auth_claims.push_back(make_self_individual_key_claim(0));
+    tx.auth_claim = make_self_individual_key_claim(0);
 
     SignedTransaction stx{};
     stx.tx = tx;
-    stx.signatures.push_back(make_signature(keys[addr_idx].second, tx, 0, 0));
+    stx.signatures.push_back(make_signature(keys[addr_idx].second, tx, 0));
     stx_vec.push_back(std::move(stx));
   }
 

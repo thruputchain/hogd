@@ -124,8 +124,8 @@ public:
   void write_all_average_hog_ages_to_db();
 
   struct ReadAverageHogAgesResult {
-    std::unordered_set<ContractAddress> found;
-    std::unordered_set<ContractAddress> missing;
+    std::unordered_set<ContractAddress, ByteArrayHasher> found;
+    std::unordered_set<ContractAddress, ByteArrayHasher> missing;
   };
   x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
@@ -244,7 +244,7 @@ private:
 
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
-      const std::unordered_set<ContractAddress> &accounts,
+      const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts,
       const TxKey &lower_bound);
 
   void process_transfers_helper(const Delta &delta,
@@ -292,9 +292,11 @@ private:
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
-  SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>> txs_;
+  SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>,
+                  ByteArrayHasher>
+      txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
-  SynchronizedMap<ContractAddress, AccountState> accounts_;
+  SynchronizedMap<ContractAddress, AccountState, ByteArrayHasher> accounts_;
 
   // The number of txs on the runqueue.
   std::atomic<size_t> size_ = 0;

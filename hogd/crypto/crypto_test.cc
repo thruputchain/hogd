@@ -94,7 +94,9 @@ TEST(Ed25519, BasicUsage)
 
   std::string_view msg = "test message";
   std::string_view msg_wrong = "wrong message";
-  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg)));
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg))).value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_EQ(ed25519_verify(pk, sig, msg), true);
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
 }
@@ -105,7 +107,9 @@ TEST(Ed25519, FFIBug)
   auto [pk, sk] = ed25519_keygen();
   uint64_t v = 0;
   auto msg = sha256(v);
-  auto sig = ed25519_sign(sk, msg);
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto sig = ed25519_sign(sk, msg).value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_TRUE(ed25519_verify(pk, sig, msg));
 }
 
@@ -119,9 +123,11 @@ TEST(Ed25519, BatchUsage)
   std::string_view msg2 = "another message";
   std::string_view msg3 = "yet another message";
 
-  auto sig1 = ed25519_sign(sk1, msg1);
-  auto sig2 = ed25519_sign(sk2, msg2);
-  auto sig3 = ed25519_sign(sk3, msg3);
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto sig1 = ed25519_sign(sk1, msg1).value();
+  auto sig2 = ed25519_sign(sk2, msg2).value();
+  auto sig3 = ed25519_sign(sk3, msg3).value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   EXPECT_EQ(ed25519_verify_batch({pk1, pk2, pk3}, {sig1, sig2, sig3},
                                  std::vector<std::span<const std::byte>>{
@@ -137,6 +143,25 @@ TEST(Ed25519, RandomKeygen)
   auto [pk2, sk2] = ed25519_keygen();
   EXPECT_NE(pk, pk2);
   EXPECT_NE(sk, sk2);
+}
+
+TEST(Ed25519, SignReturnsNulloptForMismatchedKeypair)
+{
+  auto [pk, sk] = ed25519_keygen();
+  std::string_view msg = "message signed with mismatched keypair";
+  auto msg_bytes = std::as_bytes(std::span(msg));
+
+  auto valid_sig = ed25519_sign(sk, msg_bytes);
+  ASSERT_TRUE(valid_sig.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(ed25519_verify(pk, valid_sig.value(), msg));
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  auto corrupted_sk = sk;
+  corrupted_sk[0] ^= 0x01;
+
+  auto invalid_sig = ed25519_sign(corrupted_sk, msg_bytes);
+  EXPECT_FALSE(invalid_sig.has_value());
 }
 
 TEST(LtHash16, EmptyState)

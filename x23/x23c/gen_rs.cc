@@ -537,6 +537,8 @@ GenRs::show_type(const StructBody &s, string const &tname)
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+    if (!array_size)
+      prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
@@ -699,6 +701,25 @@ impl {0} {{
 )",
                                      *array_size, outer_id);
         prtop("{}\n", cfg("xdrs", xdrs_read));
+
+        auto schema_impl = std::format(
+            R"(impl schemars::JsonSchema for {0} {{
+    fn schema_name() -> ::std::borrow::Cow<'static, str> {{
+        "{0}".into()
+    }}
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {{
+        schemars::json_schema!({{
+            "type": "string",
+            "contentEncoding": "hex",
+            "contentMediaType": "application/binary",
+            "minLength": {1},
+            "maxLength": {1}
+        }})
+    }}
+}}
+)",
+            outer_id, std::stoul(*array_size) * 2);
+        prtop("{}\n", cfg("schema", schema_impl));
       }
     }
   }
@@ -711,6 +732,7 @@ GenRs::show_type(const EnumBody &e, string const &tname)
   prtop("{}\n", feature_attr("serde", "serde(transparent)"));
   prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
   prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+  prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
 #[repr(transparent)]
@@ -845,6 +867,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}\n", feature_attr("xdrs", "derive(ReadXDR, WriteXDR)"));
     prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+    prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
     // it FFI-safe. See Rust RFC 2195:
     // https://github.com/rust-lang/rfcs/blob/master/text/2195-really-tagged-unions.md
@@ -1095,6 +1118,12 @@ GenRs::type_name(const Declaration &d, bool generate,
 
   switch (d.qual) {
   case kScalar:
+    if (needs_box) {
+      if (in_colon_required_setting) {
+        return std::format("Box::<{}>", tname);
+      }
+      return std::format("Box<{}>", tname);
+    }
     return tname;
   case kPtr:
   {

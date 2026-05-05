@@ -403,3 +403,29 @@ typedef fix_12 single_vec<1>;
 
 // Very small bounded opaque (length prefix + 1 byte max + padding)
 typedef opaque tiny_opaque<1>;
+
+// Regression: xdr_size_bounds<const S> must work when S contains a union field
+// directly (const propagates through tuple_element_t, and union_ops must handle it).
+enum ConstUnionBugType { kConstBugA = 0 };
+union ConstUnionBugUnion switch (ConstUnionBugType t) { case kConstBugA: int val; };
+struct ConstUnionBugStruct { ConstUnionBugUnion u; };
+
+// Box<T> integration test: a recursive type with a union base case.
+// box_expr is a union; kBoxLiteral terminates, kBoxAdd recurses through
+// box_add_args which uses Box to break the static size cycle.
+%struct box_add_args;
+
+enum box_expr_type { kBoxLiteral = 0, kBoxAdd = 1 };
+
+union box_expr switch (box_expr_type t)
+{
+case kBoxLiteral:
+  int literal;
+case kBoxAdd:
+  box_add_args *add; // #[cpp(box)]
+};
+
+struct box_add_args {
+  box_expr left;
+  box_expr right;
+};

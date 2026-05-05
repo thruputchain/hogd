@@ -41,15 +41,15 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 
   RpcServer<AuthDBRpc> auth_db_rpc;
   auth_db_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
-  const uint16_t actual_db_port =
-      auth_db_rpc.start_server(make_bind_host_port(bind_ip, db_port));
+  auto [actual_db_port, db_lfd] =
+      auth_db_rpc.bind_server(make_bind_host_port(bind_ip, db_port));
   CHECK(actual_db_port == db_port || db_port == 0);
   info("PORT auth.db={}", actual_db_port);
 
   RpcServer<AuthMempoolRpc> auth_mempool_rpc;
   auth_mempool_rpc->max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
-  const uint16_t actual_mempool_port =
-      auth_mempool_rpc.start_server(make_bind_host_port(bind_ip, mempool_port));
+  auto [actual_mempool_port, mempool_lfd] =
+      auth_mempool_rpc.bind_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT auth.mempool={}", actual_mempool_port);
 
@@ -74,6 +74,9 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   auth_server.set_mempool_client(std::move(mempool_client));
   auth_db_rpc->impl()->set_auth_server(auth_server);
   auth_mempool_rpc->impl()->set_auth_server(auth_server);
+
+  auth_db_rpc.start_accepting(std::move(db_lfd));
+  auth_mempool_rpc.start_accepting(std::move(mempool_lfd));
 
   auth_server.subscribe_to_auth_data_changes(auth_card)();
 

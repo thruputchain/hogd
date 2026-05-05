@@ -75,7 +75,8 @@ protected:
   StorageCostModel const *cost_model_;
 
   // simple impl, for now
-  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
+  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>,
+                               ByteArrayHasher>>
       contract_creates_;
 
   // Does NOT own the parent StorageView.

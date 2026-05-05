@@ -11,9 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -161,7 +159,7 @@ make_new_db(const uint8_t *serialized_cost_model,
         x23::deserialize(&cost_model_xdr,
                          x23::BufView{serialized_cost_model,
                                       serialized_cost_model_len});
-      } catch (x23::XdrBadInput const &e) {
+      } catch (x23::XdrException const &e) {
         log_error("error deserializing cost model: {}", e);
         return {.db = nullptr,
                 .ffi_error_code = kTestFFIErrorCodeDeserializeError};
@@ -217,7 +215,7 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
     try {
       x23::deserialize(&deserialized_addrkey,
                        x23::BufView{addrkey.data, addrkey.len});
-    } catch (x23::XdrBadInput const &e) {
+    } catch (x23::XdrException const &e) {
       log_error("error deserializing address and key: {}", e);
       return {.data = kNullBuffer,
               .ffi_error_code = kTestFFIErrorCodeDeserializeError};
@@ -344,7 +342,7 @@ open_syscall_handler(void *db, void *rc,
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
     return make_ffi_result_type<OpenSyscallHandlerResult>(
         kTestFFIErrorCodeDeserializeError);
@@ -380,20 +378,20 @@ open_mocked_syscall_handler(void *db, void *rc,
     return kNullptrError;
   }
   try {
-    hogd::AuthClaimData auth_claim_data_xdr;
-    x23::deserialize(&auth_claim_data_xdr,
+    hogd::AuthClaim auth_claim_xdr;
+    x23::deserialize(&auth_claim_xdr,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
     SHA256Hash source_hash{};
     std::memcpy(source_hash.data(), source_tx_hash, source_hash.size());
     auto *handler =
         new SyscallHandlerContext(runtime_context->get(), *db_context,
-                                  auth_claim_data_xdr, source_hash);
+                                  auth_claim_xdr, source_hash);
     if (enable_tracing) {
       handler->to_handler().enable_tracing();
     }
     return {.syscall_handler = static_cast<void *>(handler),
             .ffi_error_code = kTestFFIErrorCodeNone};
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
     return make_ffi_result_type<OpenSyscallHandlerResult>(
         kTestFFIErrorCodeDeserializeError);
@@ -468,7 +466,7 @@ open_mock_invocation_frame(void *syscall_handler,
   try {
     x23::deserialize(&invocation_xdr,
                      x23::BufView{invocation.data, invocation.len});
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing invocation: {}", e);
     return kTestFFIErrorCodeDeserializeError;
   } catch (std::exception const &e) {
@@ -706,7 +704,7 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
     SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     return stx;
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing signed transaction: {}", e);
     if (error_out) {
       *error_out = make_ffi_result_type<T>(kTestFFIErrorCodeDeserializeError);
@@ -723,8 +721,7 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
 
 VerifyAuthResult
 verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
-                                    FFISourceAuthData source_auth_data,
-                                    FFIAuxiliaryAuthData aux_auth_data) noexcept
+                                    FFISourceAuthData source_auth_data) noexcept
 {
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
@@ -746,32 +743,8 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
     x23::deserialize(&source_data,
                      x23::BufView{source_auth_data.data, source_auth_data.len});
 
-    // Deserialize auxiliary auth data
-    std::unordered_map<ContractAddress, const AddressAuthData *> aux_data_map;
-    std::vector<std::unique_ptr<AddressAuthData>> aux_data_storage;
-
-    if (aux_auth_data.count > 0) {
-      if (!aux_auth_data.auth_data) {
-        return kNullptrError;
-      }
-
-      for (uint32_t i = 0; i < aux_auth_data.count; i++) {
-        ContractAddress addr;
-        std::memcpy(addr.data(), aux_auth_data.auth_data[i].address,
-                    addr.size());
-
-        auto aux_data = std::make_unique<AddressAuthData>();
-        x23::deserialize(aux_data.get(),
-                         x23::BufView{aux_auth_data.auth_data[i].data,
-                                      aux_auth_data.auth_data[i].len});
-
-        aux_data_map[addr] = aux_data.get();
-        aux_data_storage.push_back(std::move(aux_data));
-      }
-    }
-
     // Perform the appropriate level of verification
-    AuthVerifyStatus<void> result = verify_auth(stx, source_data, aux_data_map);
+    AuthVerifyStatus<void> result = verify_auth(stx, source_data);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -779,7 +752,7 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
     return {.auth_error_code = std::to_underlying(result.error().code()),
             .ffi_error_code = kTestFFIErrorCodeNone};
 
-  } catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrException const &e) {
     log_error("error deserializing auth data: {}", e);
     return make_ffi_result_type<VerifyAuthResult>(
         kTestFFIErrorCodeDeserializeError);
@@ -1176,6 +1149,7 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
       "arg3={}, arg4={}, arg5={}, arg6={}, arg7={}, arg8={}, arg9={}, "
       "arg10={})",
       syscall, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+  hogd::lazy_init();
   auto result =
       hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4, arg5, arg6,
                                     arg7, arg8, arg9, arg10);
@@ -1194,19 +1168,17 @@ enable_syscall_logging(int32_t level)
 
 VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISourceAuthData source_auth_data,
-                               FFIAuxiliaryAuthData aux_auth_data)
+                               FFISourceAuthData source_auth_data)
 {
   hogd::do_ffi_trace(
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
-      "source_auth_data={}, aux_auth_data={})",
-      signed_tx, source_auth_data, aux_auth_data);
+      "source_auth_data={})",
+      signed_tx, source_auth_data);
   auto result =
-      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
-                                                aux_auth_data);
+      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
-                     "source_auth_data={}, aux_auth_data={}) -> {}",
-                     signed_tx, source_auth_data, aux_auth_data, result);
+                     "source_auth_data={}) -> {}",
+                     signed_tx, source_auth_data, result);
   return result;
 }
 

@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -79,7 +80,7 @@ public:
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
-                    RuntimeContext &runtime_context, AuthClaimData auth_claims,
+                    RuntimeContext &runtime_context, AuthClaim auth_claim,
                     SHA256Hash source_tx_hash);
 
   // Disable move and copy.
@@ -238,7 +239,7 @@ public:
   // Span invalidated when call frame changes.
   std::span<const uint32_t> get_parent_supplied_auth_tokens() const;
 
-  AuthClaimData const &get_auth_claims() const;
+  AuthClaim const &get_auth_claim() const;
 
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
@@ -323,10 +324,7 @@ public:
                                  PublicKeyConfigOpt new_key);
 
   SystemStatus<SyscallStatus<void>>
-  set_address_nonce_config(NonceConfig const &nonce_config);
-
-  SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
-      x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
+  set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
@@ -366,12 +364,13 @@ private:
   std::unique_ptr<InvocationFrameTrace> invocation_frame_trace_;
 
   const SHA256Hash source_tx_hash_;
-  const AuthClaimData auth_claims_;
+  const AuthClaim auth_claim_;
   std::optional<Invocation> root_invocation_;
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
-  const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>>
+  const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
+                           ByteArrayHasher>
       newly_created_contracts_;
 
   ExecutionModeData execution_mode_data_;

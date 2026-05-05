@@ -437,6 +437,23 @@ xdr_serialize(auto &serializer, BorrowedPtr<T> p)
 template<typename X, serializes_like<X> T>
 struct serialize_equiv<Ptr<X>, BorrowedPtr<T>> : std::true_type {};
 
+template<is_xdr_serializable T>
+inline size_t
+xdr_size(const Box<T> &b)
+{
+  return xdr_size(*b);
+}
+
+template<is_xdr_serializable T>
+void
+xdr_serialize(auto &serializer, const Box<T> &b)
+{
+  serializer(*b);
+}
+
+template<typename X, serializes_like<X> T>
+struct serialize_equiv<X, Box<T>> : std::true_type {};
+
 // A non-owning span that serializes a member projection of each element.
 // Dynamic extent (default) includes a size prefix and serializes like Vec;
 // fixed extent omits the prefix and serializes like std::array.

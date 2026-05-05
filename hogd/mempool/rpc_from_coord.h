@@ -389,8 +389,9 @@ private:
     info("finish_init(), system starting with db tip: height = {}, id = {}, "
          "block_hash = {}, events_hash = {}, db_hash = {}",
          last_committed_block_.height, last_committed_block_.id,
-         last_committed_block_.block_hash, last_committed_block_.events_hash,
-         last_committed_block_.db_hash);
+         show_byte_array(last_committed_block_.block_hash),
+         show_byte_array(last_committed_block_.events_hash),
+         show_byte_array(last_committed_block_.db_hash));
 
     scheduler_ = std::make_shared<Scheduler>(
         /*current_block=*/last_committed_block_.height, db_sched_client_);

@@ -20,7 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 #include "transaction.hh"
@@ -96,12 +96,7 @@ GenesisConfigurationLoader::load_genesis_configuration(
   int128_t total_storage_costs = 0;
 
   AddressAuthData deployer_auth_data{};
-  deployer_auth_data.nonce_config.accepted_keys = 0;
-  deployer_auth_data.nonce_config.required_weight = 0;
-  deployer_auth_data.gas_permissions.push_back(
-      GasPermissionConfig{.limit = std::numeric_limits<GasAmount>::max(),
-                          .accepted_keys = 0,
-                          .required_weight = 0});
+  deployer_auth_data.required_weight = 0;
   deployer_auth_data.last_written_height = 0;
 
   total_storage_costs +=

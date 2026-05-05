@@ -2,18 +2,19 @@
 
 #include <format>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
-#include "auth_rpc.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/auth/mock_dbauth_rpc.h"
-#include "hogd/base/rpc_client.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "types.hh"
 #include "x23/async.h"
-#include "x23/sockio.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -64,6 +65,7 @@ inline AddressAuthData
 make_test_auth_data(uint8_t id)
 {
   AddressAuthData auth_data{};
+  CHECK(id < kMaxSigners);
   auth_data.public_keys[id] = make_test_pk_config(id);
   auth_data.last_written_height = 0;
   return auth_data;

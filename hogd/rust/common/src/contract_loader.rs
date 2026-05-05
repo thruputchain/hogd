@@ -41,10 +41,10 @@ impl ContractGetResult {
         if self.err_code != 0 {
             return match self.err_code.try_into() {
                 Ok(err) => Err(err),
-                Err(_) => Err(SystemErrorCode::kSystemUnrecoverable),
+                Err(_) => Err(SystemErrorCode::Unrecoverable),
             };
         }
-        if self.data.is_null() {
+        if self.data.is_null() || self.data_len == 0 {
             return Ok(None);
         }
         Ok(Some(unsafe {

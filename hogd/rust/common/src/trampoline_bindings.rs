@@ -21,12 +21,12 @@ impl Into<Result<i32, HostFnErrorCode>> for TrampolineResult {
         let panic: HostFnErrorCode = {
             match self.panic.try_into() {
                 Ok(panic) => panic,
-                Err(_) => return Err(HostFnErrorCode::kHostUnrecoverable),
+                Err(_) => return Err(HostFnErrorCode::Unrecoverable),
             }
         };
 
         match panic {
-            HostFnErrorCode::kHostNoneOrRecoverable => Ok(self.result),
+            HostFnErrorCode::NoneOrRecoverable => Ok(self.result),
             _ => Err(panic),
         }
     }
@@ -36,20 +36,16 @@ impl Into<Result<i32, HostFnErrorCode>> for TrampolineResult {
 // this error is caught at the root of the invocation and converted to an InvokeResult.
 
 pub fn to_invoke_result(error: HostFnErrorCode) -> Result<(), InvokeErrorCode> {
-    debug_assert!(error != HostFnErrorCode::kHostNoneOrRecoverable);
+    debug_assert!(error != HostFnErrorCode::NoneOrRecoverable);
     match error {
-        HostFnErrorCode::kHostOutOfGas => Err(InvokeErrorCode::kInvokeOutOfGas),
-        HostFnErrorCode::kHostReturn => Ok(()),
-        HostFnErrorCode::kHostExit => {
-            Err(InvokeErrorCode::kInvokeDeterministic)
+        HostFnErrorCode::OutOfGas => Err(InvokeErrorCode::OutOfGas),
+        HostFnErrorCode::Return => Ok(()),
+        HostFnErrorCode::Exit => Err(InvokeErrorCode::Deterministic),
+        HostFnErrorCode::ValidationFailure => {
+            Err(InvokeErrorCode::ValidationFailure)
         }
-        HostFnErrorCode::kHostValidationFailure => {
-            Err(InvokeErrorCode::kInvokeValidationFailure)
-        }
-        HostFnErrorCode::kHostAbortTransaction => {
-            Err(InvokeErrorCode::kInvokeAbortTransaction)
-        }
-        _ => Err(InvokeErrorCode::kInvokeUnrecoverable),
+        HostFnErrorCode::Abandon => Err(InvokeErrorCode::Abandon),
+        _ => Err(InvokeErrorCode::Unrecoverable),
     }
 }
 macro_rules! define_trampoline {

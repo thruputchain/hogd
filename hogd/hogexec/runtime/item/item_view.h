@@ -180,26 +180,16 @@ public:
     internal_auth_data_->pk_changes_[key_index] = std::move(new_key);
   }
 
-  void set_nonce_config(NonceConfig const &nonce_config)
+  void set_required_weight(Weight w)
   {
     assert(internal_auth_data_);
-    internal_auth_data_->nonce_config_ = nonce_config;
-  }
-
-  void set_gas_permission_configs(
-      x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
-  {
-    assert(internal_auth_data_);
-    internal_auth_data_->gas_permission_configs_ =
-        std::move(gas_permission_configs);
+    internal_auth_data_->required_weight_ = w;
   }
 
 private:
   struct InternalAuthData {
     std::unordered_map<uint32_t, PublicKeyConfigOpt> pk_changes_;
-    std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
-        gas_permission_configs_;
-    std::optional<NonceConfig> nonce_config_;
+    std::optional<Weight> required_weight_;
   };
   std::unique_ptr<InternalAuthData> internal_auth_data_;
 };

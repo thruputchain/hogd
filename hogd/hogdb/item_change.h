@@ -384,11 +384,7 @@ public:
     assert(key_id < kMaxSigners);
     pk_changes_[key_id].emplace(std::move(pk));
   }
-  void set_new_nonce(NonceConfig nonce) { nonce_change_ = std::move(nonce); }
-  void set_new_gas_configs(GasConfigChange gas_config)
-  {
-    gas_config_change_ = std::move(gas_config);
-  }
+  void set_new_required_weight(Weight w) { required_weight_change_ = w; }
 
   HogDBStatus<bool> narrow(const AuthDataItem &auth_data_item) const;
 
@@ -398,8 +394,7 @@ public:
 
 private:
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
-  std::optional<NonceConfig> nonce_change_;
-  std::optional<GasConfigChange> gas_config_change_;
+  std::optional<Weight> required_weight_change_;
   AddressAuthData base_auth_data_;
 
   friend struct std::formatter<AuthDataItem>;
@@ -464,14 +459,22 @@ static_assert(hogd::is_item<hogd::PointerItem<hogd::ReplayCacheIt>>);
 
 class RetrocausalQueueIt {
 public:
-  RetrocausalQueueIt(RetrocausalQueueDelta delta) : delta_(std::move(delta)) {}
+  RetrocausalQueueIt(RetrocausalQueueDelta delta)
+    : delta_(std::move(delta)), max_insert_count_(static_cast<uint16_t>(
+                                    delta_.insert.added_entries.size()))
+  {}
 
   HogDBStatus<bool> narrow(const RetrocausalQueueIt &earlier);
 
   RetrocausalQueueDelta const &delta() const { return delta_; }
 
+  uint16_t max_insert_count() const { return max_insert_count_; }
+
 private:
   RetrocausalQueueDelta delta_;
+  static_assert(std::numeric_limits<uint16_t>::max() >=
+                kRetrocausalQueueBlockEntriesMaxLen);
+  uint16_t max_insert_count_ = 0;
   // Number of entries consumed from past blocks. Calculated during
   // try_atomic_change_lock and used in commit_change.
   mutable uint64_t consumed_past_entries_{0};

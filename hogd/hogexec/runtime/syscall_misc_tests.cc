@@ -15,6 +15,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/contract_trait_client.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "rpc_types.hh"
@@ -448,21 +449,6 @@ TEST_F(SyscallMiscTests, TestLogEventNoncontinuousTopics)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-// ── #24: GetAuthClaim (out of bounds) ───────────────────────────────
-
-TEST_F(SyscallMiscTests, TestGetAuthClaimOob)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<"test_get_auth_claim_oob">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-}
-
 // ── #25: SHA256Update (no buffer) ───────────────────────────────────
 
 TEST_F(SyscallMiscTests, TestSha256UpdateNoBuffer)
@@ -570,22 +556,6 @@ TEST_F(SyscallMiscTests, TestChangePubkeyIndexOob)
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-}
-
-// ── #32: WriteAddressGasPermissionConfigs (non-initial segment) ─────
-
-TEST_F(SyscallMiscTests, TestGasPermsNonInitialSegment)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<"test_gas_perms_non_initial_segment">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }

@@ -44,7 +44,7 @@ public:
                         SignedTransaction const &stx, DBContext &db);
 
   SyscallHandlerContext(MockRuntimeContext *context, DBContext &db,
-                        AuthClaimData const &auth_claim_data,
+                        AuthClaim const &auth_claim,
                         SHA256Hash const &source_tx_hash);
 
   ~SyscallHandlerContext()

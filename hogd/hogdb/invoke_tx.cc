@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -183,16 +184,32 @@ void
 InvokeTX::commit()
 {
   assert_is_valid();
-  // changes are already applied to BlockTX, but we still need to mark them all
-  // as committed
+
+  // Phase 1: commit balance keys first, finalizing their locks so that
+  // release_balance (called in phase 2) can apply post-commit credit.
+  // TODO(geoff): Balance keys currently never produce refunds
+  // (BalanceLock::commit_change returns 0, locked_storage_cost is 0).
+  // Account deletion will break this invariant — when it lands, this
+  // loop will need refund handling and release_balance will need to
+  // handle the case where the balance lock is not yet finalized.
   for (auto &[key, vec] : changes_) {
-    if (!vec.empty()) {
+    if (!vec.empty() && key.is_address_balance()) {
+      auto cost_change = block_.get().commit_change(key, vec.back().change);
+      CHECK_EQ(cost_change, 0);
+      CHECK_EQ(vec.back().locked_storage_cost, 0);
+    }
+  }
+
+  // Phase 2: commit non-balance keys. These may produce storage refunds
+  // that are credited to the (now-finalized) balance locks.
+  for (auto &[key, vec] : changes_) {
+    if (!vec.empty() && !key.is_address_balance()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
       CHECK_LE(cost_change, vec.back().locked_storage_cost);
-      // NONDETERMINISTIC:Compute the amount of storage tokens that can be
+      // NONDETERMINISTIC: Compute the amount of storage tokens that can be
       // released after this transaction commits.
       int128_t released_cost = vec.back().locked_storage_cost - cost_change;
-      assert(released_cost >= 0);
+      CHECK_GE(released_cost, 0);
 
       if (released_cost > 0) {
         block_.get().release_balance(key.get_address(), released_cost);
@@ -437,11 +454,9 @@ InvokeTX::request_auth_data(Address const &addr,
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
   }
-  if (auth_data_change.new_nonce_config) {
-    auth_data_item.set_new_nonce(*auth_data_change.new_nonce_config);
-  }
-  if (auth_data_change.new_gas_config_change) {
-    auth_data_item.set_new_gas_configs(*auth_data_change.new_gas_config_change);
+  if (auth_data_change.new_required_weight) {
+    auth_data_item.set_new_required_weight(
+        *auth_data_change.new_required_weight);
   }
   auto change = ItemChange(std::move(auth_data_item));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
@@ -470,6 +485,9 @@ InvokeTX::request_retrocausal_queue(const ItemKey &key,
                                     const RetrocausalQueueDelta &delta,
                                     StorageDeltaFlagSet flags)
 {
+  if (delta.insert.added_entries.size() > kRetrocausalQueueBlockEntriesMaxLen) {
+    return std::unexpected(HogDBError{HogDBCode::kInvalidExecutorBehavior});
+  }
   auto change = ItemChange(RetrocausalQueueIt(delta));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
