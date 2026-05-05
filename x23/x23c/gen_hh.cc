@@ -90,6 +90,8 @@ struct Gen {
   static string map_bound(string const &bound);
   string type_name(const Declaration &d, bool generate);
 
+  static constexpr std::string_view kCppBox = R"(#[cpp(box)])";
+
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
   {
@@ -806,8 +808,12 @@ Gen::type_name(const Declaration &d, bool generate)
 
   switch (d.qual) {
   case kScalar:
+    if (d.comment.find(kCppBox) != std::string::npos)
+      return std::format("x23::Box<{}>", tname);
     return tname;
   case kPtr:
+    if (d.comment.find(kCppBox) != std::string::npos)
+      return std::format("x23::Ptr<x23::Box<{}>>", tname);
     return std::format("x23::Ptr<{}>", tname);
   case kArray:
     return std::format("std::array<{}, {}>", tname, d.bound);

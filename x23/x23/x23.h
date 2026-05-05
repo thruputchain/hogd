@@ -18,6 +18,7 @@
 #include <utility>
 #include <variant>
 
+#include "x23/debug.h"
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -235,6 +236,66 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
 };
 template<typename T> Ptr(T &&) -> Ptr<T>;
 
+template<typename T> struct Box : private std::unique_ptr<T> {
+  using super = std::unique_ptr<T>;
+  using element_type = T;
+  using value_type = T;
+
+  Box() noexcept = default;
+
+  Box(const Box &other)
+  {
+    if (other.has_value())
+      this->reset(new T(*other));
+  }
+  Box(Box &&other) noexcept = default;
+
+  Box(value_type t) : super(new T(std::move(t))) {}
+
+  template<typename... Args> requires std::constructible_from<T, Args...>
+  Box(std::in_place_t, Args &&...args)
+    : super(new T(std::forward<Args>(args)...))
+  {}
+  template<typename U, typename... Args>
+  requires std::constructible_from<T, std::initializer_list<U>, Args...>
+  Box(std::in_place_t, std::initializer_list<U> ilist, Args &&...args)
+    : super(new T(ilist, std::forward<Args>(args)...))
+  {}
+
+  Box &operator=(const Box &other)
+  {
+    if (has_value() && other.has_value())
+      **this = *other;
+    else if (other.has_value())
+      this->reset(new T(*other));
+    else
+      this->reset();
+    return *this;
+  }
+  Box &operator=(Box &&other) noexcept = default;
+
+  bool has_value() const noexcept { return bool(super::get()); }
+  void ensure()
+  {
+    if (!has_value())
+      this->reset(new T{});
+  }
+
+  T *get() noexcept
+  {
+    x23assert(has_value());
+    return super::get();
+  }
+  const T *get() const noexcept
+  {
+    x23assert(has_value());
+    return super::get();
+  }
+  decltype(auto) operator*(this auto &&self) { return *self.get(); }
+  auto operator->(this auto &&self) noexcept { return self.get(); }
+};
+template<typename T> Box(T &&) -> Box<T>;
+
 // A non-owning Ptr that serializes like a Ptr.
 template<typename T> struct BorrowedPtr {
   BorrowedPtr() noexcept = default;
@@ -275,7 +336,56 @@ template<typename T> struct xdr_meta<Ptr<T>> {
   static constexpr XdrCategory category = XdrCategory::kPtr;
 };
 
+template<typename T>
+inline bool
+operator==(const Box<T> &a, const Box<T> &b)
+{
+  static const T da{}, db{};
+  return (a.has_value() ? *a : da) == (b.has_value() ? *b : db);
+}
+
+template<typename T>
+inline std::compare_three_way_result_t<T>
+operator<=>(const Box<T> &a, const Box<T> &b)
+{
+  static const T da{}, db{};
+  return (a.has_value() ? *a : da) <=> (b.has_value() ? *b : db);
+}
+
+template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};
+
 } // namespace x23
+
+template<typename T> requires requires { typename std::tuple_size<T>::type; }
+struct std::tuple_size<x23::Box<T>> : std::tuple_size<T> {};
+
+template<size_t I, typename T>
+requires requires { typename std::tuple_element<I, T>::type; }
+struct std::tuple_element<I, x23::Box<T>> : std::tuple_element<I, T> {};
+
+template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
+decltype(auto)
+get(x23::Box<T> &b)
+{
+  b.ensure();
+  return get<I>(*b);
+}
+
+template<size_t I, typename T> requires requires(const T &t) { get<I>(t); }
+decltype(auto)
+get(const x23::Box<T> &b)
+{
+  x23assert(b.has_value());
+  return get<I>(*b);
+}
+
+template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
+decltype(auto)
+get(x23::Box<T> &&b)
+{
+  x23assert(b.has_value());
+  return get<I>(*std::move(b));
+}
 
 template<x23::is_xdr_enum E>
 struct std::formatter<E> : std::formatter<std::string> {

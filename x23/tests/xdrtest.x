@@ -409,3 +409,23 @@ typedef opaque tiny_opaque<1>;
 enum ConstUnionBugType { kConstBugA = 0 };
 union ConstUnionBugUnion switch (ConstUnionBugType t) { case kConstBugA: int val; };
 struct ConstUnionBugStruct { ConstUnionBugUnion u; };
+
+// Box<T> integration test: a recursive type with a union base case.
+// box_expr is a union; kBoxLiteral terminates, kBoxAdd recurses through
+// box_add_args which uses Box to break the static size cycle.
+%struct box_add_args;
+
+enum box_expr_type { kBoxLiteral = 0, kBoxAdd = 1 };
+
+union box_expr switch (box_expr_type t)
+{
+case kBoxLiteral:
+  int literal;
+case kBoxAdd:
+  box_add_args *add; // #[cpp(box)]
+};
+
+struct box_add_args {
+  box_expr left;
+  box_expr right;
+};
