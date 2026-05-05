@@ -86,7 +86,7 @@ public:
 
     init();
 
-    memcpy(backing_store_.data(), &hash, hash.size() * sizeof(hash[0]));
+    memcpy(backing_store_.data(), hash.data(), hash.size() * sizeof(hash[0]));
     size_ = hash.size() * 2;
   }
 

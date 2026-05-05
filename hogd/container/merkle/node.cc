@@ -21,6 +21,10 @@ namespace hogd {
 
 namespace {
 
+static_assert(
+    sizeof(SHA256Hash) == SHA256Hash{}.size(),
+    "Merkle proof wire format requires sizeof(SHA256Hash) == element count");
+
 template<typename Sink>
 void
 emit_bytes(Sink &sink, std::span<const std::byte> bytes)
@@ -116,7 +120,7 @@ visit_children_encoding(
                            std::span(child->hash.data(), child->hash.size())));
     }
     else {
-      std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};
+      std::array<std::byte, SHA256Hash{}.size()> zero_bytes{};
       emit_bytes(sink, zero_bytes);
     }
   }
@@ -131,7 +135,7 @@ visit_child_encoding(Sink &sink, Node *child)
                          std::span(child->hash.data(), child->hash.size())));
   }
   else {
-    std::array<std::byte, sizeof(SHA256Hash)> zero_bytes{};
+    std::array<std::byte, SHA256Hash{}.size()> zero_bytes{};
     emit_bytes(sink, zero_bytes);
   }
 }
@@ -179,12 +183,12 @@ get_value_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   idx += kValuePresentSize;
 
   if (value_present) {
-    if (idx + sizeof(SHA256Hash) > encodings.size()) {
+    if (idx + SHA256Hash{}.size() > encodings.size()) {
       return false;
     }
     node.value_hash = SHA256Hash();
-    memcpy(&(*node.value_hash), &encodings[idx], sizeof(SHA256Hash));
-    idx += sizeof(SHA256Hash);
+    memcpy(node.value_hash->data(), &encodings[idx], node.value_hash->size());
+    idx += node.value_hash->size();
   }
   else {
     node.value_hash = std::nullopt;
@@ -228,13 +232,14 @@ bool
 get_branches_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
                            Node::Raw &node, size_t num_branches)
 {
-  size_t branch_encoding_size = num_branches * sizeof(SHA256Hash);
+  size_t branch_encoding_size = num_branches * node.child_hashes[0].size();
   if (idx + branch_encoding_size > encodings.size()) {
     return false;
   }
   for (size_t i = 0; i < num_branches; i++) {
-    size_t start = idx + (i * sizeof(SHA256Hash));
-    memcpy(&node.child_hashes[i], &encodings[start], sizeof(SHA256Hash));
+    size_t start = idx + (i * node.child_hashes[i].size());
+    memcpy(node.child_hashes[i].data(), &encodings[start],
+           node.child_hashes[i].size());
   }
   idx += branch_encoding_size;
 
