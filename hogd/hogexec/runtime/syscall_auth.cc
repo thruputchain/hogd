@@ -142,7 +142,9 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-static bool
+namespace {
+
+bool
 auth_token_node_within_depth(AuthTokenNode const &root, uint32_t max_depth)
 {
   std::vector<std::pair<AuthTokenNode const *, uint32_t>> stack;
@@ -159,6 +161,8 @@ auth_token_node_within_depth(AuthTokenNode const &root, uint32_t max_depth)
   }
   return true;
 }
+
+} // namespace
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_MintAuthToken_inner(
@@ -191,10 +195,15 @@ syscall_MintAuthToken_inner(
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
-  if (!auth_token_node_within_depth(auth_token.root_node,
-                                    kAuthTokenMaxDepth)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+  try {
+    if (!auth_token_node_within_depth(auth_token.root_node,
+                                      kAuthTokenMaxDepth)) {
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+              WrappedGasAmount{0}};
+    }
+  } catch (...) {
+    error("unrecoverable: failed to validate auth token depth");
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.mint_auth_token(auth_token);

@@ -1126,10 +1126,10 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
                                     uint32_t{kAuthTokenMaxDepth}),
                                 .child_nodes = {}};
              for (uint32_t level = kAuthTokenMaxDepth; level > 0; --level) {
-               node = AuthTokenNode{
-                   .consumer_address = kAddr,
-                   .payload = x23::serialize(level - uint32_t{1}),
-                   .child_nodes = {node}};
+               node =
+                   AuthTokenNode{.consumer_address = kAddr,
+                                 .payload = x23::serialize(level - uint32_t{1}),
+                                 .child_nodes = {node}};
              }
 
              auto serialized = x23::serialize(node);
@@ -1141,9 +1141,8 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
                                             serialized.size()},
                  token_id);
              EXPECT_TRUE(mint_res.has_value());
-             EXPECT_EQ(
-                 mint_res.value(),
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             EXPECT_EQ(mint_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
              return {};
            }}});
@@ -1182,17 +1181,15 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
   auto contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             AuthTokenNode node{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(
-                     uint32_t{kAuthTokenMaxDepth - 1}),
-                 .child_nodes = {}};
-             for (uint32_t level = kAuthTokenMaxDepth - 1; level > 0;
-                  --level) {
-               node = AuthTokenNode{
-                   .consumer_address = kAddr,
-                   .payload = x23::serialize(level - uint32_t{1}),
-                   .child_nodes = {node}};
+             AuthTokenNode node{.consumer_address = kAddr,
+                                .payload = x23::serialize(
+                                    uint32_t{kAuthTokenMaxDepth - 1}),
+                                .child_nodes = {}};
+             for (uint32_t level = kAuthTokenMaxDepth - 1; level > 0; --level) {
+               node =
+                   AuthTokenNode{.consumer_address = kAddr,
+                                 .payload = x23::serialize(level - uint32_t{1}),
+                                 .child_nodes = {node}};
              }
 
              auto serialized = x23::serialize(node);
@@ -1208,8 +1205,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                        SyscallErrorCode::kSyscallErrorCodeNone);
 
              uint32_t token_id = root_id;
-             for (uint32_t level = 0;
-                  level < uint32_t{kAuthTokenMaxDepth};
+             for (uint32_t level = 0; level < uint32_t{kAuthTokenMaxDepth};
                   ++level) {
                std::array<std::byte, 256> payload_buf{};
                RuntimeMemoryLength payload_written_len = 0;
@@ -1231,7 +1227,8 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                if (level < uint32_t{kAuthTokenMaxDepth} - 1) {
                  EXPECT_EQ(child_count, 1U);
                  token_id = child_start;
-               } else {
+               }
+               else {
                  EXPECT_EQ(child_count, 0U);
                }
              }
@@ -1273,30 +1270,25 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
   auto contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0, [&](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             AuthTokenNode too_deep{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(uint32_t{5}),
-                 .child_nodes = {}};
-             AuthTokenNode great_grandchild{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(uint32_t{4}),
-                 .child_nodes = {too_deep}};
-             AuthTokenNode grandchild{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(uint32_t{3}),
-                 .child_nodes = {great_grandchild}};
-             AuthTokenNode child1{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(uint32_t{2}),
-                 .child_nodes = {grandchild}};
-             AuthTokenNode child0{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(uint32_t{1}),
-                 .child_nodes = {}};
-             AuthTokenNode root{
-                 .consumer_address = kAddr,
-                 .payload = x23::serialize(uint32_t{0}),
-                 .child_nodes = {child0, child1}};
+             AuthTokenNode too_deep{.consumer_address = kAddr,
+                                    .payload = x23::serialize(uint32_t{5}),
+                                    .child_nodes = {}};
+             AuthTokenNode great_grandchild{.consumer_address = kAddr,
+                                            .payload =
+                                                x23::serialize(uint32_t{4}),
+                                            .child_nodes = {too_deep}};
+             AuthTokenNode grandchild{.consumer_address = kAddr,
+                                      .payload = x23::serialize(uint32_t{3}),
+                                      .child_nodes = {great_grandchild}};
+             AuthTokenNode child1{.consumer_address = kAddr,
+                                  .payload = x23::serialize(uint32_t{2}),
+                                  .child_nodes = {grandchild}};
+             AuthTokenNode child0{.consumer_address = kAddr,
+                                  .payload = x23::serialize(uint32_t{1}),
+                                  .child_nodes = {}};
+             AuthTokenNode root{.consumer_address = kAddr,
+                                .payload = x23::serialize(uint32_t{0}),
+                                .child_nodes = {child0, child1}};
 
              auto serialized = x23::serialize(root);
              uint32_t token_id = 0;
@@ -1307,9 +1299,8 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
                                             serialized.size()},
                  token_id);
              EXPECT_TRUE(mint_res.has_value());
-             EXPECT_EQ(
-                 mint_res.value(),
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             EXPECT_EQ(mint_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
              return {};
            }}});
