@@ -46,7 +46,12 @@ public:
   {
     auto status = lambda();
     if (!status) [[unlikely]] {
+      // We need to actually panic here; we do not want to allow
+      // a corrupted cache entry to get read as valid or kHogDBCode::kNotFound.
+      // TODO(geoff): We could consider explicitly marking the cache entry
+      // as corrupted, and handling errors more gracefully.
       panic("failed to get snapshot cost: {}", status.error());
+      // any action on this item will fail
       snapshot_cost_ = std::numeric_limits<int128_t>::min();
       return;
     }
