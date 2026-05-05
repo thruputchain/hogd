@@ -1118,6 +1118,12 @@ GenRs::type_name(const Declaration &d, bool generate,
 
   switch (d.qual) {
   case kScalar:
+    if (needs_box) {
+      if (in_colon_required_setting) {
+        return std::format("Box::<{}>", tname);
+      }
+      return std::format("Box<{}>", tname);
+    }
     return tname;
   case kPtr:
   {
