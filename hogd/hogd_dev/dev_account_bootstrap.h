@@ -13,6 +13,8 @@
 
 namespace hogd {
 
+inline constexpr std::uint32_t kMaxDevAccounts = 1000;
+
 struct DevAccountBootstrapConfig {
   std::uint32_t count = 0;
   std::string seed = "groundhog-dev-accounts";

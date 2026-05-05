@@ -54,6 +54,8 @@ derive_dev_account_keypair(std::string_view seed, std::uint32_t index)
 DevAccountBootstrapArtifact
 build_dev_account_bootstrap_artifact(DevAccountBootstrapConfig const &config)
 {
+  CHECK_LE(config.count, kMaxDevAccounts);
+
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
   auto wallet_contract = wallet_meta::load_wasm();

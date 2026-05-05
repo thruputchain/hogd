@@ -440,6 +440,11 @@ public:
     return parse_readiness(read_stdout_line(kStartupTimeout));
   }
 
+  std::optional<int> wait_for_exit_for_test(std::chrono::milliseconds timeout)
+  {
+    return wait_for_exit(timeout);
+  }
+
   int terminate()
   {
     if (pid_ <= 0) {
@@ -681,6 +686,21 @@ TEST(HogdDev, DevAccountReadinessAdvertisesPublicMetadata)
   }
 
   expect_clean_exit(process);
+}
+
+TEST(HogdDev, RejectsDevAccountCountAboveLimit)
+{
+  HogdDevProcess process = HogdDevProcess::start({
+      "--dev-accounts",
+      "1001",
+  });
+
+  std::optional<int> status = process.wait_for_exit_for_test(kStartupTimeout);
+  ASSERT_TRUE(status.has_value());
+  EXPECT_FALSE(WIFEXITED(*status) && WEXITSTATUS(*status) == EXIT_SUCCESS);
+  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  EXPECT_NE(process.read_remaining_stderr().find("Invalid dev account count"),
+            std::string::npos);
 }
 
 TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)

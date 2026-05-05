@@ -189,6 +189,18 @@ parse_u32(const std::string &value, std::string_view name)
   return static_cast<std::uint32_t>(parsed);
 }
 
+std::uint32_t
+parse_dev_account_count(const std::string &value)
+{
+  std::uint32_t count = parse_u32(value, "dev account count");
+  if (count > hogd::kMaxDevAccounts) {
+    throw std::runtime_error(
+        std::format("Invalid dev account count: {} exceeds maximum {}", value,
+                    hogd::kMaxDevAccounts));
+  }
+  return count;
+}
+
 std::uint64_t
 parse_u64(const std::string &value, std::string_view name)
 {
@@ -236,7 +248,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {
-      bootstrap_config.count = parse_u32(argv[++i], "dev account count");
+      bootstrap_config.count = parse_dev_account_count(argv[++i]);
       continue;
     }
     if (arg == "--dev-account-seed" && i + 1 < argc) {
