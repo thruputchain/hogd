@@ -36,7 +36,7 @@ namespace hogd {
 class HogdDevNode {
 public:
   HogdDevNode(std::string bind_host, std::uint16_t requested_scheduler_port,
-              DevAccountBootstrapConfig bootstrap_config = {});
+              DevAccountBootstrapConfig const &bootstrap_config = {});
   ~HogdDevNode();
 
   HogdDevNode(HogdDevNode const &) = delete;

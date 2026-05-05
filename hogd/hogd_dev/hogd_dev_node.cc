@@ -9,19 +9,26 @@
 #include <sys/socket.h>
 #include <utility>
 
+#include "address_auth.hh"
 #include "auth_card.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "db_sched.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/hogd_dev/dev_account_bootstrap.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -37,6 +44,7 @@
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -60,7 +68,7 @@ validate_dev_account_auth_data(DevAccountMetadata const &account,
 
 HogdDevNode::HogdDevNode(std::string bind_host,
                          std::uint16_t requested_scheduler_port,
-                         DevAccountBootstrapConfig bootstrap_config)
+                         DevAccountBootstrapConfig const &bootstrap_config)
   : bind_host_(std::move(bind_host)), event_ctx_(event_dir_.directory()),
     event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
     event_indexer_server_(event_ctx_)
@@ -282,7 +290,8 @@ HogdDevNode::refresh_dev_account_balances()
         ctx_->get_db().read_address_balance(account.address);
     CHECK(balance.has_value());
     CHECK_GE(*balance, 0);
-    CHECK_LE(*balance, std::numeric_limits<std::uint64_t>::max());
+    CHECK(std::cmp_less_equal(*balance,
+                              std::numeric_limits<std::uint64_t>::max()));
     account.storage_tokens = static_cast<std::uint64_t>(*balance);
   }
 }

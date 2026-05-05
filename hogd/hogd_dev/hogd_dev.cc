@@ -18,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/string.h"
+#include "hogd/hogd_dev/dev_account_bootstrap.h"
 #include "hogd/hogd_dev/hogd_dev_node.h"
 #include "hogd/init.h"
 
@@ -134,7 +135,7 @@ emit_readiness(const HogdDevNode &node, ReadinessSink sink)
 int
 hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
               ReadinessSink readiness_sink,
-              DevAccountBootstrapConfig bootstrap_config)
+              DevAccountBootstrapConfig const &bootstrap_config)
 {
   install_signal_handler();
 
@@ -264,5 +265,5 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   return hogd::hogd_dev_init(std::move(listen_host), scheduler_port,
-                             readiness_sink, std::move(bootstrap_config));
+                             readiness_sink, bootstrap_config);
 }

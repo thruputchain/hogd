@@ -1,19 +1,22 @@
 #include "hogd/hogd_dev/dev_account_bootstrap.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <span>
-#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/dev_wallet.h"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "types.hh"
 
 namespace hogd {
 

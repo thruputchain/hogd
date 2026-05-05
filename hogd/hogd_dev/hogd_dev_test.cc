@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -24,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
 #include "built_contracts/fibonacci.h"
@@ -49,6 +51,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 #ifndef HOGD_DEV_BINARY
 #error "HOGD_DEV_BINARY must be defined by CMake"
@@ -211,7 +214,8 @@ parse_dev_accounts(const json::Value &readiness, std::string_view line)
     const std::int64_t index = require_integer_field(account, "index", line);
     const std::int64_t initial_storage_tokens =
         require_integer_field(account, "initial_storage_tokens", line);
-    if (index < 0 || index > std::numeric_limits<std::uint32_t>::max() ||
+    if (index < 0 ||
+        std::cmp_greater(index, std::numeric_limits<std::uint32_t>::max()) ||
         initial_storage_tokens < 0) {
       throw std::runtime_error(
           std::format("unexpected dev_accounts integer in readiness: {}",
@@ -697,7 +701,9 @@ TEST(HogdDev, RejectsDevAccountCountAboveLimit)
 
   std::optional<int> status = process.wait_for_exit_for_test(kStartupTimeout);
   ASSERT_TRUE(status.has_value());
-  EXPECT_FALSE(WIFEXITED(*status) && WEXITSTATUS(*status) == EXIT_SUCCESS);
+  const int wait_status = status.value_or(EXIT_SUCCESS);
+  EXPECT_FALSE(WIFEXITED(wait_status) &&
+               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find("Invalid dev account count"),
             std::string::npos);
@@ -902,8 +908,9 @@ TEST(HogdDev, DevAccountCanDeployCliShapedTransaction)
     };
 
     Signature signature(CryptographicScheme::Ed25519);
-    signature.ed25519() =
-        ed25519_sign(keypair.second, x23::serialize(tx)).value();
+    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    ASSERT_TRUE(signed_bytes.has_value());
+    signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
         .tx = std::move(tx),
         .signatures = {DecoratedSignature{
