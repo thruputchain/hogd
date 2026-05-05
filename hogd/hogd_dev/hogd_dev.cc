@@ -111,7 +111,7 @@ build_readiness_payload(const HogdDevNode &node)
             w.field("index", static_cast<std::int64_t>(account.index));
             w.field("address", format_hex(account.address));
             w.field("public_key", format_hex(account.public_key));
-            w.field("storage_tokens",
+            w.field("initial_storage_tokens",
                     static_cast<std::int64_t>(account.storage_tokens));
           });
         }

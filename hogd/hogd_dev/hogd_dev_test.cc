@@ -77,7 +77,7 @@ struct Readiness {
     std::uint32_t index;
     std::string address;
     std::string public_key;
-    std::uint64_t storage_tokens;
+    std::uint64_t initial_storage_tokens;
   };
   std::vector<DevAccount> dev_accounts;
 };
@@ -209,10 +209,10 @@ parse_dev_accounts(const json::Value &readiness, std::string_view line)
                       line));
     }
     const std::int64_t index = require_integer_field(account, "index", line);
-    const std::int64_t storage_tokens =
-        require_integer_field(account, "storage_tokens", line);
+    const std::int64_t initial_storage_tokens =
+        require_integer_field(account, "initial_storage_tokens", line);
     if (index < 0 || index > std::numeric_limits<std::uint32_t>::max() ||
-        storage_tokens < 0) {
+        initial_storage_tokens < 0) {
       throw std::runtime_error(
           std::format("unexpected dev_accounts integer in readiness: {}",
                       line));
@@ -222,7 +222,8 @@ parse_dev_accounts(const json::Value &readiness, std::string_view line)
         .address = std::string(require_string_field(account, "address", line)),
         .public_key =
             std::string(require_string_field(account, "public_key", line)),
-        .storage_tokens = static_cast<std::uint64_t>(storage_tokens),
+        .initial_storage_tokens =
+            static_cast<std::uint64_t>(initial_storage_tokens),
     });
   }
   return out;
@@ -674,8 +675,9 @@ TEST(HogdDev, DevAccountReadinessAdvertisesPublicMetadata)
     EXPECT_EQ(readiness.dev_accounts[i].public_key, hex_string(keypair.first));
     EXPECT_TRUE(readiness.dev_accounts[i].address.starts_with("0x"));
     EXPECT_EQ(readiness.dev_accounts[i].address.size(), 66UL);
-    EXPECT_GT(readiness.dev_accounts[i].storage_tokens, 0UL);
-    EXPECT_LE(readiness.dev_accounts[i].storage_tokens, 1'000'000'000UL);
+    EXPECT_GT(readiness.dev_accounts[i].initial_storage_tokens, 0UL);
+    EXPECT_LE(readiness.dev_accounts[i].initial_storage_tokens,
+              1'000'000'000UL);
   }
 
   expect_clean_exit(process);
