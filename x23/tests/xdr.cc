@@ -273,12 +273,12 @@ TEST(Box, GeneratedBoxExpr)
   args.right = two;
 
   box_expr add(kBoxAdd);
-  add.add() = std::move(args);
+  add.add() = x23::Box<box_add_args>(std::move(args));
 
   auto buf = x23::serialize(add);
   box_expr result;
   x23::deserialize(&result, buf);
   EXPECT_EQ(result, add);
-  EXPECT_EQ(result.add()->left.literal(), 1);
-  EXPECT_EQ(result.add()->right.literal(), 2);
+  EXPECT_EQ((*result.add())->left.literal(), 1);
+  EXPECT_EQ((*result.add())->right.literal(), 2);
 }

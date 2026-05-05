@@ -813,7 +813,7 @@ Gen::type_name(const Declaration &d, bool generate)
     return tname;
   case kPtr:
     if (d.comment.find(kCppBox) != std::string::npos)
-      return std::format("x23::Box<{}>", tname);
+      return std::format("x23::Ptr<x23::Box<{}>>", tname);
     return std::format("x23::Ptr<{}>", tname);
   case kArray:
     return std::format("std::array<{}, {}>", tname, d.bound);
