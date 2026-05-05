@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "auth_token.hh"
+#include "invoke_flag.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
