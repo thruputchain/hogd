@@ -155,8 +155,13 @@ auth_token_node_within_depth(AuthTokenNode const &root, uint32_t max_depth)
     if (depth > max_depth) {
       return false;
     }
-    for (auto const &child : node->child_nodes) {
-      stack.emplace_back(&child, depth + 1);
+    if (!node->child_nodes.empty()) {
+      if (depth == max_depth) {
+        return false;
+      }
+      for (auto const &child : node->child_nodes) {
+        stack.emplace_back(&child, depth + 1);
+      }
     }
   }
   return true;
