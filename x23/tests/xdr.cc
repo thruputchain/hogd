@@ -261,3 +261,28 @@ TEST(Box, RecursiveRoundTrip)
   x23::deserialize(&result, buf);
   EXPECT_EQ(*result, tree);
 }
+
+TEST(Box, GeneratedBoxExpr)
+{
+  using enum box_expr_type;
+
+  // Build expression tree: (1 + 2)
+  box_expr one(kBoxLiteral);
+  one.literal() = 1;
+  box_expr two(kBoxLiteral);
+  two.literal() = 2;
+
+  box_add_args args;
+  args.left = one;
+  args.right = two;
+
+  box_expr add(kBoxAdd);
+  add.add() = std::move(args);
+
+  auto buf = x23::serialize(add);
+  box_expr result;
+  x23::deserialize(&result, buf);
+  EXPECT_EQ(result, add);
+  EXPECT_EQ(result.add()->left.literal(), 1);
+  EXPECT_EQ(result.add()->right.literal(), 2);
+}

@@ -50,6 +50,9 @@ static_assert(x23::detail::xdr_size_bounds<x23::Box<fix_4>>() ==
 static_assert(x23::serializes_like<x23::Box<fix_4>, fix_4>);
 static_assert(x23::is_xdr_serializable<x23::Box<fix_4>>);
 
+static_assert(x23::contains_recursive_xdr<box_add_args>);
+static_assert(x23::contains_recursive_xdr<box_expr>);
+
 struct my_fix_4 {
   int32_t i;
 };

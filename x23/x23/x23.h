@@ -11,6 +11,8 @@
 #include <format>
 #include <initializer_list>
 #include <memory>
+
+#include "x23/debug.h"
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -240,9 +242,13 @@ template<typename T> struct Box : private std::unique_ptr<T> {
   using element_type = T;
   using value_type = T;
 
-  Box() : super(new T{}) {}
+  Box() noexcept = default;
 
-  Box(const Box &other) : super(new T(*other)) {}
+  Box(const Box &other)
+  {
+    if (other.has_value())
+      this->reset(new T(*other));
+  }
   Box(Box &&other) noexcept = default;
 
   Box(value_type t) : super(new T(std::move(t))) {}
@@ -260,13 +266,25 @@ template<typename T> struct Box : private std::unique_ptr<T> {
 
   Box &operator=(const Box &other)
   {
-    **this = *other;
+    if (has_value() && other.has_value())
+      **this = *other;
+    else if (other.has_value())
+      this->reset(new T(*other));
+    else
+      this->reset();
     return *this;
   }
   Box &operator=(Box &&other) noexcept = default;
 
-  T *get() noexcept { return super::get(); }
-  const T *get() const noexcept { return super::get(); }
+  bool has_value() const noexcept { return bool(super::get()); }
+  void ensure()
+  {
+    if (!has_value())
+      this->reset(new T{});
+  }
+
+  T *get() noexcept { x23assert(has_value()); return super::get(); }
+  const T *get() const noexcept { x23assert(has_value()); return super::get(); }
   decltype(auto) operator*(this auto &&self) { return *self.get(); }
   auto operator->(this auto &&self) noexcept { return self.get(); }
 };
@@ -343,6 +361,7 @@ requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &b)
 {
+  b.ensure();
   return get<I>(*b);
 }
 
@@ -351,6 +370,7 @@ requires requires(const T &t) { get<I>(t); }
 decltype(auto)
 get(const x23::Box<T> &b)
 {
+  x23assert(b.has_value());
   return get<I>(*b);
 }
 
@@ -359,6 +379,7 @@ requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &&b)
 {
+  x23assert(b.has_value());
   return get<I>(*std::move(b));
 }
 

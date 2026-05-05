@@ -71,29 +71,28 @@ serialization framework internals.
 
 ### x23c Codegen
 
-Per-language annotations in end-of-line comments on pointer (`*`) fields.
-Recursive fields require `*` in XDR syntax to avoid infinite struct size in the
-parser — the annotation controls whether the indirection is nullable (`Ptr`) or
-non-nullable (`Box`):
+Per-language annotations in end-of-line comments on scalar fields (no `*`
+pointer syntax). The XDR parser doesn't enforce struct sizing, so a scalar
+self-referential field is valid XDR — the annotations tell each backend to
+heap-allocate:
 
 ```xdr
 struct TreeNode {
   int32 value;
-  TreeNode *left;  // #[cpp(box)] #[rust(box)]
-  TreeNode *right; // #[cpp(box)] #[rust(box)]
+  TreeNode left;  // #[cpp(box)] #[rust(box_ptr)]
+  TreeNode right; // #[cpp(box)] #[rust(box_ptr)]
 };
 ```
 
 **C++ (`gen_hh.cc`):**
 
-When `#[cpp(box)]` is present on a `kPtr` field, emit `x23::Box<T>` instead of
-`x23::Ptr<T>`.
+When `#[cpp(box)]` is present on a `kScalar` field, emit `x23::Box<T>` instead
+of bare `T`.
 
 **Rust (`gen_rs.cc`):**
 
-When `#[rust(box)]` is present on a `kPtr` field, emit `Box<T>` instead of
-`Option<T>` or `Option<Box<T>>`. This is distinct from the existing
-`#[rust(box_ptr)]` annotation, which emits `Option<Box<T>>`.
+No changes needed. The existing `#[rust(box_ptr)]` annotation (and the
+`recursive_types` set) already handle `kScalar` fields by emitting `Box<T>`.
 
 **TypeScript (`gen_ts.cc`):**
 
@@ -109,14 +108,11 @@ Follows the existing pattern from `gen_rs.cc`:
 - Each backend checks for its own annotation and strips it from the output
   comment
 
-New constants:
+New constant:
 
 ```cpp
 // gen_hh.cc
 static constexpr string_view kCppBox = R"(#[cpp(box)])";
-
-// gen_rs.cc
-static constexpr string_view kRustBox = R"(#[rust(box)])";
 ```
 
 ## Scope
@@ -128,11 +124,11 @@ This spec covers:
    `x23/x23/serialize.h`
 3. `xdr_meta` forwarding and tuple protocol in `x23/x23/x23.h`
 4. `#[cpp(box)]` annotation support in `x23/x23c/gen_hh.cc`
-5. `#[rust(box)]` annotation support in `x23/x23c/gen_rs.cc`
-6. Tests for serialization round-trip, non-nullability, and recursive type usage
+5. Tests for serialization round-trip, non-nullability, and recursive type usage
 
 This spec does not cover:
 
+- Rust codegen changes (existing `#[rust(box_ptr)]` already handles `Box<T>`)
 - TypeScript codegen changes
 - Changes to the `Serializer` or `Deserializer` classes
 - New `XdrCategory` values

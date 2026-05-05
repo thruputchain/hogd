@@ -2,7 +2,6 @@
 #include <cstddef>
 #include <format>
 #include <map>
-#include <optional>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -90,18 +89,6 @@ struct Gen {
   static string map_case(string const &c);
   static string map_bound(string const &bound);
   string type_name(const Declaration &d, bool generate);
-
-  static std::optional<std::string> substring_removed(std::string_view str,
-                                                      std::string_view sub)
-  {
-    auto i = str.find(sub);
-    if (i != std::string::npos) {
-      std::string str2{str};
-      str2.erase(i, sub.length());
-      return str2;
-    }
-    return {};
-  }
 
   static constexpr std::string_view kCppBox = R"(#[cpp(box)])";
 
@@ -821,12 +808,12 @@ Gen::type_name(const Declaration &d, bool generate)
 
   switch (d.qual) {
   case kScalar:
-    if (auto c = substring_removed(d.comment, kCppBox)) {
-      const_cast<Declaration &>(d).comment = *c;
+    if (d.comment.find(kCppBox) != std::string::npos)
       return std::format("x23::Box<{}>", tname);
-    }
     return tname;
   case kPtr:
+    if (d.comment.find(kCppBox) != std::string::npos)
+      return std::format("x23::Box<{}>", tname);
     return std::format("x23::Ptr<{}>", tname);
   case kArray:
     return std::format("std::array<{}, {}>", tname, d.bound);
