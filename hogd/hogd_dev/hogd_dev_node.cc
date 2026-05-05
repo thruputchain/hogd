@@ -3,24 +3,32 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <sys/socket.h>
 #include <utility>
 
+#include "address_auth.hh"
 #include "auth_card.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "db_sched.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/hogd_dev/dev_account_bootstrap.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -36,6 +44,7 @@
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -43,10 +52,23 @@ namespace hogd {
 
 namespace {
 constexpr char kIndexerDbSubdir[] = "indexer-db";
+
+void
+validate_dev_account_auth_data(DevAccountMetadata const &account,
+                               AddressAuthData const &auth_data)
+{
+  CHECK_EQ(auth_data.required_weight, Weight{1});
+  CHECK(auth_data.public_keys[0] != nullptr);
+  CHECK_EQ(auth_data.public_keys[0]->max_weight, Weight{1});
+  CHECK_EQ(auth_data.public_keys[0]->key.scheme(),
+           CryptographicScheme::Ed25519);
+  CHECK_EQ(auth_data.public_keys[0]->key.ed25519(), account.public_key);
+}
 } // namespace
 
 HogdDevNode::HogdDevNode(std::string bind_host,
-                         std::uint16_t requested_scheduler_port)
+                         std::uint16_t requested_scheduler_port,
+                         DevAccountBootstrapConfig const &bootstrap_config)
   : bind_host_(std::move(bind_host)), event_ctx_(event_dir_.directory()),
     event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
     event_indexer_server_(event_ctx_)
@@ -134,6 +156,7 @@ HogdDevNode::HogdDevNode(std::string bind_host,
   // have registered!
   register_executor_with_mempool();
   register_coordinator_with_mempool()();
+  bootstrap_dev_accounts(bootstrap_config);
 }
 
 HogdDevNode::~HogdDevNode()
@@ -206,6 +229,71 @@ HogdDevNode::register_indexer_with_event_service()
   IndexerCard card{.protocol = version::kHogdProtocol(),
                    .address_for_event = indexer_event_address.c_str()};
   client.event_indexer_intro(card)();
+}
+
+void
+HogdDevNode::bootstrap_dev_accounts(DevAccountBootstrapConfig const &config)
+{
+  if (config.count == 0) {
+    return;
+  }
+
+  DevAccountBootstrapArtifact artifact =
+      build_dev_account_bootstrap_artifact(config);
+  auto client = create_client<SchedulerCoord1>(bind_host_,
+                                               mempool_coord_server_.port())();
+  CHECK_EQ(client.schedcoord_load_genesis_configuration(
+               std::move(artifact.genesis_configuration))(),
+           DbSchedResult::DbSchedResultOK);
+
+  SignedTransactionBatch batch;
+  batch.append_range(artifact.initialization_txs);
+  commit_initialization_batch(batch);
+
+  dev_accounts_ = std::move(artifact.accounts);
+  refresh_dev_account_balances();
+}
+
+void
+HogdDevNode::commit_initialization_batch(SignedTransactionBatch const &txs)
+{
+  if (txs.empty()) {
+    return;
+  }
+
+  auto client = create_client<SchedulerCoord1>(bind_host_,
+                                               mempool_coord_server_.port())();
+  client.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
+
+  SchedulerGetTipResult tip = client.schedcoord_get_tip()();
+  CHECK_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  SchedulerNominationResult nomination =
+      client.schedulercoord_nominate(tip.db_tip())();
+  CHECK_EQ(nomination.outcome(),
+           SchedulerNominationOutcome::SchedulerNominationOK);
+  CHECK_EQ(client.schedulercoord_commit_block(
+               nomination.nominated_block().block_id)(),
+           SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+void
+HogdDevNode::refresh_dev_account_balances()
+{
+  for (DevAccountMetadata &account : dev_accounts_) {
+    HogDBStatus<AddressAuthData> auth_data =
+        ctx_->get_db().read_address_auth_data(account.address);
+    CHECK(auth_data.has_value());
+    validate_dev_account_auth_data(account, *auth_data);
+
+    HogDBStatus<int128_t> balance =
+        ctx_->get_db().read_address_balance(account.address);
+    CHECK(balance.has_value());
+    CHECK_GE(*balance, 0);
+    CHECK(std::cmp_less_equal(*balance,
+                              std::numeric_limits<std::uint64_t>::max()));
+    account.storage_tokens = static_cast<std::uint64_t>(*balance);
+  }
 }
 
 void
