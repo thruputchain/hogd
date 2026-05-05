@@ -41,8 +41,7 @@ struct BoxTree {
   bool operator==(const BoxTree &) const noexcept = default;
 };
 
-template<size_t I, x23::references<BoxTree> T>
-requires (I < 3)
+template<size_t I, x23::references<BoxTree> T> requires (I < 3)
 decltype(auto)
 get(T &&t)
 {
@@ -55,19 +54,17 @@ get(T &&t)
 }
 
 template<>
-struct std::tuple_size<BoxTree>
-  : std::integral_constant<std::size_t, 3> {};
+struct std::tuple_size<BoxTree> : std::integral_constant<std::size_t, 3> {};
 template<size_t I> requires (I < 3)
 struct std::tuple_element<I, BoxTree> {
   using type = decltype(auto(get<I>(std::declval<BoxTree>())));
 };
 
-template<>
-struct x23::xdr_meta<BoxTree> {
+template<> struct x23::xdr_meta<BoxTree> {
   static constexpr XdrCategory category = XdrCategory::kStruct;
   static constexpr const char *type_name = "BoxTree";
-  static constexpr std::array<std::string_view, 3> field_names{
-      "value", "left", "right"};
+  static constexpr std::array<std::string_view, 3> field_names{"value", "left",
+                                                               "right"};
 };
 
 TEST(Deserialize, Fuzz)
@@ -247,8 +244,7 @@ TEST(Box, RecursiveRoundTrip)
   BoxTree tree{
       .value = 1,
       .left = BoxTree{.value = 2},
-      .right = BoxTree{.value = 3,
-                       .left = BoxTree{.value = 4}},
+      .right = BoxTree{.value = 3, .left = BoxTree{.value = 4}},
   };
 
   x23::Box<BoxTree> boxed(tree);

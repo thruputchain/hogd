@@ -253,8 +253,7 @@ template<typename T> struct Box : private std::unique_ptr<T> {
 
   Box(value_type t) : super(new T(std::move(t))) {}
 
-  template<typename... Args>
-  requires std::constructible_from<T, Args...>
+  template<typename... Args> requires std::constructible_from<T, Args...>
   Box(std::in_place_t, Args &&...args)
     : super(new T(std::forward<Args>(args)...))
   {}
@@ -283,8 +282,16 @@ template<typename T> struct Box : private std::unique_ptr<T> {
       this->reset(new T{});
   }
 
-  T *get() noexcept { x23assert(has_value()); return super::get(); }
-  const T *get() const noexcept { x23assert(has_value()); return super::get(); }
+  T *get() noexcept
+  {
+    x23assert(has_value());
+    return super::get();
+  }
+  const T *get() const noexcept
+  {
+    x23assert(has_value());
+    return super::get();
+  }
   decltype(auto) operator*(this auto &&self) { return *self.get(); }
   auto operator->(this auto &&self) noexcept { return self.get(); }
 };
@@ -348,16 +355,14 @@ template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};
 
 } // namespace x23
 
-template<typename T>
-requires requires { typename std::tuple_size<T>::type; }
+template<typename T> requires requires { typename std::tuple_size<T>::type; }
 struct std::tuple_size<x23::Box<T>> : std::tuple_size<T> {};
 
 template<size_t I, typename T>
 requires requires { typename std::tuple_element<I, T>::type; }
 struct std::tuple_element<I, x23::Box<T>> : std::tuple_element<I, T> {};
 
-template<size_t I, typename T>
-requires requires(T &t) { get<I>(t); }
+template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &b)
 {
@@ -365,8 +370,7 @@ get(x23::Box<T> &b)
   return get<I>(*b);
 }
 
-template<size_t I, typename T>
-requires requires(const T &t) { get<I>(t); }
+template<size_t I, typename T> requires requires(const T &t) { get<I>(t); }
 decltype(auto)
 get(const x23::Box<T> &b)
 {
@@ -374,8 +378,7 @@ get(const x23::Box<T> &b)
   return get<I>(*b);
 }
 
-template<size_t I, typename T>
-requires requires(T &t) { get<I>(t); }
+template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &&b)
 {
