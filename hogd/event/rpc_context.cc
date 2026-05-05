@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -123,7 +124,17 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return;
   }(context.get());
 
-  SHA256Hash out_hash = context.get().get_root_hash();
+  SHA256Hash out_hash;
+  std::exception_ptr ex;
+  try {
+    out_hash = context.get().get_root_hash();
+  } catch (...) {
+    ex = std::current_exception();
+  }
+  if (ex) {
+    co_await file_wait;
+    std::rethrow_exception(ex);
+  }
   record_stage(stage_prepare_context_and_async);
 
   pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
