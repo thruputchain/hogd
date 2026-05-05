@@ -459,8 +459,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   }
 
   if (!invocation_frame_stack_.empty() &&
-      !invocation_frame_stack_.check_auth_tokens_owned(
-          owned_auth_token_ids)) {
+      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 

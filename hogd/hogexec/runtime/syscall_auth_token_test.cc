@@ -701,8 +701,7 @@ TEST_F(SyscallAuthTokenTest, ReturnUnownedAuthTokensCausesExit)
 
 // Regression test for #1702: a child mints a token then faults; the parent
 // must not be able to forward the child-minted token ID to another contract.
-TEST_F(SyscallAuthTokenTest,
-       ForwardUnownedAuthTokenAfterChildRevertIsRejected)
+TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
 {
   constexpr ContractAddress kAttackerAddress = make_contract_address(0);
   constexpr ContractAddress kMinterAddress = make_contract_address(1);
@@ -781,8 +780,7 @@ TEST_F(SyscallAuthTokenTest,
              }
 
              uint32_t stolen_token_id = 0;
-             std::memcpy(&stolen_token_id, return_buf.data(),
-                         sizeof(uint32_t));
+             std::memcpy(&stolen_token_id, return_buf.data(), sizeof(uint32_t));
 
              // Step 2: try to forward the stolen token ID to the consumer.
              // This must be rejected because the attacker doesn't own it.
@@ -793,9 +791,8 @@ TEST_F(SyscallAuthTokenTest,
                  std::span<uint32_t const>{forged_ids}, out_ret_len,
                  out_auth_len);
              EXPECT_TRUE(forge_res.has_value());
-             EXPECT_EQ(
-                 forge_res.value(),
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             EXPECT_EQ(forge_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
              return {};
            }}});
@@ -860,9 +857,8 @@ TEST_F(SyscallAuthTokenTest, ForwardFabricatedAuthTokenIdIsRejected)
                  std::span<uint32_t const>{forged_ids}, out_ret_len,
                  out_auth_len);
              EXPECT_TRUE(invoke_res.has_value());
-             EXPECT_EQ(
-                 invoke_res.value(),
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             EXPECT_EQ(invoke_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
              return {};
            }}});
 
@@ -968,9 +964,8 @@ TEST_F(SyscallAuthTokenTest, ReplayConsumedAuthTokenIsRejected)
                  std::span<uint32_t const>{forwarded}, out_ret_len,
                  out_auth_len);
              EXPECT_TRUE(second_res.has_value());
-             EXPECT_EQ(
-                 second_res.value(),
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             EXPECT_EQ(second_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
              return {};
            }}});
@@ -1041,9 +1036,8 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
                  std::span<uint32_t const>{stolen_ids}, out_ret_len,
                  out_auth_len);
              EXPECT_TRUE(invoke_res.has_value());
-             EXPECT_EQ(
-                 invoke_res.value(),
-                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             EXPECT_EQ(invoke_res.value(),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
              return {};
            }}});
 
@@ -1073,9 +1067,11 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
              std::memcpy(calldata.data(), &token_id, sizeof(token_id));
 
              RuntimeMemoryLength out_ret_len = 0, out_auth_len = 0;
-             auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-                 kMiddleAddress, 0, UINT64_MAX, calldata, 0,
-                 std::span<uint32_t const>{}, out_ret_len, out_auth_len);
+             auto invoke_res =
+                 ctx.syscall<SyscallNo::kInvoke>(kMiddleAddress, 0, UINT64_MAX,
+                                                 calldata, 0,
+                                                 std::span<uint32_t const>{},
+                                                 out_ret_len, out_auth_len);
              EXPECT_TRUE(invoke_res.has_value());
              EXPECT_EQ(invoke_res.value(),
                        SyscallErrorCode::kSyscallErrorCodeNone);
