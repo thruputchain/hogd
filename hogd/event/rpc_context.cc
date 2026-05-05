@@ -132,7 +132,12 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     ex = std::current_exception();
   }
   if (ex) {
-    co_await file_wait;
+    error("close_block: get_root_hash threw; draining file_wait before "
+          "rethrowing");
+    try {
+      co_await file_wait;
+    } catch (...) {
+    }
     std::rethrow_exception(ex);
   }
   record_stage(stage_prepare_context_and_async);
