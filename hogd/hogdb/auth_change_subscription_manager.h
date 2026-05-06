@@ -37,7 +37,7 @@ private:
   // One in-flight forward-RPC. Member declaration order matters: ~future
   // runs before ~client_ref, keeping the RpcStream alive while the coroutine
   // handle (which holds only a raw RpcStream*) is destroyed.
-  struct PendingPublish {
+  struct PendingPublish { // NOLINT(bugprone-exception-escape)
     AuthCard card;
     client_ref_t client_ref;
     x23::Async<void> future;
