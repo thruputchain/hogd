@@ -21,6 +21,8 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
+#include "hogd/hogdb/invoke_tx.h"
+#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -152,6 +154,9 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
+  if (try_invoke_frame_count_ >= kMaxSavepointDepth) {
+    return false;
+  }
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size());
 
   for (auto const &[addrkey, item_view] : modified_items_) {

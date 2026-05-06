@@ -12,6 +12,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogexec_constants.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -523,8 +524,9 @@ void
 InvokeTX::assert_is_valid() const noexcept
 {
   assert(tx_depth_ >= 0);
-  std::unordered_map<Address, int128_t> balance_deltas;
+  assert(tx_depth_ < kMaxSavepointDepth);
   if constexpr (is_debug_build()) {
+    std::unordered_map<Address, int128_t> balance_deltas;
     for (const auto &[key, vec] : changes_) {
       [[maybe_unused]] unsigned int depth = 0;
       for (const ItemVersion &item : vec) {
