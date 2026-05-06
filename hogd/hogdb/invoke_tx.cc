@@ -465,8 +465,8 @@ InvokeTX::request_auth_data(Address const &addr,
   // request_change can fail with kConflict (lock contention from another tx
   // in the same block) or kStaleBlock (a sibling block committed and changed
   // the auth base out from under us, detected in AuthDataItem::narrow()).
-  auto ret = request_change(make_address_auth_data_item_key(addr),
-                            std::move(change));
+  auto ret =
+      request_change(make_address_auth_data_item_key(addr), std::move(change));
   if (!ret) {
     CHECK(ret.error().code() == HogDBCode::kStaleBlock ||
           ret.error().code() == HogDBCode::kConflict);
