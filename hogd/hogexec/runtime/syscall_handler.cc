@@ -458,6 +458,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
+  if (!invocation_frame_stack_.empty() &&
+      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+  }
+
   // reentrance guard
   // check if the address is already on the stack
   if (!hack_DONTUSE_TEST_BYPASS_allow_reentrance_ &&

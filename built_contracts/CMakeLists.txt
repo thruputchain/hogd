@@ -204,6 +204,7 @@ add_wasm_builds(
     fibonacci_call
     cxs_roundtrip
     txs_roundtrip
+    dev_wallet
     read_only_test
     manual_revert_test
     manual_revert_caller
@@ -236,6 +237,7 @@ add_wasm_builds(
 # Generate .x files from spec JSON type_defs for contracts that define custom types
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
+add_types_xdr(simple_wallet)
 add_types_xdr(txs_roundtrip)
 add_types_xdr(cxs_roundtrip)
 add_types_xdr(payment_channel)
@@ -243,6 +245,7 @@ add_types_xdr(payment_channel)
 # XDR .x -> .hh via x23c
 add_xdr(itc_erc20_hh ./itc_erc20.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
+add_xdr(simple_wallet_hh ./simple_wallet.x)
 add_xdr(txs_roundtrip_hh ./txs_roundtrip.x)
 add_xdr(cxs_roundtrip_hh ./cxs_roundtrip.x)
 add_xdr(payment_channel_hh ./payment_channel.x)
@@ -250,6 +253,7 @@ add_xdr(payment_channel_hh ./payment_channel.x)
 # Ensure XDR generation waits for spec JSONs (produced by wasm build)
 add_dependencies(build_itc_erc20_hh all_wasms_built)
 add_dependencies(build_manual_revert_test_hh all_wasms_built)
+add_dependencies(build_simple_wallet_hh all_wasms_built)
 add_dependencies(build_txs_roundtrip_hh all_wasms_built)
 add_dependencies(build_cxs_roundtrip_hh all_wasms_built)
 add_dependencies(build_payment_channel_hh all_wasms_built)
@@ -262,11 +266,12 @@ add_contract_header(fibonacci)
 add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/cxs_roundtrip.hh")
 add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.hh")
+add_contract_header(dev_wallet)
 add_contract_header(read_only_test)
 add_contract_header(manual_revert_test "${CURRENT_RELATIVE_SOURCE_DIR}/manual_revert_test.hh")
 add_contract_header(manual_revert_caller)
 add_contract_header(sha256_wrapper)
-add_contract_header(simple_wallet)
+add_contract_header(simple_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/simple_wallet.hh")
 add_contract_header(simple_wallet_authclaim)
 add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
@@ -286,6 +291,7 @@ add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)
 add_dependencies(txs_roundtrip_header txs_roundtrip_hh)
 add_dependencies(manual_revert_test_header manual_revert_test_hh)
+add_dependencies(simple_wallet_header simple_wallet_hh)
 
 # Create ONE top-level ALL target that triggers everything
 add_custom_target(build_all_contracts ALL)
