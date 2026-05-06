@@ -202,15 +202,24 @@ BlockTX::read_nnint128_base(const ItemKey &key)
 {
   auto *lock = item_locks_.get(key);
   if (!lock) {
-    auto r = db_.read_nnint128(key);
-    if (!r) {
-      if (r.error() == HogDBCode::kNotFound ||
-          r.error() == HogDBCode::kTypeMismatch) {
-        return 0;
+    if (!key.is_contract_data()) {
+      auto r = db_.read_nnint128(key);
+      if (!r) {
+        if (r.error() == HogDBCode::kNotFound ||
+            r.error() == HogDBCode::kTypeMismatch) {
+          return 0;
+        }
+        return r.error();
       }
-      return r.error();
+      return *r;
     }
-    return *r;
+
+    auto snapshot = get_snapshot_cost_and_cache_data(key);
+    if (!snapshot) {
+      return snapshot.error();
+    }
+    lock = item_locks_.insert_or_get(key, *snapshot);
+    CHECK_PTR(lock);
   }
 
   auto base = lock->get_cached_nnint128_base();

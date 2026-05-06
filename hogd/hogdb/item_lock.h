@@ -35,6 +35,10 @@ namespace hogd {
 class ItemLock {
 public:
   ItemLock(int128_t snapshot_cost) : snapshot_cost_(snapshot_cost) {}
+  explicit ItemLock(std::pair<int128_t, ItemLockCacheData> const &snapshot)
+  {
+    set_snapshot_data(snapshot);
+  }
   ItemLock(auto const &lambda)
       requires std::invocable<decltype(lambda)> &&
                std::same_as<std::invoke_result_t<decltype(lambda)>,
@@ -51,24 +55,7 @@ public:
       snapshot_cost_ = std::numeric_limits<int128_t>::min();
       return;
     }
-    snapshot_cost_ = status->first;
-
-    if (status->second.is_cached_nnint128_base()) {
-      snapshot_type_ = kItemLockCacheDataNNInt128BaseValue;
-      nnint_base_ = status->second.get_cached_nnint128_base();
-    }
-    else if (status->second.is_cached_balance()) {
-      snapshot_type_ = kItemLockCacheDataBalance;
-      auto balance = status->second.get_cached_balance();
-      balance_base_ =
-          balance.has_value() ? *balance : std::numeric_limits<int128_t>::min();
-    }
-    else if (status->second.is_rcq()) {
-      snapshot_type_ = kItemLockCacheDataRCQ;
-    }
-    else {
-      CHECK(status->second.is_none());
-    }
+    set_snapshot_data(*status);
   }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
@@ -128,6 +115,28 @@ private:
   handle_release_uncommitted_lock(const ItemChange *before,
                                   const LockContext &ctx,
                                   std::unique_lock<x23::TestLock> const &ul);
+
+  void set_snapshot_data(std::pair<int128_t, ItemLockCacheData> const &snapshot)
+  {
+    snapshot_cost_ = snapshot.first;
+
+    if (snapshot.second.is_cached_nnint128_base()) {
+      snapshot_type_ = kItemLockCacheDataNNInt128BaseValue;
+      nnint_base_ = snapshot.second.get_cached_nnint128_base();
+    }
+    else if (snapshot.second.is_cached_balance()) {
+      snapshot_type_ = kItemLockCacheDataBalance;
+      auto balance = snapshot.second.get_cached_balance();
+      balance_base_ =
+          balance.has_value() ? *balance : std::numeric_limits<int128_t>::min();
+    }
+    else if (snapshot.second.is_rcq()) {
+      snapshot_type_ = kItemLockCacheDataRCQ;
+    }
+    else {
+      CHECK(snapshot.second.is_none());
+    }
+  }
 
   // Set up lock_contents_ for a type of change.
   // does NOT modify pending_refcount_.
