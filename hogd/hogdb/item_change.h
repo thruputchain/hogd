@@ -64,13 +64,14 @@ concept is_item = requires(T t, HogDBDAO &db, const ItemKey &key, const T &arg,
   //   true  — narrowing succeeded; reservations are compatible.
   //   false — narrowing failed; the change will be promoted to an exclusive
   //           lock. This is a legitimate outcome (not an error).
-  //   error — an internal invariant was violated (e.g., the executor produced
-  //           an impossible delta). The error propagates to the caller and
-  //           aborts the transaction.
+  //   error — a structural problem was detected. The error propagates to
+  //           the caller and aborts the transaction. Current error codes:
+  //           kInvalidExecutorBehavior (executor produced an impossible delta),
+  //           kStaleBlock (a sibling block committed and changed the base
+  //           state out from under us).
   //
   // narrow() must not fail for I/O or other transient reasons; it operates
-  // purely on in-memory state. The only error it may return is
-  // kInvalidExecutorBehavior for invariant violations.
+  // purely on in-memory state.
   //
   // Note: `t` is the new change, and `arg` is the existing change.
   { t.narrow(arg) } -> std::same_as<HogDBStatus<bool>>;

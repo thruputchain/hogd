@@ -10,7 +10,7 @@ extern "C" {
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
 #define TEST_FFI_VERSION_MINOR 14
-#define TEST_FFI_VERSION_PATCH 2
+#define TEST_FFI_VERSION_PATCH 3
 
 enum TestFFIErrorCode {
   kTestFFIErrorCodeNone = 0,
@@ -42,7 +42,7 @@ enum TestFFILogLevel {
 // Must be freed with free_ffi_data_buffer()
 struct FFIDataBuffer {
   uint8_t *data;
-  uint32_t len;
+  uint64_t len;
 };
 
 enum TestFFIErrorCode free_ffi_data_buffer(struct FFIDataBuffer buffer);

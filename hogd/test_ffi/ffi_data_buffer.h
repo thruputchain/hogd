@@ -19,7 +19,7 @@ namespace hogd {
 constexpr FFIDataBuffer kNullBuffer = FFIDataBuffer{.data = nullptr, .len = 0};
 
 inline std::expected<FFIDataBuffer, TestFFIErrorCode>
-make_new_data_buffer(uint32_t len) noexcept
+make_new_data_buffer(uint64_t len) noexcept
 {
   if (len == 0) {
     return FFIDataBuffer{.data = nullptr, .len = 0};

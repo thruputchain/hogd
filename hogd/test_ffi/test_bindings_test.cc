@@ -2812,4 +2812,16 @@ TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
   EXPECT_EQ(result.success, 0);
 }
 
+// Regression test for #1754: FFIDataBuffer::len must be uint64_t so that
+// buffers larger than UINT32_MAX can be represented without truncation.
+TEST(TestBindingsTest, MakeNewDataBufferUint32Max)
+{
+  constexpr uint64_t kSize = UINT32_MAX;
+  auto *data = new uint8_t[kSize];
+  ASSERT_NE(data, nullptr);
+  FFIDataBuffer buffer{.data = data, .len = kSize};
+  EXPECT_EQ(buffer.len, kSize);
+  EXPECT_EQ(free_ffi_data_buffer(buffer), kTestFFIErrorCodeNone);
+}
+
 } // namespace hogd
