@@ -3081,6 +3081,58 @@ TEST_F(HogDBTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
   }
 }
 
+TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
+{
+  Address addr = make_address(kAddress + 300);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  PerThreadARC<BlockTX> block_tx_a(db_, cost_model_, background_commit_worker_,
+                                   1);
+  ASSERT_TRUE(block_tx_a.try_acquire_reference());
+  InvokeTX itx_a(block_tx_a);
+
+  AuthDataChangeArgs first_args{};
+  first_args.new_required_weight = Weight{0};
+  ASSERT_TRUE(
+      itx_a.request_auth_data(addr, first_args,
+                              std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+
+  {
+    PerThreadARC<BlockTX> block_tx_b(db_, cost_model_,
+                                     background_commit_worker_, 1);
+    ASSERT_TRUE(block_tx_b.try_acquire_reference());
+    InvokeTX itx_b(block_tx_b);
+
+    AuthDataChangeArgs sibling_args{};
+    PublicKey key;
+    key.ed25519().fill(0xBB);
+    sibling_args.auth_data_change_signers.push_back(AuthDataChangeSigner{
+        .public_key_id = 0,
+        .public_key = x23::Ptr<PublicKeyConfig>(
+            new PublicKeyConfig{.key = key, .max_weight = 100})});
+    ASSERT_TRUE(
+        itx_b.request_auth_data(addr, sibling_args,
+                                std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx_b.sync_balance_locks());
+    itx_b.commit();
+    itx_b.release_blocktx_reference();
+    ASSERT_TRUE(block_tx_b.get().close(DbHash{}));
+    ASSERT_TRUE(block_tx_b.get().commit());
+  }
+
+  AuthDataChangeArgs second_args{};
+  second_args.new_required_weight = Weight{1};
+  auto result =
+      itx_a.request_auth_data(addr, second_args,
+                              std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
+
+  itx_a.abort();
+  itx_a.release_blocktx_reference();
+}
+
 } // namespace hogd
 
 int

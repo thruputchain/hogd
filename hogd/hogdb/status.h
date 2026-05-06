@@ -61,6 +61,11 @@ enum class HogDBCode : uint8_t {
   // This can only happen with a dishonest proposer or when replaying
   // a dishonest block; an honest executor never triggers this.
   kInvalidExecutorBehavior,
+
+  // The block snapshot is stale — a sibling block committed and
+  // changed state that this block already read. The block should
+  // be abandoned.
+  kStaleBlock,
 };
 
 // HogDBCategory provides an error category for hogdb errors.

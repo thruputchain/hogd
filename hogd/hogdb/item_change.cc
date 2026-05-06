@@ -62,7 +62,9 @@ Balance::narrow(const Balance &other)
 HogDBStatus<bool>
 AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
-  CHECK(base_auth_data() == auth_data_item.base_auth_data());
+  if (base_auth_data() != auth_data_item.base_auth_data()) {
+    return HogDBError(HogDBCode::kStaleBlock);
+  }
   return true;
 }
 
