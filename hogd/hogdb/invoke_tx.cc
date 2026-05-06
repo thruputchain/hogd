@@ -462,8 +462,16 @@ InvokeTX::request_auth_data(Address const &addr,
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
   }
-  return request_change(make_address_auth_data_item_key(addr),
-                        std::move(change));
+  // ItemChange::narrow() dispatches via std::visit on the variant type, so
+  // request_change will only ever call AuthDataItem::narrow() here. The only
+  // error AuthDataItem::narrow() can return is kStaleBlock (a sibling block
+  // committed and changed the auth base out from under us).
+  auto ret = request_change(make_address_auth_data_item_key(addr),
+                            std::move(change));
+  if (!ret) {
+    CHECK(ret.error().code() == HogDBCode::kStaleBlock);
+  }
+  return ret;
 }
 
 HogDBStatus<void>
