@@ -16,7 +16,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/auth_token_registry.h"
 #include "hogd/hogexec/components/execution_mode.h"
@@ -36,9 +35,11 @@ namespace hogd {
 InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags,
                                  size_t event_count,
-                                 std::span<uint32_t const> owned_auth_token_ids)
+                                 std::span<uint32_t const> owned_auth_token_ids,
+                                 uint32_t inherited_try_invoke_depth)
   : address_(address), calldata_(std::forward<Calldata>(calldata)),
     flags_(flags), event_count_(event_count),
+    total_try_invoke_depth_(inherited_try_invoke_depth),
     owned_auth_token_ids_(owned_auth_token_ids.begin(),
                           owned_auth_token_ids.end())
 {}
@@ -84,6 +85,7 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   }
 
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
+  total_try_invoke_depth_ = frame.total_try_invoke_depth_;
 
   // Reclaim auth tokens the child returned via the Return syscall
   for (auto token_id : frame.returned_auth_token_ids_) {
@@ -154,9 +156,10 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
-  if (try_invoke_frame_count_ >= kMaxSavepointDepth) {
+  if (total_try_invoke_depth_ >= kMaxSavepointDepth) {
     return false;
   }
+
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size());
 
   for (auto const &[addrkey, item_view] : modified_items_) {
@@ -179,6 +182,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
   }
   if (res.value()) {
     try_invoke_frame_count_++;
+    total_try_invoke_depth_++;
   }
   return res.value();
 }
@@ -225,8 +229,11 @@ InvocationFrameStack::start_frame(
     frame_stack_.back().remove_auth_tokens(owned_auth_token_ids);
     frame_stack_.back().set_child_restore_auth_tokens(owned_auth_token_ids);
   }
+  uint32_t parent_depth =
+      frame_stack_.empty() ? 0
+                           : frame_stack_.back().get_total_try_invoke_depth();
   frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                            event_count, owned_auth_token_ids);
+                            event_count, owned_auth_token_ids, parent_depth);
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>
