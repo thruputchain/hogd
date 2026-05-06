@@ -319,6 +319,10 @@ syscall_Return_inner(
                 input_returned_auth_token_ids.size());
   }
 
+  if (has_duplicate_auth_token_ids(returned_auth_token_ids_vec)) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
   if (!syscall_handler.check_auth_tokens_owned(returned_auth_token_ids_vec)) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
@@ -344,6 +348,11 @@ syscall_GetReturnedBuffer_inner(
     return {status->error().code(), WrappedGasAmount{0}};
   }
   CHECK(**status != nullptr);
+
+  if (output_restored_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
 
   bool written = false;
   size_t write_len = std::min(output_buffer.size(), (**status)->size());
