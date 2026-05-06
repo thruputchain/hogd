@@ -17,7 +17,7 @@ ed25519-zebra = { version = "4.1" }
 lru = "0.14.0"
 wasmi = "0.36.5"
 bindgen = "0.71"
-wasmtime = { version = "42.0.0", features = ["winch", "runtime", "cranelift", "pooling-allocator"], default-features = false }
+wasmtime = { version = "=44.0.1", features = ["winch", "runtime", "cranelift", "pooling-allocator"], default-features = false }
 siphasher = { version = "1.0.1", default-features = false }
 hogexec-internal = { version = "0.10.0", registry = "groundhog" }
 groundhog-xdr = { version = "0.10.0", registry = "groundhog", features = ["xdrs"] }
