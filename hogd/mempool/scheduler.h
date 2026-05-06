@@ -200,8 +200,8 @@ private:
 
   struct PendingNominationState {
     BlockID block_id = 0;
-    std::unordered_map<ContractAddress, HogAge> hog_ages;
-    std::unordered_set<ContractAddress> touched_accounts;
+    std::unordered_map<ContractAddress, HogAge, ByteArrayHasher> hog_ages;
+    std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
 
     void clear()
     {
@@ -251,7 +251,8 @@ private:
                                 BlockHeight block_height) noexcept;
   void apply_committed_tx_hog_age(
       const SignedTransaction &tx,
-      std::unordered_map<ContractAddress, uint128_t> &hogs_spent_by_account);
+      std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
+          &hogs_spent_by_account);
 
   static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
                                                    uint128_t num_hogs,
@@ -281,8 +282,8 @@ private:
                                    const ContractAddress &account);
   const HogAge &get_hog_age_for_account(const AccountState &account_state,
                                         const ContractAddress &account) const;
-  void
-  refresh_ready_accounts(const std::unordered_set<ContractAddress> &accounts);
+  void refresh_ready_accounts(
+      const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts);
   void erase_ready_account(const ContractAddress &account);
 
   std::set<AccountKey> ready_accounts_;

@@ -114,7 +114,7 @@ Scheduler::commit_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
-  std::unordered_set<ContractAddress> touched_accounts =
+  std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts =
       pending_nomination_.touched_accounts;
   for (const auto &[account, hog_age] : pending_nomination_.hog_ages) {
     auto [account_state, lock] = get_account_state(account);
@@ -129,7 +129,7 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
-  std::unordered_set<ContractAddress> touched_accounts =
+  std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts =
       pending_nomination_.touched_accounts;
   pending_nomination_.clear();
   refresh_ready_accounts(touched_accounts);
@@ -145,9 +145,10 @@ Scheduler::apply_committed_block_hog_ages(
   x23::CoroGuard cg;
   co_await cg(global_lock_);
 
-  std::unordered_map<ContractAddress, uint128_t> hogs_spent_by_account;
+  std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
+      hogs_spent_by_account;
   hogs_spent_by_account.reserve(txs.size());
-  std::unordered_set<ContractAddress> touched_accounts;
+  std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
   touched_accounts.reserve(txs.size());
 
   for (const SignedTransaction &tx : txs) {
@@ -569,7 +570,8 @@ Scheduler::process_transfers_helper(const Delta &delta,
 void
 Scheduler::apply_committed_tx_hog_age(
     const SignedTransaction &tx,
-    std::unordered_map<ContractAddress, uint128_t> &hogs_spent_by_account)
+    std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
+        &hogs_spent_by_account)
 {
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const GasAmount gas_limit = tx.tx.invocation.gas_limit;
@@ -635,7 +637,7 @@ Scheduler::erase_ready_account(const ContractAddress &account)
 
 void
 Scheduler::refresh_ready_accounts(
-    const std::unordered_set<ContractAddress> &accounts)
+    const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts)
 {
   for (const ContractAddress &account : accounts) {
     erase_ready_account(account);
