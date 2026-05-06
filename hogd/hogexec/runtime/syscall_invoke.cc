@@ -6,6 +6,7 @@
 #include <cstring>
 #include <exception>
 #include <span>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -25,6 +26,23 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+bool
+has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids)
+{
+  std::unordered_set<uint32_t> seen;
+  seen.reserve(auth_token_ids.size());
+  for (uint32_t auth_token_id : auth_token_ids) {
+    if (!seen.insert(auth_token_id).second) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
@@ -117,6 +135,11 @@ syscall_GetCalldata_inner(
     std::span<std::byte> output_auth_token_list,
     RuntimeMemoryLength &output_auth_token_written_len) noexcept
 {
+  if (output_auth_token_list.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
       std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
@@ -206,6 +229,11 @@ syscall_Invoke_inner(
                 input_owned_auth_token_ids.size());
   }
 
+  if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
@@ -291,6 +319,10 @@ syscall_Return_inner(
                 input_returned_auth_token_ids.size());
   }
 
+  if (has_duplicate_auth_token_ids(returned_auth_token_ids_vec)) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
   if (!syscall_handler.check_auth_tokens_owned(returned_auth_token_ids_vec)) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
@@ -316,6 +348,11 @@ syscall_GetReturnedBuffer_inner(
     return {status->error().code(), WrappedGasAmount{0}};
   }
   CHECK(**status != nullptr);
+
+  if (output_restored_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
 
   bool written = false;
   size_t write_len = std::min(output_buffer.size(), (**status)->size());
