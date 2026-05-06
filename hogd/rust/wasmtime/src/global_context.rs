@@ -110,7 +110,7 @@ impl WasmtimeGlobalContext {
             .strategy(compiler)
             .native_unwind_info(false)
             .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
-            .wasm_backtrace(false)
+            .wasm_backtrace_max_frames(None)
             .debug_info(false)
             .cranelift_opt_level(wasmtime::OptLevel::Speed)
             .cranelift_nan_canonicalization(true) // deterministic nan on cranelift
@@ -167,7 +167,7 @@ impl WasmtimeGlobalContext {
         }
 
         if cfg!(feature = "wasm_debug") {
-            config.wasm_backtrace(true);
+            config.wasm_backtrace_max_frames(std::num::NonZeroUsize::new(20));
             config
                 .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
 
