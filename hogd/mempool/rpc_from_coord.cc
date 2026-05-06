@@ -1524,6 +1524,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   const BlockID block_id = cache.block_id;
   {
+    x23::CoroGuard cache_cg;
+    co_await cache_cg(validated_block_cache_lock_);
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[block_id] = std::move(cache);
   }

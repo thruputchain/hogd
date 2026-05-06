@@ -552,6 +552,10 @@ private:
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
+  // Protects accesses to [validated_block_cache_]. If multiple blocks are
+  // validated concurrently, [validated_block_cache_] could be accessed in
+  // parallel without this lock.
+  x23::CoroLock validated_block_cache_lock_;
   // Ensures that a commit does not occur while txs are being verified. Txs
   // are verified against a certain block height, so if they race with a block
   // commit, we could add txs to the scheduler that are no longer verified as
