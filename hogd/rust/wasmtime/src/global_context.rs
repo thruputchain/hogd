@@ -102,16 +102,12 @@ impl WasmtimeGlobalContext {
                 //.memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
 
-        let compiler = wasmtime::Strategy::Winch;
+        let compiler = wasmtime::Strategy::Cranelift;
 
         let mut config = Config::default();
         config
             .consume_fuel(true)
             .strategy(compiler)
-            // cranelift-only options
-            //.signals_based_traps(false)
-            //.table_lazy_init(true)
-            // done cranelift-only
             .cranelift_pcc(false)
             .native_unwind_info(false)
             .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
