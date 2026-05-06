@@ -6,6 +6,7 @@
 #include <cstring>
 #include <exception>
 #include <span>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -25,6 +26,23 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+bool
+has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids)
+{
+  std::unordered_set<uint32_t> seen;
+  seen.reserve(auth_token_ids.size());
+  for (uint32_t auth_token_id : auth_token_ids) {
+    if (!seen.insert(auth_token_id).second) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
@@ -117,6 +135,11 @@ syscall_GetCalldata_inner(
     std::span<std::byte> output_auth_token_list,
     RuntimeMemoryLength &output_auth_token_written_len) noexcept
 {
+  if (output_auth_token_list.size() % sizeof(uint32_t) != 0) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
       std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
@@ -204,6 +227,11 @@ syscall_Invoke_inner(
     std::memcpy(owned_auth_token_ids_vec.data(),
                 input_owned_auth_token_ids.data(),
                 input_owned_auth_token_ids.size());
+  }
+
+  if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 
   auto [invoke_res, gas_amount] =
