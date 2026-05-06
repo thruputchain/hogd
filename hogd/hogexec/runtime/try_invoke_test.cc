@@ -16,7 +16,6 @@
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
-#include "hogexec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
@@ -32,6 +31,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
@@ -3522,8 +3522,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
 
     auto looper = std::make_unique<NativeContract>(
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-            {0,
-             [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                int successes = 0;
                for (int i = 0; i < kMaxSavepointDepth + 1; i++) {
                  RuntimeMemoryLength out_ret = 0, out_auth = 0;
@@ -3562,11 +3561,12 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{
-              .invocation = Invocation{.invoked_address = kAddressLooper,
-                                       .entrypoint = entrypoint_from_method_id(0),
-                                       .gas_limit = UINT64_MAX,
-                                       .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kAddressLooper,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
       *context);
 
   auto res = handler.root_invoke();

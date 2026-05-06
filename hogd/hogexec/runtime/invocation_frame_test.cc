@@ -6,14 +6,14 @@
 
 #include "auth_token.hh"
 #include "ffi_enums.hh"
-#include "hogexec_constants.hh"
-#include "invoke_flag.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogexec_constants.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -214,8 +214,7 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
 
   stack.start_frame(make_test_address(1), Calldata{},
                     std::to_underlying(InvokeFlag::TryInvoke), {});
-  auto result =
-      stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
   ASSERT_TRUE(result.has_value());
   ASSERT_FALSE(result.value().first.result_.has_value());
 }
