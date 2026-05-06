@@ -108,7 +108,6 @@ impl WasmtimeGlobalContext {
         config
             .consume_fuel(true)
             .strategy(compiler)
-            .cranelift_pcc(false)
             .native_unwind_info(false)
             .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
             .wasm_backtrace(false)
