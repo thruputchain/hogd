@@ -35,15 +35,16 @@ public:
 
   T *alloc()
   {
-    if (private_region_->num_elements_ == 0) {
-      private_region_->region_ = alloc_from_pool();
-      CHECK_PTR(private_region_->region_);
-      private_region_->num_elements_ = PerThreadNumElementsPerChunk;
+    PrivateRegion &region = *private_region_;
+    if (region.num_elements_ == 0) {
+      region.region_ = alloc_from_pool();
+      CHECK_PTR(region.region_);
+      region.num_elements_ = PerThreadNumElementsPerChunk;
     }
 
-    private_region_->num_elements_--;
-    T *ret = reinterpret_cast<T *>(private_region_->region_);
-    private_region_->region_ += sizeof(T);
+    region.num_elements_--;
+    T *ret = reinterpret_cast<T *>(region.region_);
+    region.region_ += sizeof(T);
     return ret;
   }
 
