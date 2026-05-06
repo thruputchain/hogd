@@ -242,8 +242,9 @@ TEST_F(SyscallAuthTokenTest, GetCalldataRejectsPartialAuthTokenOutputSpan)
           {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              RuntimeMemoryLength calldata_len = 0;
              uint32_t auth_token_count = 0;
-             auto len_res = ctx.syscall<SyscallNo::kGetCalldataLen>(
-                 calldata_len, auth_token_count);
+             auto len_res =
+                 ctx.syscall<SyscallNo::kGetCalldataLen>(calldata_len,
+                                                         auth_token_count);
              EXPECT_TRUE(len_res.has_value());
              EXPECT_EQ(len_res.value(),
                        SyscallErrorCode::kSyscallErrorCodeNone);
