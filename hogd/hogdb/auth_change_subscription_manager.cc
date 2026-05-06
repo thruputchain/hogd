@@ -127,8 +127,8 @@ AuthChangeSubscriptionManager::start_forward_key_changes(
   for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
     auto &client = it->second;
     try {
-      pending.emplace_back(it->first, client.__send_call,
-                           client.authdb_forward_key_changes(height, batch));
+      pending.push_back({it->first, client.__send_call,
+                         client.authdb_forward_key_changes(height, batch)});
       ++it;
     } catch (x23::XdrException &e) {
       error("AuthChangeSubscriptionManager: Failed to forward key changes to "
