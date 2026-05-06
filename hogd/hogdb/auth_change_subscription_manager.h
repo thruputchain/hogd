@@ -42,16 +42,15 @@ private:
     client_ref_t client_ref;
     x23::Async<void> future;
   };
-  using pending_publish_t = PendingPublish;
 
   static x23::Async<std::optional<auth_db_client_t>>
   create_client(const sockaddr_storage &address, const AuthCard &card);
 
   // Under lock_: kick off authdb_forward_key_changes on every current client,
-  // returning a pending_publish_t per client. A client whose dispatch throws
+  // returning a PendingPublish per client. A client whose dispatch throws
   // synchronously is erased from the map before returning. Lock is released
   // when this coroutine returns — the caller awaits the futures unlocked.
-  x23::Async<std::vector<pending_publish_t>>
+  x23::Async<std::vector<PendingPublish>>
   start_forward_key_changes(BlockHeight height, const KeyChangeBatch &batch);
 
   // Under lock_: erase the entry for `card` only if it still holds the client

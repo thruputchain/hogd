@@ -114,11 +114,11 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   co_return true;
 }
 
-x23::Async<std::vector<AuthChangeSubscriptionManager::pending_publish_t>>
+x23::Async<std::vector<AuthChangeSubscriptionManager::PendingPublish>>
 AuthChangeSubscriptionManager::start_forward_key_changes(
     BlockHeight height, const KeyChangeBatch &batch)
 {
-  std::vector<pending_publish_t> pending;
+  std::vector<PendingPublish> pending;
 
   x23::CoroGuard guard;
   co_await guard(lock_);
