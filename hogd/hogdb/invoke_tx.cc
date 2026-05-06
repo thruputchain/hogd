@@ -524,7 +524,7 @@ void
 InvokeTX::assert_is_valid() const noexcept
 {
   assert(tx_depth_ >= 0);
-  assert(tx_depth_ < kMaxSavepointDepth);
+  assert(tx_depth_ <= kMaxSavepointDepth);
   if constexpr (is_debug_build()) {
     std::unordered_map<Address, int128_t> balance_deltas;
     for (const auto &[key, vec] : changes_) {

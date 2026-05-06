@@ -183,7 +183,7 @@ private:
 inline int
 InvokeTX::create_savepoint()
 {
-  CHECK(tx_depth_ < kMaxSavepointDepth);
+  CHECK(tx_depth_ <= kMaxSavepointDepth);
   return ++tx_depth_;
 }
 

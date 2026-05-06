@@ -173,7 +173,7 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (!itx)
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
-  if (depth == kMaxSavepointDepth) [[unlikely]] {
+  if (depth > kMaxSavepointDepth) [[unlikely]] {
     itx->rollback_to_savepoint(depth - 1);
     return RPCError::kRPCUnrecoverable;
   }
