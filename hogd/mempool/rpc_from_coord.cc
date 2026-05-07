@@ -1764,7 +1764,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   record_stage(stage_await_handles);
 
-  co_await scheduler_->write_all_average_hog_ages_to_db();
+  scheduler_->write_all_average_hog_ages_to_db();
   record_stage(stage_write_average_hog_ages);
 
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
