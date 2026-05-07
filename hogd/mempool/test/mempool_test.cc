@@ -639,8 +639,9 @@ TEST(Mempool, ValidateCommitUpdatesHogAgesWithoutNominatedBlock)
   MempoolTestInfra server;
   ValidatorID validator_id{};
 
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
 
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -688,8 +689,9 @@ TEST(Mempool, ValidateCommitUpdatesHogAgesWithoutNominatedBlock)
                            .prev_block_hash = nomination.prev_block_hash});
   }
 
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   ASSERT_EQ(res_validate.outcome(),
@@ -712,11 +714,11 @@ TEST(Mempool, ValidateCommitUpdatesHogAgesWithoutNominatedBlock)
 
   auto [after_validation_commit, after_lock] =
       scheduler->get_cached_hog_age(account);
-  EXPECT_NE(from_xdr(after_validation_commit->num_hogs[kHogAgeGroupToSchedule]),
+  EXPECT_EQ(from_xdr(after_validation_commit->num_hogs[kHogAgeGroupToSchedule]),
             to_schedule_before);
   EXPECT_EQ(
       from_xdr(after_validation_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
-      already_scheduled_before + txs[0].tx.invocation.gas_limit);
+      already_scheduled_before);
   EXPECT_EQ(after_validation_commit->average_ages[kHogAgeGroupAlreadyScheduled],
             db_tip.height + 1);
   after_lock.unlock();
