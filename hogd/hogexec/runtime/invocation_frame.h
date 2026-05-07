@@ -40,7 +40,8 @@ class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
-                  std::span<uint32_t const> owned_auth_token_ids);
+                  std::span<uint32_t const> owned_auth_token_ids,
+                  uint32_t inherited_try_invoke_depth);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -99,6 +100,11 @@ public:
   bool is_read_only() const
   {
     return (flags_ & std::to_underlying(InvokeFlag::ReadOnly)) != 0;
+  }
+
+  uint32_t get_total_try_invoke_depth() const
+  {
+    return total_try_invoke_depth_;
   }
 
   // returned pointer is invalidated by any call to add_item_view
@@ -222,6 +228,7 @@ private:
   size_t event_count_ = 0;
 
   uint32_t try_invoke_frame_count_ = 0;
+  uint32_t total_try_invoke_depth_;
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;

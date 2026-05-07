@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <span>
+#include <utility>
 
 #include "auth_token.hh"
 #include "ffi_enums.hh"
@@ -11,6 +12,8 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogexec_constants.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -192,6 +195,28 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
   ASSERT_NE(stack.lookup_auth_token(token_id.value()), nullptr);
+}
+
+TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  stack.start_frame(make_test_address(0), Calldata{}, 0, {});
+
+  for (int i = 0; i < kMaxSavepointDepth; i++) {
+    stack.start_frame(make_test_address(1), Calldata{},
+                      std::to_underlying(InvokeFlag::TryInvoke), {});
+    auto result =
+        stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+    ASSERT_TRUE(result.has_value()) << "iteration " << i;
+    ASSERT_TRUE(result.value().first.result_.has_value()) << "iteration " << i;
+    ASSERT_EQ(result.value().second, false);
+  }
+
+  stack.start_frame(make_test_address(1), Calldata{},
+                    std::to_underlying(InvokeFlag::TryInvoke), {});
+  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_FALSE(result.value().first.result_.has_value());
 }
 
 TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)

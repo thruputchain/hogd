@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
+#include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -60,6 +61,7 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kCorruption:
   case HogDBCode::kNoMemory:
   case HogDBCode::kIO:
+    error("Unrecoverable: received Hogdb error: {}", ret.error().raw_code());
     return RPCError::kRPCUnrecoverable;
   default:
     error("Received unhandled error type from RPC: {}", ret.error().raw_code());
@@ -171,6 +173,10 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (!itx)
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
+  if (depth > kMaxSavepointDepth) [[unlikely]] {
+    itx->rollback_to_savepoint(depth - 1);
+    return RPCError::kRPCUnrecoverable;
+  }
 
   if constexpr (is_debug_build()) {
     // Invariant: hogexec sends at most one delta per key per subtransaction.
