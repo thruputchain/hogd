@@ -64,6 +64,7 @@ list(APPEND generated_rs_files ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_cont
 add_xdr(roundtrip_hh
   ./integration_test_contracts/xdr/roundtrip.x
 )
+add_dependencies(all_wasm_headers build_roundtrip_hh)
 
 set(roundtrip_rs_stamp ${CMAKE_CURRENT_BINARY_DIR}/roundtrip_rs.stamp)
 add_custom_command(
