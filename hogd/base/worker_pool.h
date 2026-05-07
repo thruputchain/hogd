@@ -63,6 +63,7 @@ public:
   WorkerPool(int n = available_parallelism())
     : target_workers_(n), active_workers_(n)
   {
+    CHECK_GT(n, 0);
     workers_.reserve(n);
     for (int i = 0; i < n; ++i) {
       workers_.emplace_back(

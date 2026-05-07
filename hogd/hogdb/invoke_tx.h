@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -18,6 +19,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -181,6 +183,7 @@ private:
 inline int
 InvokeTX::create_savepoint()
 {
+  CHECK(tx_depth_ <= kMaxSavepointDepth);
   return ++tx_depth_;
 }
 

@@ -21,6 +21,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "hogexec_constants.hh"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -523,8 +524,9 @@ void
 InvokeTX::assert_is_valid() const noexcept
 {
   assert(tx_depth_ >= 0);
-  std::unordered_map<Address, int128_t> balance_deltas;
+  assert(tx_depth_ <= kMaxSavepointDepth);
   if constexpr (is_debug_build()) {
+    std::unordered_map<Address, int128_t> balance_deltas;
     for (const auto &[key, vec] : changes_) {
       [[maybe_unused]] unsigned int depth = 0;
       for (const ItemVersion &item : vec) {

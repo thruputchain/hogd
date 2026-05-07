@@ -31,6 +31,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
@@ -3506,6 +3507,70 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())
       << "insert-consume-insert via TryInvoke must succeed";
+}
+
+TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
+{
+  static constexpr ContractAddress kAddressNoop = make_contract_address(0);
+  static constexpr ContractAddress kAddressLooper = make_contract_address(1);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto noop = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &) -> InvokeStatus<void> { return {}; }}});
+
+    auto looper = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               int successes = 0;
+               for (int i = 0; i < kMaxSavepointDepth + 1; i++) {
+                 RuntimeMemoryLength out_ret = 0, out_auth = 0;
+                 auto r = ctx.syscall<SyscallNo::kInvoke>(
+                     kAddressNoop, 0, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     std::span<uint32_t>{}, out_ret, out_auth);
+                 if (!r.has_value()) {
+                   return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+                 if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                   successes++;
+                 }
+               }
+               if (successes != kMaxSavepointDepth) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }}});
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(noop));
+    contract_map.emplace(1, std::move(looper));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  ContractAddress addrs[] = {kAddressNoop, kAddressLooper};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kAddressLooper,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, TryInvokeTest,

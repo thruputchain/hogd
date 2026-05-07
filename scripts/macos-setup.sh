@@ -34,8 +34,11 @@ BREW_PACKAGES=(
   "lld"       # LLVM linker (separate from llvm package on Homebrew)
   "cmake"     # Build system generator
   "bison"     # Parser generator (macOS version is outdated)
+  "python"    # Python for venv-backed build tools
   "jemalloc"  # Memory allocator
   "openssl@3" # TLS
+  "zlib"      # Compression
+  "bzip2"     # Compression
   "lz4"       # Compression
   "zstd"      # Compression
   "snappy"    # Compression (for RocksDB)
@@ -62,8 +65,12 @@ fi
 echo ""
 echo "Setting up Python virtual environment..."
 if [ ! -d "$VENV_DIR" ]; then
-  python3 -m venv "$VENV_DIR"
+  BREW_PYTHON="$(brew --prefix python)/bin/python3"
+  "$BREW_PYTHON" -m venv "$VENV_DIR"
   echo "Created venv at $VENV_DIR"
+fi
+if [ ! -e "$VENV_DIR/bin/python3" ] && [ -x "$VENV_DIR/bin/python" ]; then
+  ln -s python "$VENV_DIR/bin/python3"
 fi
 
 # Install Python dependencies in venv
@@ -162,9 +169,38 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+VENV_DIR="$PROJECT_ROOT/.venv"
 
 # Activate Python venv
-source "$PROJECT_ROOT/.venv/bin/activate"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "ERROR: Python virtual environment not found at $VENV_DIR"
+  echo "Run: ./scripts/macos-setup.sh"
+  return 1 2>/dev/null || exit 1
+fi
+
+if [ ! -e "$VENV_DIR/bin/python3" ] && [ -x "$VENV_DIR/bin/python" ]; then
+  ln -s python "$VENV_DIR/bin/python3" 2>/dev/null || true
+fi
+
+if [ -x "$VENV_DIR/bin/python3" ]; then
+  export HOGD_PYTHON="$VENV_DIR/bin/python3"
+else
+  export HOGD_PYTHON="$VENV_DIR/bin/python"
+fi
+
+source "$VENV_DIR/bin/activate"
+export VIRTUAL_ENV="$VENV_DIR"
+export PATH="$VENV_DIR/bin:$PATH"
+if [ ! -x "$VENV_DIR/bin/python3" ] && [ -x "$VENV_DIR/bin/python" ]; then
+  HOGD_PYTHON_SHIM_DIR="${TMPDIR:-/tmp}/hogd-python-${USER:-$(id -u)}"
+  mkdir -p "$HOGD_PYTHON_SHIM_DIR"
+  cat >"$HOGD_PYTHON_SHIM_DIR/python3" <<PYTHON3_SHIM
+#!/bin/sh
+exec "$VENV_DIR/bin/python" "\$@"
+PYTHON3_SHIM
+  chmod +x "$HOGD_PYTHON_SHIM_DIR/python3"
+  export PATH="$HOGD_PYTHON_SHIM_DIR:$PATH"
+fi
 
 # Add Homebrew LLVM to PATH (clang-21)
 export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
@@ -175,6 +211,9 @@ export PATH="/opt/homebrew/opt/lld/bin:$PATH"
 # Add Homebrew bison to PATH (newer than macOS version)
 export PATH="/opt/homebrew/opt/bison/bin:$PATH"
 
+# Some venv activation scripts contain stale absolute paths after checkout moves.
+export PATH="$VENV_DIR/bin:$PATH"
+
 # Set compiler flags for LLVM
 export CC="/opt/homebrew/opt/llvm/bin/clang"
 export CXX="/opt/homebrew/opt/llvm/bin/clang++"
@@ -182,10 +221,10 @@ export LDFLAGS="-L/opt/homebrew/opt/llvm/lib/c++ -L/opt/homebrew/opt/llvm/lib"
 export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
 
 # For cmake to find packages
-export CMAKE_PREFIX_PATH="/opt/homebrew/opt/llvm:/opt/homebrew/opt/openssl@3"
+export CMAKE_PREFIX_PATH="/opt/homebrew/opt/llvm:/opt/homebrew/opt/openssl@3:/opt/homebrew/opt/zlib:/opt/homebrew/opt/bzip2:/opt/homebrew/opt/lz4:/opt/homebrew/opt/zstd:/opt/homebrew/opt/snappy:/opt/homebrew/opt/jemalloc"
 
 echo "hogd development environment activated"
-echo "  Python: $(which python3)"
+echo "  Python: $HOGD_PYTHON"
 echo "  Clang:  $(clang --version | head -1)"
 echo "  Rust:   $(rustc --version) (default)"
 # Show the project toolchain version to verify rustup is working

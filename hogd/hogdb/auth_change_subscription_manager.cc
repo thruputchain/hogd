@@ -114,11 +114,11 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   co_return true;
 }
 
-x23::Async<std::vector<AuthChangeSubscriptionManager::pending_publish_t>>
+x23::Async<std::vector<AuthChangeSubscriptionManager::PendingPublish>>
 AuthChangeSubscriptionManager::start_forward_key_changes(
     BlockHeight height, const KeyChangeBatch &batch)
 {
-  std::vector<pending_publish_t> pending;
+  std::vector<PendingPublish> pending;
 
   x23::CoroGuard guard;
   co_await guard(lock_);
@@ -127,8 +127,8 @@ AuthChangeSubscriptionManager::start_forward_key_changes(
   for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
     auto &client = it->second;
     try {
-      pending.emplace_back(it->first, client.__send_call,
-                           client.authdb_forward_key_changes(height, batch));
+      pending.push_back({it->first, client.__send_call,
+                         client.authdb_forward_key_changes(height, batch)});
       ++it;
     } catch (x23::XdrException &e) {
       error("AuthChangeSubscriptionManager: Failed to forward key changes to "
