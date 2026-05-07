@@ -91,8 +91,7 @@ private:
     }
     size_t operator()(const ItemKey &key) const
     {
-      static SipHash24 hasher;
-      return hasher(key.as_bytes());
+      return std::hash<ItemKey>{}(key);
     }
   };
 
