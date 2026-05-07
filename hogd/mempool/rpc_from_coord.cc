@@ -1524,9 +1524,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await cache_cg(validated_block_cache_lock_);
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[block_id] = std::move(cache);
-    info("in schedulercoord_validate(), &validated_block_cache_[block_id] = "
-         "%p\n",
-         (void *)&validated_block_cache_[block_id]);
+    info(
+        "in schedulercoord_validate(), &validated_block_cache_[block_id] = {}" &
+        validated_block_cache_[block_id]);
   }
   record_stage(stage_cache_validated_block);
   co_await decrement_num_validations_in_progress();
@@ -1752,8 +1752,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       committed_cache = &it->second;
     }
     CHECK_CONST_PTR(committed_cache);
-    info("schedulercoord_commit_block(), committed_cache = %p\n",
-         (void *)committed_cache);
+    info("schedulercoord_commit_block(), committed_cache = {}",
+         committed_cache);
     co_await scheduler_->apply_committed_block_hog_ages(
         committed_cache->txs, committed_cache->db_tip.height);
   }
