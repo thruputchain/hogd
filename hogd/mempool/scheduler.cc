@@ -150,9 +150,11 @@ Scheduler::apply_committed_block_hog_ages(
   std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
   touched_accounts.reserve(txs.size());
 
+  size_t iteration = 0;
   for (const SignedTransaction &tx : txs) {
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     touched_accounts.insert(account);
+    info("iteration {}", iteration++);
     apply_committed_tx_hog_age(tx, hogs_spent_by_account);
   }
   for (const auto &[account, num_hogs] : hogs_spent_by_account) {
@@ -572,9 +574,9 @@ Scheduler::apply_committed_tx_hog_age(
     std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
         &hogs_spent_by_account)
 {
+  auto [account_state, lock] = get_account_state(account);
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const GasAmount gas_limit = tx.tx.invocation.gas_limit;
-  auto [account_state, lock] = get_account_state(account);
   HogAge &hog_age = account_state->hog_age;
 
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
