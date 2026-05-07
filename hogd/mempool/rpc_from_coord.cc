@@ -1455,8 +1455,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   record_stage(stage_block_execution);
 
   if (!validated) {
-    co_await scheduler_->add_txs(cache.txs);
-
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
@@ -1497,8 +1495,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   SHA256Hash block_hash = sha256(header);
   record_stage(stage_verify_block_hash);
   if (block_hash != nomination.block_hash) {
-    co_await scheduler_->add_txs(cache.txs);
-
     co_await finish_block_handle;
     co_await decrement_num_validations_in_progress();
     validation_telemetry.outcome = validation_outcome_str(
