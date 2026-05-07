@@ -30,21 +30,21 @@ echo "Checking Homebrew dependencies..."
 
 # Required Homebrew packages
 BREW_PACKAGES=(
-  "llvm"        # clang-21, libc++
-  "lld"         # LLVM linker (separate from llvm package on Homebrew)
-  "cmake"       # Build system generator
-  "bison"       # Parser generator (macOS version is outdated)
-  "python@3.14" # Python for venv-backed build tools
-  "jemalloc"    # Memory allocator
-  "openssl@3"   # TLS
-  "zlib"        # Compression
-  "bzip2"       # Compression
-  "lz4"         # Compression
-  "zstd"        # Compression
-  "snappy"      # Compression (for RocksDB)
-  "wabt"        # WebAssembly tools (wat2wasm)
-  "binaryen"    # WebAssembly optimizer (wasm-opt)
-  "ccache"      # CCache (for faster builds)
+  "llvm"      # clang-21, libc++
+  "lld"       # LLVM linker (separate from llvm package on Homebrew)
+  "cmake"     # Build system generator
+  "bison"     # Parser generator (macOS version is outdated)
+  "python"    # Python for venv-backed build tools
+  "jemalloc"  # Memory allocator
+  "openssl@3" # TLS
+  "zlib"      # Compression
+  "bzip2"     # Compression
+  "lz4"       # Compression
+  "zstd"      # Compression
+  "snappy"    # Compression (for RocksDB)
+  "wabt"      # WebAssembly tools (wat2wasm)
+  "binaryen"  # WebAssembly optimizer (wasm-opt)
+  "ccache"    # CCache (for faster builds)
 )
 
 MISSING_PACKAGES=()
@@ -65,7 +65,8 @@ fi
 echo ""
 echo "Setting up Python virtual environment..."
 if [ ! -d "$VENV_DIR" ]; then
-  /opt/homebrew/opt/python@3.14/bin/python3.14 -m venv "$VENV_DIR"
+  BREW_PYTHON="$(brew --prefix python)/bin/python3"
+  "$BREW_PYTHON" -m venv "$VENV_DIR"
   echo "Created venv at $VENV_DIR"
 fi
 if [ ! -e "$VENV_DIR/bin/python3" ] && [ -x "$VENV_DIR/bin/python" ]; then
