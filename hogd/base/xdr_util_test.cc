@@ -4,9 +4,11 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "transaction.hh"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -35,6 +37,87 @@ TEST(Int128XdrBytesTest, RoundTripsPositiveAndNegativeValues)
 
   EXPECT_EQ(int128_from_xdr_bytes(int128_to_xdr_bytes(kPositive)), kPositive);
   EXPECT_EQ(int128_from_xdr_bytes(int128_to_xdr_bytes(kNegative)), kNegative);
+}
+
+namespace {
+
+SignedTransaction
+make_minimal_signed_transaction()
+{
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 0;
+  claim.source_address_claim().required_weight = 0;
+
+  return SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{
+              .invoked_address = {},
+              .entrypoint = {},
+              .gas_limit = 1,
+              .calldata = {},
+          },
+          .uniquifier = {.block_expiry_height = 1, .nonce = 0},
+          .contracts_to_deploy = {},
+          .auth_claim = std::move(claim),
+      },
+      .signatures = {},
+  };
+}
+
+} // namespace
+
+TEST(ParallelBatchToTTest, RoundTripsSingleSignedTransaction)
+{
+  const SignedTransaction tx = make_minimal_signed_transaction();
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{tx})();
+
+  SignedTransactionBatch parsed;
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed)());
+  ASSERT_EQ(parsed.size(), 1UL);
+  EXPECT_EQ(parsed[0], tx);
+}
+
+TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  ASSERT_EQ(batch.segment_tokens[0], 1U);
+  ASSERT_EQ(batch.segment_bytes[0], batch.xdr.size());
+  batch.segment_tokens[0] = 2;
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
+TEST(ParallelBatchToTTest, RejectsLeftoverSegmentBytes)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  ASSERT_EQ(batch.segment_tokens[0], 1U);
+  batch.xdr.resize(batch.xdr.size() + 4, 0);
+  batch.segment_bytes[0] += 4;
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
+TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
+{
+  using BoundedUint32Vec = x23::Vec<std::uint32_t, 1>;
+
+  ParallelBatch batch{
+      .segment_tokens = {1},
+      .segment_bytes = {12},
+      .xdr = {0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2},
+  };
+
+  x23::XdrVec<BoundedUint32Vec> parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
 }
 
 } // namespace hogd

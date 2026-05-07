@@ -139,6 +139,11 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
+// Decodes a ParallelBatch whose top-level segment metadata has already been
+// validated by the caller. A mismatch between [segment_tokens] and
+// [segment_bytes], or between the sum of [segment_bytes] and [xdr.size()], is a
+// caller bug and remains a CHECK failure. Malformed object XDR inside otherwise
+// sane segment metadata is untrusted input and is reported by returning false.
 template<typename T>
 inline x23::Async<bool>
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
@@ -182,16 +187,37 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
         size_t inner_obj_offset = 0;
         size_t inner_xdr_offset = 0;
         for (size_t j = 0; j < num_segment_tokens; j++) {
+          if (inner_xdr_offset >= num_segment_bytes) {
+            info("failed to deserialize: segment {} claims {} tokens but "
+                 "byte offset {} reached segment size {}",
+                 i, num_segment_tokens, inner_xdr_offset, num_segment_bytes);
+            co_return false;
+          }
+
           try {
+            const size_t obj_idx = obj_offsets[i] + inner_obj_offset;
             size_t num_consumed = x23::deserialize_from(
-                &objs[obj_offsets[i] + inner_obj_offset++],
+                &objs[obj_idx],
                 x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
                              num_segment_bytes - inner_xdr_offset));
+            inner_obj_offset++;
             inner_xdr_offset += num_consumed;
-          } catch (const x23::XdrBadInput &e) {
+            if (inner_xdr_offset > num_segment_bytes) {
+              info("failed to deserialize: segment {} consumed {} bytes, "
+                   "exceeding segment size {}",
+                   i, inner_xdr_offset, num_segment_bytes);
+              co_return false;
+            }
+          } catch (const x23::XdrException &e) {
             info("failed to deserialize: {}", e.what());
             co_return false;
           }
+        }
+
+        if (inner_xdr_offset != num_segment_bytes) {
+          info("failed to deserialize: segment {} left {} trailing bytes", i,
+               num_segment_bytes - inner_xdr_offset);
+          co_return false;
         }
       }
       co_return true;
