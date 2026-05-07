@@ -315,6 +315,7 @@ def gen_syscall_meta(syscall: dict) -> str:
     # Extract and validate error codes
     error_codes = validate_and_extract_error_codes(syscall)
     error_codes_cpp = [f"SyscallErrorCode::{code}" for code in error_codes]
+    allowed_errors = ",\n        ".join(error_codes_cpp)
 
     return f"""template<>
 struct SyscallMeta<SyscallNo::k{name}> {{
@@ -333,7 +334,7 @@ struct SyscallMeta<SyscallNo::k{name}> {{
     }};
     constexpr static std::array<SyscallErrorCode, {len(error_codes_cpp)}>
         kAllowedErrors = {{
-        {",\n        ".join(error_codes_cpp)}
+        {allowed_errors}
     }};
 }};
 static_assert(is_syscall_meta<SyscallMeta<SyscallNo::k{name}>>);
