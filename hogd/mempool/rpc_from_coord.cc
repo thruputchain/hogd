@@ -1526,7 +1526,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     validated_block_cache_[block_id] = std::move(cache);
     info("in schedulercoord_validate(), &validated_block_cache_[block_id] = "
          "%p\n",
-         &validated_block_cache_[block_id]);
+         (void *)&validated_block_cache_[block_id]);
   }
   record_stage(stage_cache_validated_block);
   co_await decrement_num_validations_in_progress();
