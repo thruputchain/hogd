@@ -65,6 +65,7 @@ public:
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
     CHECK_PTR(scheduler_.get());
+    info("process_transfers");
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.store(transfers.block);

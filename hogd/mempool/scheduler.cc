@@ -574,8 +574,8 @@ Scheduler::apply_committed_tx_hog_age(
     std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
         &hogs_spent_by_account)
 {
-  auto [account_state, lock] = get_account_state(account);
   const ContractAddress &account = tx.tx.invocation.invoked_address;
+  auto [account_state, lock] = get_account_state(account);
   const GasAmount gas_limit = tx.tx.invocation.gas_limit;
   HogAge &hog_age = account_state->hog_age;
 
