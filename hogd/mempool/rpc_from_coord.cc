@@ -1753,7 +1753,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     }
     CHECK_CONST_PTR(committed_cache);
     info("schedulercoord_commit_block(), committed_cache = %p\n",
-         committed_cache);
+         (void *)committed_cache);
     co_await scheduler_->apply_committed_block_hog_ages(
         committed_cache->txs, committed_cache->db_tip.height);
   }
