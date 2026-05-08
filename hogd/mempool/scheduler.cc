@@ -126,6 +126,19 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
+
+  // We want to ensure that [refresh_ready_accounts()] does not use the hog ages
+  // stored in [pending_nomination_.hog_ages]. Thus, we clear out
+  // [pending_nomination_.hog_ages] (along with [pending_nomination_.block_id]
+  // to avoid mistakes in the future).
+  //
+  // The reason why we do not call [pending_nomination_.clear()] instead is
+  // because we pass [pending_nomination_.touched_accounts] to
+  // [refresh_ready_accounts()]. We could copy it into a temporary variable
+  // instead and call [pending_nomination_.clear()], but it would be best to
+  // avoid this copy overhead.
+  pending_nomination_.block_id = 0;
+  pending_nomination_.hog_ages.clear();
   refresh_ready_accounts(pending_nomination_.touched_accounts);
   pending_nomination_.clear();
 }
