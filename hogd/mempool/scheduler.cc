@@ -113,14 +113,12 @@ Scheduler::commit_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
-  std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts =
-      pending_nomination_.touched_accounts;
   for (const auto &[account, hog_age] : pending_nomination_.hog_ages) {
     auto [account_state, lock] = get_account_state(account);
     account_state->hog_age = hog_age;
   }
+  refresh_ready_accounts(pending_nomination_.touched_accounts);
   pending_nomination_.clear();
-  refresh_ready_accounts(touched_accounts);
 }
 
 void
@@ -128,10 +126,8 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
-  std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts =
-      pending_nomination_.touched_accounts;
+  refresh_ready_accounts(pending_nomination_.touched_accounts);
   pending_nomination_.clear();
-  refresh_ready_accounts(touched_accounts);
 }
 
 x23::Async<void>
@@ -146,8 +142,8 @@ Scheduler::apply_committed_block_hog_ages(
 
   std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
       hogs_spent_by_account;
-  hogs_spent_by_account.reserve(txs.size());
   std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
+  hogs_spent_by_account.reserve(txs.size());
   touched_accounts.reserve(txs.size());
 
   for (const SignedTransaction &tx : txs) {
