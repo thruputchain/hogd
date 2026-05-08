@@ -1750,8 +1750,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     CHECK_CONST_PTR(committed_cache);
     // [apply_committed_block_hog_ages] acquires [scheduler_->global_lock_] for
     // us, so we do not need to do it here.
-    scheduler_->apply_committed_block_hog_ages(committed_cache->txs,
-                                               committed_cache->db_tip.height);
+    co_await scheduler_->apply_committed_block_hog_ages(
+        committed_cache->txs, committed_cache->db_tip.height);
   }
   record_stage(stage_remove_from_scheduler);
 
