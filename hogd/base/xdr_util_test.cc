@@ -3,13 +3,17 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <utility>
 
+#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "parallel.hh"
 #include "transaction.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
