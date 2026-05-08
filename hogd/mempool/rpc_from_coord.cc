@@ -1745,9 +1745,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     }
     const PendingBlock *committed_cache = nullptr;
     auto it = validated_block_cache_.find(block_id);
-    if (it != validated_block_cache_.end()) {
-      committed_cache = &it->second;
-    }
+    CHECK(it != validated_block_cache_.end());
+    committed_cache = &it->second;
     CHECK_CONST_PTR(committed_cache);
     // [apply_committed_block_hog_ages] acquires [scheduler_->global_lock_] for
     // us, so we do not need to do it here.
@@ -1756,6 +1755,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   record_stage(stage_remove_from_scheduler);
 
+  // We write the hog ages to the database down here because we need to commit
+  // the hog ages above first ([scheduler_->commit_pending_nomination()] and
+  // [scheduler_->apply_committed_block_hog_ages]).
+  scheduler_->write_all_average_hog_ages_to_db();
+  record_stage(stage_write_average_hog_ages);
+
   for (x23::Async<void> &handle : commit_handles) {
     co_await handle;
   }
@@ -1763,9 +1768,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     CHECK_EQ(co_await handle, DbSchedResult::DbSchedResultOK);
   }
   record_stage(stage_await_handles);
-
-  scheduler_->write_all_average_hog_ages_to_db();
-  record_stage(stage_write_average_hog_ages);
 
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
   // elements in the vectors in [nominated_block_cache_], so if we clear those
