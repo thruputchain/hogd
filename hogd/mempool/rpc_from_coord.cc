@@ -1340,6 +1340,17 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
 
+    if (cache.tx_hashes.size() != tx_nominations.size()) {
+      co_await decrement_num_validations_in_progress();
+      validation_telemetry.outcome = validation_outcome_str(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+      info("schedulercoord_validate rejected nomination with {} tx hashes and "
+           "{} nondeterministic data entries",
+           cache.tx_hashes.size(), tx_nominations.size());
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+    }
+
     // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
     // correctly when we use the helper functions above to send txs to the
     // executors.

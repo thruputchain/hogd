@@ -367,6 +367,27 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
+TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
+{
+  SignedTransactionHashBatch tx_hashes{SignedTransactionHash{},
+                                       SignedTransactionHash{}};
+  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+      NondeterministicProposalData{}};
+
+  Nomination nomination{
+      .block_height = 1,
+      .prev_block_hash = {},
+      .transactions_hash = t_to_parallel_batch(tx_hashes)(),
+      .transactions_nondeterministic_data =
+          t_to_parallel_batch(tx_nondeterministic_data)(),
+  };
+
+  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+}
+
 TEST(Mempool, ValidateBatch)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
