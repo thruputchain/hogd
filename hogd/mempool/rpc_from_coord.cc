@@ -168,7 +168,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   double stage_add_txs = 0.0;
 
   auto txs = std::make_shared<SignedTransactionBatch>();
-  CHECK(co_await parallel_batch_to_t(batch, *txs));
+  if (!(co_await parallel_batch_to_t(batch, *txs))) {
+    info("submit_unvetted rejected malformed transaction batch");
+    co_return;
+  }
   size_t num_submitted_txs = txs->size();
   record_submitted_unvetted(num_submitted_txs);
   record_stage(stage_deserialize_batch);
@@ -240,7 +243,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
   SignedTransactionBatch txs;
-  CHECK(co_await parallel_batch_to_t(batch, txs));
+  if (!(co_await parallel_batch_to_t(batch, txs))) {
+    info("submit_vetted rejected malformed transaction batch");
+    co_return;
+  }
   record_submitted_vetted(txs.size());
   info("submit_vetted, {} txs", txs.size());
   x23::CoroGuard cg;

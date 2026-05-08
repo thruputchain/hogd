@@ -74,6 +74,35 @@ TEST(Mempool, SubmitVetted)
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 }
 
+TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  batch.segment_tokens[0]++;
+
+  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  coord.schedulercoord_submit_unvetted(batch)();
+}
+
+TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  batch.segment_tokens[0]++;
+
+  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  ValidatorID validator_id{};
+  coord.schedulercoord_submit_vetted(validator_id, batch)();
+}
+
 TEST(Mempool, Nominate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
