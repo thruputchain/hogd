@@ -49,17 +49,19 @@ make_minimal_signed_transaction()
   claim.source_address_claim().required_weight = 0;
 
   return SignedTransaction{
-      .tx = Transaction{
-          .invocation = Invocation{
-              .invoked_address = {},
-              .entrypoint = {},
-              .gas_limit = 1,
-              .calldata = {},
+      .tx =
+          Transaction{
+              .invocation =
+                  Invocation{
+                      .invoked_address = {},
+                      .entrypoint = {},
+                      .gas_limit = 1,
+                      .calldata = {},
+                  },
+              .uniquifier = {.block_expiry_height = 1, .nonce = 0},
+              .contracts_to_deploy = {},
+              .auth_claim = std::move(claim),
           },
-          .uniquifier = {.block_expiry_height = 1, .nonce = 0},
-          .contracts_to_deploy = {},
-          .auth_claim = std::move(claim),
-      },
       .signatures = {},
   };
 }

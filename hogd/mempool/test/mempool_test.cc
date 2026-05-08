@@ -355,9 +355,8 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   };
 
   ASSERT_EQ(nomination.transactions_hash.segment_tokens.size(), 1UL);
-  ASSERT_EQ(
-      nomination.transactions_nondeterministic_data.segment_tokens.size(),
-      1UL);
+  ASSERT_EQ(nomination.transactions_nondeterministic_data.segment_tokens.size(),
+            1UL);
   nomination.transactions_hash.segment_tokens[0]++;
   nomination.transactions_nondeterministic_data.segment_tokens[0]++;
 
