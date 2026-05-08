@@ -1801,14 +1801,25 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                                                             last_commit_);
   if (commit_window_stats.nomination.attempted) {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
-         "commit_duration={:.6f}, scheduler_size={}, submitted_total={}, "
+         "commit_duration={:.6f}, stage_wait_commit_lock={:.6f}, "
+         "stage_wait_validations={:.6f}, stage_precheck_validations={:.6f}, "
+         "stage_wait_nominated_lock={:.6f}, "
+         "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
+         "stage_compute_reenqueue_set={:.6f}, "
+         "stage_remove_from_scheduler={:.6f}, stage_await_handles={:.6f}, "
+         "stage_write_average_hog_ages={:.6f}, stage_finalize={:.6f}, "
+         "scheduler_size={}, submitted_total={}, "
          "submitted_vetted={}, submitted_unvetted={}, nomination={{succeeded="
          "{}, block_id={}, height={}, duration={:.6f}, scheduled_txs={}, "
          "nominated_txs={}, failed_txs={}}}, validations={}, "
          "validation_details=[{}]",
          last_committed_block_.height, block_id, since_last_commit_ms.count(),
-         timer.elapsed(), scheduler_size, total_submitted,
-         commit_window_stats.submitted_vetted,
+         timer.elapsed(), stage_wait_commit_lock, stage_wait_validations,
+         stage_precheck_validations, stage_wait_nominated_lock,
+         stage_precheck_block_presence, stage_build_handles,
+         stage_compute_reenqueue_set, stage_remove_from_scheduler,
+         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
+         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.nomination.succeeded,
          commit_window_stats.nomination.block_id,
@@ -1821,12 +1832,23 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   else {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
-         "commit_duration={:.6f}, scheduler_size={}, submitted_total={}, "
+         "commit_duration={:.6f}, stage_wait_commit_lock={:.6f}, "
+         "stage_wait_validations={:.6f}, stage_precheck_validations={:.6f}, "
+         "stage_wait_nominated_lock={:.6f}, "
+         "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
+         "stage_compute_reenqueue_set={:.6f}, "
+         "stage_remove_from_scheduler={:.6f}, stage_await_handles={:.6f}, "
+         "stage_write_average_hog_ages={:.6f}, stage_finalize={:.6f}, "
+         "scheduler_size={}, submitted_total={}, "
          "submitted_vetted={}, submitted_unvetted={}, nomination=none, "
          "validations={}, validation_details=[{}]",
          last_committed_block_.height, block_id, since_last_commit_ms.count(),
-         timer.elapsed(), scheduler_size, total_submitted,
-         commit_window_stats.submitted_vetted,
+         timer.elapsed(), stage_wait_commit_lock, stage_wait_validations,
+         stage_precheck_validations, stage_wait_nominated_lock,
+         stage_precheck_block_presence, stage_build_handles,
+         stage_compute_reenqueue_set, stage_remove_from_scheduler,
+         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
+         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.validations.size(), validation_summary.str());
   }
