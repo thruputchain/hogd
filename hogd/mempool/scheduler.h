@@ -279,10 +279,10 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
   static bool cycle_if_needed(HogAge &hog_age, GasAmount gas_limit);
-  HogAge *get_hog_age_for_schedule(AccountState &account_state,
-                                   const ContractAddress &account);
-  const HogAge &get_hog_age_for_account(const AccountState &account_state,
-                                        const ContractAddress &account) const;
+  HogAge *get_hog_age_from_pending_nomination_create_if_needed(
+      AccountState &account_state, const ContractAddress &account);
+  const HogAge &get_hog_age_from_pending_nomination_if_exists(
+      const AccountState &account_state, const ContractAddress &account) const;
   void refresh_ready_accounts(
       const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts);
   void erase_ready_account(const ContractAddress &account);

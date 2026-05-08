@@ -275,27 +275,42 @@ Scheduler::get_account_key(const ContractAddress &account)
 {
   // TODO(jhumphri): If the age is 0 (due to no hogs), set the age to INT_MAX.
   const auto [account_state, lock] = get_account_state(account);
-  const HogAge &hog_age = get_hog_age_for_account(*account_state, account);
+  const HogAge &hog_age =
+      get_hog_age_from_pending_nomination_if_exists(*account_state, account);
   BlockHeight average_hog_age = hog_age.average_ages[kHogAgeGroupToSchedule];
   return {.average_hog_age = average_hog_age, .account = account};
 }
 
+// If there is a pending nomination, returns the [HogAge] struct from the
+// nomination and creates one in the pending nomination from [account_state] if
+// needed.
+//
+// If there is no pending nomination, returns the [HogAge] struct from
+// [account_state].
 HogAge *
-Scheduler::get_hog_age_for_schedule(AccountState &account_state,
-                                    const ContractAddress &account)
+Scheduler::get_hog_age_from_pending_nomination_create_if_needed(
+    AccountState &account_state, const ContractAddress &account)
 {
   if (!pending_nomination_.block_id) {
     return &account_state.hog_age;
   }
+
   auto [it, inserted] =
       pending_nomination_.hog_ages.try_emplace(account, account_state.hog_age);
   pending_nomination_.touched_accounts.insert(account);
   return &it->second;
 }
 
+// If there is a pending nomination, returns the [HogAge] struct from the
+// nomination. This method does *not* create one in the pending nomination from
+// [account_state] if it does not exist. That is the difference between this
+// method and [get_hog_age_from_pending_nomination_create_if_needed].
+//
+// If there is no pending nomination, returns the [HogAge] struct from
+// [account_state].
 const HogAge &
-Scheduler::get_hog_age_for_account(const AccountState &account_state,
-                                   const ContractAddress &account) const
+Scheduler::get_hog_age_from_pending_nomination_if_exists(
+    const AccountState &account_state, const ContractAddress &account) const
 {
   if (pending_nomination_.block_id) {
     auto it = pending_nomination_.hog_ages.find(account);
@@ -399,7 +414,9 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 {
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
     auto [account_state, lock] = get_account_state(account);
-    HogAge *hog_age = get_hog_age_for_schedule(*account_state, account);
+    HogAge *hog_age =
+        get_hog_age_from_pending_nomination_create_if_needed(*account_state,
+                                                             account);
     if (!cycle_if_needed(*hog_age, gas_limit)) {
       break;
     }
@@ -782,7 +799,9 @@ Scheduler::schedule(size_t num_txs,
     const AccountKey account_key = *account_it;
     const ContractAddress account = account_key.account;
     auto [account_state, account_lock] = get_account_state(account);
-    HogAge *hog_ages = get_hog_age_for_schedule(*account_state, account);
+    HogAge *hog_ages =
+        get_hog_age_from_pending_nomination_create_if_needed(*account_state,
+                                                             account);
     std::map<TxKey, std::shared_ptr<TxValue>> &txs_to_schedule =
         account_state->txs;
     uint128_t hogs_spent_by_account = 0;
