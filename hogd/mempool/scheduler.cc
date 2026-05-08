@@ -149,8 +149,17 @@ Scheduler::apply_committed_block_hog_ages(
   for (const SignedTransaction &tx : txs) {
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     touched_accounts.insert(account);
+    // Recall that even if the [kHogAgeGroupToSchedule] group does not have
+    // enough hogs to schedule [tx], the overall account could have enough, so
+    // in that case we need to cycle the hogs between the groups to get enough
+    // hogs into the [kHogAgeGroupToSchedule] group.
+    //
+    // This method cycles the hogs as needed and then fills in
+    // [hogs_spent_by_account].
     apply_committed_tx_hog_age(tx, hogs_spent_by_account, block_height);
   }
+  // Now we move the hogs to the [kHogAgeGroupAlreadyScheduled] group to account
+  // for the cost of executing the txs.
   for (const auto &[account, num_hogs] : hogs_spent_by_account) {
     if (!num_hogs) {
       continue;
@@ -570,16 +579,26 @@ Scheduler::apply_committed_tx_hog_age(
     BlockHeight block_height)
 {
   const ContractAddress &account = tx.tx.invocation.invoked_address;
-  auto [account_state, lock] = get_account_state(account);
   const GasAmount gas_limit = tx.tx.invocation.gas_limit;
+
+  auto [account_state, lock] = get_account_state(account);
   HogAge &hog_age = account_state->hog_age;
   uint128_t &hogs_spent_by_this_account = hogs_spent_by_account[account];
 
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
     if (gas_limit > from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]) &&
         hogs_spent_by_this_account) {
+      // The [kHogAgeGroupToSchedule] group does not have enough hogs to
+      // schedule the tx, so we cycle the hogs to get enough hogs into the
+      // group. Note that just as in [schedule()], we may need to do this twice
+      // since there are three groups in total. Thus, the for loop spins for
+      // [kHogAgeNumGroups - 1] iterations.
       move_hogs_to_already_scheduled_group(hog_age, hogs_spent_by_this_account,
                                            block_height);
+      // [hogs_spent_by_this_account] is the hogs that have not yet been written
+      // back into the account's [HogAge] groups. Since we just added
+      // [hogs_spent_by_this_account] to the [kHogAgeGroupAlreadyScheduled]
+      // group, we set it to 0.
       hogs_spent_by_this_account = 0;
     }
     if (!cycle_if_needed(hog_age, gas_limit)) {
@@ -587,6 +606,10 @@ Scheduler::apply_committed_tx_hog_age(
     }
   }
 
+  // Deduct the hogs from the [kHogAgeGroupToSchedule] group and add them to
+  // [hogs_spent_by_this_account]. Later on in
+  // [apply_committed_block_hog_ages()], we move these hogs to the
+  // [kHogAgeGroupAlreadyScheduled] group.
   uint128_t hogs_available = from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
   CHECK_GE(hogs_available, static_cast<uint128_t>(gas_limit));
   hog_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(hogs_available - gas_limit);
