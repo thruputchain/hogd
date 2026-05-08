@@ -794,7 +794,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     last_stage_ts = now;
   };
   double stage_await_commit_snapshot = 0.0;
-  double stage_write_average_hog_ages = 0.0;
 
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.block_hash,
@@ -805,10 +804,9 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   record_stage(stage_await_commit_snapshot);
 
-  info("commit_block() stages: await_commit_snapshot={:.6f}, "
-       "write_average_hog_ages={:.6f}, total={:.6f}, block_id={}",
-       stage_await_commit_snapshot, stage_write_average_hog_ages,
-       timer.elapsed(), cache.block_id);
+  info("commit_block() stages: await_commit_snapshot={:.6f}, total={:.6f}, "
+       "block_id={}",
+       stage_await_commit_snapshot, timer.elapsed(), cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
