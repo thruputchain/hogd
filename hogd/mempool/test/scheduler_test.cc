@@ -243,8 +243,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->apply_committed_block_hog_ages_to_cached_accounts(
-      {txs[0]}, /*block_height=*/1)();
+  scheduler->apply_committed_block_hog_ages({txs[0]}, /*block_height=*/1)();
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);

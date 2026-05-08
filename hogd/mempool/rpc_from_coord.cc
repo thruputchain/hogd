@@ -1749,15 +1749,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
       committed_cache = &it->second;
     }
     CHECK_CONST_PTR(committed_cache);
-    Scheduler::ReadAverageHogAgesResult read_result =
-        co_await scheduler_->read_average_hog_ages(committed_cache->txs);
-    CHECK(read_result.missing.empty());
-    {
-      x23::CoroGuard cg;
-      co_await cg(scheduler_->global_lock_);
-      scheduler_->apply_committed_block_hog_ages_to_cached_accounts(
-          committed_cache->txs, committed_cache->db_tip.height);
-    }
+    // [apply_committed_block_hog_ages] acquires [scheduler_->global_lock_] for
+    // us, so we do not need to do it here.
+    scheduler_->apply_committed_block_hog_ages(committed_cache->txs,
+                                               committed_cache->db_tip.height);
   }
   record_stage(stage_remove_from_scheduler);
 

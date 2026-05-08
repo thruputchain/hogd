@@ -66,10 +66,6 @@ public:
   x23::Async<void>
   apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
                                  BlockHeight block_height);
-  // Applies committed-block hog-age updates after the caller has loaded every
-  // referenced account and acquired [global_lock_].
-  void apply_committed_block_hog_ages_to_cached_accounts(
-      const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height);
 
   std::shared_ptr<const SignedTransaction>
   find_tx(const SignedTransactionHash &tx_hash)

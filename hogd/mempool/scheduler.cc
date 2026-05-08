@@ -144,13 +144,6 @@ Scheduler::apply_committed_block_hog_ages(
   x23::CoroGuard cg;
   co_await cg(global_lock_);
 
-  apply_committed_block_hog_ages_to_cached_accounts(txs, block_height);
-}
-
-void
-Scheduler::apply_committed_block_hog_ages_to_cached_accounts(
-    const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height)
-{
   std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
       hogs_spent_by_account;
   hogs_spent_by_account.reserve(txs.size());
