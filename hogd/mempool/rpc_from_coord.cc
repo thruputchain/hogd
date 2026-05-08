@@ -1324,17 +1324,28 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     x23::Async<bool> tx_hash_handle =
         parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
 
-    CHECK(co_await tx_nondeterministic_data_handle);
+    const bool decoded_tx_nominations =
+        co_await tx_nondeterministic_data_handle;
     record_stage(stage_deserialize_nomination_data);
+
+    const bool decoded_tx_hashes = co_await tx_hash_handle;
+    record_stage(stage_deserialize_tx_hashes);
+
+    if (!decoded_tx_nominations || !decoded_tx_hashes) {
+      co_await decrement_num_validations_in_progress();
+      validation_telemetry.outcome = validation_outcome_str(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+      info("schedulercoord_validate rejected malformed nomination batch");
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+    }
 
     // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
     // correctly when we use the helper functions above to send txs to the
     // executors.
     cache.block_id = generate_block_id();
     validation_telemetry.block_id = cache.block_id;
-    CHECK(co_await tx_hash_handle);
     validation_telemetry.tx_count = cache.tx_hashes.size();
-    record_stage(stage_deserialize_tx_hashes);
   }
 
   co_await wait_for_transfer_data(nomination.block_height - 1);
