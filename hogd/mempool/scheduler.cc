@@ -275,6 +275,15 @@ Scheduler::get_account_key(const ContractAddress &account)
 {
   // TODO(jhumphri): If the age is 0 (due to no hogs), set the age to INT_MAX.
   const auto [account_state, lock] = get_account_state(account);
+
+  // It is ok to call [get_hog_age_from_pending_nomination_if_exists()] and use
+  // the [HogAge] struct from the pending nomination, even when
+  // [get_account_key()] is called from methods such as [add_txs()]. Presumably
+  // these methods do not want to use the hog ages from the pending nomination
+  // if that nomination is not committed. However, if the nomination is not
+  // committed, we call [refresh_ready_accounts()], which updates the account
+  // keys with the correct hog ages. So the account keys end up correct in the
+  // end.
   const HogAge &hog_age =
       get_hog_age_from_pending_nomination_if_exists(*account_state, account);
   BlockHeight average_hog_age = hog_age.average_ages[kHogAgeGroupToSchedule];
@@ -283,7 +292,8 @@ Scheduler::get_account_key(const ContractAddress &account)
 
 // If there is a pending nomination, returns the [HogAge] struct from the
 // nomination and creates one in the pending nomination from [account_state] if
-// needed.
+// needed. This is the behavior we want for [schedule()] and
+// [cycle_if_needed()].
 //
 // If there is no pending nomination, returns the [HogAge] struct from
 // [account_state].
@@ -304,7 +314,7 @@ Scheduler::get_hog_age_from_pending_nomination_create_if_needed(
 // If there is a pending nomination, returns the [HogAge] struct from the
 // nomination. This method does *not* create one in the pending nomination from
 // [account_state] if it does not exist. That is the difference between this
-// method and [get_hog_age_from_pending_nomination_create_if_needed].
+// method and [get_hog_age_from_pending_nomination_create_if_needed()].
 //
 // If there is no pending nomination, returns the [HogAge] struct from
 // [account_state].
@@ -453,6 +463,14 @@ Scheduler::cycle_if_needed(HogAge &hog_age, GasAmount gas_limit)
         (received > 0) && (received_age < to_schedule_age);
   }
 
+  // We should cycle if either of the following is true:
+  // 1. Cycling will increase the average age of the [kHogAgeGroupToSchedule]
+  //    group. These are the first two operands of the boolean OR statement.
+  //
+  // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to schedule
+  //    a tx that requires [gas_limit] hogs, but cycling will add enough hogs to
+  //    the group to schedule it. This is the third operand of the boolean OR
+  //    statement.
   if (already_scheduled_average_older || combined_averages_older ||
       gas_limit > to_schedule) {
     cycle_groups(hog_age);
@@ -670,6 +688,16 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
 void
 Scheduler::erase_ready_account(const ContractAddress &account)
 {
+  // This is very slow: it is O(NlogN) to remove [account], so if we want to
+  // remove N accounts, it is O(N^2 * logN) total. We need to do a linear search
+  // because we do not know what the hog age is in the [AccountKey].
+  //
+  // Once performance data shows that this method is a bottleneck, we should
+  // update it to be faster. I would imagine we could create a helper map that
+  // maps each account to the hog age in the [AccountKey] for that account. We
+  // could then look up the hog age in that map in O(1) time, and then remove
+  // the account from [ready_accounts_] in O(logN) time, for a total of O(1 +
+  // logN) = O(logN) time. For N accounts, this is O(NlogN) time.
   for (auto it = ready_accounts_.begin(); it != ready_accounts_.end(); it++) {
     if (it->account == account) {
       ready_accounts_.erase(it);
@@ -683,6 +711,10 @@ Scheduler::refresh_ready_accounts(
     const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts)
 {
   for (const ContractAddress &account : accounts) {
+    // We call [erase_ready_account()] even if the account ends up getting
+    // inserted back into [ready_accounts_] again below. We do this because the
+    // [AccountKey] may be updated with a new age, so the updated age is used on
+    // the [insert()].
     erase_ready_account(account);
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));

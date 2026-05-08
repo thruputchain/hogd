@@ -203,6 +203,8 @@ private:
     std::unordered_map<ContractAddress, HogAge, ByteArrayHasher> hog_ages;
     std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
 
+    PendingNominationState() { clear(); }
+
     void clear()
     {
       block_id = 0;
