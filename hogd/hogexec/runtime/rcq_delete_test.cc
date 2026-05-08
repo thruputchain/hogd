@@ -1922,6 +1922,53 @@ protected:
           return {};
         });
 
+    // Method 51: delete -> peek(expect nothing) -> consume(expect nothing)
+    builder.add<SerializationFormat::kTxs>(
+        51, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete queue";
+            return InvokeError{InvokeErrorCode::None};
+          }
+
+          uint32_t peeked = 0;
+          RuntimeMemoryLength peek_len = 0;
+          auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, true, std::as_writable_bytes(std::span(&peeked, 1)),
+              peek_len);
+          if (!r2.has_value() ||
+              ((r2.value() !=
+                SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) &&
+               (r2.value() !=
+                SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist))) {
+            ADD_FAILURE() << "Peek should not find an entry";
+            return InvokeError{InvokeErrorCode::None};
+          }
+          if (peek_len != 0) {
+            ADD_FAILURE() << "Peek wrote output for an empty queue";
+            return InvokeError{InvokeErrorCode::None};
+          }
+
+          auto r3 = [&]() {
+            RuntimeMemoryLength output_return_buffer_len = 0,
+                                output_returned_auth_token_len = 0;
+            return ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, 2, std::numeric_limits<GasAmount>::max(),
+                Calldata{}, std::to_underlying(InvokeFlag::None),
+                std::span<uint32_t>{}, output_return_buffer_len,
+                output_returned_auth_token_len);
+          }();
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume_empty after peek";
+            return InvokeError{InvokeErrorCode::None};
+          }
+
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -2241,6 +2288,18 @@ TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
   ASSERT_TRUE(check_rcq_empty());
 }
 
+// Delete -> peek(empty) -> consume(empty). The peek must not decide the final
+// write shape; the later non-peek consume should still use delete-recreate RCQ
+// behavior.
+TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
+{
+  invoke_method(51);
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
 // Multiple delete-recreate cycles: consume(a) -> delete -> consume(b) -> delete
 // -> consume(c). Verifies that preserved entries accumulate correctly across
 // multiple cycles.
@@ -2541,13 +2600,13 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
   ASSERT_EQ(qe.live_entries, 1);
 }
 
-// After delete+recreate with no self-insert, peek returns a concurrent entry
-// from the recreated queue.
-TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesConcurrentEntry)
+// After delete, peek can still observe a concurrent entry, but it does not
+// recreate the queue or consume the entry. The pending delete still conflicts.
+TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 {
   insert(42);
   insert(99);
-  invoke_method(33, uint32_t{42}, uint32_t{99});
+  invoke_method_fail_commit(33, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2555,8 +2614,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesConcurrentEntry)
   ASSERT_TRUE(queue.has_value());
   ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
   auto const &qe = queue->metadata();
-  // peek doesn't consume, so the concurrent entry (99) is still live
-  ASSERT_EQ(qe.live_entries, 1);
+  ASSERT_EQ(qe.live_entries, 2);
 }
 
 // A delete inside a reverted try_invoke frame should leave the queue intact.
