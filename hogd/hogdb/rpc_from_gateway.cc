@@ -1,6 +1,6 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 
-#include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <span>
 #include <utility>
@@ -101,10 +101,11 @@ read_one_item(HogDBDAO &db, AddressAndKey const &addrkey)
   case kNNInt128:
   {
     out.type(StorageItemType::kItemTypeNonnegativeInt);
-    int128_t nnint;
-    CHECK(item->value.size() == sizeof(int128_t));
-    std::ranges::copy(item->value, writable_byte_view(nnint).begin());
-    out.nnint() = to_xdr(nnint);
+    CHECK(item->value.size() == sizeof(int128_xdr));
+    auto encoded =
+        std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
+                                                       sizeof(int128_xdr));
+    out.nnint() = to_xdr(int128_from_xdr_bytes(encoded));
     break;
   }
   case kBytes:
