@@ -307,7 +307,8 @@ public:
     pool.for_each_parallel(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
-          value_bucket_t::clear(bucket.load(std::memory_order_acquire));
+          value_bucket_t::clear(
+              bucket.exchange(nullptr, std::memory_order_acquire));
         },
         width);
     cleared_ = true;
