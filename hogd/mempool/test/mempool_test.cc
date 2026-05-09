@@ -48,18 +48,15 @@ set_cached_hog_age_to_zero(MempoolTestInfra &server,
   hog_age->average_ages[kHogAgeGroupReceived] = 0;
 }
 
-void
-commit_validated_block_after_zeroing_local_scheduler_hogs()
+SchedulerValidationResult
+validate_nominated_block_after_zeroing_local_scheduler_hogs(
+    MempoolTestInfra &server, const SignedTransaction &tx)
 {
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  fib_client_t fib_client(account);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
   ValidatorID validator_id{};
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{tx})())();
 
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -70,12 +67,12 @@ commit_validated_block_after_zeroing_local_scheduler_hogs()
   CHECK_EQ(res_nominate.outcome(),
            SchedulerNominationOutcome::SchedulerNominationOK);
 
+  Nomination nomination = res_nominate.nominated_block().nomination;
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_nominate.nominated_block().block_id)();
   CHECK_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   server.mempool_coord_rpc().scheduler()->shut_down()();
 
-  Nomination nomination = res_nominate.nominated_block().nomination;
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   SignedTransactionHashBatch tx_hashes;
@@ -98,25 +95,15 @@ commit_validated_block_after_zeroing_local_scheduler_hogs()
   set_cached_hog_age_to_zero(server, account);
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{tx})())();
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   CHECK_EQ(res_validate.outcome(),
            SchedulerValidationResult::SchedulerValidationOK);
-
-  static_cast<void>(server.mempool_coord_rpc().schedulercoord_commit_block(
-      res_validate.block().db_tip.id)());
+  return res_validate;
 }
 
 } // namespace
-
-TEST(MempoolDeathTest, CommitValidatedBlockDiesWhenGasExceedsLocalHogs)
-{
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-
-  EXPECT_DEATH(commit_validated_block_after_zeroing_local_scheduler_hogs(),
-               "CHECK FAILED: hogs_available >=");
-}
 
 // TODO(jhumphri): Update this test once we implement authentication and
 // vetting.
@@ -995,6 +982,51 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip, res_validate.block().db_tip);
+}
+
+TEST(Mempool, CommitValidatedBlockSkipsInvalidHogAgeUpdate)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  MempoolTestInfra server;
+
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+  const uint128_t gas_limit =
+      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  auto res_validate =
+      validate_nominated_block_after_zeroing_local_scheduler_hogs(server,
+                                                                  txs[0]);
+
+  // Validation should still accept the block even though the local scheduler's
+  // hog-age buckets cannot pay for the tx.
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  {
+    auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
+    EXPECT_LT(from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]), gas_limit);
+    EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+              static_cast<uint128_t>(0));
+    EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupReceived]),
+              static_cast<uint128_t>(0));
+  }
+
+  const SchedulerCommitOutcome res_commit =
+      server.mempool_coord_rpc().schedulercoord_commit_block(
+          res_validate.block().db_tip.id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  {
+    auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
+    EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]),
+              static_cast<uint128_t>(0));
+    EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+              static_cast<uint128_t>(0));
+    EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupReceived]),
+              static_cast<uint128_t>(0));
+  }
 }
 
 TEST(Mempool, GenerateBlockId)

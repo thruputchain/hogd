@@ -251,11 +251,10 @@ private:
 
   void process_transfers_helper(const Delta &delta,
                                 BlockHeight block_height) noexcept;
-  void apply_committed_tx_hog_age(
-      const SignedTransaction &tx,
-      std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
-          &hogs_spent_by_account,
-      BlockHeight block_height);
+  static bool apply_committed_tx_hog_age(const SignedTransaction &tx,
+                                         HogAge &hog_age,
+                                         uint128_t &hogs_spent_by_account,
+                                         BlockHeight block_height);
 
   static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
                                                    uint128_t num_hogs,
