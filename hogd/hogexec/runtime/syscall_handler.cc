@@ -1220,6 +1220,66 @@ retrocausal_queue_item_from_view(ItemView *item_view,
 
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
+
+SystemStatus<SyscallStatus<QueueEntry>>
+load_next_queue_entry(RetrocausalQueueItem &queue_item,
+                      ExecutionModeData &execution_mode_data,
+                      bool advance_cursor)
+{
+  auto entry = queue_item.get_next_item(execution_mode_data, advance_cursor);
+  if (!entry.has_value()) {
+    return entry.error();
+  }
+
+  auto &value = entry.value();
+  if (value.has_value()) {
+    return value.value();
+  }
+
+  return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
+}
+
+SystemStatus<SyscallStatus<QueueEntry>>
+retrocausal_queue_peek_from_view(ItemView *item_view,
+                                 AddressAndKey const &addrkey,
+                                 StorageSnapshotCache &snapshot_cache,
+                                 ExecutionModeData &execution_mode_data)
+{
+  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    return load_next_queue_entry(*queue_item, execution_mode_data,
+                                 /*advance_cursor=*/false);
+  }
+
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto load_status = unmodified_item->load(snapshot_cache, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+
+    RetrocausalQueueItem queue_item(unmodified_item->base_item());
+    return load_next_queue_entry(queue_item, execution_mode_data,
+                                 /*advance_cursor=*/false);
+  }
+
+  if (item_view->get<DeletedItem>()) {
+    UnmodifiedItem unmodified_item;
+    auto load_status = unmodified_item.load(snapshot_cache, addrkey);
+    if (!load_status.has_value()) {
+      return load_status.error();
+    }
+
+    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
+        unmodified_item.base_item(),
+        item_view->get_retrocausally_consumed_count());
+    return load_next_queue_entry(queue_item, execution_mode_data,
+                                 /*advance_cursor=*/false);
+  }
+
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+}
 } // namespace
 
 SystemStatus<SyscallStatus<void>>
@@ -1256,6 +1316,11 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
+  if (peek) {
+    return retrocausal_queue_peek_from_view(item_view, addrkey, snapshot_cache_,
+                                            execution_mode_data_);
+  }
+
   auto queue_item =
       retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_);
   if (!queue_item.has_value()) {
@@ -1266,19 +1331,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   }
   auto *queue_item_ptr = queue_item.value().value();
 
-  auto entry = queue_item_ptr->get_next_item(execution_mode_data_, !peek);
+  auto entry = load_next_queue_entry(*queue_item_ptr, execution_mode_data_,
+                                     /*advance_cursor=*/true);
   item_view->sync_retrocausally_consumed(*queue_item_ptr);
-  if (!entry.has_value()) {
-    return entry.error();
-  }
-
-  auto &value = entry.value();
-  if (value.has_value()) {
-    return value.value();
-  }
-
-  return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
+  return entry;
 }
 
 // == Native token syscalls ==

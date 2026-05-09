@@ -168,6 +168,290 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntry)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
+TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntryEmitsNoStorageDelta)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  NativeContractBuilder builder;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        RuntimeMemoryLength len = 0;
+        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+            SyscallRcqPeekTest::kStorageKey, len);
+        if (!peek_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (peek_status.value() !=
+            SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata = Serializer<
+      NativeContractBuilder::kDefaultSerializationFormat>::serialize();
+  ASSERT_TRUE(calldata.has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(3),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata.value()}}},
+      *context);
+  handler.enable_tracing();
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+  EXPECT_TRUE(trace->storage_writes.empty());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+TEST_F(SyscallRcqPeekTest, PeekConsumeNoQueueEntryEmitsNoStorageDelta)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  NativeContractBuilder builder;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      6, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        uint32_t out = 0;
+        RuntimeMemoryLength written_len = 0;
+        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            SyscallRcqPeekTest::kStorageKey, true,
+            std::as_writable_bytes(std::span(&out, 1)), written_len);
+        if (!peek_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (peek_status.value() !=
+            SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (written_len != 0) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata = Serializer<
+      NativeContractBuilder::kDefaultSerializationFormat>::serialize();
+  ASSERT_TRUE(calldata.has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(6),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata.value()}}},
+      *context);
+  handler.enable_tracing();
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+  EXPECT_TRUE(trace->storage_writes.empty());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  NativeContractBuilder builder;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      7, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(
+            SyscallRcqPeekTest::kStorageKey,
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!delete_status.has_value() ||
+            delete_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        RuntimeMemoryLength len = 0;
+        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+            SyscallRcqPeekTest::kStorageKey, len);
+        if (!peek_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (peek_status.value() !=
+            SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (len != 0) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata = Serializer<
+      NativeContractBuilder::kDefaultSerializationFormat>::serialize();
+  ASSERT_TRUE(calldata.has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(7),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata.value()}}},
+      *context);
+  handler.enable_tracing();
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+  ASSERT_EQ(trace->storage_writes.size(), 1);
+  EXPECT_EQ(trace->storage_writes[0].delta.type(),
+            StorageDeltaType::kDeltaTypeDelete);
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  NativeContractBuilder builder;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      4, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        uint32_t payload = 0xC0FFEEU;
+        auto insert_status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            SyscallRcqPeekTest::kStorageKey,
+            std::as_bytes(std::span(&payload, 1)));
+        if (!insert_status.has_value() ||
+            insert_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      5,
+      [](NativeSyscallContext &ctx,
+         uint32_t expected_len) -> InvokeStatus<void> {
+        RuntimeMemoryLength len = 0;
+        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+            SyscallRcqPeekTest::kStorageKey, len);
+        if (!peek_status.has_value() ||
+            peek_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (len != expected_len) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto insert_calldata = Serializer<
+      NativeContractBuilder::kDefaultSerializationFormat>::serialize();
+  ASSERT_TRUE(insert_calldata.has_value());
+
+  auto insert_handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(4),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = insert_calldata.value()}}},
+      *context);
+  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  advance_block();
+
+  auto peek_calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          static_cast<uint32_t>(sizeof(uint32_t)));
+  ASSERT_TRUE(peek_calldata.has_value());
+
+  auto peek_handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(5),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = peek_calldata.value()}}},
+      *context);
+  peek_handler.enable_tracing();
+
+  auto root_res = peek_handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+
+  auto const *trace = peek_handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+  EXPECT_TRUE(trace->storage_writes.empty());
+
+  ASSERT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 // A bytestring at the key is not a retrocausal queue; PeekLen must not
 // succeed (same idea as RCQ consume on a bytestring slot).
 TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
