@@ -28,7 +28,95 @@ namespace {
 
 constexpr size_t kNumTxs = 100;
 
+void
+set_cached_hog_age_to_zero(MempoolTestInfra &server,
+                           const ContractAddress &account)
+{
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
+  hog_age->num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
+  hog_age->average_ages[kHogAgeGroupToSchedule] = 0;
+  hog_age->num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(static_cast<uint128_t>(0));
+  hog_age->average_ages[kHogAgeGroupAlreadyScheduled] = 0;
+  hog_age->num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(0));
+  hog_age->average_ages[kHogAgeGroupReceived] = 0;
+}
+
+void
+commit_validated_block_after_zeroing_local_scheduler_hogs()
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  ValidatorID validator_id{};
+
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  CHECK_EQ(res_nominate.outcome(),
+           SchedulerNominationOutcome::SchedulerNominationOK);
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.nominated_block().block_id)();
+  CHECK_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().scheduler()->shut_down()();
+
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  SignedTransactionHashBatch tx_hashes;
+  CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  CHECK_EQ(db_tip.height, 1);
+
+  nomination.block_hash =
+      sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                         .block_height = nomination.block_height,
+                         .txset_hash =
+                             MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                         .db_hash = db_tip.db_hash,
+                         .events_hash = db_tip.events_hash,
+                         .prev_block_hash = nomination.prev_block_hash});
+
+  set_cached_hog_age_to_zero(server, account);
+
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  CHECK_EQ(res_validate.outcome(),
+           SchedulerValidationResult::SchedulerValidationOK);
+
+  static_cast<void>(server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_validate.block().db_tip.id)());
+}
+
 } // namespace
+
+TEST(MempoolDeathTest, CommitValidatedBlockDiesWhenGasExceedsLocalHogs)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
+  EXPECT_DEATH(commit_validated_block_after_zeroing_local_scheduler_hogs(),
+               "CHECK FAILED: hogs_available >=");
+}
 
 // TODO(jhumphri): Update this test once we implement authentication and
 // vetting.

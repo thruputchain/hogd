@@ -27,6 +27,32 @@ constexpr size_t kNumTxs = 100;
 
 } // namespace
 
+TEST(SchedulerDeathTest, ApplyCommittedBlockHogAgesDiesWhenGasExceedsLocalHogs)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
+  EXPECT_DEATH(
+      {
+        const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+        fib_client_t fib_client(account);
+        const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+        MempoolTestInfra server;
+        server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                        /*num_hogs=*/0);
+        server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                        /*num_hogs=*/0);
+        server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0,
+                        /*num_hogs=*/0);
+
+        std::shared_ptr<Scheduler> scheduler =
+            server.mempool_coord_rpc().scheduler();
+        scheduler->apply_committed_block_hog_ages({txs[0]},
+                                                  /*block_height=*/1)();
+      },
+      "CHECK FAILED: hogs_available >=");
+}
+
 TEST(Scheduler, ReadAge)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
