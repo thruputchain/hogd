@@ -367,10 +367,12 @@ public:
 
   constexpr Vec &operator=(Vec &&other) noexcept
   {
-    realloc(0);
-    a_ = std::move(other.a_);
-    b_ = other.b_;
-    other.b_ = {};
+    if (this != &other) {
+      realloc(0);
+      a_ = std::move(other.a_);
+      b_ = other.b_;
+      other.b_ = {};
+    }
     return *this;
   }
   constexpr Vec &operator=(const Vec &other)

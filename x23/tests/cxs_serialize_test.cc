@@ -232,4 +232,19 @@ TEST(CxsSerialize, Int8Encoding)
   check_expect(int32_t{31}, {0x1f});
 }
 
+TEST(Vec, SelfMoveAssignPreservesData)
+{
+  x23::Vec<uint32_t, 16> v;
+  v.push_back(1);
+  v.push_back(2);
+  v.push_back(3);
+
+  v = std::move(v);
+
+  ASSERT_EQ(v.size(), 3UL);
+  EXPECT_EQ(v[0], 1U);
+  EXPECT_EQ(v[1], 2U);
+  EXPECT_EQ(v[2], 3U);
+}
+
 } // namespace x23
