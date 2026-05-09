@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -7,11 +8,13 @@
 #include "block.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
@@ -991,8 +994,7 @@ TEST(Mempool, CommitValidatedBlockSkipsInvalidHogAgeUpdate)
 
   fib_client_t fib_client(account);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-  const uint128_t gas_limit =
-      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
 
   auto res_validate =
       validate_nominated_block_after_zeroing_local_scheduler_hogs(server,

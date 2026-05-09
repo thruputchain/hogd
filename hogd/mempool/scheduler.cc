@@ -246,7 +246,7 @@ Scheduler::apply_committed_block_hog_ages(
   // for the cost of executing the txs.
   for (auto &[account, hog_age] : hog_ages_by_account) {
     const auto spent_it = hogs_spent_by_account.find(account);
-    if (spent_it != hogs_spent_by_account.end() && spent_it->second) {
+    if (spent_it != hogs_spent_by_account.end() && (spent_it->second != 0UL)) {
       if (!try_move_hogs_to_already_scheduled_group(hog_age, spent_it->second,
                                                     block_height)) {
         continue;

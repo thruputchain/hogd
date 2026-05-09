@@ -253,7 +253,7 @@ private:
                                 BlockHeight block_height) noexcept;
   static bool apply_committed_tx_hog_age(const SignedTransaction &tx,
                                          HogAge &hog_age,
-                                         uint128_t &hogs_spent_by_account,
+                                         uint128_t &hogs_spent_by_this_account,
                                          BlockHeight block_height);
 
   static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
