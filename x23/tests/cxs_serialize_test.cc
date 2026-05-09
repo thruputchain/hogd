@@ -239,7 +239,10 @@ TEST(Vec, SelfMoveAssignPreservesData)
   v.push_back(2);
   v.push_back(3);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wself-move"
   v = std::move(v);
+#pragma GCC diagnostic pop
 
   ASSERT_EQ(v.size(), 3UL);
   EXPECT_EQ(v[0], 1U);
