@@ -205,6 +205,18 @@ make_contract_data_key(std::span<const std::byte> key)
   return buf;
 }
 
+constexpr size_t kContractDataItemKeySize = 1 + kAddressSize + kItemKeySize;
+
+constexpr auto
+make_contract_data_key(const ItemKey &key)
+{
+  assert(key.is_contract_data());
+  std::array<std::byte, kContractDataItemKeySize> ret;
+  ret[0] = static_cast<std::byte>(Prefix::kContractDataKey);
+  std::ranges::copy(key.as_bytes(), std::begin(ret) + 1);
+  return ret;
+}
+
 // Item type identifiers; stored in the type field in ramdb.
 //
 // These are only used in cases where multiple types can be stored at an

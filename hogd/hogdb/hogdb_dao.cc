@@ -250,8 +250,7 @@ HogDBDAO::read_nnint128(const ItemKey &key)
 
   std::array<std::byte, sizeof(int128_xdr)> encoded{};
   HogDBStatus<void> ret =
-      db_.get_if_type(make_contract_data_key(key.as_bytes()), kNNInt128,
-                      encoded);
+      db_.get_if_type(make_contract_data_key(key), kNNInt128, encoded);
   if (!ret)
     return ret.error();
   return int128_from_xdr_bytes(encoded);
@@ -260,7 +259,7 @@ HogDBDAO::read_nnint128(const ItemKey &key)
 HogDBStatus<OwningSpan<const std::byte>>
 HogDBDAO::read_bytes(const ItemKey &key)
 {
-  return db_.get_if_type(make_contract_data_key(key.as_bytes()), kBytes);
+  return db_.get_if_type(make_contract_data_key(key), kBytes);
 }
 
 HogDBStatus<void>
@@ -399,7 +398,7 @@ HogDBDAO::remove_retrocausal_queue_block(const ItemKey &key,
 HogDBStatus<RetrocausalQueueMetadata>
 HogDBDAO::read_retrocausal_queue_metadata(const ItemKey &key)
 {
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto raw = db_.get_if_type(db_key, kRetrocausalQueue);
   if (!raw)
     return raw.error();
@@ -417,7 +416,7 @@ HogDBStatus<void>
 HogDBDAO::write_retrocausal_queue_metadata(
     const ItemKey &key, const RetrocausalQueueMetadata &metadata)
 {
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto buf = x23::serialize(metadata);
 
   auto before_item = get_before_item(db_key);
@@ -430,7 +429,7 @@ HogDBDAO::write_retrocausal_queue_metadata(
 HogDBStatus<void>
 HogDBDAO::remove_retrocausal_queue_metadata(const ItemKey &key)
 {
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto before_item = get_before_item(db_key);
   auto ret = db_.remove(db_key);
 
@@ -468,7 +467,7 @@ HogDBDAO::write_nnint128(const ItemKey &key, int128_t val)
     return write_address_balance(key.get_address(), val);
   assert(key.is_contract_data());
 
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto before_item = get_before_item(db_key);
   auto encoded = int128_to_xdr_bytes(val);
   auto ret = db_.put(db_key, kNNInt128, encoded);
@@ -479,7 +478,7 @@ HogDBDAO::write_nnint128(const ItemKey &key, int128_t val)
 HogDBStatus<void>
 HogDBDAO::write_bytes(const ItemKey &key, std::span<const std::byte> buf)
 {
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto before_item = get_before_item(db_key);
   auto ret = db_.put(db_key, kBytes, buf);
   update_invariants_post(db_key, before_item);
@@ -563,7 +562,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
     }
   case ItemKeyType::kItemKeyTypeContractData:
   {
-    auto item = db_.get(make_contract_data_key(key.as_bytes()));
+    auto item = db_.get(make_contract_data_key(key));
     if (!item) {
       if (item.error() != HogDBCode::kNotFound) {
         return item.error();
@@ -621,7 +620,7 @@ HogDBDAO::get_item_type(const ItemKey &key)
     error("item key is not contract data: {}", key.key_type());
     return HogDBError(HogDBCode::kInternal);
   }
-  return db_.get_type(make_contract_data_key(key.as_bytes()));
+  return db_.get_type(make_contract_data_key(key));
 }
 
 HogDBStatus<DBItem>
@@ -631,14 +630,14 @@ HogDBDAO::read_contract_data_item(const ItemKey &key)
     error("item key is not contract data: {}", key.key_type());
     return HogDBError(HogDBCode::kInternal);
   }
-  return db_.get(make_contract_data_key(key.as_bytes()));
+  return db_.get(make_contract_data_key(key));
 }
 
 HogDBStatus<void>
 HogDBDAO::remove_item(const ItemKey &key)
 {
   if (key.is_contract_data()) {
-    auto db_key = make_contract_data_key(key.as_bytes());
+    auto db_key = make_contract_data_key(key);
     auto before_item = get_before_item(db_key);
     auto ret = db_.remove(db_key);
     update_invariants_post(db_key, before_item);

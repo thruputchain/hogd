@@ -941,7 +941,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
   Address contract_addr = make_address(kAddress + 62);
   setup_contract_address(contract_addr);
   ItemKey key = make_item_key(contract_addr, 10);
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto balance_key = make_address_key(contract_addr, Prefix::kBalance);
   DbHash base_hash = db_.compute_full_db_hash();
   constexpr int128_t kInitialBalance = 10'000'000;
