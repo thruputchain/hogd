@@ -6,6 +6,7 @@ add_library(direct_rpc_test_objects OBJECT
   direct_nnint_test.cc
   direct_nonce_tests.cc
   direct_rcq_tests.cc
+  direct_staleness_test.cc
   direct_storage_ordering_tests.cc
   reference_leak_test.cc
   shutdown_test.cc
