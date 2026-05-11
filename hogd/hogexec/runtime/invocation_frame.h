@@ -388,6 +388,7 @@ public:
 
   struct ConsumeAuthTokenResult {
     AuthTokenPayload payload;
+    ContractAddress const *mint_address;
     uint32_t new_token_id_start;
     uint32_t new_token_id_count;
   };
