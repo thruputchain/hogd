@@ -211,9 +211,11 @@ constexpr auto
 make_contract_data_key(const ItemKey &key)
 {
   assert(key.is_contract_data());
+  auto key_bytes = key.as_bytes();
+  assert(key_bytes.size() == kContractDataItemKeySize - 1);
   std::array<std::byte, kContractDataItemKeySize> ret;
   ret[0] = static_cast<std::byte>(Prefix::kContractDataKey);
-  std::ranges::copy(key.as_bytes(), std::begin(ret) + 1);
+  std::ranges::copy(key_bytes, std::begin(ret) + 1);
   return ret;
 }
 
