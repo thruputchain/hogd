@@ -86,6 +86,17 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
   block_txes_.erase(bid);
 }
 
+void
+RPCContext::invalidate_siblings(BlockTXID committer)
+{
+  std::scoped_lock g(lock_);
+  for (auto &[id, arc] : block_txes_) {
+    if (id != committer) {
+      arc.get().invalidate();
+    }
+  }
+}
+
 HogDBStatus<void>
 RPCContext::update_dbtip(BlockTXID bid, BlockHash block_hash,
                          SHA256Hash events_hash, const DbHash &db_hash)

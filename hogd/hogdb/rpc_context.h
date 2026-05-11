@@ -151,6 +151,8 @@ public:
   // references.
   void remove_shutdown_block_tx(BlockTXID bid);
 
+  void invalidate_siblings(BlockTXID committer);
+
 private:
   struct BlockCache {
     std::mutex lock;
