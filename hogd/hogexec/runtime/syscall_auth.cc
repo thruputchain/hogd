@@ -244,7 +244,7 @@ syscall_ConsumeAuthToken_inner(
   output_token_minter = *result.mint_address;
 
   auto payload_bytes = std::as_bytes(
-      std::span<const uint8_t>{result.payload.data(), result.payload.size()});
+      std::span<const uint8_t>{result.payload->data(), result.payload->size()});
   auto copy_len =
       std::min<size_t>(payload_bytes.size(), output_auth_payload.size());
   if (copy_len > 0) {
@@ -260,7 +260,7 @@ syscall_ConsumeAuthToken_inner(
               .get_syscall_trace_data<SyscallNo::kConsumeAuthToken>()) {
     try {
       trace_data->outputs.emplace(SyscallConsumeAuthTokenOutputs{
-          .payload = result.payload,
+          .payload = *result.payload,
           .token_minter = *result.mint_address,
           .auth_payload_written_len = output_auth_payload_written_len,
           .unwrapped_token_id_start = result.new_token_id_start,

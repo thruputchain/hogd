@@ -467,7 +467,7 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
   frame_stack_.back().remove_auth_tokens(
       std::span<uint32_t const>{&token_id, 1});
 
-  return ConsumeAuthTokenResult{.payload = token->root_node.payload,
+  return ConsumeAuthTokenResult{.payload = &token->root_node.payload,
                                 .mint_address = &token->mint_address,
                                 .new_token_id_start =
                                     unwrap_result->new_token_id_start,
