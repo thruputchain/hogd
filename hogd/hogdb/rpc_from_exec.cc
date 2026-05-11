@@ -236,13 +236,18 @@ HogDBExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
+HogDBExecutorRpc::get_snapshot_item(BlockID block,
                                     AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
   // snapshot state. In theory we could instead support different snapshot
   // heads for each BlockID, but the database is not currently designed to do
   // this.
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+  }
 
   ItemKey key = make_item_key(addrkey);
   if (key.is_address_balance()) {
@@ -317,9 +322,14 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
 }
 
 ExpectedContract
-HogDBExecutorRpc::get_contract(BlockID /*block*/, SHA256Hash const &hash)
+HogDBExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedContract(RPCError::kRPCBadBlockID);
+  }
 
   HogDBStatus<OwningSpan<const std::byte>> wasm =
       ctx_.get_db().read_wasm_code(hash);
@@ -334,9 +344,14 @@ HogDBExecutorRpc::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 }
 
 ExpectedDeployment
-HogDBExecutorRpc::get_deployment(BlockID /*unused*/,
+HogDBExecutorRpc::get_deployment(BlockID block,
                                  ContractAddress const &contract_address)
 {
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedDeployment(RPCError::kRPCBadBlockID);
+  }
 
   HogDBStatus<DeployedContractHash> hash =
       ctx_.get_db().read_address_metadata(contract_address);
@@ -350,23 +365,28 @@ HogDBExecutorRpc::get_deployment(BlockID /*unused*/,
 }
 
 ExpectedRetrocausalQueueBlock
-HogDBExecutorRpc::get_next_retrocausal_queue_block(BlockID /*block*/,
+HogDBExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
                                                    AddressAndKey const &addrkey,
                                                    uint64_t search_start_number)
 {
   // TODO(stutsman): BlockID is ignored because we can only read the latest
   // snapshot state.
-  HogDBStatus<RetrocausalQueueBlock> block =
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
+  }
+  HogDBStatus<RetrocausalQueueBlock> queue_block =
       ctx_.get_db().read_retrocausal_queue_block(make_item_key(addrkey),
                                                  search_start_number);
 
-  if (!block) {
-    return ExpectedRetrocausalQueueBlock(to_rpc_error(block.error()));
+  if (!queue_block) {
+    return ExpectedRetrocausalQueueBlock(to_rpc_error(queue_block.error()));
   }
 
   ExpectedRetrocausalQueueBlock out;
   out.error(RPCError::kRPCNone);
-  out.queue_block() = *block;
+  out.queue_block() = *queue_block;
   return out;
 }
 
@@ -376,6 +396,9 @@ HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
 {
   PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
   if (!btx) {
+    return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
+  }
+  if (btx->get().is_invalidated()) [[unlikely]] {
     return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
   }
 
