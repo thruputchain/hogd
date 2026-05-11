@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
