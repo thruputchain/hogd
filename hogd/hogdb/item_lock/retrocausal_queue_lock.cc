@@ -15,7 +15,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
