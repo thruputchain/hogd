@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -41,7 +42,8 @@ class ValueBucket {
 public:
   template<typename... Args> requires std::constructible_from<Value, Args...>
   ValueBucket(KeyType key, Args &&...args)
-    : key_(std::move(key)), value_(std::forward<Args>(args)...)
+    : key_(std::move(key)), next_ptr_(nullptr),
+      value_(std::forward<Args>(args)...)
   {}
 
   using value_bucket_t = ValueBucket<KeyType, Value, KeyEqual>;
@@ -52,10 +54,10 @@ public:
   ValueBucket &operator=(ValueBucket &&) noexcept = delete;
 
   const KeyType key_;
-  Value value_;
   // Does not own the next_ptr_.  Memory is freed when the bump allocator is
   // destroyed.
-  std::atomic<value_bucket_t *> next_ptr_ = nullptr;
+  std::atomic<value_bucket_t *> next_ptr_;
+  Value value_;
 
   // You almost certainly do not want to do an insert concurrent with a
   // for_each. In such a situation, the insert() might or might not get picked
