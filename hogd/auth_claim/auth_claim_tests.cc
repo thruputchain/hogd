@@ -389,8 +389,8 @@ TEST_F(AuthClaimTests, WeightAccumulatorDoesNotOverflow32Bits)
   auto [pk1, sk1] = make_key_pair();
   auto [pk2, sk2] = make_key_pair();
 
-  AuthClaim claim =
-      make_claim((1 << 0) | (1 << 1) | (1 << 2), /*required_weight=*/kMaxWeight);
+  AuthClaim claim = make_claim((1 << 0) | (1 << 1) | (1 << 2),
+                               /*required_weight=*/kMaxWeight);
   auto tx = make_transaction(claim);
 
   DecoratedSignature sig0 = make_signature(sk0, tx, /*public_key_id=*/0);
@@ -401,15 +401,13 @@ TEST_F(AuthClaimTests, WeightAccumulatorDoesNotOverflow32Bits)
   ASSERT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
   AddressAuthData auth_data{
-      .public_keys = {x23::Ptr<PublicKeyConfig>(
-                          new PublicKeyConfig{.key = pk0,
-                                              .max_weight = kMaxWeight}),
-                      x23::Ptr<PublicKeyConfig>(
-                          new PublicKeyConfig{.key = pk1,
-                                              .max_weight = kMaxWeight}),
-                      x23::Ptr<PublicKeyConfig>(
-                          new PublicKeyConfig{.key = pk2,
-                                              .max_weight = kMaxWeight})},
+      .public_keys =
+          {x23::Ptr<PublicKeyConfig>(
+               new PublicKeyConfig{.key = pk0, .max_weight = kMaxWeight}),
+           x23::Ptr<PublicKeyConfig>(
+               new PublicKeyConfig{.key = pk1, .max_weight = kMaxWeight}),
+           x23::Ptr<PublicKeyConfig>(
+               new PublicKeyConfig{.key = pk2, .max_weight = kMaxWeight})},
       .required_weight = kMaxWeight,
   };
 
