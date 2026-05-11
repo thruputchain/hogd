@@ -242,13 +242,10 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   // snapshot state. In theory we could instead support different snapshot
   // heads for each BlockID, but the database is not currently designed to do
   // this.
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
-  }
 
   ItemKey key = make_item_key(addrkey);
+  ExpectedStorageItem ret;
+
   if (key.is_address_balance()) {
     HogDBStatus<int128_t> nnint =
         ctx_.get_db().read_address_balance(key.get_address());
@@ -256,67 +253,74 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
       return ExpectedStorageItem(to_rpc_error(nnint.error()));
     WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
-    ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
     ret.item() = out;
-    return ret;
   }
-  if (key.is_address_auth_data()) {
+  else if (key.is_address_auth_data()) {
     HogDBStatus<AddressAuthData> auth_data =
         ctx_.get_db().read_address_auth_data(key.get_address());
     if (!auth_data)
       return ExpectedStorageItem(to_rpc_error(auth_data.error()));
     WireStorageItem out(StorageItemType::kItemTypeAuthData);
     out.auth_data() = *auth_data;
-    ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
     ret.item() = out;
-    return ret;
   }
+  else {
+    HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
+    if (!item)
+      return ExpectedStorageItem(to_rpc_error(item.error()));
 
-  HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
-  if (!item)
-    return ExpectedStorageItem(to_rpc_error(item.error()));
-
-  WireStorageItem out;
-  switch (item->type) {
-  case kNNInt128:
-  {
-    out.type(StorageItemType::kItemTypeNonnegativeInt);
-    CHECK(item->value.size() == sizeof(int128_xdr));
-    auto encoded =
-        std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
-                                                       sizeof(int128_xdr));
-    out.nnint() = to_xdr(int128_from_xdr_bytes(encoded));
-    break;
-  }
-  case kBytes:
-  {
-    out.type(StorageItemType::kItemTypeBytestring);
-    const auto *cptr = reinterpret_cast<const char *>(item->value.data());
-    out.bytestring().append_range(
-        std::span<const char>(cptr, item->value.size()));
-    break;
-  }
-  case kRetrocausalQueue:
-  {
-    out.type(StorageItemType::kItemTypeRetrocausalQueue);
-    try {
-      x23::deserialize(&out.metadata(), x23::BufViewEnd(item->value));
-    } catch (x23::XdrException &e) {
-      error("failed to deserialize rcq metadata: {}", e.what());
+    WireStorageItem out;
+    switch (item->type) {
+    case kNNInt128:
+    {
+      out.type(StorageItemType::kItemTypeNonnegativeInt);
+      CHECK(item->value.size() == sizeof(int128_xdr));
+      auto encoded =
+          std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
+                                                         sizeof(int128_xdr));
+      out.nnint() = to_xdr(int128_from_xdr_bytes(encoded));
+      break;
+    }
+    case kBytes:
+    {
+      out.type(StorageItemType::kItemTypeBytestring);
+      const auto *cptr = reinterpret_cast<const char *>(item->value.data());
+      out.bytestring().append_range(
+          std::span<const char>(cptr, item->value.size()));
+      break;
+    }
+    case kRetrocausalQueue:
+    {
+      out.type(StorageItemType::kItemTypeRetrocausalQueue);
+      try {
+        x23::deserialize(&out.metadata(), x23::BufViewEnd(item->value));
+      } catch (x23::XdrException &e) {
+        error("failed to deserialize rcq metadata: {}", e.what());
+        return ExpectedStorageItem(
+            to_rpc_error(HogDBError(HogDBCode::kInternal)));
+      }
+      break;
+    }
+    default:
       return ExpectedStorageItem(
           to_rpc_error(HogDBError(HogDBCode::kInternal)));
     }
-    break;
-  }
-  default:
-    return ExpectedStorageItem(to_rpc_error(HogDBError(HogDBCode::kInternal)));
+
+    ret.error(RPCError::kRPCNone);
+    ret.item() = out;
   }
 
-  ExpectedStorageItem ret;
-  ret.error(RPCError::kRPCNone);
-  ret.item() = out;
+  // Staleness check AFTER the DAO read: if a sibling committed during our
+  // read, the release/acquire ordering through the DAO's internal
+  // synchronization guarantees we see the invalidation flag here.
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+  }
+
   return ret;
 }
 
@@ -324,11 +328,6 @@ ExpectedContract
 HogDBExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedContract(RPCError::kRPCBadBlockID);
-  }
 
   HogDBStatus<OwningSpan<const std::byte>> wasm =
       ctx_.get_db().read_wasm_code(hash);
@@ -339,6 +338,13 @@ HogDBExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
   out.error(RPCError::kRPCNone);
 
   x23::deserialize(&out.contract(), x23::BufView{*wasm});
+
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedContract(RPCError::kRPCBadBlockID);
+  }
+
   return out;
 }
 
@@ -346,16 +352,16 @@ ExpectedDeployment
 HogDBExecutorRpc::get_deployment(BlockID block,
                                  ContractAddress const &contract_address)
 {
+  HogDBStatus<DeployedContractHash> hash =
+      ctx_.get_db().read_address_metadata(contract_address);
+  if (!hash)
+    return ExpectedDeployment(to_rpc_error(hash.error()));
+
   {
     PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
     if (!btx || btx->get().is_invalidated()) [[unlikely]]
       return ExpectedDeployment(RPCError::kRPCBadBlockID);
   }
-
-  HogDBStatus<DeployedContractHash> hash =
-      ctx_.get_db().read_address_metadata(contract_address);
-  if (!hash)
-    return ExpectedDeployment(to_rpc_error(hash.error()));
 
   ExpectedDeployment out;
   out.error(RPCError::kRPCNone);
@@ -370,17 +376,19 @@ HogDBExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
 {
   // TODO(stutsman): BlockID is ignored because we can only read the latest
   // snapshot state.
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
-  }
+
   HogDBStatus<RetrocausalQueueBlock> queue_block =
       ctx_.get_db().read_retrocausal_queue_block(make_item_key(addrkey),
                                                  search_start_number);
 
   if (!queue_block) {
     return ExpectedRetrocausalQueueBlock(to_rpc_error(queue_block.error()));
+  }
+
+  {
+    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+    if (!btx || btx->get().is_invalidated()) [[unlikely]]
+      return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
   }
 
   ExpectedRetrocausalQueueBlock out;
