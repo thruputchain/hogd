@@ -413,6 +413,7 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
                  c1_payload_written_len, unused_start, c1_count);
              EXPECT_TRUE(c1_res.has_value());
              EXPECT_EQ(c1_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(c1_minter, kAddr);
              EXPECT_EQ(c1_count, 0U);
              auto expected_c1_payload = x23::serialize(300U);
              EXPECT_EQ(std::memcmp(c1_payload.data(),
@@ -431,6 +432,7 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
                  gc_payload_written_len, gc_unused_start, gc_gc_count);
              EXPECT_TRUE(gc_res.has_value());
              EXPECT_EQ(gc_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+             EXPECT_EQ(gc_minter, kAddr);
              EXPECT_EQ(gc_gc_count, 0U);
              auto expected_gc_payload = x23::serialize(200U);
              EXPECT_EQ(std::memcmp(gc_payload.data(),
@@ -1589,6 +1591,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                EXPECT_TRUE(consume_res.has_value());
                EXPECT_EQ(consume_res.value(),
                          SyscallErrorCode::kSyscallErrorCodeNone);
+               EXPECT_EQ(loop_minter, kAddr);
 
                auto expected_payload = x23::serialize(level);
                EXPECT_EQ(payload_written_len, expected_payload.size());
