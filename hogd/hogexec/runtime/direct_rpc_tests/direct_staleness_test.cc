@@ -1,11 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <string_view>
 #include <utility>
 
+#include "db_sched.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "rpc_types.hh"
@@ -82,7 +81,9 @@ TEST_F(DirectStalenessTest, SnapshotReadOnStaleBlockReturnsAbandon)
   }
   {
     auto r = get_coord_client().dbsched_commit_snapshot(
-        block_a, /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+        block_a,
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
     ASSERT_EQ(r.result(), DbSchedResult::DbSchedResultOK);
   }
 
