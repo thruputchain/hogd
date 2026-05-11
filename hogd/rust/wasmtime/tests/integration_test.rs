@@ -839,6 +839,70 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
 }
 
 // ===========================================================================
+// Regression test for issue #1869:
+// Wasmtime StackOverflow trap is nondeterministic, so it correctly maps to
+// Unrecoverable. The defense is at the verification layer: wasm-meter must
+// reject modules whose operand stack or per-function charge can produce
+// Cranelift frames large enough to trigger Wasmtime's native stack check
+// before the instrumented prologue runs.
+//
+// This module accumulates 1280 i64 values on the operand stack (via 128
+// calls to a function returning 10 i64s), exceeding the default
+// max_operand_stack_values (1024) and max_function_charge (4096 bytes).
+// ===========================================================================
+
+fn big_stack_frame_contract_bytes() -> &'static [u8] {
+    let n = 128;
+    let mut wat = String::from("(module\n  (func $big_stack\n");
+    for _ in 0..n {
+        wat.push_str("    call $get\n");
+    }
+    for _ in 0..n {
+        wat.push_str("    call $take\n");
+    }
+    wat.push_str("  )\n");
+    wat.push_str(
+        "  (func $get (result i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)\n\
+         \x20   call $big_stack\n    unreachable)\n",
+    );
+    wat.push_str(
+        "  (func $take (param i64 i64 i64 i64 i64 i64 i64 i64 i64 i64)\n\
+         \x20   unreachable)\n",
+    );
+    wat.push_str(
+        "  (func (export \"0000000000000001\")\n    call $big_stack)\n\
+         \x20 (memory 1 1)\n  (export \"memory\" (memory 0))\n)\n",
+    );
+    let bytes = wat::parse_str(&wat).expect("big stack frame WAT must parse");
+    Box::leak(bytes.into_boxed_slice())
+}
+
+#[test]
+fn test_issue_1869_big_stack_frame_rejected_by_verify() {
+    unsafe {
+        let global_context = new_wasmtime_global_context(8);
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
+
+        let wasm_bytes = big_stack_frame_contract_bytes();
+        let result = wasmtime_verify_contract(
+            context,
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len(),
+        );
+
+        assert!(
+            !result,
+            "contracts with operand stack exceeding wasm-meter limits \
+             must be rejected by wasmtime_verify_contract"
+        );
+
+        free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+// ===========================================================================
 // Regression tests for audit issue #1469 (H002):
 // Winch SIMD contract validity depends on host AVX support.
 //
