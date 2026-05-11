@@ -142,6 +142,8 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
     return HogDBError(HogDBCode::kInternal);
   }
 
+  ctx_.invalidate_siblings(id);
+
   HogDBStatus<void> ret = btx->get().commit();
   if (!ret) {
     // Cleanup the block tx if commit failed.
