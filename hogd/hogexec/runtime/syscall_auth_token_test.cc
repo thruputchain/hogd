@@ -371,8 +371,8 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
              RuntimeMemoryLength payload_written_len = 0;
              ContractAddress minter{};
              auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 root_id, std::span<std::byte>{payload_buf}, minter,
-                 payload_written_len, child_start, child_count);
+                 root_id, std::span<std::byte>{payload_buf},
+                 minter, payload_written_len, child_start, child_count);
              EXPECT_TRUE(consume_res.has_value());
              EXPECT_EQ(consume_res.value(),
                        SyscallErrorCode::kSyscallErrorCodeNone);
@@ -391,8 +391,8 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
              uint32_t gc_start = 0, gc_count = 0;
              ContractAddress c0_minter{};
              auto c0_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 child_start, std::span<std::byte>{c0_payload}, c0_minter,
-                 c0_payload_written_len, gc_start, gc_count);
+                 child_start, std::span<std::byte>{c0_payload},
+                 c0_minter, c0_payload_written_len, gc_start, gc_count);
              EXPECT_TRUE(c0_res.has_value());
              EXPECT_EQ(c0_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
              EXPECT_EQ(c0_minter, kAddr);
@@ -409,8 +409,8 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
              uint32_t unused_start = 0, c1_count = 0;
              ContractAddress c1_minter{};
              auto c1_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 child_start + 1, std::span<std::byte>{c1_payload}, c1_minter,
-                 c1_payload_written_len, unused_start, c1_count);
+                 child_start + 1, std::span<std::byte>{c1_payload},
+                 c1_minter, c1_payload_written_len, unused_start, c1_count);
              EXPECT_TRUE(c1_res.has_value());
              EXPECT_EQ(c1_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
              EXPECT_EQ(c1_count, 0U);
@@ -427,8 +427,8 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
              uint32_t gc_unused_start = 0, gc_gc_count = 0;
              ContractAddress gc_minter{};
              auto gc_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 gc_start, std::span<std::byte>{gc_payload}, gc_minter,
-                 gc_payload_written_len, gc_unused_start, gc_gc_count);
+                 gc_start, std::span<std::byte>{gc_payload},
+                 gc_minter, gc_payload_written_len, gc_unused_start, gc_gc_count);
              EXPECT_TRUE(gc_res.has_value());
              EXPECT_EQ(gc_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
              EXPECT_EQ(gc_gc_count, 0U);
@@ -665,8 +665,8 @@ TEST_F(SyscallAuthTokenTest, ReturnAuthTokensToParent)
              uint32_t child_start = 0, child_count = 0;
              ContractAddress minter{};
              auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 token_id, std::span<std::byte>{payload_buf}, minter,
-                 payload_written_len, child_start, child_count);
+                 token_id, std::span<std::byte>{payload_buf},
+                 minter, payload_written_len, child_start, child_count);
              EXPECT_TRUE(consume_res.has_value());
              EXPECT_EQ(consume_res.value(),
                        SyscallErrorCode::kSyscallErrorCodeNone);
@@ -1288,8 +1288,8 @@ TEST_F(SyscallAuthTokenTest, ReplayConsumedAuthTokenIsRejected)
              uint32_t child_start = 0, child_count = 0;
              ContractAddress minter{};
              auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                 token_id, std::span<std::byte>{payload_buf}, minter,
-                 payload_written_len, child_start, child_count);
+                 token_id, std::span<std::byte>{payload_buf},
+                 minter, payload_written_len, child_start, child_count);
              EXPECT_TRUE(consume_res.has_value());
              EXPECT_EQ(consume_res.value(),
                        SyscallErrorCode::kSyscallErrorCodeNone);
@@ -1584,8 +1584,8 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                uint32_t child_start = 0, child_count = 0;
                ContractAddress loop_minter{};
                auto consume_res = ctx.syscall<SyscallNo::kConsumeAuthToken>(
-                   token_id, std::span<std::byte>{payload_buf}, loop_minter,
-                   payload_written_len, child_start, child_count);
+                   token_id, std::span<std::byte>{payload_buf},
+                   loop_minter, payload_written_len, child_start, child_count);
                EXPECT_TRUE(consume_res.has_value());
                EXPECT_EQ(consume_res.value(),
                          SyscallErrorCode::kSyscallErrorCodeNone);
