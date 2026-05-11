@@ -381,6 +381,44 @@ TEST_F(AuthClaimTests, ZeroSignaturesRejectedByWeight)
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
+TEST_F(AuthClaimTests, WeightAccumulatorDoesNotOverflow32Bits)
+{
+  constexpr Weight kMaxWeight = std::numeric_limits<Weight>::max();
+
+  auto [pk0, sk0] = make_key_pair();
+  auto [pk1, sk1] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+
+  AuthClaim claim =
+      make_claim((1 << 0) | (1 << 1) | (1 << 2), /*required_weight=*/kMaxWeight);
+  auto tx = make_transaction(claim);
+
+  DecoratedSignature sig0 = make_signature(sk0, tx, /*public_key_id=*/0);
+  DecoratedSignature sig1 = make_signature(sk1, tx, /*public_key_id=*/1);
+  DecoratedSignature sig2 = make_signature(sk2, tx, /*public_key_id=*/2);
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig0, sig1, sig2}};
+  ASSERT_TRUE(auth_claim_is_well_formed(stx).has_value());
+
+  AddressAuthData auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk0,
+                                              .max_weight = kMaxWeight}),
+                      x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk1,
+                                              .max_weight = kMaxWeight}),
+                      x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk2,
+                                              .max_weight = kMaxWeight})},
+      .required_weight = kMaxWeight,
+  };
+
+  // 3 * UINT32_MAX = 12,884,901,885 which exceeds UINT32_MAX.
+  // A uint32_t accumulator would wrap to UINT32_MAX - 2 and reject.
+  auto result = lightweight_validate_auth_claims(stx, auth_data);
+  EXPECT_TRUE(result.has_value());
+}
+
 } // namespace hogd
 
 int
