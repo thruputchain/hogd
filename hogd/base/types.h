@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -28,6 +29,40 @@ using int128_t = __int128;
 using uint128_t = unsigned __int128;
 // NOLINTNEXTLINE(misc-redundant-expression)
 static_assert(__SIZEOF_INT128__ == 16); // check for support
+
+// #1846, #1874: lock down the bit layout that syscall memcpy and XDR
+// conversion rely on. Compilation fails if any assumption breaks.
+static_assert(
+    [] {
+      struct alignas(int128_t) B16 {
+        unsigned char b[16];
+      };
+      // LE: least-significant byte first
+      auto one = std::bit_cast<B16>(int128_t{1});
+      if (one.b[0] != 1)
+        return false;
+      for (int i = 1; i < 16; ++i)
+        if (one.b[i] != 0)
+          return false;
+      // two's complement: -1 is all-bits-set
+      auto neg1 = std::bit_cast<B16>(int128_t{-1});
+      // NOLINTNEXTLINE(modernize-loop-convert)
+      for (int i = 0; i < 16; ++i)
+        if (neg1.b[i] != 0xFF)
+          return false;
+      // high limb occupies bytes [8,15]
+      auto high1 = std::bit_cast<B16>(int128_t{1} << 64);
+      if (high1.b[8] != 1)
+        return false;
+      for (int i = 0; i < 8; ++i)
+        if (high1.b[i] != 0)
+          return false;
+      for (int i = 9; i < 16; ++i)
+        if (high1.b[i] != 0)
+          return false;
+      return true;
+    }(),
+    "int128_t must be little-endian two's complement");
 
 // Kibibytes (power of 2)
 constexpr size_t
