@@ -104,6 +104,8 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
 HogDBStatus<int128_t>
 BlockTX::lock(const ItemKey &key, ItemChange &change)
 {
+  if (auto s = check_stale(); !s) [[unlikely]]
+    return s.error();
   // no storage cost for address balances.
   if (key.is_address_balance()) {
 
@@ -200,6 +202,8 @@ BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
 HogDBStatus<int128_t>
 BlockTX::read_nnint128_base(const ItemKey &key)
 {
+  if (auto s = check_stale(); !s) [[unlikely]]
+    return s.error();
   auto *lock = item_locks_.get(key);
   if (!lock) {
     if (!key.is_contract_data()) {
@@ -232,6 +236,8 @@ BlockTX::read_nnint128_base(const ItemKey &key)
 HogDBStatus<int128_t>
 BlockTX::read_balance_base(const Address &addr)
 {
+  if (auto s = check_stale(); !s) [[unlikely]]
+    return s.error();
   auto *lock = addr_balance_locks_.get(addr);
   if (!lock) {
     return db_.read_address_balance(addr);
