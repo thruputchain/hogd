@@ -236,8 +236,7 @@ HogDBExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-HogDBExecutorRpc::get_snapshot_item(BlockID block,
-                                    AddressAndKey const &addrkey)
+HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
   // snapshot state. In theory we could instead support different snapshot

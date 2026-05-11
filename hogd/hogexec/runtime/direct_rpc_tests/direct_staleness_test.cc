@@ -14,7 +14,7 @@
 namespace hogd {
 
 class DirectStalenessTest : public ::testing::Test,
-                             public NativeContractTestFramework {
+                            public NativeContractTestFramework {
 public:
   DirectStalenessTest()
     : NativeContractTestFramework(
@@ -24,7 +24,8 @@ public:
 };
 
 // Verify that a snapshot read through a sibling block that was invalidated when
-// another sibling committed returns SystemErrorCode::Abandon (via kRPCBadBlockID).
+// another sibling committed returns SystemErrorCode::Abandon (via
+// kRPCBadBlockID).
 TEST_F(DirectStalenessTest, SnapshotReadOnStaleBlockReturnsAbandon)
 {
   // 1. Commit some data so the db has a real parent tip.
@@ -61,8 +62,7 @@ TEST_F(DirectStalenessTest, SnapshotReadOnStaleBlockReturnsAbandon)
   BlockID block_b = block_a + kSiblingOffset;
   {
     auto r = get_coord_client().dbsched_create_snapshot(
-        parent_id, block_b,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        parent_id, block_b, BlockExecutionMode::kBlockExecutionModeProposal);
     ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
   }
 
