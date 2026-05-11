@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <optional>
 #include <utility>
 
@@ -39,6 +40,12 @@ public:
   // getters
   HogDBDAO &get_db() const { return db_; }
   BlockHeight get_height() const { return block_height_; }
+
+  void invalidate() { invalidated_.store(true, std::memory_order_release); }
+  bool is_invalidated() const
+  {
+    return invalidated_.load(std::memory_order_acquire);
+  }
 
   // commit applies the staged ChangeSet to the database.
   // Requires close() to have been called first.
@@ -83,6 +90,14 @@ private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
   get_snapshot_cost_and_cache_data(const ItemKey &key);
 
+  HogDBStatus<void> check_stale() const
+  {
+    if (is_invalidated()) [[unlikely]] {
+      return HogDBError(HogDBCode::kStaleBlock);
+    }
+    return {};
+  }
+
   struct SipHash24Hasher {
     size_t operator()(const Address &key) const
     {
@@ -102,6 +117,7 @@ private:
   BackgroundCommitWorker &background_commit_worker_;
   BlockHeight block_height_;
   std::optional<ChangeSet> changeset_;
+  std::atomic<bool> invalidated_{false};
 
   HogDBStatus<void> stage_locks(ChangeSet &changes);
 
