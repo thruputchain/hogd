@@ -56,7 +56,7 @@ public:
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
-  
+
   x23::Async<ExpectedViewResult>
   view_transaction(TransactionViewQuery const &query);
 

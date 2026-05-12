@@ -30,9 +30,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
                            RuntimeContext &context)
 {
   SystemCallHandler syscall_handler(snapshot_cache, proxy,
-                                    std::move(event_proxy),
-                                    ViewingModeCtor{}, context,
-                                    query.auth_claim, SHA256Hash{});
+                                    std::move(event_proxy), ViewingModeCtor{},
+                                    context, query.auth_claim, SHA256Hash{});
 
   assert(!syscall_handler.is_running());
 
@@ -48,11 +47,11 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   }
 
   if (query.parent_address) {
-    Invocation parent_frame_invocation = Invocation {
-      .invoked_address = *query.parent_address,
-      .entrypoint = entrypoint_from_method_id(0),
-      .gas_limit = UINT64_MAX,
-      .calldata = Calldata {},
+    Invocation parent_frame_invocation = Invocation{
+        .invoked_address = *query.parent_address,
+        .entrypoint = entrypoint_from_method_id(0),
+        .gas_limit = UINT64_MAX,
+        .calldata = Calldata{},
     };
 
     auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
@@ -81,7 +80,9 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   }
 
   if (*res != SyscallErrorCode::kSyscallErrorCodeNone &&
-      *res != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+      *res != SyscallErrorCode::kSyscallErrorCodeFrameReverted &&
+      *res != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+    info("view transaction failed with SystemErrorCode::{}", *res);
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
     result.error_code() = *res;
     return result;

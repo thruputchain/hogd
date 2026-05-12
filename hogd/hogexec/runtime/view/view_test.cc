@@ -3,11 +3,17 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
+#include <unordered_map>
 #include <utility>
 
 #include "auth_claim.hh"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/read_only_test.h"
+#include "contract.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/contract_trait_client.h"
@@ -15,6 +21,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/view/view.h"
 #include "rpc_types.hh"
@@ -81,9 +88,9 @@ protected:
     };
   }
 
-  static TransactionViewQuery make_query_with_parent(
-      Invocation invocation, ContractAddress parent_address,
-      AuthClaim auth_claim = {})
+  static TransactionViewQuery
+  make_query_with_parent(Invocation invocation, ContractAddress parent_address,
+                         AuthClaim auth_claim = {})
   {
     return TransactionViewQuery{
         .invocation = std::move(invocation),
@@ -100,22 +107,32 @@ protected:
       SystemCallHandler::force_commit_or_abort();
 };
 
-TEST_F(ViewTest, BasicViewReturnsOk)
+TEST_F(ViewTest, BasicViewReturnsOkWithCorrectOutput)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
   auto invocation = client.make_invocation<"fibonacci">(UINT64_MAX, 10U);
 
   auto result = run_view(make_query(invocation));
-  EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto &buf = result.result().output.return_buffer();
+  auto decoded = fibonacci_meta::decode_return<"fibonacci">(
+      std::as_bytes(std::span(buf.data(), buf.size())), false);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(*decoded, 55U);
 }
 
-TEST_F(ViewTest, ViewIsRoot)
+TEST_F(ViewTest, ViewGasExhaustion)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<"fibonacci">(1, 10U);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
 }
 
 TEST_F(ViewTest, ViewWithMsgSender)
@@ -145,18 +162,20 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 
   auto result = run_view(make_query_with_parent(invocation, kFibAddress));
   EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
-  EXPECT_EQ(result.error_code(),
-            SyscallErrorCode::kSyscallErrorCodeReentrance);
+  EXPECT_EQ(result.error_code(), SyscallErrorCode::kSyscallErrorCodeReentrance);
 }
 
 TEST_F(ViewTest, ViewContractSelfInvokeFaults)
 {
   ContractTraitClient<read_only_test::ReadOnlyTest> client(kReadOnlyAddress);
-  auto invocation = client.make_invocation<
-      "read_only_aliasing_before_read_only_check">(UINT64_MAX);
+  auto invocation =
+      client.make_invocation<"read_only_aliasing_before_read_only_check">(
+          UINT64_MAX);
 
   auto result = run_view(make_query(invocation));
-  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output,
+            InvocationFrameOutput(InvocationFrameStatusCode::Fault));
 }
 
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
@@ -166,8 +185,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
 
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              ContractAddress sender{};
              auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
              if (!r.has_value()) {
@@ -192,8 +210,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
           {ContractType::kWasmi, {wasm_context.release(), true}},
           {ContractType::kNative, {native_context.get(), false}}});
 
-  auto native_xdr =
-      NativeContractTestFramework::make_native_contract(0);
+  auto native_xdr = NativeContractTestFramework::make_native_contract(0);
   framework_.write_contract(native_xdr);
   framework_.write_deployment(kNativeAddr, native_xdr);
   framework_.setup_grant_storage_token(kNativeAddr, 1'000'000'000);
@@ -218,8 +235,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
 
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              ContractAddress sender{};
              auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
              if (!r.has_value()) {
@@ -244,8 +260,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
           {ContractType::kWasmi, {wasm_context.release(), true}},
           {ContractType::kNative, {native_context.get(), false}}});
 
-  auto native_xdr =
-      NativeContractTestFramework::make_native_contract(0);
+  auto native_xdr = NativeContractTestFramework::make_native_contract(0);
   framework_.write_contract(native_xdr);
   framework_.write_deployment(kNativeAddr, native_xdr);
   framework_.setup_grant_storage_token(kNativeAddr, 1'000'000'000);

@@ -12,12 +12,10 @@ class View {
 public:
   View() = delete;
 
-  static ExpectedViewResult
-  run_view_transaction(StorageSnapshotCache &snapshot_cache,
-                       PerTransactionDatabaseProxy proxy,
-                       PerTransactionEventServerProxy event_proxy,
-                       TransactionViewQuery const &query,
-                       RuntimeContext &context);
+  static ExpectedViewResult run_view_transaction(
+      StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy proxy,
+      PerTransactionEventServerProxy event_proxy,
+      TransactionViewQuery const &query, RuntimeContext &context);
 };
 
 } // namespace hogd

@@ -14,7 +14,11 @@
 
 namespace hogd {
 
-enum class ExecutionMode : uint8_t { kProposing = 0, kValidating = 1, kViewing = 2 };
+enum class ExecutionMode : uint8_t {
+  kProposing = 0,
+  kValidating = 1,
+  kViewing = 2
+};
 
 } // namespace hogd
 
@@ -23,12 +27,12 @@ template<> struct std::formatter<hogd::ExecutionMode> {
   static auto format(const hogd::ExecutionMode &mode, auto &ctx)
   {
     switch (mode) {
-      case hogd::ExecutionMode::kProposing:
-        return format_to(ctx.out(), "ExecutionMode::kProposing");
-      case hogd::ExecutionMode::kValidating:
-        return format_to(ctx.out(), "ExecutionMode::kValidating");
-      case hogd::ExecutionMode::kViewing:
-        return format_to(ctx.out(), "ExecutionMode::kViewing");
+    case hogd::ExecutionMode::kProposing:
+      return format_to(ctx.out(), "ExecutionMode::kProposing");
+    case hogd::ExecutionMode::kValidating:
+      return format_to(ctx.out(), "ExecutionMode::kValidating");
+    case hogd::ExecutionMode::kViewing:
+      return format_to(ctx.out(), "ExecutionMode::kViewing");
     }
   }
 };
@@ -122,17 +126,17 @@ public:
   ViewingModeData(ViewingModeData &&) noexcept = delete;
   ViewingModeData &operator=(ViewingModeData &&) noexcept = delete;
 
-  // TODO(geoff): Eventually, tx view mode will have some initial segment of nondeterministic data
-  // to consume, and then lazily add bits as the tx proceeds when that initial view is exhausted.
+  // TODO(geoff): Eventually, tx view mode will have some initial segment of
+  // nondeterministic data to consume, and then lazily add bits as the tx
+  // proceeds when that initial view is exhausted.
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  Nondeterministic<bool> view_nondeterministic_bit() {
-    return false;
-  }
+  Nondeterministic<bool> view_nondeterministic_bit() { return false; }
 };
 
 // Variant type that holds either proposal or validation mode data
-using ExecutionModeData = std::variant<ProposalModeData, ValidationModeData, ViewingModeData>;
+using ExecutionModeData =
+    std::variant<ProposalModeData, ValidationModeData, ViewingModeData>;
 
 using ProposalModeCtor = std::monostate;
 using ValidationModeCtor = NondeterministicProposalData;
@@ -141,6 +145,7 @@ struct ViewingModeCtor {
   NondeterministicProposalData proposal_data_segment;
 };
 
-using ExecutionModeCtor = std::variant<ProposalModeCtor, ValidationModeCtor, ViewingModeCtor>;
+using ExecutionModeCtor =
+    std::variant<ProposalModeCtor, ValidationModeCtor, ViewingModeCtor>;
 
 } // namespace hogd

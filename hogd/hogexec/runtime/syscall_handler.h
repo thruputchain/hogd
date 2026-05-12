@@ -92,7 +92,8 @@ public:
   ~SystemCallHandler()
   {
     if constexpr (is_debug_build()) {
-      if (!transaction_committed_or_aborted_ && !std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
+      if (!transaction_committed_or_aborted_ &&
+          !std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
         warn("SystemCallHandler destroyed without committing or aborting "
              "transaction");
         if (debug_force_commit_abort_) {
