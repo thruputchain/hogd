@@ -79,30 +79,50 @@ TEST(Mempool, SubmitVetted)
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+
   ParallelSignedTransactionBatch batch =
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})();
 
   ASSERT_EQ(batch.segment_tokens.size(), 1UL);
   batch.segment_tokens[0]++;
 
-  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
-  coord.schedulercoord_submit_unvetted(batch)();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(batch)();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
   ParallelSignedTransactionBatch batch =
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})();
 
   ASSERT_EQ(batch.segment_tokens.size(), 1UL);
   batch.segment_tokens[0]++;
 
-  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
   ValidatorID validator_id{};
-  coord.schedulercoord_submit_vetted(validator_id, batch)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, batch)();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 TEST(Mempool, Nominate)
@@ -365,7 +385,7 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
-            SchedulerValidationResult::SchedulerValidationInvalid);
+            SchedulerValidationResult::SchedulerValidationMalformed);
 }
 
 TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
@@ -386,7 +406,7 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
   MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
-            SchedulerValidationResult::SchedulerValidationInvalid);
+            SchedulerValidationResult::SchedulerValidationMalformed);
 }
 
 TEST(Mempool, ValidateBatch)

@@ -89,6 +89,8 @@ validation_outcome_str(SchedulerValidationOutcome outcome) -> const char *
     return "db_failed";
   case SchedulerValidationOutcome::SchedulerValidationExecutorFailed:
     return "executor_failed";
+  case SchedulerValidationOutcome::SchedulerValidationMalformed:
+    return "malformed";
   }
   return "unknown";
 }
@@ -1335,21 +1337,21 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     if (!decoded_tx_nominations || !decoded_tx_hashes) {
       co_await decrement_num_validations_in_progress();
       validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
       info("schedulercoord_validate rejected malformed nomination batch");
       co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
     }
 
     if (cache.tx_hashes.size() != tx_nominations.size()) {
       co_await decrement_num_validations_in_progress();
       validation_telemetry.outcome = validation_outcome_str(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
       info("schedulercoord_validate rejected nomination with {} tx hashes and "
            "{} nondeterministic data entries",
            cache.tx_hashes.size(), tx_nominations.size());
       co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
     }
 
     // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]

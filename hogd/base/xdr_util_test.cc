@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <random>
 #include <span>
 #include <utility>
 
@@ -110,6 +111,51 @@ TEST(ParallelBatchToTTest, RejectsLeftoverSegmentBytes)
 
   SignedTransactionBatch parsed;
   EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
+TEST(ParallelBatchToTTest, RejectsXdrLargerThanSegmentBytes)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  batch.xdr.resize(batch.xdr.size() + 4, 0);
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
+TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  batch.segment_bytes[0] += 4;
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
+TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  std::mt19937 rng(42);
+  std::uniform_int_distribution<size_t> idx_dist(0, batch.xdr.size() - 1);
+  std::uniform_int_distribution<uint8_t> byte_dist(0, 255);
+
+  for (int trial = 0; trial < 100; trial++) {
+    ParallelSignedTransactionBatch corrupted = batch;
+    const size_t num_mutations =
+        std::uniform_int_distribution<size_t>(1, batch.xdr.size())(rng);
+    for (size_t m = 0; m < num_mutations; m++) {
+      corrupted.xdr[idx_dist(rng)] = byte_dist(rng);
+    }
+    SignedTransactionBatch parsed;
+    (void)parallel_batch_to_t(corrupted, parsed)();
+  }
 }
 
 TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)

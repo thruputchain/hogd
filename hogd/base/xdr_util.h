@@ -165,16 +165,18 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
-// Decodes a ParallelBatch whose top-level segment metadata has already been
-// validated by the caller. A mismatch between [segment_tokens] and
-// [segment_bytes], or between the sum of [segment_bytes] and [xdr.size()], is a
-// caller bug and remains a CHECK failure. Malformed object XDR inside otherwise
-// sane segment metadata is untrusted input and is reported by returning false.
+// Decodes a ParallelBatch, returning false for any malformed input: metadata
+// mismatches (segment_tokens/segment_bytes size, total segment bytes vs
+// xdr.size()) as well as per-object XDR deserialization failures.
 template<typename T>
 inline x23::Async<bool>
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 {
-  CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
+  if (parallel.segment_tokens.size() != parallel.segment_bytes.size()) {
+    info("failed to deserialize: segment_tokens size {} != segment_bytes size {}",
+         parallel.segment_tokens.size(), parallel.segment_bytes.size());
+    co_return false;
+  }
 
   std::vector<size_t> byte_offsets;
   byte_offsets.reserve(parallel.segment_bytes.size());
@@ -183,7 +185,11 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     byte_offsets.push_back(total_segment_bytes);
     total_segment_bytes += segment_bytes;
   }
-  CHECK_EQ(total_segment_bytes, parallel.xdr.size());
+  if (total_segment_bytes != parallel.xdr.size()) {
+    info("failed to deserialize: total segment bytes {} != xdr size {}",
+         total_segment_bytes, parallel.xdr.size());
+    co_return false;
+  }
 
   std::vector<size_t> obj_offsets;
   obj_offsets.reserve(parallel.segment_tokens.size());
@@ -228,12 +234,9 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
                              num_segment_bytes - inner_xdr_offset));
             inner_obj_offset++;
             inner_xdr_offset += num_consumed;
-            if (inner_xdr_offset > num_segment_bytes) {
-              info("failed to deserialize: segment {} consumed {} bytes, "
-                   "exceeding segment size {}",
-                   i, inner_xdr_offset, num_segment_bytes);
-              co_return false;
-            }
+            // if inner_xdr_offset > num_segment_bytes, then deserialize_from would have read beyond
+            // the end of the supplied buffer.
+            CHECK_LE(inner_xdr_offset, num_segment_bytes);
           } catch (const x23::XdrException &e) {
             info("failed to deserialize: {}", e.what());
             co_return false;
