@@ -254,7 +254,15 @@ message(STATUS "ROCKSDB_WITH_ZSTD: ${ROCKSDB_WITH_ZSTD}")
 message(STATUS "ROCKSDB_WITH_ZLIB: ${ROCKSDB_WITH_ZLIB}")
 message(STATUS "ROCKSDB_WITH_BZ2: ${ROCKSDB_WITH_BZ2}")
 # Memory allocator (jemalloc is faster than system malloc)
-set(WITH_JEMALLOC ON CACHE BOOL "" FORCE)
+set(WITH_JEMALLOC ON CACHE BOOL "Build RocksDB with jemalloc")
+set(HOGD_SANITIZER_FLAGS
+    "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS} ${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS} ${CMAKE_MODULE_LINKER_FLAGS}")
+string(FIND "${HOGD_SANITIZER_FLAGS}" "-fsanitize=address" HOGD_ASAN_FLAG_POS)
+if(WITH_JEMALLOC AND NOT HOGD_ASAN_FLAG_POS EQUAL -1)
+  message(WARNING
+      "WITH_JEMALLOC=ON with -fsanitize=address may cause AddressSanitizer "
+      "violations during process initialization. Consider -DWITH_JEMALLOC=OFF.")
+endif()
 # Fix for macOS/LLVM: atomic operations are built-in, no need for -latomic
 set(BUILTIN_ATOMIC ON CACHE BOOL "" FORCE)
 add_subdirectory(external/rocksdb EXCLUDE_FROM_ALL)
