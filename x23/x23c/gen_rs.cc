@@ -920,7 +920,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         }
         if (a.has_default) {
           default_decl =
-              std::format("Default {{ {}: {} }},", switch_id, kEnumBaseType);
+              std::format("#[xdr(default_variant)] Default {{ {}: {} }},", switch_id, kEnumBaseType);
           default_match =
               std::format("{0}::Default{{ {1} }} => {2},\n", tname, switch_id,
                           convert_i32(std::format("*{}", switch_id)));
@@ -949,7 +949,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         }
         if (a.has_default) {
           std::format_to(std::back_inserter(default_decl),
-                         "Default {{ {}: {}, {}: {} }},", switch_id,
+                         "#[xdr(default_variant)] Default {{ {}: {}, {}: {} }},", switch_id,
                          kEnumBaseType, escape_rust_id(a.decl.id),
                          type_name(a.decl, false, false));
           default_match =
