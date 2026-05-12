@@ -319,8 +319,8 @@ TEST_F(ViewTest, ViewOutputCorrectWithParentFrame)
       {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           uint32_t val = 42;
           auto ret = ctx.syscall<SyscallNo::kReturn>(
-              std::as_bytes(std::span(
-                  reinterpret_cast<const char *>(&val), sizeof(val))),
+              std::as_bytes(
+                  std::span(reinterpret_cast<const char *>(&val), sizeof(val))),
               false, std::span<const std::byte>{});
           if (ret.has_value() ||
               ret.error().code() != HostFnErrorCode::Return) {

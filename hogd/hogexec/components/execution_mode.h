@@ -34,6 +34,7 @@ template<> struct std::formatter<hogd::ExecutionMode> {
     case hogd::ExecutionMode::kViewing:
       return format_to(ctx.out(), "ExecutionMode::kViewing");
     }
+    return format_to(ctx.out(), "ExecutionMode::Unknown");
   }
 };
 
