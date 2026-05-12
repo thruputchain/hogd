@@ -202,8 +202,9 @@ private:
   void release_block_tx_reference(BlockTXID bid);
 };
 
-// returns true if the blocktx does not exist or is on an abandoned branch of
-// the blockchain
+// Returns true if the blocktx does not exist or is on an abandoned branch.
+// Safe without acquiring a reference: the per-thread cache.lock (fast path) and
+// lock_ (slow path) prevent concurrent removal by remove_shutdown_block_tx().
 inline bool
 RPCContext::is_block_tx_stale(BlockTXID bid)
 {
