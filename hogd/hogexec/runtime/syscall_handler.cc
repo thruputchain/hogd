@@ -799,9 +799,14 @@ SystemCallHandler::emit_events(ExecResult exec_result)
   auto events = (root_invoke_succeeded_ && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
+  auto root_output =
+      last_frame_.has_value()
+          ? last_frame_.value().get_frame_output()
+          : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_source_tx_hash(),
       .exec_result = exec_result,
+      .root_output = std::move(root_output),
       .events = std::move(events),
   });
 }
