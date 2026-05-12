@@ -14,6 +14,7 @@
 #include "hogd/test_ffi/test_bindings.h"
 #include "invoke_flag.hh"
 #include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
@@ -238,8 +239,13 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   }
 
   if (handler_.is_running()) {
-    handler_.finish_syscall_trace(result.to_host_fn_result().first,
-                                  gas_remaining);
+    auto status = [&]() -> HostFnStatus<SyscallErrorCode> {
+      if (result.to_host_fn_result().first.has_value()) {
+        return result.to_host_fn_result().first.value();
+      }
+      return result.to_host_fn_result().first.error().to_host_fn_error();
+    }();
+    handler_.finish_syscall_trace(status, gas_remaining);
   }
 
   // When the root (last) mock frame finishes, run the same finalization
