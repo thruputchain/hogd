@@ -289,7 +289,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsAccountWhenGasExceedsLocalHogs)
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
+  scheduler->add_txs({txs[0]})();
   scheduler->apply_committed_block_hog_ages({txs[0]}, /*block_height=*/1)();
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
@@ -330,7 +330,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsOnlyInvalidAccounts)
                   /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
+  scheduler->add_txs({valid_txs[0], invalid_txs[0]})();
   scheduler->apply_committed_block_hog_ages({valid_txs[0], invalid_txs[0]},
                                             /*block_height=*/1)();
 
@@ -367,7 +367,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesRollsBackAccountWhenLaterTxFails)
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
+  scheduler->add_txs({txs[0], txs[1]})();
   scheduler->apply_committed_block_hog_ages({txs[0], txs[1]},
                                             /*block_height=*/1)();
 
