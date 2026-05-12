@@ -257,13 +257,12 @@ Scheduler::apply_committed_block_hog_ages(
                                                   block_height)) {
       continue;
     }
-  }
 
-  auto [account_state, lock] = get_account_state(account);
-  account_state->hog_age = hog_age;
-  touched_accounts.insert(account);
-}
-refresh_ready_accounts(touched_accounts);
+    auto [account_state, lock] = get_account_state(account);
+    account_state->hog_age = hog_age;
+    touched_accounts.insert(account);
+  }
+  refresh_ready_accounts(touched_accounts);
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
