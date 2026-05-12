@@ -292,7 +292,7 @@ SystemCallHandler::get_most_recent_frame_output() const
 
 InvokeStatus<void>
 SystemCallHandler::handle_root_host_fn_status(
-    HostFnStatus<SyscallErrorCode> status)
+    SystemStatus<SyscallErrorCode> status)
 {
   if (status.has_value()) {
     // TODO(geoff): Consider whether we want to have "frame reverted" on the
@@ -303,23 +303,12 @@ SystemCallHandler::handle_root_host_fn_status(
                : InvokeError{InvokeErrorCode::Deterministic};
   }
   switch (status.error().code()) {
-  case HostFnErrorCode::OutOfGas:
-    return InvokeError{InvokeErrorCode::OutOfGas};
-  case HostFnErrorCode::Return:
-    return InvokeStatus<void>{};
-  case HostFnErrorCode::Exit:
-    return InvokeError{InvokeErrorCode::Deterministic};
-  case HostFnErrorCode::ValidationFailure:
+  case SystemErrorCode::ValidationFailure:
     return InvokeError{InvokeErrorCode::ValidationFailure};
-  case HostFnErrorCode::Abandon:
+  case SystemErrorCode::Abandon:
     return InvokeError{InvokeErrorCode::Abandon};
-  case HostFnErrorCode::Unrecoverable:
+  case SystemErrorCode::Unrecoverable:
     error("handle_root_host_fn_status: received Unrecoverable");
-    return InvokeError{InvokeErrorCode::Unrecoverable};
-  case HostFnErrorCode::NoneOrRecoverable:
-    // This case should never happen, as it is instead handled by
-    // the status.has_value() check above.
-    panic("unreachable");
     return InvokeError{InvokeErrorCode::Unrecoverable};
   }
   // Leaving the default arm out of the switch, so that the compiler
@@ -445,7 +434,7 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
@@ -474,7 +463,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   if (!runtime) {
     trace("SystemError: resolving runtime for address: {}, error {}",
           x23::show(address), runtime.error());
-    return std::pair{runtime.error().to_host_fn_error(), 0};
+    return std::pair{runtime.error(), 0};
   }
   if (!runtime.value()) {
     trace("Failed to instantiate runtime for address: {}", x23::show(address));
@@ -497,7 +486,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
-    return {finish_status.error().to_host_fn_error(), 0};
+    return {finish_status.error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
@@ -799,9 +788,14 @@ SystemCallHandler::emit_events(ExecResult exec_result)
   auto events = (root_invoke_succeeded_ && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
+  auto root_output =
+      last_frame_.has_value()
+          ? last_frame_.value().get_frame_output()
+          : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_source_tx_hash(),
       .exec_result = exec_result,
+      .root_output = std::move(root_output),
       .events = std::move(events),
   });
 }
@@ -1220,6 +1214,66 @@ retrocausal_queue_item_from_view(ItemView *item_view,
 
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
+
+SystemStatus<SyscallStatus<QueueEntry>>
+load_next_queue_entry(RetrocausalQueueItem &queue_item,
+                      ExecutionModeData &execution_mode_data,
+                      bool advance_cursor)
+{
+  auto entry = queue_item.get_next_item(execution_mode_data, advance_cursor);
+  if (!entry.has_value()) {
+    return entry.error();
+  }
+
+  auto &value = entry.value();
+  if (value.has_value()) {
+    return value.value();
+  }
+
+  return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
+}
+
+SystemStatus<SyscallStatus<QueueEntry>>
+retrocausal_queue_peek_from_view(ItemView *item_view,
+                                 AddressAndKey const &addrkey,
+                                 StorageSnapshotCache &snapshot_cache,
+                                 ExecutionModeData &execution_mode_data)
+{
+  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    return load_next_queue_entry(*queue_item, execution_mode_data,
+                                 /*advance_cursor=*/false);
+  }
+
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto load_status = unmodified_item->load(snapshot_cache, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+
+    RetrocausalQueueItem queue_item(unmodified_item->base_item());
+    return load_next_queue_entry(queue_item, execution_mode_data,
+                                 /*advance_cursor=*/false);
+  }
+
+  if (item_view->get<DeletedItem>()) {
+    UnmodifiedItem unmodified_item;
+    auto load_status = unmodified_item.load(snapshot_cache, addrkey);
+    if (!load_status.has_value()) {
+      return load_status.error();
+    }
+
+    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
+        unmodified_item.base_item(),
+        item_view->get_retrocausally_consumed_count());
+    return load_next_queue_entry(queue_item, execution_mode_data,
+                                 /*advance_cursor=*/false);
+  }
+
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+}
 } // namespace
 
 SystemStatus<SyscallStatus<void>>
@@ -1256,6 +1310,11 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
+  if (peek) {
+    return retrocausal_queue_peek_from_view(item_view, addrkey, snapshot_cache_,
+                                            execution_mode_data_);
+  }
+
   auto queue_item =
       retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_);
   if (!queue_item.has_value()) {
@@ -1266,19 +1325,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   }
   auto *queue_item_ptr = queue_item.value().value();
 
-  auto entry = queue_item_ptr->get_next_item(execution_mode_data_, !peek);
+  auto entry = load_next_queue_entry(*queue_item_ptr, execution_mode_data_,
+                                     /*advance_cursor=*/true);
   item_view->sync_retrocausally_consumed(*queue_item_ptr);
-  if (!entry.has_value()) {
-    return entry.error();
-  }
-
-  auto &value = entry.value();
-  if (value.has_value()) {
-    return value.value();
-  }
-
-  return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
+  return entry;
 }
 
 // == Native token syscalls ==

@@ -34,6 +34,7 @@ public:
                                        StorageDeltaBatch const &batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
+
   ExpectedStorageItem get_snapshot_item(BlockID block,
                                         AddressAndKey const &addrkey);
 

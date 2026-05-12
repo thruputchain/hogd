@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -58,6 +59,13 @@ public:
   // [block_size] may be included.
   void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
                 x23::XdrVec<SignedTransaction> &txs);
+
+  void start_pending_nomination(BlockID block_id);
+  void commit_pending_nomination(BlockID block_id);
+  void abandon_pending_nomination(BlockID block_id);
+  x23::Async<void>
+  apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
+                                 BlockHeight block_height);
 
   std::shared_ptr<const SignedTransaction>
   find_tx(const SignedTransactionHash &tx_hash)
@@ -190,6 +198,21 @@ private:
     std::map<TxKey, std::shared_ptr<TxValue>> txs;
   };
 
+  struct PendingNominationState {
+    BlockID block_id = 0;
+    std::unordered_map<ContractAddress, HogAge, ByteArrayHasher> hog_ages;
+    std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
+
+    PendingNominationState() { clear(); }
+
+    void clear()
+    {
+      block_id = 0;
+      hog_ages.clear();
+      touched_accounts.clear();
+    }
+  };
+
   struct AccountKey {
     BlockHeight average_hog_age;
     ContractAddress account;
@@ -228,6 +251,11 @@ private:
 
   void process_transfers_helper(const Delta &delta,
                                 BlockHeight block_height) noexcept;
+  void apply_committed_tx_hog_age(
+      const SignedTransaction &tx,
+      std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
+          &hogs_spent_by_account,
+      BlockHeight block_height);
 
   static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
                                                    uint128_t num_hogs,
@@ -252,8 +280,17 @@ private:
   // group does not have enough hogs to schedule a tx with a gas limit of
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
+  static bool cycle_if_needed(HogAge &hog_age, GasAmount gas_limit);
+  HogAge *get_hog_age_from_pending_nomination_create_if_needed(
+      AccountState &account_state, const ContractAddress &account);
+  const HogAge &get_hog_age_from_pending_nomination_if_exists(
+      const AccountState &account_state, const ContractAddress &account) const;
+  void refresh_ready_accounts(
+      const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts);
+  void erase_ready_account(const ContractAddress &account);
 
   std::set<AccountKey> ready_accounts_;
+  PendingNominationState pending_nomination_;
 
   // Tx cache.
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can

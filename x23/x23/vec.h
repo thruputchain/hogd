@@ -125,6 +125,9 @@ struct merged_allocator<T> {
   using type = std::allocator<AlignedStorage<sizeof(T), alignof(T)>>;
 };
 
+// Default-init leaves all pointers null; subtracting two null pointers is
+// well-defined and yields 0 per [expr.add]/5.1 ("If P and Q both evaluate
+// to null pointer values, the result is 0.").
 template<typename T> struct VecBuf {
   T begin;
   T end;
@@ -364,10 +367,12 @@ public:
 
   constexpr Vec &operator=(Vec &&other) noexcept
   {
-    realloc(0);
-    a_ = std::move(other.a_);
-    b_ = other.b_;
-    other.b_ = {};
+    if (this != &other) {
+      realloc(0);
+      a_ = std::move(other.a_);
+      b_ = other.b_;
+      other.b_ = {};
+    }
     return *this;
   }
   constexpr Vec &operator=(const Vec &other)
@@ -459,6 +464,7 @@ public:
   constexpr const_pointer data() const noexcept { return b_.begin; }
 
   constexpr bool empty() const noexcept { return b_.begin == b_.end; }
+  // Well-defined even on a default (null-ptr) Vec: [expr.add]/5.1
   constexpr size_type size() const noexcept { return b_.end - b_.begin; }
   static constexpr size_type max_size() noexcept
   {
@@ -471,6 +477,7 @@ public:
       realloc(cap);
     }
   }
+  // Well-defined even on a default (null-ptr) Vec: [expr.add]/5.1
   constexpr size_type capacity() const noexcept { return b_.bufend - b_.begin; }
   constexpr void shrink_to_fit() { realloc(size()); }
 
@@ -706,6 +713,7 @@ protected:
     }
   }
 
+  // Pointer subtraction on null ptrs is well-defined: [expr.add]/5.1
   constexpr void ensure(size_type n = 1)
   {
     if (size_type(b_.bufend - b_.end) >= n + kExtraAlloc)

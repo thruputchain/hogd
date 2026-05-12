@@ -5,6 +5,7 @@
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "block.hh"
+#include "db_sched.hh"
 #include "discovery.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -704,6 +705,100 @@ TEST(Mempool, ValidateCommit)
   res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_validate.block().db_tip.id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, ValidateCommitUpdatesHogAgesWithoutNominatedBlock)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  ValidatorID validator_id{};
+
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.nominated_block().block_id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  auto [before_validation_commit, before_lock] =
+      scheduler->get_cached_hog_age(account);
+  const uint128_t to_schedule_before =
+      from_xdr(before_validation_commit->num_hogs[kHogAgeGroupToSchedule]);
+  const uint128_t already_scheduled_before = from_xdr(
+      before_validation_commit->num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const BlockHeight already_scheduled_age_before =
+      before_validation_commit->average_ages[kHogAgeGroupAlreadyScheduled];
+  before_lock.unlock();
+
+  Nomination nomination = res_nominate.nominated_block().nomination;
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  {
+    SignedTransactionHashBatch tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
+
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    ASSERT_EQ(db_tip.height, 1);
+
+    nomination.block_hash =
+        sha256(BlockHeader{.network_id = MempoolTestInfra::kNetworkId,
+                           .block_height = nomination.block_height,
+                           .txset_hash =
+                               MempoolCoordinatorRpc::get_txset_hash(tx_hashes),
+                           .db_hash = db_tip.db_hash,
+                           .events_hash = db_tip.events_hash,
+                           .prev_block_hash = nomination.prev_block_hash});
+  }
+
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  ASSERT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+
+  auto [before_commit_again, before_commit_lock] =
+      scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(before_commit_again->num_hogs[kHogAgeGroupToSchedule]),
+            to_schedule_before);
+  EXPECT_EQ(from_xdr(
+                before_commit_again->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            already_scheduled_before);
+  EXPECT_EQ(before_commit_again->average_ages[kHogAgeGroupAlreadyScheduled],
+            already_scheduled_age_before);
+  before_commit_lock.unlock();
+
+  res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_validate.block().db_tip.id)();
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  auto [after_validation_commit, after_lock] =
+      scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(after_validation_commit->num_hogs[kHogAgeGroupToSchedule]),
+            to_schedule_before);
+  EXPECT_EQ(
+      from_xdr(after_validation_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
+      already_scheduled_before);
+  EXPECT_EQ(after_validation_commit->average_ages[kHogAgeGroupAlreadyScheduled],
+            db_tip.height + 1);
+  after_lock.unlock();
 }
 
 TEST(Mempool, ValidateTwo)

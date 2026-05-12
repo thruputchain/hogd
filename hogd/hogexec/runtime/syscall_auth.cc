@@ -224,6 +224,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ConsumeAuthToken_inner(
     SystemCallHandler &syscall_handler, uint32_t input_token_id,
     std::span<std::byte> output_auth_payload,
+    ContractAddress &output_token_minter,
     RuntimeMemoryLength &output_auth_payload_written_len,
     uint32_t &output_unwrapped_token_id_start,
     uint32_t &output_unwrapped_token_id_count) noexcept
@@ -240,8 +241,10 @@ syscall_ConsumeAuthToken_inner(
 
   auto const &result = *status;
 
+  output_token_minter = *result.mint_address;
+
   auto payload_bytes = std::as_bytes(
-      std::span<const uint8_t>{result.payload.data(), result.payload.size()});
+      std::span<const uint8_t>{result.payload->data(), result.payload->size()});
   auto copy_len =
       std::min<size_t>(payload_bytes.size(), output_auth_payload.size());
   if (copy_len > 0) {
@@ -257,7 +260,8 @@ syscall_ConsumeAuthToken_inner(
               .get_syscall_trace_data<SyscallNo::kConsumeAuthToken>()) {
     try {
       trace_data->outputs.emplace(SyscallConsumeAuthTokenOutputs{
-          .payload = result.payload,
+          .payload = *result.payload,
+          .token_minter = *result.mint_address,
           .auth_payload_written_len = output_auth_payload_written_len,
           .unwrapped_token_id_start = result.new_token_id_start,
           .unwrapped_token_id_count = result.new_token_id_count});

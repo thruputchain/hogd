@@ -800,7 +800,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     last_stage_ts = now;
   };
   double stage_await_commit_snapshot = 0.0;
-  double stage_write_average_hog_ages = 0.0;
 
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.block_hash,
@@ -811,13 +810,9 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   record_stage(stage_await_commit_snapshot);
 
-  scheduler_->write_all_average_hog_ages_to_db();
-  record_stage(stage_write_average_hog_ages);
-
-  info("commit_block() stages: await_commit_snapshot={:.6f}, "
-       "write_average_hog_ages={:.6f}, total={:.6f}, block_id={}",
-       stage_await_commit_snapshot, stage_write_average_hog_ages,
-       timer.elapsed(), cache.block_id);
+  info("commit_block() stages: await_commit_snapshot={:.6f}, total={:.6f}, "
+       "block_id={}",
+       stage_await_commit_snapshot, timer.elapsed(), cache.block_id);
 }
 
 x23::Async<SchedulerNominationResult>
@@ -947,6 +942,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // call with the block initialization work.
     x23::CoroGuard cg;
     co_await cg(scheduler_->global_lock_);
+    scheduler_->start_pending_nomination(nominated_block_cache_.block_id);
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
@@ -965,6 +961,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(const DbTip db_tip)
     // adding complexity and overhead in the common case to for full recovery
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
+    {
+      x23::CoroGuard cg;
+      co_await cg(scheduler_->global_lock_);
+      scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
+    }
     last_ = std::chrono::steady_clock::now();
     info("schedulercoord_nominate ret");
     co_return SchedulerNominationResult(
@@ -1477,8 +1478,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   record_stage(stage_block_execution);
 
   if (!validated) {
-    co_await scheduler_->add_txs(cache.txs);
-
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
@@ -1519,8 +1518,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   SHA256Hash block_hash = sha256(header);
   record_stage(stage_verify_block_hash);
   if (block_hash != nomination.block_hash) {
-    co_await scheduler_->add_txs(cache.txs);
-
     co_await finish_block_handle;
     co_await decrement_num_validations_in_progress();
     validation_telemetry.outcome = validation_outcome_str(
@@ -1546,6 +1543,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   const BlockID block_id = cache.block_id;
   {
+    x23::CoroGuard cache_cg;
+    co_await cache_cg(validated_block_cache_lock_);
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[block_id] = std::move(cache);
   }
@@ -1614,6 +1613,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   double stage_compute_reenqueue_set = 0.0;
   double stage_remove_from_scheduler = 0.0;
   double stage_await_handles = 0.0;
+  double stage_write_average_hog_ages = 0.0;
   double stage_finalize = 0.0;
   auto emit_commit_stats = [&](const char *outcome, size_t handles_size,
                                size_t reenqueue_size,
@@ -1623,14 +1623,16 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
          "precheck_validations={:.6f}, wait_nominated_lock={:.6f}, "
          "precheck_block_presence={:.6f}, build_handles={:.6f}, "
          "compute_reenqueue_set={:.6f}, remove_from_scheduler={:.6f}, "
-         "await_handles={:.6f}, finalize={:.6f}, total={:.6f}, outcome={}, "
+         "await_handles={:.6f}, write_average_hog_ages={:.6f}, "
+         "finalize={:.6f}, total={:.6f}, outcome={}, "
          "block_id={}, handles={}, reenqueue_size={}, remove_size={}",
          stage_wait_commit_lock, stage_wait_validations,
          stage_precheck_validations, stage_wait_nominated_lock,
          stage_precheck_block_presence, stage_build_handles,
          stage_compute_reenqueue_set, stage_remove_from_scheduler,
-         stage_await_handles, stage_finalize, timer.elapsed(), outcome,
-         block_id, handles_size, reenqueue_size, remove_from_scheduler_size);
+         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
+         timer.elapsed(), outcome, block_id, handles_size, reenqueue_size,
+         remove_from_scheduler_size);
   };
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -1755,7 +1757,35 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   const size_t remove_from_scheduler_size = remove_from_scheduler->size();
   co_await scheduler_->remove_from_scheduler(
       x23::span<const SignedTransactionHash>(*remove_from_scheduler));
+  if (nominated_block_cache_.block_id &&
+      nominated_block_cache_.block_id == block_id) {
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
+    scheduler_->commit_pending_nomination(block_id);
+  }
+  else {
+    if (nominated_block_cache_.block_id) {
+      x23::CoroGuard cg;
+      co_await cg(scheduler_->global_lock_);
+      scheduler_->abandon_pending_nomination(nominated_block_cache_.block_id);
+    }
+    const PendingBlock *committed_cache = nullptr;
+    auto it = validated_block_cache_.find(block_id);
+    CHECK(it != validated_block_cache_.end());
+    committed_cache = &it->second;
+    CHECK_CONST_PTR(committed_cache);
+    // [apply_committed_block_hog_ages] acquires [scheduler_->global_lock_] for
+    // us, so we do not need to do it here.
+    co_await scheduler_->apply_committed_block_hog_ages(
+        committed_cache->txs, committed_cache->db_tip.height);
+  }
   record_stage(stage_remove_from_scheduler);
+
+  // We write the hog ages to the database down here because we need to commit
+  // the hog ages above first ([scheduler_->commit_pending_nomination()] and
+  // [scheduler_->apply_committed_block_hog_ages]).
+  scheduler_->write_all_average_hog_ages_to_db();
+  record_stage(stage_write_average_hog_ages);
 
   for (x23::Async<void> &handle : commit_handles) {
     co_await handle;
@@ -1799,14 +1829,25 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
                                                             last_commit_);
   if (commit_window_stats.nomination.attempted) {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
-         "commit_duration={:.6f}, scheduler_size={}, submitted_total={}, "
+         "commit_duration={:.6f}, stage_wait_commit_lock={:.6f}, "
+         "stage_wait_validations={:.6f}, stage_precheck_validations={:.6f}, "
+         "stage_wait_nominated_lock={:.6f}, "
+         "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
+         "stage_compute_reenqueue_set={:.6f}, "
+         "stage_remove_from_scheduler={:.6f}, stage_await_handles={:.6f}, "
+         "stage_write_average_hog_ages={:.6f}, stage_finalize={:.6f}, "
+         "scheduler_size={}, submitted_total={}, "
          "submitted_vetted={}, submitted_unvetted={}, nomination={{succeeded="
          "{}, block_id={}, height={}, duration={:.6f}, scheduled_txs={}, "
          "nominated_txs={}, failed_txs={}}}, validations={}, "
          "validation_details=[{}]",
          last_committed_block_.height, block_id, since_last_commit_ms.count(),
-         timer.elapsed(), scheduler_size, total_submitted,
-         commit_window_stats.submitted_vetted,
+         timer.elapsed(), stage_wait_commit_lock, stage_wait_validations,
+         stage_precheck_validations, stage_wait_nominated_lock,
+         stage_precheck_block_presence, stage_build_handles,
+         stage_compute_reenqueue_set, stage_remove_from_scheduler,
+         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
+         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.nomination.succeeded,
          commit_window_stats.nomination.block_id,
@@ -1819,12 +1860,23 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   }
   else {
     info("commit summary: height={}, block_id={}, since_last_commit_ms={}, "
-         "commit_duration={:.6f}, scheduler_size={}, submitted_total={}, "
+         "commit_duration={:.6f}, stage_wait_commit_lock={:.6f}, "
+         "stage_wait_validations={:.6f}, stage_precheck_validations={:.6f}, "
+         "stage_wait_nominated_lock={:.6f}, "
+         "stage_precheck_block_presence={:.6f}, stage_build_handles={:.6f}, "
+         "stage_compute_reenqueue_set={:.6f}, "
+         "stage_remove_from_scheduler={:.6f}, stage_await_handles={:.6f}, "
+         "stage_write_average_hog_ages={:.6f}, stage_finalize={:.6f}, "
+         "scheduler_size={}, submitted_total={}, "
          "submitted_vetted={}, submitted_unvetted={}, nomination=none, "
          "validations={}, validation_details=[{}]",
          last_committed_block_.height, block_id, since_last_commit_ms.count(),
-         timer.elapsed(), scheduler_size, total_submitted,
-         commit_window_stats.submitted_vetted,
+         timer.elapsed(), stage_wait_commit_lock, stage_wait_validations,
+         stage_precheck_validations, stage_wait_nominated_lock,
+         stage_precheck_block_presence, stage_build_handles,
+         stage_compute_reenqueue_set, stage_remove_from_scheduler,
+         stage_await_handles, stage_write_average_hog_ages, stage_finalize,
+         scheduler_size, total_submitted, commit_window_stats.submitted_vetted,
          commit_window_stats.submitted_unvetted,
          commit_window_stats.validations.size(), validation_summary.str());
   }

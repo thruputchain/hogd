@@ -941,7 +941,7 @@ TEST_F(HogDBTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
   Address contract_addr = make_address(kAddress + 62);
   setup_contract_address(contract_addr);
   ItemKey key = make_item_key(contract_addr, 10);
-  auto db_key = make_contract_data_key(key.as_bytes());
+  auto db_key = make_contract_data_key(key);
   auto balance_key = make_address_key(contract_addr, Prefix::kBalance);
   DbHash base_hash = db_.compute_full_db_hash();
   constexpr int128_t kInitialBalance = 10'000'000;
@@ -3131,6 +3131,77 @@ TEST_F(HogDBTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
 
   itx_a.abort();
   itx_a.release_blocktx_reference();
+}
+
+TEST_F(HogDBTest, InvalidateSiblingBlockTX)
+{
+  PerThreadARC<BlockTX> block_a(db_, cost_model_, background_commit_worker_, 1);
+  PerThreadARC<BlockTX> block_b(db_, cost_model_, background_commit_worker_, 1);
+
+  EXPECT_FALSE(block_a.get().is_invalidated());
+  EXPECT_FALSE(block_b.get().is_invalidated());
+
+  block_b.get().invalidate();
+
+  EXPECT_FALSE(block_a.get().is_invalidated());
+  EXPECT_TRUE(block_b.get().is_invalidated());
+}
+
+TEST_F(HogDBTest, InvalidatedBlockTXReadReturnsStaleBlock)
+{
+  constexpr uint64_t kInvalidAddr = 0xABCD0001;
+  Address addr = make_address(kInvalidAddr);
+  setup_contract_address(addr);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+
+  ItemKey key = make_item_key(addr, 0);
+  auto result_before = block_tx.get().read_nnint128_base(key);
+  ASSERT_TRUE(result_before.has_value());
+
+  block_tx.get().invalidate();
+
+  auto result_after = block_tx.get().read_nnint128_base(key);
+  ASSERT_FALSE(result_after.has_value());
+  EXPECT_EQ(result_after.error().code(), HogDBCode::kStaleBlock);
+}
+
+TEST_F(HogDBTest, InvalidatedBlockTXBalanceReadReturnsStaleBlock)
+{
+  constexpr uint64_t kInvalidAddr = 0xABCD0002;
+  Address addr = make_address(kInvalidAddr);
+  setup_contract_address(addr);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+
+  auto result_before = block_tx.get().read_balance_base(addr);
+  ASSERT_TRUE(result_before.has_value());
+
+  block_tx.get().invalidate();
+
+  auto result_after = block_tx.get().read_balance_base(addr);
+  ASSERT_FALSE(result_after.has_value());
+  EXPECT_EQ(result_after.error().code(), HogDBCode::kStaleBlock);
+}
+
+TEST_F(HogDBTest, InvalidatedBlockTXLockReturnsStaleBlock)
+{
+  constexpr uint64_t kInvalidAddr = 0xABCD0003;
+  Address addr = make_address(kInvalidAddr);
+  setup_contract_address(addr);
+
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_,
+                                 1);
+
+  block_tx.get().invalidate();
+
+  ItemKey key = make_item_key(addr, 0);
+  ItemChange change = ItemChange(NNInt128(0, 10));
+  auto result = block_tx.get().lock(key, change);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
 }
 
 } // namespace hogd

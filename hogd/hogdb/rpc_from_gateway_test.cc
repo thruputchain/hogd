@@ -15,14 +15,21 @@
 
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
+#include "hogd/hogdb/block_tx.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
 
@@ -103,6 +110,65 @@ TEST(HogDBGatewayRpcTest, GetItemsMissingBalanceIsNotFound)
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
   EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
+}
+
+// Regression test for #1715: contract-data NNInt values must be decoded
+// from canonical XDR bytes, not reinterpreted as host-endian int128_t.
+TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
+{
+  HogDBDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 42;
+  ASSERT_TRUE(dao.write_address_balance(addr, int128_t{1'000'000}));
+
+  StorageKey storage_key(StorageKeyType::ContractData);
+  storage_key.contract_data_key()[0] = 7;
+  AddressAndKey query{.address = addr, .key = std::move(storage_key)};
+  ItemKey item_key = make_item_key(query);
+
+  AuthChangeSubscriptionManager subscription_manager;
+  BackgroundCommitWorker background_commit_worker(subscription_manager,
+                                                  nullptr);
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  {
+    DbHash base_hash = dao.compute_full_db_hash();
+    PerThreadARC<BlockTX> block_tx(dao, cost_model, background_commit_worker,
+                                   BlockHeight{1});
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx(block_tx);
+
+    ASSERT_TRUE(invoke_tx.request_nnint128(item_key, int128_t{1}, int128_t{0},
+                                           std::to_underlying(
+                                               StorageDeltaFlags::None)));
+    ASSERT_TRUE(invoke_tx.sync_balance_locks());
+    invoke_tx.commit();
+    invoke_tx.release_blocktx_reference();
+
+    auto db_hash = block_tx.get().close(base_hash);
+    ASSERT_TRUE(db_hash.has_value());
+    ASSERT_TRUE(block_tx.get().commit());
+  }
+
+  HogDBStatus<int128_t> dao_value = dao.read_nnint128(item_key);
+  ASSERT_TRUE(dao_value);
+  ASSERT_EQ(*dao_value, int128_t{1});
+
+  RPCContext ctx(std::move(dao), nullptr);
+  AddressAndKeyBatch batch;
+  batch.push_back(query);
+
+  HogDBGatewayRpc gateway(ctx);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 1U);
+  ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items[0].item().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+
+  int128_t gateway_value = from_xdr(result.payload().items[0].item().nnint());
+  EXPECT_EQ(gateway_value, int128_t{1});
 }
 
 } // namespace hogd

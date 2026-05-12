@@ -40,7 +40,7 @@ SyscallErrorCategory::message(int code) const
   return x23::show(static_cast<SyscallErrorCode>(code));
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<SystemStatus<SyscallErrorCode>, uint64_t>
 InvokeResult::to_host_fn_result() const
 {
   if (!result_.has_value()) {
@@ -48,7 +48,7 @@ InvokeResult::to_host_fn_result() const
 
     switch (result_.error().code()) {
     case Unrecoverable:
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, gas_consumed_};
+      return {SystemError{SystemErrorCode::Unrecoverable}, gas_consumed_};
     case Deterministic:
       // i.e. trap within Wasmi
     case OutOfGas:
@@ -59,14 +59,14 @@ InvokeResult::to_host_fn_result() const
       return {SyscallErrorCode::kSyscallErrorCodeDeterministicWasm,
               gas_consumed_};
     case Abandon:
-      return {HostFnError{HostFnErrorCode::Abandon}, gas_consumed_};
+      return {SystemError{SystemErrorCode::Abandon}, gas_consumed_};
     case ValidationFailure:
-      return {HostFnError{HostFnErrorCode::ValidationFailure}, gas_consumed_};
+      return {SystemError{SystemErrorCode::ValidationFailure}, gas_consumed_};
     default:
       error("Unrecoverable: InvokeResult::to_host_fn_result got unknown "
             "InvokeErrorCode {}",
             std::to_underlying(result_.error().code()));
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, gas_consumed_};
+      return {SystemError{SystemErrorCode::Unrecoverable}, gas_consumed_};
     }
     // unreachable
     assert(false);

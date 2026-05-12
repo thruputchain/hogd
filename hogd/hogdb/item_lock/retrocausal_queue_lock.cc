@@ -15,7 +15,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/change_set.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -525,7 +524,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
   }
   updated_metadata.live_entries = static_cast<uint64_t>(new_live);
 
-  auto meta_key = make_contract_data_key(ctx.key.as_bytes());
+  auto meta_key = make_contract_data_key(ctx.key);
 
   if (updated_metadata.live_entries == 0) {
     // Remove the item from the DAO if it actually existed in the snapshot.
@@ -600,7 +599,7 @@ RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
 
   // Remove the metadata unless the caller will overwrite it (type change).
   if (!keep_metadata) {
-    auto meta_key = make_contract_data_key(ctx.key.as_bytes());
+    auto meta_key = make_contract_data_key(ctx.key);
     changes.remove(meta_key);
   }
 

@@ -52,6 +52,32 @@ from_xdr(uint128_xdr value)
   return (uint128_t{value.highbits} << 64) + value.lowbits;
 }
 
+// #1846, #1874: verify shift, cast, and round-trip semantics that
+// XDR conversion and native-token precompile arithmetic depend on.
+static_assert(int128_t{-1} >> 64 == -1, "arithmetic right shift required");
+static_assert(static_cast<int64_t>(int128_t{-1} >> 64) == int64_t{-1},
+              "int128 high-limb cast must preserve sign");
+static_assert(static_cast<uint64_t>(int128_t{-1} & UINT64_MAX) == UINT64_MAX,
+              "int128 low-limb mask must yield all-ones");
+static_assert(to_xdr(int128_t{-1}).highbits == int64_t{-1},
+              "to_xdr high limb mismatch");
+static_assert(to_xdr(int128_t{-1}).lowbits == UINT64_MAX,
+              "to_xdr low limb mismatch");
+static_assert(from_xdr(to_xdr(int128_t{0})) == 0, "XDR round-trip failed");
+static_assert(from_xdr(to_xdr(int128_t{-1})) == -1, "XDR round-trip failed");
+static_assert(from_xdr(to_xdr(int128_t{1})) == 1, "XDR round-trip failed");
+static_assert(from_xdr(to_xdr(int128_t{1} << 127)) == (int128_t{1} << 127),
+              "XDR round-trip failed for INT128_MIN");
+static_assert(from_xdr(to_xdr((int128_t{INT64_MAX} << 64) | UINT64_MAX)) ==
+                  (int128_t{INT64_MAX} << 64 | UINT64_MAX),
+              "XDR round-trip failed for INT128_MAX");
+// limb reconstruction used by precompile_native_token.cc
+static_assert((uint128_t{UINT64_MAX} << 64 | UINT64_MAX) ==
+                  static_cast<uint128_t>(int128_t{-1}),
+              "uint128 all-ones must match int128 -1");
+static_assert((int128_t{int64_t{-1}} << 64 | int128_t{UINT64_MAX}) == -1,
+              "signed limb reconstruction must produce -1");
+
 inline std::array<std::byte, sizeof(int128_xdr)>
 int128_to_xdr_bytes(int128_t value)
 {

@@ -42,7 +42,7 @@ DeletionLock::stage_committed_changes(const LockContext &ctx,
     return RetrocausalQueueLock::cleanup_on_deletion(ctx, changes);
   }
 
-  auto key = make_contract_data_key(ctx.key.as_bytes());
+  auto key = make_contract_data_key(ctx.key);
   changes.remove(key);
   return {};
 }

@@ -263,7 +263,7 @@ verify_auth_claims_internal(const SignedTransaction &stx,
 
     // No dedup needed: verify_weight_key_claim_internal already enforces
     // strictly-increasing public_key_id, so duplicates are impossible here.
-    Weight total_weight = 0;
+    uint64_t total_weight = 0;
     for (const DecoratedSignature &sig : stx.signatures) {
       assert(has_public_key(*source_auth_data, sig.public_key_id));
       total_weight +=

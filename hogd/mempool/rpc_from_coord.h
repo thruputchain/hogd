@@ -20,6 +20,7 @@
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -136,6 +137,11 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
+    // [last_committed_block_] is updated by [schedulercoord_commit_block()]
+    // under the [commit_lock_] lock.
+    x23::CoroGuard cg;
+    co_await cg(commit_lock_);
+
     if (last_committed_block_.height == -1) {
       co_return SchedulerGetTipResult(
           SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
@@ -552,6 +558,10 @@ private:
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
+  // Protects accesses to [validated_block_cache_]. If multiple blocks are
+  // validated concurrently, [validated_block_cache_] could be accessed in
+  // parallel without this lock.
+  x23::CoroLock validated_block_cache_lock_;
   // Ensures that a commit does not occur while txs are being verified. Txs
   // are verified against a certain block height, so if they race with a block
   // commit, we could add txs to the scheduler that are no longer verified as

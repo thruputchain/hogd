@@ -217,7 +217,7 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+  [[nodiscard]] std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
          std::span<uint32_t const> owned_auth_token_ids);
@@ -406,7 +406,7 @@ private:
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
   static InvokeStatus<void>
-  handle_root_host_fn_status(HostFnStatus<SyscallErrorCode> status);
+  handle_root_host_fn_status(SystemStatus<SyscallErrorCode> status);
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at
