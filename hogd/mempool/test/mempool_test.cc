@@ -121,7 +121,8 @@ TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
   batch.segment_tokens[0]++;
 
   ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, batch)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          batch)();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 

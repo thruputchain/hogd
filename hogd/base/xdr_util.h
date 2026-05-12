@@ -173,7 +173,8 @@ inline x23::Async<bool>
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 {
   if (parallel.segment_tokens.size() != parallel.segment_bytes.size()) {
-    info("failed to deserialize: segment_tokens size {} != segment_bytes size {}",
+    info("failed to deserialize: segment_tokens size {} != segment_bytes size "
+         "{}",
          parallel.segment_tokens.size(), parallel.segment_bytes.size());
     co_return false;
   }
@@ -234,8 +235,8 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
                              num_segment_bytes - inner_xdr_offset));
             inner_obj_offset++;
             inner_xdr_offset += num_consumed;
-            // if inner_xdr_offset > num_segment_bytes, then deserialize_from would have read beyond
-            // the end of the supplied buffer.
+            // if inner_xdr_offset > num_segment_bytes, then deserialize_from
+            // would have read beyond the end of the supplied buffer.
             CHECK_LE(inner_xdr_offset, num_segment_bytes);
           } catch (const x23::XdrException &e) {
             info("failed to deserialize: {}", e.what());
