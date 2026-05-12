@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -8,12 +7,13 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
-#include "block.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
@@ -26,7 +26,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_db.h"
