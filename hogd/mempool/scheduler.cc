@@ -851,32 +851,6 @@ Scheduler::account_is_ready(const ContractAddress &account,
 }
 
 void
-Scheduler::move_hogs_to_already_scheduled_group(HogAge &hog_ages,
-                                                uint128_t num_hogs,
-                                                BlockHeight block_height)
-{
-  const uint128_xdr already_scheduled_hogs =
-      hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled];
-  const BlockHeight already_scheduled_age =
-      hog_ages.average_ages[kHogAgeGroupAlreadyScheduled];
-
-  // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
-  bool empty = from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
-  hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled] =
-      to_xdr(num_hogs + from_xdr(already_scheduled_hogs));
-  if (empty) {
-    hog_ages.average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
-  }
-  else {
-    // See comment above for [compute_average_age()].
-    hog_ages.average_ages[kHogAgeGroupAlreadyScheduled] =
-        compute_average_age(num_hogs, block_height,
-                            from_xdr(already_scheduled_hogs),
-                            already_scheduled_age);
-  }
-}
-
-void
 Scheduler::cycle_accounts_during_schedule_helper(
     const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts,
     const TxKey &lower_bound)
@@ -1017,8 +991,9 @@ Scheduler::schedule(size_t num_txs,
     if (hogs_spent_by_account) {
       // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
       // this account.
-      move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
-                                           current_block() + 1);
+      CHECK(try_move_hogs_to_already_scheduled_group(*hog_ages,
+                                                     hogs_spent_by_account,
+                                                     current_block() + 1));
     }
   }
   // Add [removed_accounts] back to [ready_accounts_] for each account that is

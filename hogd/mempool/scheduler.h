@@ -256,10 +256,6 @@ private:
                                          uint128_t &hogs_spent_by_this_account,
                                          BlockHeight block_height);
 
-  static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
-                                                   uint128_t num_hogs,
-                                                   BlockHeight block_height);
-
   x23::Detached write_all_average_hog_ages_helper();
 
   std::pair<AccountState *, std::unique_lock<std::mutex>>
