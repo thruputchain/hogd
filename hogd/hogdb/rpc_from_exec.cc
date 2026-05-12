@@ -32,6 +32,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -249,6 +250,10 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   if (key.is_address_balance()) {
     HogDBStatus<int128_t> nnint =
         ctx_.get_db().read_address_balance(key.get_address());
+
+    if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+
     if (!nnint)
       return ExpectedStorageItem(to_rpc_error(nnint.error()));
     WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
@@ -259,6 +264,10 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   else if (key.is_address_auth_data()) {
     HogDBStatus<AddressAuthData> auth_data =
         ctx_.get_db().read_address_auth_data(key.get_address());
+
+    if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+
     if (!auth_data)
       return ExpectedStorageItem(to_rpc_error(auth_data.error()));
     WireStorageItem out(StorageItemType::kItemTypeAuthData);
@@ -268,6 +277,10 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   }
   else {
     HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
+
+    if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+
     if (!item)
       return ExpectedStorageItem(to_rpc_error(item.error()));
 
@@ -312,15 +325,6 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     ret.item() = out;
   }
 
-  // Staleness check AFTER the DAO read: if a sibling committed during our
-  // read, the release/acquire ordering through the DAO's internal
-  // synchronization guarantees we see the invalidation flag here.
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
-  }
-
   return ret;
 }
 
@@ -331,6 +335,10 @@ HogDBExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 
   HogDBStatus<OwningSpan<const std::byte>> wasm =
       ctx_.get_db().read_wasm_code(hash);
+
+  if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+    return ExpectedContract(RPCError::kRPCBadBlockID);
+
   if (!wasm)
     return ExpectedContract(to_rpc_error(wasm.error()));
 
@@ -338,12 +346,6 @@ HogDBExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
   out.error(RPCError::kRPCNone);
 
   x23::deserialize(&out.contract(), x23::BufView{*wasm});
-
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedContract(RPCError::kRPCBadBlockID);
-  }
 
   return out;
 }
@@ -354,14 +356,12 @@ HogDBExecutorRpc::get_deployment(BlockID block,
 {
   HogDBStatus<DeployedContractHash> hash =
       ctx_.get_db().read_address_metadata(contract_address);
+
+  if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+    return ExpectedDeployment(RPCError::kRPCBadBlockID);
+
   if (!hash)
     return ExpectedDeployment(to_rpc_error(hash.error()));
-
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedDeployment(RPCError::kRPCBadBlockID);
-  }
 
   ExpectedDeployment out;
   out.error(RPCError::kRPCNone);
@@ -381,14 +381,13 @@ HogDBExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
       ctx_.get_db().read_retrocausal_queue_block(make_item_key(addrkey),
                                                  search_start_number);
 
+  // After the DAO read, check for staleness before returning either the result
+  // or a deterministic error (like not found).
+  if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+    return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
+
   if (!queue_block) {
     return ExpectedRetrocausalQueueBlock(to_rpc_error(queue_block.error()));
-  }
-
-  {
-    PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-    if (!btx || btx->get().is_invalidated()) [[unlikely]]
-      return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
   }
 
   ExpectedRetrocausalQueueBlock out;
@@ -401,11 +400,13 @@ ExpectedQueueEntry
 HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
-  PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
-  if (!btx) {
-    return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
-  }
-  if (btx->get().is_invalidated()) [[unlikely]] {
+  PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block);
+  x23::Defer _d([&]() {
+    if (btx && btx->release_reference()) {
+      ctx_.remove_shutdown_block_tx(block);
+    }
+  });
+  if (!btx || btx->get().is_invalidated()) [[unlikely]] {
     return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
   }
 
