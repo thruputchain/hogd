@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/view/view.h"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -222,64 +223,11 @@ ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
 {
   assert(mode_ == ExecutionMode::kViewing);
   static thread_local auto context = make_hogexec_context();
-  // view transactions never commit or write to state; therefore, they can be run on a dummy transaction ID
-  auto proxy = make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max());
-  
-  SystemCallHandler syscall_handler(*snapshot_cache_, proxy,
-                                    make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
-                                    ViewingModeCtor{}, *context,
-                                  query.auth_claim,
-                                  SHA256Hash{});
-  
-  assert(!syscall_handler.is_running());
-
-  std::vector<uint32_t> forwarded_token_ids;
-  forwarded_token_ids.reserve(query.forwarded_tokens.size());
-
-  for (auto const &token : query.forwarded_tokens) {
-    auto token_id = syscall_handler.mint_auth_token(token);
-    if (!token_id.has_value()) {
-      // This branch only triggers if the auth token registry is full,
-      // which should never happen when starting from an empty auth token registry.
-      return ExpectedViewResult{TransactionViewStatus::Abandoned};
-    }
-    forwarded_token_ids.push_back(token_id.value());
-  }
-
-  auto [res, gas_consumed] = syscall_handler.invoke(query.invocation.invoked_address, 
-    sdk_method_id(query.invocation.entrypoint),
-     query.invocation.gas_limit, 
-     query.invocation.calldata, 
-     query.invoke_flags, 
-     forwarded_token_ids);
-  
-  if (!res.has_value()) {
-    switch(res.error().code()) {
-      case SystemErrorCode::ValidationFailure:
-        // This should never occur in view mode
-        error("view transaction failed with SystemErrorCode::ValidationFailure");
-        return ExpectedViewResult(TransactionViewStatus::InternalError);
-      case SystemErrorCode::Abandon:
-        return ExpectedViewResult{TransactionViewStatus::Abandoned};
-      case SystemErrorCode::Unrecoverable:
-        // This should never occur in view mode
-        error("view transaction failed with SystemErrorCode::Unrecoverable");
-        return ExpectedViewResult(TransactionViewStatus::InternalError);
-    }
-  }
-
-  if (*res != SyscallErrorCode::kSyscallErrorCodeNone && *res != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-    ExpectedViewResult result(TransactionViewStatus::InvalidInput);
-    result.error_code() = *res;
-    return result;
-  }
-
-  CHECK(syscall_handler.last_frame_finished());
-
-  ExpectedViewResult result(TransactionViewStatus::Ok);
-  result.result().output = syscall_handler.get_most_recent_frame_output();
-  result.result().events = syscall_handler.extract_events();
-  return result;
+  return View::run_view_transaction(
+      *snapshot_cache_,
+      make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
+      make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
+      query, *context);
 }
 
 void

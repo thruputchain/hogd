@@ -160,6 +160,9 @@ SystemCallHandler::SystemCallHandler(
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
             return ProposalModeData{};
           }
+          if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
+            return ExecutionModeData{std::in_place_type<ViewingModeData>};
+          }
           return ExecutionModeData{std::in_place_type<ValidationModeData>,
                                    std::get<ValidationModeCtor>(
                                        execution_mode_ctor)};
@@ -289,6 +292,20 @@ SystemCallHandler::get_most_recent_frame_output() const
              .has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return *invocation_frame_stack_.get_active_frame_child_return_output();
+}
+
+x23::Vec<TxEmittedEvent>
+SystemCallHandler::get_most_recent_frame_events() const
+{
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+    if (!last_frame_.has_value()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return last_frame_.value().get_events();
+  }
+  return invocation_frame_stack_.copy_active_frame_events();
 }
 
 InvokeStatus<void>
@@ -777,9 +794,11 @@ SystemCallHandler::get_proposal_data() const
   // or deterministic error during execution.
   // Not allowed to have i.e. validation failure here, or block abort.
   assert(cumulative_invoke_result_.has_readable_proposal_data());
-  return std::visit([](auto const &arg) -> NondeterministicProposalData const
-                                            & { return arg.proposal_data(); },
-                    execution_mode_data_);
+  assert(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+    return std::get<ProposalModeData>(execution_mode_data_).proposal_data();
+  }
+  return std::get<ValidationModeData>(execution_mode_data_).proposal_data();
 }
 
 x23::Async<SystemStatus<void>>

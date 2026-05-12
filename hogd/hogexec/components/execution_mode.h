@@ -132,7 +132,7 @@ public:
 };
 
 // Variant type that holds either proposal or validation mode data
-using ExecutionModeData = std::variant<ProposalModeData, ValidationModeData>;
+using ExecutionModeData = std::variant<ProposalModeData, ValidationModeData, ViewingModeData>;
 
 using ProposalModeCtor = std::monostate;
 using ValidationModeCtor = NondeterministicProposalData;
