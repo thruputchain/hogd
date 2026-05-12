@@ -221,6 +221,9 @@ Scheduler::apply_committed_block_hog_ages(
       continue;
     }
 
+    // We cache the [HogAge] struct rather than retrieve it each time with
+    // [get_account_state()] so that we can avoid the locking overhead for
+    // accounts that submitted multiple txs in the block.
     auto [hog_age_it, inserted] = hog_ages_by_account.try_emplace(account);
     if (inserted) {
       auto [account_state, lock] = get_account_state(account);
@@ -245,9 +248,9 @@ Scheduler::apply_committed_block_hog_ages(
   // Now we move the hogs to the [kHogAgeGroupAlreadyScheduled] group to account
   // for the cost of executing the txs.
   for (auto &[account, hog_age] : hog_ages_by_account) {
-    const auto spent_it = hogs_spent_by_account.find(account);
-    if (spent_it != hogs_spent_by_account.end() && (spent_it->second != 0UL)) {
-      if (!try_move_hogs_to_already_scheduled_group(hog_age, spent_it->second,
+    const uint128_t num_hogs = hogs_spent_by_account.at(account);
+    if (num_hogs != 0UL) {
+      if (!try_move_hogs_to_already_scheduled_group(hog_age, num_hogs,
                                                     block_height)) {
         continue;
       }
