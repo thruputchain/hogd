@@ -120,7 +120,7 @@ NNInt128Lock::stage_committed_changes(const LockContext &ctx,
   CHECK(is_committed_value_in_bounds(base_, delta_bounds_.get_delta()));
   auto value = wrapping_add(base_, delta_bounds_.get_delta());
   auto encoded = int128_to_xdr_bytes(value);
-  auto key = make_contract_data_key(ctx.key.as_bytes());
+  auto key = make_contract_data_key(ctx.key);
   changes.put(key, kNNInt128, encoded);
   return {};
 }

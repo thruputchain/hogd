@@ -20,6 +20,7 @@
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -136,6 +137,11 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
+    // [last_committed_block_] is updated by [schedulercoord_commit_block()]
+    // under the [commit_lock_] lock.
+    x23::CoroGuard cg;
+    co_await cg(commit_lock_);
+
     if (last_committed_block_.height == -1) {
       co_return SchedulerGetTipResult(
           SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);

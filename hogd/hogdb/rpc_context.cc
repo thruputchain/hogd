@@ -68,6 +68,33 @@ RPCContext::get_block_tx_slow(BlockTXID bid, bool acquire_reference)
   return tx;
 }
 
+bool
+RPCContext::is_block_tx_stale_slow(BlockTXID bid)
+{
+  PerThreadARC<BlockTX> *tx;
+  // This lock should be held during the cache updates, not just the lookup.
+  // Otherwise, technically, release_block_tx_reference() could be called in
+  // between when we get the tx pointer from block_txes_ and when we insert it
+  // into the cache.
+  std::scoped_lock g(lock_);
+
+  // retrieve the block tx (if it exists).
+  {
+    auto it = block_txes_.find(bid);
+    if (it == block_txes_.end()) {
+      return true;
+    }
+    tx = &(it->second);
+  }
+  assert(tx);
+
+  // then make sure it's in the cache so we can avoid this cost next time.
+  BlockCache &cache = *block_tx_cache_;
+  std::scoped_lock g2(cache.lock);
+  cache.blocks.insert(std::make_pair(bid, tx));
+  return tx->get().is_invalidated();
+}
+
 void
 RPCContext::remove_shutdown_block_tx(BlockTXID bid)
 {
@@ -84,6 +111,17 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
   // We make sure to delete the BlockTX _after_
   // deleting the pointers to it in the threadlocal caches.
   block_txes_.erase(bid);
+}
+
+void
+RPCContext::invalidate_siblings(BlockTXID committer)
+{
+  std::scoped_lock g(lock_);
+  for (auto &[id, arc] : block_txes_) {
+    if (id != committer) {
+      arc.get().invalidate();
+    }
+  }
 }
 
 HogDBStatus<void>

@@ -7,7 +7,6 @@
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "types.hh"

@@ -151,6 +151,10 @@ public:
   // references.
   void remove_shutdown_block_tx(BlockTXID bid);
 
+  void invalidate_siblings(BlockTXID committer);
+
+  bool is_block_tx_stale(BlockTXID bid);
+
 private:
   struct BlockCache {
     std::mutex lock;
@@ -192,9 +196,29 @@ private:
   // slow path for get_block_tx().
   PerThreadARC<BlockTX> *get_block_tx_slow(BlockTXID bid,
                                            bool acquire_reference);
+  // slow path for is_block_tx_stale().
+  bool is_block_tx_stale_slow(BlockTXID bid);
 
   void release_block_tx_reference(BlockTXID bid);
 };
+
+// Returns true if the blocktx does not exist or is on an abandoned branch.
+// Safe without acquiring a reference: the per-thread cache.lock (fast path) and
+// lock_ (slow path) prevent concurrent removal by remove_shutdown_block_tx().
+inline bool
+RPCContext::is_block_tx_stale(BlockTXID bid)
+{
+  {
+    BlockCache &cache = *block_tx_cache_;
+    std::scoped_lock g(cache.lock);
+    auto it = cache.blocks.find(bid);
+    if (it != cache.blocks.end()) {
+      return it->second->get().is_invalidated();
+    }
+  }
+
+  return is_block_tx_stale_slow(bid);
+}
 
 inline PerThreadARC<BlockTX> *
 RPCContext::get_block_tx(BlockTXID bid, bool acquire_reference)
