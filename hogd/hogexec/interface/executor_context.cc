@@ -6,7 +6,6 @@
 #include <mutex>
 #include <optional>
 #include <utility>
-#include <vector>
 
 #include "exec_result.hh"
 #include "exec_sched.hh"
@@ -18,15 +17,12 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/view/view.h"
 #include "rpc_types.hh"
-#include "syscall_error.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "view.hh"
 #include "x23/async.h"
 
