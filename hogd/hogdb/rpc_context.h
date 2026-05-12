@@ -202,8 +202,11 @@ private:
   void release_block_tx_reference(BlockTXID bid);
 };
 
-// returns true if the blocktx does not exist or is on an abandoned branch of the blockchain
-inline bool RPCContext::is_block_tx_stale(BlockTXID bid) {
+// returns true if the blocktx does not exist or is on an abandoned branch of
+// the blockchain
+inline bool
+RPCContext::is_block_tx_stale(BlockTXID bid)
+{
   {
     BlockCache &cache = *block_tx_cache_;
     std::scoped_lock g(cache.lock);
