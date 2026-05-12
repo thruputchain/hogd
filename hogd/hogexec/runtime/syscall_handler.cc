@@ -293,7 +293,7 @@ SystemCallHandler::get_most_recent_frame_output() const
 
 InvokeStatus<void>
 SystemCallHandler::handle_root_host_fn_status(
-    HostFnStatus<SyscallErrorCode> status)
+    SystemStatus<SyscallErrorCode> status)
 {
   if (status.has_value()) {
     // TODO(geoff): Consider whether we want to have "frame reverted" on the
@@ -304,23 +304,12 @@ SystemCallHandler::handle_root_host_fn_status(
                : InvokeError{InvokeErrorCode::Deterministic};
   }
   switch (status.error().code()) {
-  case HostFnErrorCode::OutOfGas:
-    return InvokeError{InvokeErrorCode::OutOfGas};
-  case HostFnErrorCode::Return:
-    return InvokeStatus<void>{};
-  case HostFnErrorCode::Exit:
-    return InvokeError{InvokeErrorCode::Deterministic};
-  case HostFnErrorCode::ValidationFailure:
+  case SystemErrorCode::ValidationFailure:
     return InvokeError{InvokeErrorCode::ValidationFailure};
-  case HostFnErrorCode::Abandon:
+  case SystemErrorCode::Abandon:
     return InvokeError{InvokeErrorCode::Abandon};
-  case HostFnErrorCode::Unrecoverable:
+  case SystemErrorCode::Unrecoverable:
     error("handle_root_host_fn_status: received Unrecoverable");
-    return InvokeError{InvokeErrorCode::Unrecoverable};
-  case HostFnErrorCode::NoneOrRecoverable:
-    // This case should never happen, as it is instead handled by
-    // the status.has_value() check above.
-    panic("unreachable");
     return InvokeError{InvokeErrorCode::Unrecoverable};
   }
   // Leaving the default arm out of the switch, so that the compiler
@@ -800,9 +789,14 @@ SystemCallHandler::emit_events(ExecResult exec_result)
   auto events = (root_invoke_succeeded_ && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
+  auto root_output =
+      last_frame_.has_value()
+          ? last_frame_.value().get_frame_output()
+          : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
   co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_source_tx_hash(),
       .exec_result = exec_result,
+      .root_output = std::move(root_output),
       .events = std::move(events),
   });
 }

@@ -266,7 +266,15 @@ syscall_Invoke_inner(
   // Invocation encountered some error
   output_return_buffer_len = 0;
   output_returned_auth_token_len = 0;
-  return {invoke_res, WrappedGasAmount{gas_amount}};
+
+  auto host_fn_res = [&]() -> HostFnStatus<SyscallErrorCode> {
+    if (invoke_res.has_value()) {
+      return *invoke_res;
+    }
+    return invoke_res.error().to_host_fn_error();
+  }();
+
+  return {host_fn_res, WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

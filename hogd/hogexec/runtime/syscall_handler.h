@@ -406,7 +406,7 @@ private:
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
   static InvokeStatus<void>
-  handle_root_host_fn_status(HostFnStatus<SyscallErrorCode> status);
+  handle_root_host_fn_status(SystemStatus<SyscallErrorCode> status);
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

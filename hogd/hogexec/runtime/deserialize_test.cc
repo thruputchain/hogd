@@ -172,6 +172,21 @@ template<x23::is_xdr_struct T> struct DeserializeBranch<T> {
   }
 };
 
+// Required so the is_xdr_struct specialization above can recurse
+// through a struct containing a union field — without this, the
+// nested DeserializeBranch<UnionType> instantiation has no
+// definition and the struct case fails to compile.  Emits only a
+// valid encoding of the default-constructed value; the union's
+// arms are not fuzz-explored at this position.
+template<x23::is_xdr_union T> struct DeserializeBranch<T> {
+
+  static x23::Buf branch(model::RunnableActionSet & /*set*/,
+                         bool & /*exists_failure*/)
+  {
+    return x23::serialize(T{});
+  }
+};
+
 namespace {
 template<typename T>
 void

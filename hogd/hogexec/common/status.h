@@ -168,7 +168,7 @@ struct InvokeResult {
            result_.error().code() == InvokeErrorCode::Deterministic;
   }
 
-  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
+  std::pair<SystemStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
 };
 
 } // namespace hogd
