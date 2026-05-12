@@ -7,7 +7,6 @@
 #include <span>
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
