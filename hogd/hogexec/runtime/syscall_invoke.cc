@@ -271,15 +271,7 @@ syscall_Invoke_inner(
     if (invoke_res.has_value()) {
       return *invoke_res;
     }
-    switch (invoke_res.error().code()) {
-    case SystemErrorCode::Unrecoverable:
-      return HostFnError{HostFnErrorCode::Unrecoverable};
-    case SystemErrorCode::Abandon:
-      return HostFnError{HostFnErrorCode::Abandon};
-    case SystemErrorCode::ValidationFailure:
-      return HostFnError{HostFnErrorCode::ValidationFailure};
-    }
-    panic("unrecoverable: unknown error code: {}", invoke_res.error().code());
+    return invoke_res.error().to_host_fn_error();
   }();
 
   return {host_fn_res, WrappedGasAmount{gas_amount}};

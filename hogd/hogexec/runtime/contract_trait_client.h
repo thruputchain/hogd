@@ -65,18 +65,7 @@ public:
 
     if (!host_fn_res.has_value()) {
       trace("Invoke SystemStatus error: {}", host_fn_res.error());
-      switch (host_fn_res.error().code()) {
-      case SystemErrorCode::Unrecoverable:
-        return std::pair{HostFnError{HostFnErrorCode::Unrecoverable},
-                         res.second};
-      case SystemErrorCode::Abandon:
-        return std::pair{HostFnError{HostFnErrorCode::Abandon}, res.second};
-      case SystemErrorCode::ValidationFailure:
-        return std::pair{HostFnError{HostFnErrorCode::ValidationFailure},
-                         res.second};
-      }
-      panic("unrecoverable: unknown error code: {}",
-            host_fn_res.error().code());
+      return std::pair{host_fn_res.error().to_host_fn_error(), res.second};
     }
 
     if (host_fn_res.value() != SyscallErrorCode::kSyscallErrorCodeNone &&
