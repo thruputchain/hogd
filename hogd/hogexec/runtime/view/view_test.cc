@@ -101,6 +101,33 @@ protected:
     };
   }
 
+  struct NativeViewSetup {
+    std::unique_ptr<NativeContext> native_context;
+    std::unique_ptr<MultiplexedContext> context;
+
+    NativeViewSetup(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns)
+    {
+      auto nc = std::make_unique<NativeContract>(std::move(fns));
+      std::unordered_map<int32_t, std::unique_ptr<NativeContract>> map;
+      map.emplace(0, std::move(nc));
+      native_context = std::make_unique<NativeContext>(std::move(map));
+      auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+      context = std::make_unique<MultiplexedContext>(
+          std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+              {ContractType::kWasmi, {wasm_context.release(), true}},
+              {ContractType::kNative, {native_context.get(), false}}});
+    }
+  };
+
+  void deploy_native(ContractAddress addr)
+  {
+    auto native_xdr = NativeContractTestFramework::make_native_contract(0);
+    framework_.write_contract(native_xdr);
+    framework_.write_deployment(addr, native_xdr);
+    framework_.setup_grant_storage_token(addr, 1'000'000'000);
+  }
+
   NativeContractTestFramework framework_;
 
   x23::Defer<> force_syscallhandler_commit_ =
@@ -183,37 +210,23 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
   static constexpr ContractAddress kNativeAddr =
       NativeContractTestFramework::make_contract_address(10);
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             ContractAddress sender{};
-             auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
-             if (!r.has_value()) {
-               ADD_FAILURE() << "get_msg_sender syscall failed";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (r.value() !=
-                 SyscallErrorCode::kSyscallErrorCodeIsRootTransaction) {
-               ADD_FAILURE() << "expected IsRootTransaction";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             return {};
-           }}});
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          ContractAddress sender{};
+          auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+          if (!r.has_value()) {
+            ADD_FAILURE() << "get_msg_sender syscall failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() !=
+              SyscallErrorCode::kSyscallErrorCodeIsRootTransaction) {
+            ADD_FAILURE() << "expected IsRootTransaction";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto native_context =
-      std::make_unique<NativeContext>(std::move(contract_map));
-  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-  auto context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {wasm_context.release(), true}},
-          {ContractType::kNative, {native_context.get(), false}}});
-
-  auto native_xdr = NativeContractTestFramework::make_native_contract(0);
-  framework_.write_contract(native_xdr);
-  framework_.write_deployment(kNativeAddr, native_xdr);
-  framework_.setup_grant_storage_token(kNativeAddr, 1'000'000'000);
+  deploy_native(kNativeAddr);
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -222,7 +235,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
       .calldata = {},
   };
 
-  auto result = run_view(make_query(invocation), *context);
+  auto result = run_view(make_query(invocation), *setup.context);
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 }
 
@@ -233,37 +246,23 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
   static constexpr ContractAddress kParentAddr =
       NativeContractTestFramework::make_contract_address(20);
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-             ContractAddress sender{};
-             auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
-             if (!r.has_value()) {
-               ADD_FAILURE() << "get_msg_sender syscall failed";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "expected successful get_msg_sender";
-               return InvokeError{InvokeErrorCode::Deterministic};
-             }
-             EXPECT_EQ(sender, kParentAddr);
-             return {};
-           }}});
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          ContractAddress sender{};
+          auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+          if (!r.has_value()) {
+            ADD_FAILURE() << "get_msg_sender syscall failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "expected successful get_msg_sender";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          EXPECT_EQ(sender, kParentAddr);
+          return {};
+        }}});
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto native_context =
-      std::make_unique<NativeContext>(std::move(contract_map));
-  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-  auto context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {wasm_context.release(), true}},
-          {ContractType::kNative, {native_context.get(), false}}});
-
-  auto native_xdr = NativeContractTestFramework::make_native_contract(0);
-  framework_.write_contract(native_xdr);
-  framework_.write_deployment(kNativeAddr, native_xdr);
-  framework_.setup_grant_storage_token(kNativeAddr, 1'000'000'000);
+  deploy_native(kNativeAddr);
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -273,8 +272,105 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
   };
 
   auto result =
-      run_view(make_query_with_parent(invocation, kParentAddr), *context);
+      run_view(make_query_with_parent(invocation, kParentAddr), *setup.context);
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+}
+
+TEST_F(ViewTest, ViewFrameReverted)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          auto ret = ctx.syscall<SyscallNo::kReturn>(
+              std::as_bytes(std::span("hello", 5)), true,
+              std::span<const std::byte>{});
+          if (ret.has_value() ||
+              ret.error().code() != HostFnErrorCode::Return) {
+            ADD_FAILURE() << "expected Return error from kReturn syscall";
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Abort);
+}
+
+TEST_F(ViewTest, ViewOutputCorrectWithParentFrame)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          uint32_t val = 42;
+          auto ret = ctx.syscall<SyscallNo::kReturn>(
+              std::as_bytes(std::span(
+                  reinterpret_cast<const char *>(&val), sizeof(val))),
+              false, std::span<const std::byte>{});
+          if (ret.has_value() ||
+              ret.error().code() != HostFnErrorCode::Return) {
+            ADD_FAILURE() << "expected Return from kReturn syscall";
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result =
+      run_view(make_query_with_parent(invocation, kParentAddr), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto &buf = result.result().output.return_buffer();
+  EXPECT_FALSE(buf.empty());
+}
+
+TEST_F(ViewTest, ViewDeterministicWasm)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
 }
 
 } // namespace hogd
