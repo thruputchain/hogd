@@ -133,6 +133,7 @@ SystemCallHandler::SystemCallHandler(
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
             return ProposalModeData{};
           }
+          assert(!std::holds_alternative<ViewingModeCtor>(execution_mode_ctor));
           return ExecutionModeData{std::in_place_type<ValidationModeData>,
                                    std::get<ValidationModeCtor>(
                                        execution_mode_ctor)};
@@ -445,7 +446,7 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
@@ -474,7 +475,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   if (!runtime) {
     trace("SystemError: resolving runtime for address: {}, error {}",
           x23::show(address), runtime.error());
-    return std::pair{runtime.error().to_host_fn_error(), 0};
+    return std::pair{runtime.error(), 0};
   }
   if (!runtime.value()) {
     trace("Failed to instantiate runtime for address: {}", x23::show(address));
@@ -497,7 +498,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
-    return {finish_status.error().to_host_fn_error(), 0};
+    return {finish_status.error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;

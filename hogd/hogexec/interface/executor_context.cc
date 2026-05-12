@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <cassert>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "exec_result.hh"
 #include "exec_sched.hh"
@@ -16,11 +18,13 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/precompiles/context.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "view.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -67,6 +71,20 @@ ExecutorContext::propose_transaction_batch(TransactionBatch const &txs,
   });
   auto r = co_await awaitable;
   assert(r.size() == txs.size());
+  co_return std::move(r);
+}
+
+x23::Async<ExpectedViewResult>
+ExecutorContext::view_transaction(TransactionViewQuery const &query)
+{
+  assert(mode_ == ExecutionMode::kViewing);
+  x23::Awaitable<ExpectedViewResult> awaitable;
+  x23::CoroCB<ExpectedViewResult> cb(awaitable);
+  worker_pool_.submit([this, &query, cb]() {
+    auto res = run_view_transaction(query);
+    cb(res);
+  });
+  auto r = co_await awaitable;
   co_return std::move(r);
 }
 
@@ -195,6 +213,55 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
         });
   }
   return exec_res;
+}
+
+ExpectedViewResult
+ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
+{
+  assert(mode_ == ExecutionMode::kViewing);
+  static thread_local auto context = make_hogexec_context();
+  // view transactions never commit or write to state; therefore, they can be run on a dummy transaction ID
+  auto proxy = make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max());
+  
+  SystemCallHandler syscall_handler(*snapshot_cache_, proxy,
+                                    make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
+                                    ViewingModeCtor{}, *context,
+                                  query.auth_claim,
+                                  SHA256Hash{});
+  
+  assert(!syscall_handler.is_running());
+
+  std::vector<uint32_t> forwarded_token_ids;
+  forwarded_token_ids.reserve(query.forwarded_tokens.size());
+
+  for (auto const &token : query.forwarded_tokens) {
+    auto token_id = syscall_handler.mint_auth_token(token);
+    if (!token_id.has_value()) {
+      // This branch only triggers if the auth token registry is full,
+      // which should never happen when starting from an empty auth token registry.
+      return ExpectedViewResult{TransactionViewStatus::Abandoned};
+    }
+    forwarded_token_ids.push_back(token_id.value());
+  }
+
+  auto [res, gas_consumed] = syscall_handler.invoke(query.invocation.invoked_address, 
+    sdk_method_id(query.invocation.entrypoint),
+     query.invocation.gas_limit, 
+     query.invocation.calldata, 
+     query.invoke_flags, 
+     forwarded_token_ids);
+
+     
+  CHECK(syscall_handler.last_frame_finished());
+
+  if (res.has_value()) {
+    // invocation succeeded or failed, but executed deterministically
+  }
+
+
+
+
+
 }
 
 void

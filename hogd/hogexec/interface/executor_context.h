@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "view.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -55,6 +56,9 @@ public:
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
+  
+  x23::Async<ExpectedViewResult>
+  view_transaction(TransactionViewQuery const &query);
 
   std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
   {
@@ -75,6 +79,8 @@ private:
                                             TransactionID tx_id);
   ExecResult run_validate_transaction(ProposedTransaction const &tx,
                                       TransactionID tx_id);
+
+  ExpectedViewResult run_view_transaction(TransactionViewQuery const &query);
 
   void log_event_return(SystemStatus<void> error);
 

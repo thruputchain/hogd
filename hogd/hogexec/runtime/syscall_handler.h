@@ -217,7 +217,7 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+  [[nodiscard]] std::pair<SystemStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
          std::span<uint32_t const> owned_auth_token_ids);
