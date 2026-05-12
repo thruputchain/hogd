@@ -89,6 +89,8 @@ validation_outcome_str(SchedulerValidationOutcome outcome) -> const char *
     return "db_failed";
   case SchedulerValidationOutcome::SchedulerValidationExecutorFailed:
     return "executor_failed";
+  case SchedulerValidationOutcome::SchedulerValidationMalformed:
+    return "malformed";
   }
   return "unknown";
 }
