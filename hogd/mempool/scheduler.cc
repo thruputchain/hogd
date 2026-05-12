@@ -222,8 +222,11 @@ Scheduler::apply_committed_block_hog_ages(
     }
 
     // We cache the [HogAge] struct rather than retrieve it each time with
-    // [get_account_state()] so that we can avoid the locking overhead for
-    // accounts that submitted multiple txs in the block.
+    // [get_account_state()] so that (1) we can avoid the locking overhead for
+    // accounts that submitted multiple txs in the block and (2) we can discard
+    // [HogAge] changes when the updates fail (e.g., due to integer overflow,
+    // etc.) by dropping the entry in [hog_ages_by_account] rather than by
+    // having to roll back changes to [accounts_].
     auto [hog_age_it, inserted] = hog_ages_by_account.try_emplace(account);
     if (inserted) {
       auto [account_state, lock] = get_account_state(account);
@@ -249,18 +252,18 @@ Scheduler::apply_committed_block_hog_ages(
   // for the cost of executing the txs.
   for (auto &[account, hog_age] : hog_ages_by_account) {
     const uint128_t num_hogs = hogs_spent_by_account.at(account);
-    if (num_hogs != 0UL) {
-      if (!try_move_hogs_to_already_scheduled_group(hog_age, num_hogs,
-                                                    block_height)) {
-        continue;
-      }
+    if (num_hogs != 0UL &&
+        !try_move_hogs_to_already_scheduled_group(hog_age, num_hogs,
+                                                  block_height)) {
+      continue;
     }
-
-    auto [account_state, lock] = get_account_state(account);
-    account_state->hog_age = hog_age;
-    touched_accounts.insert(account);
   }
-  refresh_ready_accounts(touched_accounts);
+
+  auto [account_state, lock] = get_account_state(account);
+  account_state->hog_age = hog_age;
+  touched_accounts.insert(account);
+}
+refresh_ready_accounts(touched_accounts);
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
@@ -728,9 +731,8 @@ Scheduler::apply_committed_tx_hog_age(const SignedTransaction &tx,
       // group, we set it to 0.
       hogs_spent_by_this_account = 0;
     }
-    if (!hog_age_groups_have_valid_total(hog_age)) {
-      return false;
-    }
+    CHECK(hog_age_groups_have_valid_total(hog_age));
+
     if (!cycle_if_needed(hog_age, gas_limit)) {
       break;
     }
