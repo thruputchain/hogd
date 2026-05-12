@@ -23,7 +23,9 @@
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "view.hh"
 #include "x23/async.h"
 
@@ -250,18 +252,34 @@ ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
      query.invocation.calldata, 
      query.invoke_flags, 
      forwarded_token_ids);
-
-     
-  CHECK(syscall_handler.last_frame_finished());
-
-  if (res.has_value()) {
-    // invocation succeeded or failed, but executed deterministically
+  
+  if (!res.has_value()) {
+    switch(res.error().code()) {
+      case SystemErrorCode::ValidationFailure:
+        // This should never occur in view mode
+        error("view transaction failed with SystemErrorCode::ValidationFailure");
+        return ExpectedViewResult(TransactionViewStatus::InternalError);
+      case SystemErrorCode::Abandon:
+        return ExpectedViewResult{TransactionViewStatus::Abandoned};
+      case SystemErrorCode::Unrecoverable:
+        // This should never occur in view mode
+        error("view transaction failed with SystemErrorCode::Unrecoverable");
+        return ExpectedViewResult(TransactionViewStatus::InternalError);
+    }
   }
 
+  if (*res != SyscallErrorCode::kSyscallErrorCodeNone && *res != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+    ExpectedViewResult result(TransactionViewStatus::InvalidInput);
+    result.error_code() = *res;
+    return result;
+  }
 
+  CHECK(syscall_handler.last_frame_finished());
 
-
-
+  ExpectedViewResult result(TransactionViewStatus::Ok);
+  result.result().output = syscall_handler.get_most_recent_frame_output();
+  result.result().events = syscall_handler.extract_events();
+  return result;
 }
 
 void
