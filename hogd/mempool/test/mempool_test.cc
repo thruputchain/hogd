@@ -1092,7 +1092,6 @@ TEST(Mempool, CommitValidatedBlockSkipsInvalidHogAgeUpdate)
 
   fib_client_t fib_client(account);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
 
   auto res_validate =
       validate_nominated_block_after_zeroing_local_scheduler_hogs(server,
@@ -1106,7 +1105,8 @@ TEST(Mempool, CommitValidatedBlockSkipsInvalidHogAgeUpdate)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
   {
     auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
-    EXPECT_LT(from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]), gas_limit);
+    EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]),
+              static_cast<uint128_t>(0));
     EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
               static_cast<uint128_t>(0));
     EXPECT_EQ(from_xdr(hog_age->num_hogs[kHogAgeGroupReceived]),
