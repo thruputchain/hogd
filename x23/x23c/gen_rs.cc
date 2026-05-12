@@ -575,8 +575,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
       string inner_type = type_name(inner, false, false);
       // inner_access is used both as a field-access (self.<x>) and as a
       // binding name; either way an r#-escaped form is correct Rust.
-      string inner_access =
-          (inner.id.empty()) ? "0" : escape_rust_id(inner.id);
+      string inner_access = (inner.id.empty()) ? "0" : escape_rust_id(inner.id);
 
       /*
       impl From<$InnerType> for $OuterType {
@@ -954,8 +953,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
                          kEnumBaseType, escape_rust_id(a.decl.id),
                          type_name(a.decl, false, false));
           default_match =
-              std::format("{0}::Default{{ {1},..}} => {2},\n", tname,
-                          switch_id,
+              std::format("{0}::Default{{ {1},..}} => {2},\n", tname, switch_id,
                           convert_i32(std::format("*{}", switch_id)));
         }
       }
@@ -1087,11 +1085,11 @@ GenRs::escape_rust_id(const string &id)
   // "crate", "self", "Self", and "super" are also omitted: they cannot be
   // raw identifiers, and they are unlikely to occur as XDR field names.
   static const std::set<string> kRustKeywords = {
-      "as",     "async",  "await", "break", "continue", "dyn",    "else",
-      "extern", "fn",     "for",   "if",    "impl",     "in",     "let",
-      "loop",   "match",  "mod",   "move",  "mut",      "pub",    "ref",
-      "return", "static", "trait", "type",  "unsafe",   "use",    "where",
-      "while",
+      "as",   "async",  "await", "break",  "continue", "dyn",
+      "else", "extern", "fn",    "for",    "if",       "impl",
+      "in",   "let",    "loop",  "match",  "mod",      "move",
+      "mut",  "pub",    "ref",   "return", "static",   "trait",
+      "type", "unsafe", "use",   "where",  "while",
   };
   if (kRustKeywords.contains(id)) {
     return "r#" + id;
