@@ -170,7 +170,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   double stage_add_txs = 0.0;
 
   auto txs = std::make_shared<SignedTransactionBatch>();
-  CHECK(co_await parallel_batch_to_t(batch, *txs));
+  if (!(co_await parallel_batch_to_t(batch, *txs))) {
+    info("submit_unvetted rejected malformed transaction batch");
+    co_return;
+  }
   size_t num_submitted_txs = txs->size();
   record_submitted_unvetted(num_submitted_txs);
   record_stage(stage_deserialize_batch);
@@ -242,7 +245,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
   SignedTransactionBatch txs;
-  CHECK(co_await parallel_batch_to_t(batch, txs));
+  if (!(co_await parallel_batch_to_t(batch, txs))) {
+    info("submit_vetted rejected malformed transaction batch");
+    co_return;
+  }
   record_submitted_vetted(txs.size());
   info("submit_vetted, {} txs", txs.size());
   x23::CoroGuard cg;
@@ -1321,17 +1327,39 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     x23::Async<bool> tx_hash_handle =
         parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
 
-    CHECK(co_await tx_nondeterministic_data_handle);
+    const bool decoded_tx_nominations =
+        co_await tx_nondeterministic_data_handle;
     record_stage(stage_deserialize_nomination_data);
+
+    const bool decoded_tx_hashes = co_await tx_hash_handle;
+    record_stage(stage_deserialize_tx_hashes);
+
+    if (!decoded_tx_nominations || !decoded_tx_hashes) {
+      co_await decrement_num_validations_in_progress();
+      validation_telemetry.outcome = validation_outcome_str(
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
+      info("schedulercoord_validate rejected malformed nomination batch");
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
+    }
+
+    if (cache.tx_hashes.size() != tx_nominations.size()) {
+      co_await decrement_num_validations_in_progress();
+      validation_telemetry.outcome = validation_outcome_str(
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
+      info("schedulercoord_validate rejected nomination with {} tx hashes and "
+           "{} nondeterministic data entries",
+           cache.tx_hashes.size(), tx_nominations.size());
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationMalformed);
+    }
 
     // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
     // correctly when we use the helper functions above to send txs to the
     // executors.
     cache.block_id = generate_block_id();
     validation_telemetry.block_id = cache.block_id;
-    CHECK(co_await tx_hash_handle);
     validation_telemetry.tx_count = cache.tx_hashes.size();
-    record_stage(stage_deserialize_tx_hashes);
   }
 
   co_await wait_for_transfer_data(nomination.block_height - 1);
