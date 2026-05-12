@@ -385,6 +385,25 @@ TEST_P(WasmiErrorHandlingTest, Spin)
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});
 }
 
+TEST_P(WasmiErrorHandlingTest, ResolveContractReturnsNull)
+{
+  link_fn("test", "external_call", &good_call);
+  make_syscall_handler(contract_);
+
+  // Hash not in newly_created_contracts_ or the DB — resolve_contract returns
+  // Ok(nullptr) because BlockSnapshotServer returns kRPCNotFound.
+  DeployedContractHash nonexistent_hash{
+      .hash = SHA256Hash{},
+      .contract_size = 100,
+      .contract_type = ContractType::kWasmi,
+  };
+
+  auto runtime =
+      get_context()->make_new_runtime(nonexistent_hash, get_syscall_handler());
+  ASSERT_FALSE(runtime.has_value());
+  EXPECT_EQ(runtime.error(), SystemError{SystemErrorCode::Unrecoverable});
+}
+
 INSTANTIATE_TEST_SUITE_P(WasmEngines, WasmiErrorHandlingTest,
                          ::testing::Values(WasmEngine::kWasmi,
                                            WasmEngine::kWasmtime),

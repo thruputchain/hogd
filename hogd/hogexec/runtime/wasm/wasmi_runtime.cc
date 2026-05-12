@@ -60,6 +60,11 @@ wasmi_contract_get_fn(void *host_call_context_ptr,
     return make_err(res.error().code());
   }
 
+  if (*res == nullptr) [[unlikely]] {
+    error("Unrecoverable: Contract lookup failed in wasmi_contract_get_fn");
+    return make_err(SystemErrorCode::Unrecoverable);
+  }
+
   if ((*res)->contract_type() != ContractType::kWasmi) [[unlikely]] {
     error("Unrecoverable: Attempt to access a non-wasmi contract from inside "
           "wasmi_contract_get_fn");
