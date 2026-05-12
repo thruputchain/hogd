@@ -266,7 +266,23 @@ syscall_Invoke_inner(
   // Invocation encountered some error
   output_return_buffer_len = 0;
   output_returned_auth_token_len = 0;
-  return {invoke_res, WrappedGasAmount{gas_amount}};
+
+  auto host_fn_res = [&]() -> HostFnStatus<SyscallErrorCode> {
+    if (invoke_res.has_value()) {
+      return *invoke_res;
+    }
+    switch (invoke_res.error().code()) {
+    case SystemErrorCode::Unrecoverable:
+      return HostFnError{HostFnErrorCode::Unrecoverable};
+    case SystemErrorCode::Abandon:
+      return HostFnError{HostFnErrorCode::Abandon};
+    case SystemErrorCode::ValidationFailure:
+      return HostFnError{HostFnErrorCode::ValidationFailure};
+    }
+    panic("unrecoverable: unknown error code: {}", invoke_res.error().code());
+  }();
+
+  return {host_fn_res, WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

@@ -1,19 +1,25 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <utility>
 
+#include "ffi_enums.hh"
+#include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/string.h"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "invoke_flag.hh"
 #include "syscall_error.hh"
-#include "x23/debug.h"
+#include "transaction.hh"
+#include "types.hh"
 #include "x23/format.h"
 
 namespace hogd {
@@ -55,11 +61,19 @@ public:
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
                        UINT64_MAX, calldata, Flags, {});
 
-    HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
+    SystemStatus<SyscallErrorCode> host_fn_res = res.first;
 
     if (!host_fn_res.has_value()) {
-      trace("Invoke HostFnStatus error: {}", host_fn_res.error());
-      return std::pair{host_fn_res.error(), res.second};
+      trace("Invoke SystemStatus error: {}", host_fn_res.error());
+      switch (host_fn_res.error().code()) {
+      case SystemErrorCode::Unrecoverable:
+        return std::pair{HostFnError{HostFnErrorCode::Unrecoverable}, res.second};
+      case SystemErrorCode::Abandon:
+        return std::pair{HostFnError{HostFnErrorCode::Abandon}, res.second};
+      case SystemErrorCode::ValidationFailure:
+        return std::pair{HostFnError{HostFnErrorCode::ValidationFailure}, res.second};
+      }
+      panic("unrecoverable: unknown error code: {}", host_fn_res.error().code());
     }
 
     if (host_fn_res.value() != SyscallErrorCode::kSyscallErrorCodeNone &&
