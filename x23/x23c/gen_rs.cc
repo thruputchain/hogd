@@ -135,10 +135,8 @@ struct GenRs {
       prtop("{}{},\n", vis, type_name_str);
     }
     else {
-      // Hack: some XDR files (stellar's) use "type" as a field name.
-      // This breaks in rust, so we rename it to "type_".
-      std::string id = (d.id == "type") ? "type_" : d.id;
-      prtop("{}{}: {},\n", vis, id, type_name_str);
+      // Rust-reserved field names (e.g. "type") are escaped via r#.
+      prtop("{}{}: {},\n", vis, escape_rust_id(d.id), type_name_str);
     }
   }
 
@@ -163,6 +161,10 @@ struct GenRs {
   static string map_proc_return_type(const string &t);
   static string map_case(const string &c);
   static string map_bound(const string &b);
+  // Wraps Rust-reserved identifiers in raw-identifier syntax (r#) so XDR
+  // names that are legal per RFC 4506 but reserved in Rust (e.g. "type")
+  // pass through unchanged at the source level.
+  static string escape_rust_id(const string &id);
   string type_name(const Declaration &d, bool generate,
                    bool in_colon_required_setting);
   // return nullopt unless the type is an opaque array
@@ -571,7 +573,9 @@ GenRs::show_type(const StructBody &s, string const &tname)
       auto outer_id = tname;
       auto inner = s.front();
       string inner_type = type_name(inner, false, false);
-      string inner_access = (inner.id.empty()) ? "0" : inner.id;
+      // inner_access is used both as a field-access (self.<x>) and as a
+      // binding name; either way an r#-escaped form is correct Rust.
+      string inner_access = (inner.id.empty()) ? "0" : escape_rust_id(inner.id);
 
       /*
       impl From<$InnerType> for $OuterType {
@@ -585,7 +589,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
       if (inner.id.empty())
         prtop("        Self(_inner)\n");
       else
-        prtop("        Self {{ {}: _inner }}\n", inner.id);
+        prtop("        Self {{ {}: _inner }}\n", escape_rust_id(inner.id));
       prtop("    }}\n");
       prtop("}}");
 
@@ -610,7 +614,8 @@ impl {0} {{
 }}
 )",
             outer_id, inner_type, inner_access,
-            inner.id.empty() ? "_inner" : inner.id + ": _inner");
+            inner.id.empty() ? "_inner"
+                             : escape_rust_id(inner.id) + ": _inner");
 
       /*
       impl Deref for $OuterType {
@@ -804,6 +809,13 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   std::string default_decl;
   std::string default_match;
 
+  // b.switch_id appears in generated Rust as (a) a field name in the
+  // Default variant, (b) a pattern/expression binding inside the match
+  // arm in bottom_, and (c) the method name on the impl block.  All three
+  // accept raw identifiers, so we escape once and use the result
+  // everywhere.
+  const std::string switch_id = escape_rust_id(b.switch_id);
+
   const string switch_type = map_type(b.switch_type);
 
   const bool is_enum = (switch_type == b.switch_type);
@@ -908,10 +920,10 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         }
         if (a.has_default) {
           default_decl =
-              std::format("Default {{ {}: {} }},", b.switch_id, kEnumBaseType);
+              std::format("Default {{ {}: {} }},", switch_id, kEnumBaseType);
           default_match =
-              std::format("{0}::Default{{ {1} }} => {2},\n", tname, b.switch_id,
-                          convert_i32(std::format("*{}", b.switch_id)));
+              std::format("{0}::Default{{ {1} }} => {2},\n", tname, switch_id,
+                          convert_i32(std::format("*{}", switch_id)));
         }
       }
       else {
@@ -923,7 +935,8 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         prtop("//   {} {};\n", type_name(a.decl, false, false), a.decl.id);
         for (const auto &c : a.cases) {
           prtop("{} {{ {}: {} }} = {} as {},\n", int_qualified_declname(c),
-                a.decl.id, name_prefix + type_name(a.decl, false, false),
+                escape_rust_id(a.decl.id),
+                name_prefix + type_name(a.decl, false, false),
                 qualified_typename(c), kEnumBaseType);
 
           std::string match_name =
@@ -936,26 +949,18 @@ GenRs::show_type(const UnionBody &b, string const &tname)
         }
         if (a.has_default) {
           std::format_to(std::back_inserter(default_decl),
-                         "Default {{ {}: {}, {}: {} }},", b.switch_id,
-                         kEnumBaseType, a.decl.id,
+                         "Default {{ {}: {}, {}: {} }},", switch_id,
+                         kEnumBaseType, escape_rust_id(a.decl.id),
                          type_name(a.decl, false, false));
           default_match =
-              std::format("{0}::Default{{ {1},..}} => {2},\n", tname,
-                          b.switch_id,
-                          convert_i32(std::format("*{}", b.switch_id)));
+              std::format("{0}::Default{{ {1},..}} => {2},\n", tname, switch_id,
+                          convert_i32(std::format("*{}", switch_id)));
         }
       }
     }
     top_ += std::string(kIndentWidth * indent_, ' ');
     top_ += default_decl;
     top_ += "\n";
-  }
-
-  // Rust doesn't support having methods named "type"; switch that to "type_"
-  // if we're generating from xdr that we can't patch.
-  std::string switch_id = b.switch_id;
-  if (switch_id == "type") {
-    switch_id = "type_";
   }
 
   std::string unsafe_read =
@@ -1069,6 +1074,27 @@ GenRs::map_bound(const string &b)
   if (b.empty())
     return defbound;
   return b;
+}
+
+string
+GenRs::escape_rust_id(const string &id)
+{
+  // Rust strict + edition keywords that are also legal XDR (RFC 4506)
+  // identifiers.  Keywords that XDR itself reserves (const, enum, struct,
+  // true, false) are omitted since they can never appear as XDR names.
+  // "crate", "self", "Self", and "super" are also omitted: they cannot be
+  // raw identifiers, and they are unlikely to occur as XDR field names.
+  static const std::set<string> kRustKeywords = {
+      "as",   "async",  "await", "break",  "continue", "dyn",
+      "else", "extern", "fn",    "for",    "if",       "impl",
+      "in",   "let",    "loop",  "match",  "mod",      "move",
+      "mut",  "pub",    "ref",   "return", "static",   "trait",
+      "type", "unsafe", "use",   "where",  "while",
+  };
+  if (kRustKeywords.contains(id)) {
+    return "r#" + id;
+  }
+  return id;
 }
 
 void
