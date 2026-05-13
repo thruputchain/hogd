@@ -361,6 +361,16 @@ SystemCallHandler::try_commit_transaction()
 
   // Root commit: push the accumulated delta batch in one HogDB subtransaction.
   // The TryInvoke depth cap does not apply here; see invocation_frame.cc.
+  //
+  // Validation mode pushes no per-frame subtransactions, so the root frame's
+  // try_invoke_frame_count_ must still be 0 here. This is load-bearing: if a
+  // future refactor bumps it in validation, mark_frame_as_failed on a later
+  // failure path would pop_subtransactions a savepoint that was never pushed.
+  assert(!std::holds_alternative<ValidationModeData>(execution_mode_data_) ||
+         last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+                 .value()
+                 .get_try_invoke_frame_count() == 0);
+
   auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
                .value()
                .try_acquire_frame_locks(db_proxy_);

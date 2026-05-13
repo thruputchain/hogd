@@ -1144,6 +1144,98 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
   ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// Nested-chain depth propagation: A -> TryInvoke(B); B -> kMaxSavepointDepth
+// successful TryInvokes of C; C is a no-op. After B's loop, B's
+// total_try_invoke_depth_ has accumulated to kMaxSavepointDepth (one per
+// C success, propagated up via commit_successful_child_frame). When B's own
+// frame finishes -- i.e., A's TryInvoke of B reaches finish_frame --
+// depth_cap_reached() fires on B's frame, so no bit is logged (proposal) or
+// consumed (validation) for B itself. A sees the TryInvoke of B as a
+// deterministic failure.
+//
+// This exercises depth accumulation through a parent-child boundary
+// (B inherits depth from C), distinct from sequential siblings at one level.
+TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
+{
+  static constexpr ContractAddress kAddrC = make_contract_address(2);
+
+  // Deploy a third native contract at kAddrC, mirroring SetUp() for A and B.
+  auto native_contract_c_xdr = make_native_contract(2);
+  write_contract(native_contract_c_xdr);
+  write_deployment(kAddrC, native_contract_c_xdr);
+  setup_grant_storage_token(kAddrC, 1'000'000'000);
+
+  auto contract_a =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        RuntimeMemoryLength out_ret = 0, out_auth = 0;
+        auto r = ctx.syscall<SyscallNo::kInvoke>(
+            kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+            std::to_underlying(InvokeFlag::TryInvoke),
+            std::span<uint32_t>{}, out_ret, out_auth);
+        if (!r.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kMaxSavepointDepth; i++) {
+          RuntimeMemoryLength out_ret = 0, out_auth = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrC, 0, ctx.runtime().get_available_gas(), Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke),
+              std::span<uint32_t>{}, out_ret, out_auth);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      }});
+  auto contract_c = make_contract(
+      {[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> { return {}; }});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_a));
+  contract_map.emplace(1, std::move(contract_b));
+  contract_map.emplace(2, std::move(contract_c));
+  auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto tx = make_invoke_a_tx(0);
+
+  // Proposal: B's frame hits the cap, B's TryInvoke from A is deterministic
+  // failure, A propagates. Proposal logs exactly kMaxSavepointDepth bits
+  // (one per C success); none for B's own try_invoke.
+  auto proposal_handler = make_new_system_call_handler(tx, *ctx);
+  auto proposal_res = proposal_handler.root_invoke();
+  ASSERT_FALSE(proposal_res.is_root_success());
+  EXPECT_EQ(proposal_res.result_.error().code(),
+            InvokeErrorCode::Deterministic);
+  auto const &proposal_data = proposal_handler.get_proposal_data();
+  EXPECT_EQ(proposal_data.nondeterministic_bit_count,
+            static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+
+  // Validation round-trips: A -> B -> kMaxSavepointDepth successful C
+  // invocations (each consuming a true bit and bumping depth via
+  // note_validation_try_invoke_success); B's frame hits the cap; no bit
+  // consumed for B; A's TryInvoke of B fails deterministically; A propagates.
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *ctx, proposal_data);
+  auto validation_res = validation_handler.root_invoke();
+  ASSERT_FALSE(validation_res.is_root_success())
+      << "Validation must reach the same deterministic failure as proposal";
+  EXPECT_EQ(validation_res.result_.error().code(),
+            InvokeErrorCode::Deterministic);
+  ASSERT_TRUE(validation_handler.abort_transaction().has_value());
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

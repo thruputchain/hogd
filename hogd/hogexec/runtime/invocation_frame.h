@@ -108,6 +108,15 @@ public:
     return total_try_invoke_depth_;
   }
 
+  // Number of HogDB subtransactions this frame has pushed for its own
+  // successful TryInvoke children. Validation mode never pushes per-frame
+  // subtransactions, so this stays 0 on every frame in validation; useful
+  // for asserting that invariant at the root commit site.
+  uint32_t get_try_invoke_frame_count() const
+  {
+    return try_invoke_frame_count_;
+  }
+
   bool depth_cap_reached() const
   {
     return total_try_invoke_depth_ >= kMaxSavepointDepth;
