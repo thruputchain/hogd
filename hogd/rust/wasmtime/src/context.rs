@@ -38,6 +38,12 @@ fn check_memory_limit(module: &Module) -> bool {
 /// This replaces wasmtime's stringly-typed incompatible-import-type
 /// classification (see issue #1533): all rejections here are
 /// deterministic, no formatted error text is inspected anywhere.
+///
+/// Rejection reasons are surfaced at INFO level (unconditionally — not
+/// gated by the `debug_logging` feature) so a contract that was built
+/// against a stale SDK fails with a diagnosable signal in release.
+/// Without this, the only release-visible symptom is an opaque
+/// "deterministicError" outcome on the calling transaction.
 fn validate_imports(
     module: &Module,
     imports: &std::collections::HashMap<(String, String), u8>,
@@ -47,51 +53,51 @@ fn validate_imports(
         let expected_nargs = match imports.get(&key) {
             Some(n) => *n as usize,
             None => {
-                debug_log!(eprintln!(
-                    "Unknown host import: {}::{}",
+                eprintln!(
+                    "wasmtime: rejecting contract — unknown host import {}::{} (likely SDK/runtime ABI mismatch)",
                     import.module(),
                     import.name()
-                ));
+                );
                 return false;
             }
         };
         let func_ty = match import.ty() {
             ExternType::Func(f) => f,
-            _other => {
-                debug_log!(eprintln!(
-                    "Import {}::{} declared as non-function: {_other:?}",
+            other => {
+                eprintln!(
+                    "wasmtime: rejecting contract — import {}::{} declared as non-function: {other:?}",
                     import.module(),
                     import.name()
-                ));
+                );
                 return false;
             }
         };
         let params: Vec<_> = func_ty.params().collect();
         let results: Vec<_> = func_ty.results().collect();
         if params.len() != expected_nargs {
-            debug_log!(eprintln!(
-                "Import {}::{} arity mismatch: declared {}, expected {}",
+            eprintln!(
+                "wasmtime: rejecting contract — import {}::{} arity mismatch: contract declares {} params, host registers {} (likely SDK/runtime ABI mismatch)",
                 import.module(),
                 import.name(),
                 params.len(),
                 expected_nargs
-            ));
+            );
             return false;
         }
         if !params.iter().all(|p| p.is_i64()) {
-            debug_log!(eprintln!(
-                "Import {}::{} param type mismatch: {params:?}",
+            eprintln!(
+                "wasmtime: rejecting contract — import {}::{} param-type mismatch: contract types {params:?}, host requires all-i64",
                 import.module(),
                 import.name()
-            ));
+            );
             return false;
         }
         if results.len() != 1 || !results[0].is_i32() {
-            debug_log!(eprintln!(
-                "Import {}::{} result type mismatch: {results:?}",
+            eprintln!(
+                "wasmtime: rejecting contract — import {}::{} result-type mismatch: contract results {results:?}, host requires single i32",
                 import.module(),
                 import.name()
-            ));
+            );
             return false;
         }
     }
