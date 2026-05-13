@@ -153,6 +153,13 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 
 } // namespace
 
+void
+InvocationFrame::note_validation_try_invoke_success()
+{
+  assert(!depth_cap_reached());
+  total_try_invoke_depth_++;
+}
+
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
