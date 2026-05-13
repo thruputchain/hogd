@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -861,6 +862,384 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 
   EXPECT_THROW(advance_block(), std::runtime_error)
       << "More consumed than inserted should fail finalization";
+}
+
+TEST_P(ProposeValidateRoundtripTest,
+       ValidationRejectsOverDepthTryInvokeTrueBits)
+{
+  auto make_depth_poc_key = [](uint32_t index) {
+    StorageKeyContractData key{};
+    key[0] = static_cast<uint8_t>('d');
+    key[1] = static_cast<uint8_t>('e');
+    key[2] = static_cast<uint8_t>('p');
+    key[3] = static_cast<uint8_t>('t');
+    key[4] = static_cast<uint8_t>('h');
+    key[5] = static_cast<uint8_t>(index & 0xff);
+    key[6] = static_cast<uint8_t>((index >> 8) & 0xff);
+    key[7] = static_cast<uint8_t>((index >> 16) & 0xff);
+    key[8] = static_cast<uint8_t>((index >> 24) & 0xff);
+    return key;
+  };
+
+  auto make_index_calldata = [](uint32_t index) {
+    Calldata calldata;
+    calldata.push_back(static_cast<uint8_t>(index & 0xff));
+    calldata.push_back(static_cast<uint8_t>((index >> 8) & 0xff));
+    return calldata;
+  };
+
+  auto proposal_bit = [](NondeterministicProposalData const &proposal,
+                         uint32_t index) {
+    return (proposal.nondeterministic_bits[index / 8] &
+            (uint8_t{1} << (index % 8))) != 0;
+  };
+
+  auto make_all_true_proposal_data = [] {
+    NondeterministicProposalData proposal;
+    proposal.nondeterministic_bit_count = kMaxSavepointDepth + 1;
+    proposal.nondeterministic_bits.resize(
+        (proposal.nondeterministic_bit_count + 7) / 8, 0xff);
+    auto valid_bits_in_last_byte = proposal.nondeterministic_bit_count % 8;
+    if (valid_bits_in_last_byte != 0) {
+      proposal.nondeterministic_bits.back() =
+          static_cast<uint8_t>((uint8_t{1} << valid_bits_in_last_byte) - 1);
+    }
+    return proposal;
+  };
+
+  auto contract_a = make_contract(
+      {[make_index_calldata](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        uint32_t successes = 0;
+        for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, 0, ctx.runtime().get_available_gas(),
+              make_index_calldata(i), std::to_underlying(InvokeFlag::TryInvoke),
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            successes++;
+          }
+        }
+        if (successes != kMaxSavepointDepth + 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      }});
+
+  auto contract_b = make_contract(
+      {[make_depth_poc_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto const &calldata = ctx.handler().get_calldata();
+        if (calldata.size() != 2) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        uint32_t index = static_cast<uint32_t>(calldata[0]) |
+                         (static_cast<uint32_t>(calldata[1]) << 8);
+        auto [ws, _wg] = syscall_BytestringSet_inner(
+            ctx.handler(), make_depth_poc_key(index),
+            std::as_bytes(std::span(calldata)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!ws.has_value() ||
+            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      }});
+
+  auto native_context =
+      make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx = make_invoke_a_tx(0);
+
+  // Honest proposal cannot produce kMaxSavepointDepth+1 successes.
+  {
+    auto proposal_handler = make_new_system_call_handler(tx, *native_context);
+    auto proposal_res = proposal_handler.root_invoke();
+    ASSERT_FALSE(proposal_res.is_root_success());
+    ASSERT_EQ(proposal_res.result_.error().code(),
+              InvokeErrorCode::Deterministic);
+
+    auto const &honest_proposal = proposal_handler.get_proposal_data();
+    // With the fix, proposal does NOT log a bit for the over-depth try.
+    ASSERT_EQ(honest_proposal.nondeterministic_bit_count, kMaxSavepointDepth);
+    for (uint32_t i = 0; i < kMaxSavepointDepth; ++i) {
+      EXPECT_TRUE(proposal_bit(honest_proposal, i));
+    }
+    ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation must reject the all-true malicious proposal.
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *native_context,
+                                              make_all_true_proposal_data());
+  ASSERT_FALSE(validation_handler.root_invoke().is_root_success())
+      << "Validation must reject an all-true bitstring past the savepoint cap";
+
+  auto commit_res = validation_handler.try_commit_transaction();
+  ASSERT_NE(commit_res, ExecResult::ExecResultOK)
+      << "Validation must not commit the malicious over-depth child storage";
+
+  advance_block();
+
+  StorageKey cap_crossing_key(StorageKeyType::ContractData);
+  cap_crossing_key.contract_data_key() = make_depth_poc_key(kMaxSavepointDepth);
+  auto cap_crossing_item = lookup_storage_item_from_db(
+      AddressAndKey{.address = kAddrB, .key = std::move(cap_crossing_key)});
+  EXPECT_FALSE(cap_crossing_item.has_value())
+      << "Over-cap child storage must not be persisted";
+}
+
+TEST_P(ProposeValidateRoundtripTest,
+       ValidationRejectsStaleTrailingBitAtDepthCap)
+{
+  // A is tolerant: it does NOT propagate child failures, so a single dangling
+  // proposal bit reaches finalize_after_root_frame instead of short-circuiting
+  // in A's logic.
+  auto contract_a =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
+          RuntimeMemoryLength out_ret = 0, out_auth = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
+          // Tolerant: propagate system errors but ignore user-level failures
+          // (including the deterministic depth-cap failure on the last try).
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
+
+  auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx = make_invoke_a_tx(0);
+
+  // Stale-format proposal data: kMaxSavepointDepth `true` bits + one
+  // trailing `false` bit (what pre-fix proposal would have produced).
+  NondeterministicProposalData stale;
+  stale.nondeterministic_bit_count = kMaxSavepointDepth + 1;
+  size_t nbytes = (stale.nondeterministic_bit_count + 7) / 8;
+  stale.nondeterministic_bits.resize(nbytes, 0);
+  for (uint32_t i = 0; i < kMaxSavepointDepth; ++i) {
+    stale.nondeterministic_bits[i / 8] |=
+        static_cast<uint8_t>(uint8_t{1} << (i % 8));
+  }
+  // Last bit (index kMaxSavepointDepth) stays 0 -- the stale 'false'.
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(stale));
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success())
+      << "Validation must reject when the proposal has a trailing bit that "
+         "the depth-cap branch refuses to consume";
+  EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
+  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
+{
+  auto contract_a =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
+          RuntimeMemoryLength out_ret = 0, out_auth = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
+
+  auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx = make_invoke_a_tx(0);
+
+  // Proposal succeeds and produces exactly (kMaxSavepointDepth - 1) `true`
+  // bits.
+  auto handler = make_new_system_call_handler(tx, *ctx);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  auto proposal_data = handler.get_proposal_data();
+  EXPECT_EQ(proposal_data.nondeterministic_bit_count,
+            static_cast<uint32_t>(kMaxSavepointDepth - 1));
+  ASSERT_TRUE(handler.abort_transaction().has_value());
+
+  // Validation with the captured proposal data succeeds.
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *ctx, proposal_data);
+  ASSERT_TRUE(validation_handler.root_invoke().is_root_success());
+  ASSERT_EQ(validation_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
+}
+
+// Regression guard: if a future refactor accidentally lets validation's
+// depth-cap branch consume a bit (or skips the depth-cap check entirely),
+// a proposal with many more `true` bits than the cap would silently roll
+// through. Honest proposal can never produce more than kMaxSavepointDepth
+// `true` bits.
+TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
+{
+  static constexpr uint32_t kAttempts = 2 * kMaxSavepointDepth;
+  auto contract_a =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kAttempts; i++) {
+          RuntimeMemoryLength out_ret = 0, out_auth = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
+          // Tolerant: propagate system errors, ignore deterministic child
+          // failures (including the depth-cap rejection past the cap).
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
+
+  auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx = make_invoke_a_tx(0);
+
+  // Malicious proposal: kAttempts bits, all `true`. Honest proposal could
+  // never produce more than kMaxSavepointDepth `true` bits, so any prefix
+  // longer than that must be rejected by validation.
+  NondeterministicProposalData mal;
+  mal.nondeterministic_bit_count = kAttempts;
+  size_t nbytes = (mal.nondeterministic_bit_count + 7) / 8;
+  mal.nondeterministic_bits.resize(nbytes, 0xff);
+  auto trailing = mal.nondeterministic_bit_count % 8;
+  if (trailing != 0) {
+    mal.nondeterministic_bits.back() =
+        static_cast<uint8_t>((uint8_t{1} << trailing) - 1);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(mal));
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success())
+      << "Validation must reject a proposal with more `true` bits than "
+         "kMaxSavepointDepth (each `true` bit corresponds to a +1 depth "
+         "increment, and depth is capped).";
+  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// Nested-chain depth propagation: A -> TryInvoke(B); B -> kMaxSavepointDepth
+// successful TryInvokes of C; C is a no-op. After B's loop, B's
+// total_try_invoke_depth_ has accumulated to kMaxSavepointDepth (one per
+// C success, propagated up via commit_successful_child_frame). When B's own
+// frame finishes -- i.e., A's TryInvoke of B reaches finish_frame --
+// depth_cap_reached() fires on B's frame, so no bit is logged (proposal) or
+// consumed (validation) for B itself. A sees the TryInvoke of B as a
+// deterministic failure.
+//
+// This exercises depth accumulation through a parent-child boundary
+// (B inherits depth from C), distinct from sequential siblings at one level.
+TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
+{
+  static constexpr ContractAddress kAddrC = make_contract_address(2);
+
+  // Deploy a third native contract at kAddrC, mirroring SetUp() for A and B.
+  auto native_contract_c_xdr = make_native_contract(2);
+  write_contract(native_contract_c_xdr);
+  write_deployment(kAddrC, native_contract_c_xdr);
+  setup_grant_storage_token(kAddrC, 1'000'000'000);
+
+  auto contract_a =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        RuntimeMemoryLength out_ret = 0, out_auth = 0;
+        auto r = ctx.syscall<SyscallNo::kInvoke>(
+            kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+            out_ret, out_auth);
+        if (!r.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kMaxSavepointDepth; i++) {
+          RuntimeMemoryLength out_ret = 0, out_auth = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrC, 0, ctx.runtime().get_available_gas(), Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      }});
+  auto contract_c =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_a));
+  contract_map.emplace(1, std::move(contract_b));
+  contract_map.emplace(2, std::move(contract_c));
+  auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto tx = make_invoke_a_tx(0);
+
+  // Proposal: B's frame hits the cap, B's TryInvoke from A is deterministic
+  // failure, A propagates. Proposal logs exactly kMaxSavepointDepth bits
+  // (one per C success); none for B's own try_invoke.
+  auto proposal_handler = make_new_system_call_handler(tx, *ctx);
+  auto proposal_res = proposal_handler.root_invoke();
+  ASSERT_FALSE(proposal_res.is_root_success());
+  EXPECT_EQ(proposal_res.result_.error().code(),
+            InvokeErrorCode::Deterministic);
+  auto const &proposal_data = proposal_handler.get_proposal_data();
+  EXPECT_EQ(proposal_data.nondeterministic_bit_count,
+            static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+
+  // Validation round-trips: A -> B -> kMaxSavepointDepth successful C
+  // invocations (each consuming a true bit and bumping depth via
+  // note_validation_try_invoke_success); B's frame hits the cap; no bit
+  // consumed for B; A's TryInvoke of B fails deterministically; A propagates.
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *ctx, proposal_data);
+  auto validation_res = validation_handler.root_invoke();
+  ASSERT_FALSE(validation_res.is_root_success())
+      << "Validation must reach the same deterministic failure as proposal";
+  EXPECT_EQ(validation_res.result_.error().code(),
+            InvokeErrorCode::Deterministic);
+  ASSERT_TRUE(validation_handler.abort_transaction().has_value());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,

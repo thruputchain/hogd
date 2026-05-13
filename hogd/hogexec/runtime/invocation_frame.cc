@@ -21,7 +21,6 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
-#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -153,12 +152,26 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 
 } // namespace
 
+void
+InvocationFrame::note_validation_try_invoke_success()
+{
+  assert(!depth_cap_reached());
+  total_try_invoke_depth_++;
+}
+
 SystemStatus<bool>
 InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
-  if (total_try_invoke_depth_ >= kMaxSavepointDepth) {
-    return false;
-  }
+  // Pushes the accumulated delta batch as a HogDB subtransaction. Returns
+  // true on a successful lock acquisition, false on contention failure.
+  // On success, increments the per-frame TryInvoke counters; the root commit
+  // caller (SystemCallHandler::try_commit_transaction) ignores those counters,
+  // since the root frame is discarded immediately after commit.
+  //
+  // The deterministic TryInvoke depth cap (kMaxSavepointDepth) is NOT enforced
+  // here; it is enforced exclusively by InvocationFrameStack::finish_frame's
+  // depth-cap arm before this is called for a child TryInvoke frame. The root
+  // commit caller has no TryInvoke semantics, so the cap does not apply there.
 
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size());
 
@@ -255,8 +268,13 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     if (frame_result.is_frame_success()) {
       bool acq_success = false;
 
-      // If we're in proposal mode, we need to acquire the frame locks.
-      if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+      if (frame_stack_.back().depth_cap_reached()) {
+        // Deterministic failure across both proposal and validation modes.
+        // No nondeterministic bit is logged or consumed here, so the bit
+        // stream represents only lock-acquisition outcomes.
+        acq_success = false;
+      }
+      else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         auto acq_res = frame_stack_.back().try_acquire_frame_locks(db_proxy_);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
@@ -268,8 +286,6 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
             .log_nondeterministic_bit(acq_success);
       }
       else {
-        // Otherwise, we're in validation mode, so we read the nondeterministic
-        // bit from the validation metadata.
         auto res = std::get<ValidationModeData>(execution_mode_data)
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
@@ -277,6 +293,9 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
           return SystemError{SystemErrorCode::ValidationFailure};
         }
         acq_success = res.value().get();
+        if (acq_success) {
+          frame_stack_.back().note_validation_try_invoke_success();
+        }
       }
 
       // If the frame locks were not acquired successfully, then we mark

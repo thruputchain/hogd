@@ -23,6 +23,7 @@
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/components/hash_buffers.h"
 #include "hogd/hogexec/runtime/item/item_view.h"
+#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -107,6 +108,20 @@ public:
     return total_try_invoke_depth_;
   }
 
+  // Number of HogDB subtransactions this frame has pushed for its own
+  // successful TryInvoke children. Validation mode never pushes per-frame
+  // subtransactions, so this stays 0 on every frame in validation; useful
+  // for asserting that invariant at the root commit site.
+  uint32_t get_try_invoke_frame_count() const
+  {
+    return try_invoke_frame_count_;
+  }
+
+  bool depth_cap_reached() const
+  {
+    return total_try_invoke_depth_ >= kMaxSavepointDepth;
+  }
+
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
   auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
@@ -122,6 +137,12 @@ public:
 
   SystemStatus<bool>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+
+  // Validation-mode counterpart for a successful TryInvoke. Bumps the
+  // intra-transaction depth counter without pushing a HogDB subtransaction
+  // (validation does not use per-frame subtransactions). Precondition:
+  // !depth_cap_reached().
+  void note_validation_try_invoke_success();
 
   void
   collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
