@@ -359,6 +359,8 @@ SystemCallHandler::try_commit_transaction()
     return ExecResult::ExecResultTxRootFrameReverted;
   }
 
+  // Root commit: push the accumulated delta batch in one HogDB subtransaction.
+  // The TryInvoke depth cap does not apply here; see invocation_frame.cc.
   auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
                .value()
                .try_acquire_frame_locks(db_proxy_);
