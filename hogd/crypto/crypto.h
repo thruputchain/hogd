@@ -114,25 +114,15 @@ blake3(const T &value)
 
 namespace detail {
 
-template<size_t N>
-auto
-span_to_pointer(std::span<const std::byte, N> span)
-{
-  return reinterpret_cast<const uint8_t (*)[N]>(span.data());
-}
+// Fixed-size protocol spans and byte buffers are passed to Rust as plain
+// `const uint8_t*` / `uint8_t*` with documented lengths (see ed25519_dalek_* in
+// crypto_lib), avoiding C pointer-to-array types that required
+// `reinterpret_cast` from `std::array` storage.
 
-template<size_t N>
-auto
-span_to_pointer(std::array<uint8_t, N> const &data)
+inline const uint8_t *
+ed25519_const_bytes(std::span<const std::byte> bytes)
 {
-  return span_to_pointer(std::as_bytes(std::span(data)));
-}
-
-template<size_t N>
-auto
-span_to_writable_pointer(std::array<uint8_t, N> &data)
-{
-  return reinterpret_cast<uint8_t (*)[N]>(data.data());
+  return reinterpret_cast<const uint8_t *>(bytes.data());
 }
 
 inline MessageSpan
@@ -201,9 +191,7 @@ ed25519_keygen()
   static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
   std::array<uint8_t, 32> random_bytes;
   read_random(std::as_writable_bytes(std::span(random_bytes)));
-  ed25519_dalek_keygen(detail::span_to_pointer(random_bytes),
-                       detail::span_to_writable_pointer(pk),
-                       detail::span_to_writable_pointer(sk));
+  ed25519_dalek_keygen(random_bytes.data(), pk.data(), sk.data());
   return {pk, sk};
 }
 
@@ -216,9 +204,8 @@ ed25519_keygen_from_seed(std::span<const std::byte, 32> seed)
   Ed25519SecretKey sk;
   static_assert(sizeof(Ed25519PublicKey) == ED25519_PUBLIC_KEY_SIZE);
   static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
-  ed25519_dalek_keygen(detail::span_to_pointer(seed),
-                       detail::span_to_writable_pointer(pk),
-                       detail::span_to_writable_pointer(sk));
+  ed25519_dalek_keygen(detail::ed25519_const_bytes(seed), pk.data(),
+                       sk.data());
   return {pk, sk};
 }
 
@@ -232,14 +219,14 @@ ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
       public_keys.size() != msgs.size()) {
     return false;
   }
-  using pk_ptr = const uint8_t (*)[32];
+  using pk_ptr = const uint8_t *;
   auto *public_keys_ptr = new pk_ptr[public_keys.size()];
-  using sig_ptr = const uint8_t (*)[64];
+  using sig_ptr = const uint8_t *;
   auto *signatures_ptr = new sig_ptr[public_keys.size()];
   auto *msgs_ptr = new MessageSpan[public_keys.size()];
   for (size_t i = 0; i < public_keys.size(); i++) {
-    public_keys_ptr[i] = detail::span_to_pointer(public_keys[i]);
-    signatures_ptr[i] = detail::span_to_pointer(signatures[i]);
+    public_keys_ptr[i] = public_keys[i].data();
+    signatures_ptr[i] = signatures[i].data();
     msgs_ptr[i] = detail::span_to_message_span(msgs[i]);
   }
   auto result = ed25519_dalek_verify_batch(public_keys_ptr, signatures_ptr,
@@ -255,8 +242,8 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
                std::span<const std::byte> msg)
 {
-  return ed25519_dalek_verify(detail::span_to_pointer(public_key),
-                              detail::span_to_pointer(signature),
+  return ed25519_dalek_verify(detail::ed25519_const_bytes(public_key),
+                              detail::ed25519_const_bytes(signature),
                               detail::span_to_message_span(msg)) ==
          Ed25519Result::Success;
 }
@@ -267,8 +254,7 @@ inline bool
 ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                x23::BufView msg)
 {
-  return ed25519_dalek_verify(detail::span_to_pointer(publickey),
-                              detail::span_to_pointer(sig),
+  return ed25519_dalek_verify(publickey.data(), sig.data(),
                               detail::span_to_message_span(std::as_bytes(
                                   std::span(msg.data(), msg.size())))) ==
          Ed25519Result::Success;
@@ -278,9 +264,8 @@ inline std::optional<Ed25519Signature>
 ed25519_sign(const Ed25519SecretKey &sk, x23::BufView msg)
 {
   Ed25519Signature sig{};
-  uint8_t ret = ed25519_dalek_sign(detail::span_to_pointer(sk),
-                                   detail::span_to_message_span(msg),
-                                   detail::span_to_writable_pointer(sig));
+  uint8_t ret = ed25519_dalek_sign(sk.data(), detail::span_to_message_span(msg),
+                                   sig.data());
   if (ret != 0) {
     return std::nullopt;
   }

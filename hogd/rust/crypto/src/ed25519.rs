@@ -1,3 +1,5 @@
+use core::ptr;
+
 use ed25519_zebra::{
     Signature, SigningKey, VerificationKey, VerificationKeyBytes,
 };
@@ -15,11 +17,29 @@ pub enum Ed25519Result {
     InvalidInputLength = 4,
 }
 
+fn read_fixed_32(public_key: *const u8) -> Option<[u8; 32]> {
+    if public_key.is_null() {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    unsafe { ptr::copy_nonoverlapping(public_key, out.as_mut_ptr(), 32) };
+    Some(out)
+}
+
+fn read_fixed_64(signature: *const u8) -> Option<[u8; 64]> {
+    if signature.is_null() {
+        return None;
+    }
+    let mut out = [0u8; 64];
+    unsafe { ptr::copy_nonoverlapping(signature, out.as_mut_ptr(), 64) };
+    Some(out)
+}
+
 /// Verify an ed25519 signature
 ///
 /// # Parameters
-/// - `public_key`: 32-byte public key array
-/// - `signature`: 64-byte signature array
+/// - `public_key`: pointer to `ED25519_PUBLIC_KEY_SIZE` contiguous key bytes
+/// - `signature`: pointer to 64 contiguous signature bytes
 /// - `message_span`: MessageSpan
 ///
 /// # Returns
@@ -29,23 +49,25 @@ pub enum Ed25519Result {
 /// Caller must ensure:
 /// - If message_span.message_len == 0, message_span.message_ptr may be null
 /// - If message_span.message_len > 0, message_span.message_ptr must point to valid memory
-/// - public_key points to valid 32 bytes
-/// - signature points to valid 64 bytes
+/// - public_key points to valid 32 bytes (or null yields `InvalidInputLength`)
+/// - signature points to valid 64 bytes (or null yields `InvalidInputLength`)
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_verify(
-    public_key: *const [u8; 32],
-    signature: *const [u8; 64],
+    public_key: *const u8,
+    signature: *const u8,
     message: MessageSpan,
 ) -> Ed25519Result {
-    debug_assert!(!public_key.is_null());
-    debug_assert!(!signature.is_null());
-    debug_assert!(message.message_len == 0 || !message.message_ptr.is_null());
+    let (Some(public_key_bytes), Some(signature_bytes)) =
+        (read_fixed_32(public_key), read_fixed_64(signature))
+    else {
+        return Ed25519Result::InvalidInputLength;
+    };
+    if message.message_len > 0 && message.message_ptr.is_null() {
+        return Ed25519Result::InvalidInputLength;
+    }
+    let message_bytes = unsafe { message.to_slice() };
 
-    let public_key_bytes = unsafe { &*public_key };
-    let signature_bytes = unsafe { &*signature };
-    let message_bytes = message.to_slice();
-
-    let vk_bytes: VerificationKeyBytes = (*public_key_bytes).into();
+    let vk_bytes: VerificationKeyBytes = public_key_bytes.into();
 
     // Parse public key
     let verifying_key: VerificationKey = match vk_bytes.try_into() {
@@ -54,7 +76,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     };
 
     // Parse signature
-    let signature = Signature::from(signature_bytes);
+    let signature = Signature::from(&signature_bytes);
 
     // Verify signature
     match verifying_key.verify(&signature, message_bytes) {
@@ -66,8 +88,8 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 /// Verify a batch of ed25519 signatures
 ///
 /// # Parameters
-/// - `public_keys`: Pointer to array of 32-byte public keys
-/// - `signatures`: Pointer to array of 64-byte signatures
+/// - `public_keys`: Pointer to array of `num_messages` pointers; each points to 32 key bytes
+/// - `signatures`: Pointer to array of `num_messages` pointers; each points to 64 signature bytes
 /// - `messages`: Pointer to array of MessageSpan
 /// - `num_messages`: Number of messages in the batch
 ///
@@ -76,32 +98,41 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 ///
 /// # Safety
 /// Caller must ensure:
-/// - public_keys points to valid array of num_messages keys, each 32 bytes
-/// - signatures points to valid array of num_messages signatures, each 64 bytes
+/// - public_keys points to valid array of num_messages pointers to 32-byte buffers
+/// - signatures points to valid array of num_messages pointers to 64-byte buffers
 /// - messages points to valid array of num_messages MessageSpan
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_verify_batch(
-    public_keys: *const *const [u8; 32],
-    signatures: *const *const [u8; 64],
+    public_keys: *const *const u8,
+    signatures: *const *const u8,
     messages: *const MessageSpan,
     num_messages: usize,
 ) -> Ed25519Result {
-    debug_assert!(!public_keys.is_null());
-    debug_assert!(!signatures.is_null());
-    debug_assert!(!messages.is_null());
+    if public_keys.is_null() || signatures.is_null() || messages.is_null() {
+        return Ed25519Result::InvalidInputLength;
+    }
 
     let mut batch = ed25519_zebra::batch::Verifier::new();
 
     for i in 0..num_messages {
-        let public_key: *const [u8; 32] = unsafe { *public_keys.add(i) };
-        let signature: *const [u8; 64] = unsafe { *signatures.add(i) };
+        let pk_ptr = unsafe { *public_keys.add(i) };
+        let sig_ptr = unsafe { *signatures.add(i) };
         let message = unsafe { &*messages.add(i) };
-        let vk_bytes: VerificationKeyBytes = (*public_key).into();
+        let (Some(public_key_bytes), Some(signature_bytes)) =
+            (read_fixed_32(pk_ptr), read_fixed_64(sig_ptr))
+        else {
+            return Ed25519Result::InvalidInputLength;
+        };
+        if message.message_len > 0 && message.message_ptr.is_null() {
+            return Ed25519Result::InvalidInputLength;
+        }
+        let vk_bytes: VerificationKeyBytes = public_key_bytes.into();
+        let message_bytes = unsafe { message.to_slice() };
 
         batch.queue((
             vk_bytes,
-            Signature::from(*signature),
-            message.to_slice(),
+            Signature::from(&signature_bytes),
+            message_bytes,
         ));
     }
 
@@ -114,9 +145,9 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 /// Sign a message with ed25519
 ///
 /// # Parameters
-/// - `secret_keypair`: 64-byte secret key array [public_key, secret_key]
+/// - `secret_keypair`: pointer to 64 contiguous bytes `[public_key, secret_key]`
 /// - `message`: MessageSpan
-/// - `signature_out`: Pointer to 64-byte output buffer for signature
+/// - `signature_out`: pointer to 64-byte output buffer for signature
 ///
 /// # Returns
 /// Ed25519Result indicating success or failure reason
@@ -129,17 +160,20 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 /// - signature_out points to valid 64-byte buffer
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_sign(
-    secret_keypair: *const [u8; 64],
+    secret_keypair: *const u8,
     message: MessageSpan,
-    signature_out: *mut [u8; 64],
+    signature_out: *mut u8,
 ) -> u8 {
-    debug_assert!(!secret_keypair.is_null());
-    debug_assert!(message.message_len == 0 || !message.message_ptr.is_null());
-    debug_assert!(!signature_out.is_null());
-
-    let secret_keypair_bytes = unsafe { &*secret_keypair };
-    let message_bytes = message.to_slice();
-    let signature_out_bytes = unsafe { &mut *signature_out };
+    let Some(secret_keypair_bytes) = read_fixed_64(secret_keypair) else {
+        return 1;
+    };
+    if signature_out.is_null() {
+        return 1;
+    }
+    if message.message_len > 0 && message.message_ptr.is_null() {
+        return 1;
+    }
+    let message_bytes = unsafe { message.to_slice() };
 
     // Create signing key from secret keypair bytes
     let signing_key =
@@ -157,16 +191,22 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
     let signature = signing_key.sign(message_bytes);
 
     // Copy signature to output buffer
-    signature_out_bytes.copy_from_slice(&signature.to_bytes());
+    unsafe {
+        ptr::copy_nonoverlapping(
+            signature.to_bytes().as_ptr(),
+            signature_out,
+            64,
+        );
+    }
     0
 }
 
 /// Generate a new ed25519 keypair given a random seed
 ///
 /// # Parameters
-/// - `random_bytes`: Pointer to 32-byte random bytes
-/// - `public_key_out`: Pointer to 32-byte output buffer for public key
-/// - `secret_keypair_out`: Pointer to 64-byte output buffer for secret key
+/// - `random_bytes`: pointer to 32 random seed bytes
+/// - `public_key_out`: pointer to 32-byte output buffer for public key
+/// - `secret_keypair_out`: pointer to 64-byte output buffer for secret key
 ///
 /// # Safety
 /// Caller must ensure:
@@ -175,26 +215,31 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
 /// - secret_keypair_out points to valid 64 bytes
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_keygen(
-    random_bytes: *const [u8; 32],
-    public_key_out: *mut [u8; 32],
-    secret_keypair_out: *mut [u8; 64],
+    random_bytes: *const u8,
+    public_key_out: *mut u8,
+    secret_keypair_out: *mut u8,
 ) {
-    debug_assert!(!random_bytes.is_null());
-    debug_assert!(!public_key_out.is_null());
-    debug_assert!(!secret_keypair_out.is_null());
+    let Some(random_bytes_bytes) = read_fixed_32(random_bytes) else {
+        return;
+    };
+    if public_key_out.is_null() || secret_keypair_out.is_null() {
+        return;
+    }
 
     debug_assert_eq!(ED25519_SECRET_KEYPAIR_SIZE, 64);
     debug_assert_eq!(ED25519_PUBLIC_KEY_SIZE, 32);
 
-    let random_bytes_bytes = unsafe { &*random_bytes };
-    let public_key_out_bytes = unsafe { &mut *public_key_out };
-    let secret_keypair_out_bytes = unsafe { &mut *secret_keypair_out };
-
-    let signing_key = SigningKey::from_bytes(random_bytes_bytes);
+    let signing_key = SigningKey::from_bytes(&random_bytes_bytes);
     let public_key: [u8; 32] = signing_key.verification_key().into();
-    public_key_out_bytes.copy_from_slice(&public_key);
-    secret_keypair_out_bytes[..32].copy_from_slice(&public_key);
-    secret_keypair_out_bytes[32..].copy_from_slice(&signing_key.to_bytes());
+    unsafe {
+        ptr::copy_nonoverlapping(public_key.as_ptr(), public_key_out, 32);
+        ptr::copy_nonoverlapping(public_key.as_ptr(), secret_keypair_out, 32);
+        ptr::copy_nonoverlapping(
+            signing_key.to_bytes().as_ptr(),
+            secret_keypair_out.add(32),
+            32,
+        );
+    }
 }
 
 pub const ED25519_SECRET_KEYPAIR_SIZE: usize = 64;
@@ -222,8 +267,8 @@ mod tests {
         // Test verification
         let result = unsafe {
             ed25519_dalek_verify(
-                &verifying_key as *const [u8; 32],
-                &signature.to_bytes() as *const [u8; 64],
+                verifying_key.as_ptr(),
+                signature.to_bytes().as_ptr(),
                 MessageSpan {
                     message_ptr: message.as_ptr(),
                     message_len: message.len(),
@@ -250,8 +295,8 @@ mod tests {
         // Test verification with invalid signature
         let result = unsafe {
             ed25519_dalek_verify(
-                &verifying_key as *const [u8; 32],
-                &invalid_signature as *const [u8; 64],
+                verifying_key.as_ptr(),
+                invalid_signature.as_ptr(),
                 MessageSpan {
                     message_ptr: message.as_ptr(),
                     message_len: message.len(),
@@ -274,9 +319,9 @@ mod tests {
 
         unsafe {
             ed25519_dalek_keygen(
-                &secret_key_bytes as *const [u8; 32],
-                &mut pk_bytes as *mut [u8; 32],
-                &mut keypair_bytes as *mut [u8; 64],
+                secret_key_bytes.as_ptr(),
+                pk_bytes.as_mut_ptr(),
+                keypair_bytes.as_mut_ptr(),
             )
         };
 
@@ -292,20 +337,20 @@ mod tests {
         // Test signing
         unsafe {
             ed25519_dalek_sign(
-                &keypair_bytes as *const [u8; 64],
+                keypair_bytes.as_ptr(),
                 MessageSpan {
                     message_ptr: message.as_ptr(),
                     message_len: message.len(),
                 },
-                &mut signature_out as *mut [u8; 64],
+                signature_out.as_mut_ptr(),
             )
         };
 
         // Test that the signature verifies
         let verify_result = unsafe {
             ed25519_dalek_verify(
-                &verifying_key as *const [u8; 32],
-                &signature_out as *const [u8; 64],
+                verifying_key.as_ptr(),
+                signature_out.as_ptr(),
                 MessageSpan {
                     message_ptr: message.as_ptr(),
                     message_len: message.len(),
@@ -328,8 +373,8 @@ mod tests {
 
         let result = unsafe {
             ed25519_dalek_verify(
-                &verifying_key as *const [u8; 32],
-                &fake_signature as *const [u8; 64],
+                verifying_key.as_ptr(),
+                fake_signature.as_ptr(),
                 MessageSpan {
                     message_ptr: std::ptr::null(),
                     message_len: 0,
@@ -351,9 +396,9 @@ mod tests {
 
         unsafe {
             ed25519_dalek_keygen(
-                &secret_key_bytes as *const [u8; 32],
-                &mut pk_bytes as *mut [u8; 32],
-                &mut keypair_bytes as *mut [u8; 64],
+                secret_key_bytes.as_ptr(),
+                pk_bytes.as_mut_ptr(),
+                keypair_bytes.as_mut_ptr(),
             )
         };
 
@@ -361,12 +406,12 @@ mod tests {
 
         let result = unsafe {
             ed25519_dalek_sign(
-                &keypair_bytes as *const [u8; 64],
+                keypair_bytes.as_ptr(),
                 MessageSpan {
                     message_ptr: std::ptr::null(),
                     message_len: 0,
                 },
-                &mut signature_out as *mut [u8; 64],
+                signature_out.as_mut_ptr(),
             )
         };
 

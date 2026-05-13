@@ -1,8 +1,11 @@
 #include <cstddef>
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -84,6 +87,28 @@ TEST(Siphash24, BasicUsage)
   EXPECT_NE(hasher.get_key(), hasher2.get_key());
   EXPECT_NE(hasher(a), hasher2(a));
   EXPECT_NE(hasher(b), hasher2(b));
+}
+
+TEST(Ed25519, FfiUsesConstBytePointersForVerify)
+{
+  using VerifyFn =
+      Ed25519Result (*)(const uint8_t *, const uint8_t *, MessageSpan);
+  using PublicKeyData =
+      decltype(std::declval<const Ed25519PublicKey &>().data());
+  using SignatureData =
+      decltype(std::declval<const Ed25519Signature &>().data());
+
+  static_assert(std::is_same_v<decltype(&ed25519_dalek_verify), VerifyFn>);
+  static_assert(std::is_convertible_v<PublicKeyData, const uint8_t *>);
+  static_assert(std::is_convertible_v<SignatureData, const uint8_t *>);
+
+  auto [pk, sk] = ed25519_keygen();
+  std::string_view msg = "ffi const byte pointer verify";
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg))).value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  EXPECT_TRUE(ed25519_verify(pk, sig, msg));
 }
 
 TEST(Ed25519, BasicUsage)
