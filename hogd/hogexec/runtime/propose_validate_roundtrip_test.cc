@@ -13,6 +13,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogexec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -861,6 +862,140 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 
   EXPECT_THROW(advance_block(), std::runtime_error)
       << "More consumed than inserted should fail finalization";
+}
+
+TEST_P(ProposeValidateRoundtripTest,
+       ValidationRejectsOverDepthTryInvokeTrueBits)
+{
+  auto make_depth_poc_key = [](uint32_t index) {
+    StorageKeyContractData key{};
+    key[0] = static_cast<uint8_t>('d');
+    key[1] = static_cast<uint8_t>('e');
+    key[2] = static_cast<uint8_t>('p');
+    key[3] = static_cast<uint8_t>('t');
+    key[4] = static_cast<uint8_t>('h');
+    key[5] = static_cast<uint8_t>(index & 0xff);
+    key[6] = static_cast<uint8_t>((index >> 8) & 0xff);
+    key[7] = static_cast<uint8_t>((index >> 16) & 0xff);
+    key[8] = static_cast<uint8_t>((index >> 24) & 0xff);
+    return key;
+  };
+
+  auto make_index_calldata = [](uint32_t index) {
+    Calldata calldata;
+    calldata.push_back(static_cast<uint8_t>(index & 0xff));
+    calldata.push_back(static_cast<uint8_t>((index >> 8) & 0xff));
+    return calldata;
+  };
+
+  auto proposal_bit = [](NondeterministicProposalData const &proposal,
+                         uint32_t index) {
+    return (proposal.nondeterministic_bits[index / 8] &
+            (uint8_t{1} << (index % 8))) != 0;
+  };
+
+  auto make_all_true_proposal_data = [] {
+    NondeterministicProposalData proposal;
+    proposal.nondeterministic_bit_count = kMaxSavepointDepth + 1;
+    proposal.nondeterministic_bits.resize(
+        (proposal.nondeterministic_bit_count + 7) / 8, 0xff);
+    auto valid_bits_in_last_byte =
+        proposal.nondeterministic_bit_count % 8;
+    if (valid_bits_in_last_byte != 0) {
+      proposal.nondeterministic_bits.back() =
+          static_cast<uint8_t>((uint8_t{1} << valid_bits_in_last_byte) - 1);
+    }
+    return proposal;
+  };
+
+  auto contract_a =
+      make_contract({[make_index_calldata](NativeSyscallContext &ctx)
+                         -> InvokeStatus<void> {
+        uint32_t successes = 0;
+        for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
+          RuntimeMemoryLength output_return_buffer_len = 0,
+                              output_returned_auth_token_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, 0, ctx.runtime().get_available_gas(),
+              make_index_calldata(i),
+              std::to_underlying(InvokeFlag::TryInvoke),
+              std::span<uint32_t>{}, output_return_buffer_len,
+              output_returned_auth_token_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+            successes++;
+          }
+        }
+        if (successes != kMaxSavepointDepth + 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      }});
+
+  auto contract_b =
+      make_contract({[make_depth_poc_key](NativeSyscallContext &ctx)
+                         -> InvokeStatus<void> {
+        auto const &calldata = ctx.handler().get_calldata();
+        if (calldata.size() != 2) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        uint32_t index = static_cast<uint32_t>(calldata[0]) |
+                         (static_cast<uint32_t>(calldata[1]) << 8);
+        auto [ws, _wg] = syscall_BytestringSet_inner(
+            ctx.handler(), make_depth_poc_key(index),
+            std::as_bytes(std::span(calldata)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!ws.has_value() ||
+            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      }});
+
+  auto native_context =
+      make_ab_context(std::move(contract_a), std::move(contract_b));
+  auto tx = make_invoke_a_tx(0);
+
+  // Honest proposal cannot produce kMaxSavepointDepth+1 successes.
+  {
+    auto proposal_handler = make_new_system_call_handler(tx, *native_context);
+    auto proposal_res = proposal_handler.root_invoke();
+    ASSERT_FALSE(proposal_res.is_root_success());
+    ASSERT_EQ(proposal_res.result_.error().code(),
+              InvokeErrorCode::Deterministic);
+
+    auto const &honest_proposal = proposal_handler.get_proposal_data();
+    // With the fix, proposal does NOT log a bit for the over-depth try.
+    ASSERT_EQ(honest_proposal.nondeterministic_bit_count, kMaxSavepointDepth);
+    for (uint32_t i = 0; i < kMaxSavepointDepth; ++i) {
+      EXPECT_TRUE(proposal_bit(honest_proposal, i));
+    }
+    ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  // Validation must reject the all-true malicious proposal.
+  auto validation_handler = make_new_system_call_handler_validation(
+      tx, *native_context, make_all_true_proposal_data());
+  ASSERT_FALSE(validation_handler.root_invoke().is_root_success())
+      << "Validation must reject an all-true bitstring past the savepoint cap";
+
+  auto commit_res = validation_handler.try_commit_transaction();
+  ASSERT_NE(commit_res, ExecResult::ExecResultOK)
+      << "Validation must not commit the malicious over-depth child storage";
+
+  advance_block();
+
+  StorageKey cap_crossing_key(StorageKeyType::ContractData);
+  cap_crossing_key.contract_data_key() =
+      make_depth_poc_key(kMaxSavepointDepth);
+  auto cap_crossing_item = lookup_storage_item_from_db(
+      AddressAndKey{.address = kAddrB, .key = std::move(cap_crossing_key)});
+  EXPECT_FALSE(cap_crossing_item.has_value())
+      << "Over-cap child storage must not be persisted";
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
