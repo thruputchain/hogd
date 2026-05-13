@@ -92,7 +92,8 @@ public:
   ~SystemCallHandler()
   {
     if constexpr (is_debug_build()) {
-      if (!transaction_committed_or_aborted_) {
+      if (!transaction_committed_or_aborted_ &&
+          !std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
         warn("SystemCallHandler destroyed without committing or aborting "
              "transaction");
         if (debug_force_commit_abort_) {
@@ -134,6 +135,7 @@ public:
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
 
   InvocationFrameOutput get_most_recent_frame_output() const;
+  x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;
@@ -160,7 +162,6 @@ public:
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return last_frame_.value().get_events();
   }
-
   // Called after the root invocation frame finishes (by root_invoke or
   // the mock path).  Runs final validation on cumulative_invoke_result_
   // and sets root_invoke_succeeded_ if appropriate.

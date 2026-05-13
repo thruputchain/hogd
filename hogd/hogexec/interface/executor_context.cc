@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <utility>
@@ -19,8 +20,10 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/view/view.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "view.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -67,6 +70,20 @@ ExecutorContext::propose_transaction_batch(TransactionBatch const &txs,
   });
   auto r = co_await awaitable;
   assert(r.size() == txs.size());
+  co_return std::move(r);
+}
+
+x23::Async<ExpectedViewResult>
+ExecutorContext::view_transaction(TransactionViewQuery const &query)
+{
+  assert(mode_ == ExecutionMode::kViewing);
+  x23::Awaitable<ExpectedViewResult> awaitable;
+  x23::CoroCB<ExpectedViewResult> cb(awaitable);
+  worker_pool_.submit([this, &query, cb]() {
+    auto res = run_view_transaction(query);
+    cb(res);
+  });
+  auto r = co_await awaitable;
   co_return std::move(r);
 }
 
@@ -195,6 +212,18 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
         });
   }
   return exec_res;
+}
+
+ExpectedViewResult
+ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
+{
+  assert(mode_ == ExecutionMode::kViewing);
+  static thread_local auto context = make_hogexec_context();
+  return View::run_view_transaction(
+      *snapshot_cache_,
+      make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
+      make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
+      query, *context, {});
 }
 
 void

@@ -16,6 +16,7 @@ target_link_libraries(
   hogd
   runtime
   precompiles
+  view
 )
 
 add_library(exec_interface_test_objects OBJECT

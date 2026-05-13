@@ -285,6 +285,11 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         std::get<ProposalModeData>(execution_mode_data)
             .log_nondeterministic_bit(acq_success);
       }
+      else if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
+        auto bit = std::get<ViewingModeData>(execution_mode_data)
+                       .view_try_invoke_bit();
+        acq_success = bit.get();
+      }
       else {
         auto res = std::get<ValidationModeData>(execution_mode_data)
                        .consume_nondeterministic_bit();

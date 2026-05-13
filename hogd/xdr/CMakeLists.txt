@@ -47,6 +47,7 @@ add_xdr(
   ../../protocol/transaction.x
   ../../protocol/transaction_trace.x
   ../../protocol/types.x
+  ../../protocol/view.x
   ../../protocol/db_gateway.x
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x

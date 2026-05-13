@@ -304,7 +304,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       }
       if (queue_delta_.consume->current_block_consumed.size() >=
           kRetrocausalQueueBlockEntriesMaxLen) {
-        CHECK(std::holds_alternative<ValidationModeData>(execution_mode_data));
+        CHECK(!std::holds_alternative<ProposalModeData>(execution_mode_data));
         return SystemError{SystemErrorCode::ValidationFailure};
       }
       queue_delta_.consume->current_block_consumed.push_back(
@@ -403,6 +403,21 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     // OK to return not tagged as nondeterministic: the nondeterminism has been
     // logged above
     return rcq_entry.get();
+  }
+  if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
+    auto &viewing_data = std::get<ViewingModeData>(execution_mode_data);
+    auto bit = viewing_data.view_query_queue_observation_bit();
+    if (!bit.get()) {
+      // no queue entry available
+      return {std::nullopt};
+    }
+    // queue entry available
+    auto entry =
+        viewing_data.view_queue_entry_observation(base_item_->addrkey(), index);
+    if (!entry.has_value()) {
+      return SystemError{SystemErrorCode::ValidationFailure};
+    }
+    return entry.value().get();
   }
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
