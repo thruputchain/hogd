@@ -13,7 +13,6 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
-#include "hogexec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -23,6 +22,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogexec_constants.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -899,8 +899,7 @@ TEST_P(ProposeValidateRoundtripTest,
     proposal.nondeterministic_bit_count = kMaxSavepointDepth + 1;
     proposal.nondeterministic_bits.resize(
         (proposal.nondeterministic_bit_count + 7) / 8, 0xff);
-    auto valid_bits_in_last_byte =
-        proposal.nondeterministic_bit_count % 8;
+    auto valid_bits_in_last_byte = proposal.nondeterministic_bit_count % 8;
     if (valid_bits_in_last_byte != 0) {
       proposal.nondeterministic_bits.back() =
           static_cast<uint8_t>((uint8_t{1} << valid_bits_in_last_byte) - 1);
@@ -908,17 +907,15 @@ TEST_P(ProposeValidateRoundtripTest,
     return proposal;
   };
 
-  auto contract_a =
-      make_contract({[make_index_calldata](NativeSyscallContext &ctx)
-                         -> InvokeStatus<void> {
+  auto contract_a = make_contract(
+      {[make_index_calldata](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         uint32_t successes = 0;
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddrB, 0, ctx.runtime().get_available_gas(),
-              make_index_calldata(i),
-              std::to_underlying(InvokeFlag::TryInvoke),
+              make_index_calldata(i), std::to_underlying(InvokeFlag::TryInvoke),
               std::span<uint32_t>{}, output_return_buffer_len,
               output_returned_auth_token_len);
           if (!r.has_value()) {
@@ -934,9 +931,8 @@ TEST_P(ProposeValidateRoundtripTest,
         return {};
       }});
 
-  auto contract_b =
-      make_contract({[make_depth_poc_key](NativeSyscallContext &ctx)
-                         -> InvokeStatus<void> {
+  auto contract_b = make_contract(
+      {[make_depth_poc_key](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         auto const &calldata = ctx.handler().get_calldata();
         if (calldata.size() != 2) {
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -978,8 +974,9 @@ TEST_P(ProposeValidateRoundtripTest,
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   // Validation must reject the all-true malicious proposal.
-  auto validation_handler = make_new_system_call_handler_validation(
-      tx, *native_context, make_all_true_proposal_data());
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *native_context,
+                                              make_all_true_proposal_data());
   ASSERT_FALSE(validation_handler.root_invoke().is_root_success())
       << "Validation must reject an all-true bitstring past the savepoint cap";
 
@@ -990,8 +987,7 @@ TEST_P(ProposeValidateRoundtripTest,
   advance_block();
 
   StorageKey cap_crossing_key(StorageKeyType::ContractData);
-  cap_crossing_key.contract_data_key() =
-      make_depth_poc_key(kMaxSavepointDepth);
+  cap_crossing_key.contract_data_key() = make_depth_poc_key(kMaxSavepointDepth);
   auto cap_crossing_item = lookup_storage_item_from_db(
       AddressAndKey{.address = kAddrB, .key = std::move(cap_crossing_key)});
   EXPECT_FALSE(cap_crossing_item.has_value())
@@ -1010,8 +1006,8 @@ TEST_P(ProposeValidateRoundtripTest,
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke),
-              std::span<uint32_t>{}, out_ret, out_auth);
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
           // Tolerant: propagate system errors but ignore user-level failures
           // (including the deterministic depth-cap failure on the last try).
           if (!r.has_value()) {
@@ -1020,8 +1016,10 @@ TEST_P(ProposeValidateRoundtripTest,
         }
         return {};
       }});
-  auto contract_b = make_contract(
-      {[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> { return {}; }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1058,8 +1056,8 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke),
-              std::span<uint32_t>{}, out_ret, out_auth);
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -1067,13 +1065,16 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
         }
         return {};
       }});
-  auto contract_b = make_contract(
-      {[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> { return {}; }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
 
-  // Proposal succeeds and produces exactly (kMaxSavepointDepth - 1) `true` bits.
+  // Proposal succeeds and produces exactly (kMaxSavepointDepth - 1) `true`
+  // bits.
   auto handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   auto proposal_data = handler.get_proposal_data();
@@ -1086,7 +1087,8 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *ctx, proposal_data);
   ASSERT_TRUE(validation_handler.root_invoke().is_root_success());
-  ASSERT_EQ(validation_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(validation_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
 }
 
 // Regression guard: if a future refactor accidentally lets validation's
@@ -1103,8 +1105,8 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke),
-              std::span<uint32_t>{}, out_ret, out_auth);
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
           // Tolerant: propagate system errors, ignore deterministic child
           // failures (including the depth-cap rejection past the cap).
           if (!r.has_value()) {
@@ -1113,8 +1115,10 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
         }
         return {};
       }});
-  auto contract_b = make_contract(
-      {[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> { return {}; }});
+  auto contract_b =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1170,8 +1174,8 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         RuntimeMemoryLength out_ret = 0, out_auth = 0;
         auto r = ctx.syscall<SyscallNo::kInvoke>(
             kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
-            std::to_underlying(InvokeFlag::TryInvoke),
-            std::span<uint32_t>{}, out_ret, out_auth);
+            std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+            out_ret, out_auth);
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -1186,8 +1190,8 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddrC, 0, ctx.runtime().get_available_gas(), Calldata{},
-              std::to_underlying(InvokeFlag::TryInvoke),
-              std::span<uint32_t>{}, out_ret, out_auth);
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_ret, out_auth);
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1197,8 +1201,10 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         }
         return {};
       }});
-  auto contract_c = make_contract(
-      {[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> { return {}; }});
+  auto contract_c =
+      make_contract({[](NativeSyscallContext & /*ctx*/) -> InvokeStatus<void> {
+        return {};
+      }});
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
