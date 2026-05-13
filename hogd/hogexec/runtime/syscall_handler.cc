@@ -161,7 +161,7 @@ SystemCallHandler::SystemCallHandler(
             return ProposalModeData{};
           }
           if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
-            return ExecutionModeData{std::in_place_type<ViewingModeData>};
+            return ExecutionModeData{std::in_place_type<ViewingModeData>, std::get<ViewingModeCtor>(execution_mode_ctor)};
           }
           return ExecutionModeData{std::in_place_type<ValidationModeData>,
                                    std::get<ValidationModeCtor>(

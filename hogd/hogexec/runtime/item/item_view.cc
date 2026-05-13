@@ -405,7 +405,18 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     return rcq_entry.get();
   }
   if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
-    return SystemError{SystemErrorCode::Unrecoverable};
+    auto &viewing_data = std::get<ViewingModeData>(execution_mode_data);
+    auto bit = viewing_data.view_query_queue_observation_bit();
+    if (!bit.get()) {
+      // no queue entry available
+      return {std::nullopt};
+    }
+    // queue entry available
+    auto entry = viewing_data.view_queue_entry_observation(base_item_->addrkey(), index);
+    if (!entry.has_value()) {
+      return SystemError{SystemErrorCode::ValidationFailure};
+    }
+    return entry.value().get();
   }
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));

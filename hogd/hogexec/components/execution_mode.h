@@ -40,6 +40,13 @@ template<> struct std::formatter<hogd::ExecutionMode> {
 
 namespace hogd {
 
+using ProposalModeCtor = std::monostate;
+using ValidationModeCtor = NondeterministicProposalData;
+
+struct ViewingModeCtor {
+  NondeterministicProposalData proposal_data_segment_;
+};
+
 // Data structure for proposal mode execution that collects nondeterministic
 // choices made during transaction execution
 class ProposalModeData {
@@ -95,7 +102,8 @@ public:
   std::optional<Nondeterministic<bool>> consume_nondeterministic_bit();
 
   // Consumes and returns the next nondeterministic queue entry from the
-  // proposal Returns nullopt if no more queue entries are available (which is a
+  // proposal.
+  // Returns nullopt if no more queue entries are available (which is a
   // validation failure)
   std::optional<Nondeterministic<QueueEntry>>
   consume_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index);
@@ -121,30 +129,49 @@ private:
 
 class ViewingModeData {
 public:
-  ViewingModeData() = default;
+  ViewingModeData(ViewingModeCtor& ctor)
+    : partial_validation_data_(std::move(ctor.proposal_data_segment_))
+  {}
+
   ViewingModeData(const ViewingModeData &) = delete;
   ViewingModeData &operator=(const ViewingModeData &) = delete;
   ViewingModeData(ViewingModeData &&) noexcept = delete;
   ViewingModeData &operator=(ViewingModeData &&) noexcept = delete;
 
-  // TODO(geoff): Eventually, tx view mode will have some initial segment of
-  // nondeterministic data to consume, and then lazily add bits as the tx
-  // proceeds when that initial view is exhausted.
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  Nondeterministic<bool> view_nondeterministic_bit() { return false; }
+  Nondeterministic<bool> view_try_invoke_bit() { 
+    auto bit = partial_validation_data_.consume_nondeterministic_bit();
+    if (!bit.has_value()) {
+      // default to nondeterministic actions succeeding in view mode
+      return true;
+    }
+    return bit.value();
+  }
+
+  Nondeterministic<bool> view_query_queue_observation_bit() {
+    auto bit = partial_validation_data_.consume_nondeterministic_bit();
+    if (!bit.has_value()) {
+      // default to empty queue failing in view mode
+      return true;
+    }
+    return bit.value();
+  }
+
+  // Returns nullopt if no more queue entries are available (which is a
+  // validation failure)
+  std::optional<Nondeterministic<QueueEntry>> view_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index) {
+    return partial_validation_data_.consume_queue_entry_observation(addrkey, index);
+  }
+
+private:
+
+  ValidationModeData partial_validation_data_;
 };
 
 // Variant type that holds either proposal or validation mode data
 using ExecutionModeData =
     std::variant<ProposalModeData, ValidationModeData, ViewingModeData>;
-
-using ProposalModeCtor = std::monostate;
-using ValidationModeCtor = NondeterministicProposalData;
-
-struct ViewingModeCtor {
-  NondeterministicProposalData proposal_data_segment;
-};
 
 using ExecutionModeCtor =
     std::variant<ProposalModeCtor, ValidationModeCtor, ViewingModeCtor>;

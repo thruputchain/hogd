@@ -269,7 +269,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
       else if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
         auto bit = std::get<ViewingModeData>(execution_mode_data)
-                       .view_nondeterministic_bit();
+                       .view_try_invoke_bit();
         acq_success = bit.get();
       }
       else {
