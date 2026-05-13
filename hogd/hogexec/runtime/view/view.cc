@@ -27,10 +27,12 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
                            PerTransactionDatabaseProxy proxy,
                            PerTransactionEventServerProxy event_proxy,
                            TransactionViewQuery const &query,
-                           RuntimeContext &context)
+                           RuntimeContext &context,
+                           NondeterministicProposalData ndet)
 {
+  ViewingModeCtor ctor{.proposal_data_segment_ = std::move(ndet)};
   SystemCallHandler syscall_handler(snapshot_cache, proxy,
-                                    std::move(event_proxy), ViewingModeCtor{},
+                                    std::move(event_proxy), std::move(ctor),
                                     context, query.auth_claim, SHA256Hash{});
 
   assert(!syscall_handler.is_running());
@@ -70,7 +72,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     switch (res.error().code()) {
     case SystemErrorCode::ValidationFailure:
       error("view transaction failed with SystemErrorCode::ValidationFailure");
-      return ExpectedViewResult(TransactionViewStatus::InternalError);
+      return ExpectedViewResult(
+          TransactionViewStatus::NondeterministicDataValidationFailure);
     case SystemErrorCode::Abandon:
       return ExpectedViewResult{TransactionViewStatus::Abandoned};
     case SystemErrorCode::Unrecoverable:

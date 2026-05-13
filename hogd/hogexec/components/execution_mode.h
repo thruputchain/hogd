@@ -129,7 +129,7 @@ private:
 
 class ViewingModeData {
 public:
-  ViewingModeData(ViewingModeCtor& ctor)
+  ViewingModeData(ViewingModeCtor &ctor)
     : partial_validation_data_(std::move(ctor.proposal_data_segment_))
   {}
 
@@ -138,9 +138,9 @@ public:
   ViewingModeData(ViewingModeData &&) noexcept = delete;
   ViewingModeData &operator=(ViewingModeData &&) noexcept = delete;
 
-
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  Nondeterministic<bool> view_try_invoke_bit() { 
+  Nondeterministic<bool> view_try_invoke_bit()
+  {
     auto bit = partial_validation_data_.consume_nondeterministic_bit();
     if (!bit.has_value()) {
       // default to nondeterministic actions succeeding in view mode
@@ -149,23 +149,26 @@ public:
     return bit.value();
   }
 
-  Nondeterministic<bool> view_query_queue_observation_bit() {
+  Nondeterministic<bool> view_query_queue_observation_bit()
+  {
     auto bit = partial_validation_data_.consume_nondeterministic_bit();
     if (!bit.has_value()) {
       // default to empty queue failing in view mode
-      return true;
+      return false;
     }
     return bit.value();
   }
 
   // Returns nullopt if no more queue entries are available (which is a
   // validation failure)
-  std::optional<Nondeterministic<QueueEntry>> view_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index) {
-    return partial_validation_data_.consume_queue_entry_observation(addrkey, index);
+  std::optional<Nondeterministic<QueueEntry>>
+  view_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index)
+  {
+    return partial_validation_data_.consume_queue_entry_observation(addrkey,
+                                                                    index);
   }
 
 private:
-
   ValidationModeData partial_validation_data_;
 };
 

@@ -412,7 +412,8 @@ RetrocausalQueueItem::get_next_concurrent_entry(
       return {std::nullopt};
     }
     // queue entry available
-    auto entry = viewing_data.view_queue_entry_observation(base_item_->addrkey(), index);
+    auto entry =
+        viewing_data.view_queue_entry_observation(base_item_->addrkey(), index);
     if (!entry.has_value()) {
       return SystemError{SystemErrorCode::ValidationFailure};
     }
