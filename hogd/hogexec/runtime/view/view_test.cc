@@ -138,6 +138,8 @@ protected:
       SystemCallHandler::force_commit_or_abort();
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 TEST_F(ViewTest, BasicViewReturnsOkWithCorrectOutput)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
@@ -702,5 +704,7 @@ TEST_F(ViewTest, ViewRcqConsumePresentButNoEntryData)
   EXPECT_EQ(result.status(),
             TransactionViewStatus::NondeterministicDataValidationFailure);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
