@@ -133,8 +133,9 @@ TEST(HogDBGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
   StorageCostModel cost_model = StorageCostModel::default_cost_model();
   {
     DbHash base_hash = dao.compute_full_db_hash();
-    PerThreadARC<BlockTX> block_tx(dao, cost_model, background_commit_worker,
-                                   BlockHeight{1}, BlockExecutionMode::kBlockExecutionModeProposal);
+    PerThreadARC<BlockTX> block_tx(
+        dao, cost_model, background_commit_worker, BlockHeight{1},
+        BlockExecutionMode::kBlockExecutionModeProposal);
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 

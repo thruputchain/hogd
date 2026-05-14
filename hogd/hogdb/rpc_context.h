@@ -103,7 +103,8 @@ public:
 
   // opens a new block transaction.
   // Does not acquire a reference to the blocktx.
-  HogDBStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid, BlockExecutionMode mode);
+  HogDBStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid,
+                                                     BlockExecutionMode mode);
   // retrieves an open block transaction.
   // If the returned value is not null, then
   // the caller has acquired a reference to the blocktx.

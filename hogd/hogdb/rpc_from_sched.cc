@@ -329,7 +329,8 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // calling close() below.
   DbHash base_hash = ctx_.get_db().compute_full_db_hash();
 
-  auto r = ctx_.open_block_tx(kGenesisBlockID, BlockExecutionMode::kBlockExecutionModeProposal);
+  auto r = ctx_.open_block_tx(kGenesisBlockID,
+                              BlockExecutionMode::kBlockExecutionModeProposal);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
     co_return DbSchedResult::DbSchedResultError;
