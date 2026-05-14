@@ -19,6 +19,9 @@ permissions:
 jobs:
   release:
     runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -114,7 +117,7 @@ jobs:
             -t Release \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec
+            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hogd-dev
 
       - name: Build Go coordinator artifacts
         run: |
@@ -134,17 +137,19 @@ jobs:
           cp build/release/hogd/indexer/indexer_exec artifacts/
           cp build/release/chuckd.dev artifacts/
           cp build/release/scpd.dev artifacts/
+          mkdir -p package/hogd-dev-linux-x86_64
+          cp build/release/hogd/hogd_dev/hogd-dev package/hogd-dev-linux-x86_64/
+          chmod +x package/hogd-dev-linux-x86_64/hogd-dev
+          tar -czf artifacts/hogd-dev-linux-x86_64.tar.gz -C package/hogd-dev-linux-x86_64 hogd-dev
           chmod +x artifacts/*
-          cd artifacts && sha256sum * > SHA256SUMS
+          cd artifacts
+          sha256sum hogd-dev-linux-x86_64.tar.gz > hogd-dev-linux-x86_64.tar.gz.sha256
 
-      - name: Create GitHub Release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v6
         with:
-          files: artifacts/*
-          generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: hogd-linux-release-artifacts
+          path: artifacts/*
 
       - name: Show ccache stats
         if: always()
@@ -153,3 +158,233 @@ jobs:
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
+
+  hogd-dev-macos-arm64:
+    needs: release
+    runs-on: namespace-profile-hogd-arm64-macos
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+            ${{ secrets.HOGD_TO_HOGX_KEY }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
+            else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
+
+      - name: Use CommandLineTools SDK
+        run: |
+          if [ -d /Library/Developer/CommandLineTools ]; then
+            sudo xcode-select -s /Library/Developer/CommandLineTools
+            echo "Switched to CommandLineTools SDK: $(xcrun --show-sdk-path)"
+          fi
+
+      - name: Setup Environment
+        run: ./scripts/macos-setup.sh
+
+      - name: Build hogd-dev
+        run: |
+          ./scripts/build.sh \
+            -d build/release \
+            -t Release \
+            -c clang \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            hogd-dev
+
+      - name: Package hogd-dev
+        run: |
+          mkdir -p package/hogd-dev-macos-arm64 artifacts
+          cp build/release/hogd/hogd_dev/hogd-dev package/hogd-dev-macos-arm64/
+          chmod +x package/hogd-dev-macos-arm64/hogd-dev
+
+          pushd package/hogd-dev-macos-arm64 >/dev/null
+          mkdir -p lib
+
+          resolve_dep() {
+            local dep="$1"
+            local base
+            base="$(basename "$dep")"
+
+            if [[ "$dep" == /opt/homebrew/* ]]; then
+              printf '%s\n' "$dep"
+              return 0
+            fi
+
+            if [[ "$dep" == @rpath/* ]]; then
+              for search_dir in \
+                /opt/homebrew/opt/llvm/lib/c++ \
+                /opt/homebrew/opt/llvm/lib/unwind \
+                /opt/homebrew/opt/llvm/lib \
+                /opt/homebrew/lib; do
+                if [ -f "$search_dir/$base" ]; then
+                  printf '%s\n' "$search_dir/$base"
+                  return 0
+                fi
+              done
+            fi
+
+            return 1
+          }
+
+          list_bundle_deps() {
+            otool -L "$1" | awk 'NR > 1 { print $1 }' | while IFS= read -r dep; do
+              resolve_dep "$dep" || true
+            done
+          }
+
+          while true; do
+            added=0
+            for binary in hogd-dev lib/*.dylib; do
+              [ -e "$binary" ] || continue
+              while IFS= read -r dep; do
+                base="$(basename "$dep")"
+                if [ ! -f "lib/$base" ]; then
+                  cp "$dep" "lib/$base"
+                  added=1
+                fi
+              done < <(list_bundle_deps "$binary")
+            done
+            [ "$added" -eq 0 ] && break
+          done
+
+          for dylib in lib/*.dylib; do
+            [ -e "$dylib" ] || continue
+            install_name_tool -id "@executable_path/lib/$(basename "$dylib")" "$dylib"
+          done
+
+          for binary in hogd-dev lib/*.dylib; do
+            [ -e "$binary" ] || continue
+            while IFS= read -r dep; do
+              base="$(basename "$dep")"
+              if [ -f "lib/$base" ]; then
+                install_name_tool -change "$dep" "@executable_path/lib/$base" "$binary"
+              fi
+            done < <(otool -L "$binary" | awk 'NR > 1 { print $1 }')
+          done
+
+          file hogd-dev
+          otool -L hogd-dev
+          set +e
+          ./hogd-dev --help
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            exit "$status"
+          fi
+          popd >/dev/null
+
+          tar -czf artifacts/hogd-dev-macos-arm64.tar.gz -C package/hogd-dev-macos-arm64 hogd-dev lib
+          cd artifacts
+          shasum -a 256 hogd-dev-macos-arm64.tar.gz > hogd-dev-macos-arm64.tar.gz.sha256
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: hogd-dev-macos-arm64
+          path: artifacts/hogd-dev-macos-arm64.tar.gz*
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Print Log Download Instructions
+        if: always()
+        uses: ./.github/actions/print-log-instructions
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [release, hogd-dev-macos-arm64]
+    runs-on: namespace-profile-hogd-linux
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: hogd-linux-release-artifacts
+          path: artifacts/
+
+      - name: Download macOS hogd-dev artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: hogd-dev-macos-arm64
+          path: artifacts/
+
+      - name: Generate aggregate checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
