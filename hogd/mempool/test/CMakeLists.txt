@@ -90,3 +90,48 @@ if(BUILD_BENCHMARKS)
     set_property(TARGET mempool_scheduler_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
 endif()
+
+if(BUILD_FUZZERS)
+  add_executable(
+    mempool_scheduler_fuzz
+    EXCLUDE_FROM_ALL
+    scheduler_fuzz.cc
+    $<TARGET_OBJECTS:mempool_test_infra>
+  )
+  target_include_directories(mempool_scheduler_fuzz
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+  target_link_libraries(
+    mempool_scheduler_fuzz
+    auth
+    hogd
+    mempool
+    exec_interface
+    runtime
+    runtime_test_util
+    contract_loader
+    GTest::gtest
+  )
+  add_dependencies(
+    mempool_scheduler_fuzz
+    all_wasm_contracts
+  )
+  target_compile_options(
+    mempool_scheduler_fuzz
+    PRIVATE
+    -fsanitize=fuzzer,address,undefined
+    -fno-sanitize-recover=all
+  )
+  # libclang_rt.fuzzer is built against libstdc++, but this project uses
+  # libc++. Suppress automatic stdlib linking and explicitly link both.
+  target_link_options(
+    mempool_scheduler_fuzz
+    PRIVATE
+    -fsanitize=fuzzer,address,undefined
+    -fno-sanitize-recover=all
+    -nostdlib++
+    -lc++
+    -lstdc++
+  )
+endif()
