@@ -171,7 +171,8 @@ ViewGatewayResult
 run_view_with_retries_for_gateway(
     TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
     std::function<DbTip()> read_tip,
-    std::function<ViewGatewayResult(TransactionViewQuery const &, DbTip const &)>
+    std::function<ViewGatewayResult(TransactionViewQuery const &,
+                                    DbTip const &)>
         run_attempt,
     std::uint32_t max_attempts)
 {

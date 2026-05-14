@@ -69,14 +69,13 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw);
 
-TransactionViewQuery
-normalize_public_view_query(TransactionViewQuery query);
+TransactionViewQuery normalize_public_view_query(TransactionViewQuery query);
 
-ViewGatewayResult
-run_view_with_retries_for_gateway(
+ViewGatewayResult run_view_with_retries_for_gateway(
     TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
     std::function<DbTip()> read_tip,
-    std::function<ViewGatewayResult(TransactionViewQuery const &, DbTip const &)>
+    std::function<ViewGatewayResult(TransactionViewQuery const &,
+                                    DbTip const &)>
         run_attempt,
     std::uint32_t max_attempts);
 

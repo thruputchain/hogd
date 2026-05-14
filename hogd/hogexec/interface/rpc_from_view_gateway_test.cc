@@ -93,7 +93,7 @@ TEST(ViewGatewayRpc, MapsBackendFailures)
           1, ExpectedViewResult(
                  TransactionViewStatus::NondeterministicDataValidationFailure))
           .outcome(),
-            ViewGatewayOutcome::ViewGatewayInternalError);
+      ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
 TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
@@ -130,10 +130,7 @@ TEST(ViewGatewayRpc, RetriesAbandonedThenReturnsSuccessfulAttemptHeight)
   TransactionViewQuery query = make_query();
 
   ViewGatewayResult result = run_view_with_retries_for_gateway(
-      query, shutdown_flag,
-      [&] {
-        return tips.at(tip_reads++);
-      },
+      query, shutdown_flag, [&] { return tips.at(tip_reads++); },
       [&](TransactionViewQuery const &attempt_query, DbTip const &tip) {
         EXPECT_EQ(&attempt_query, &query);
         ++attempts;
