@@ -320,7 +320,7 @@ Benchmark::run()
 
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
-  PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1);
+  PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1, BlockExecutionMode::kBlockExecutionModeProposal);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
   if (auto ret = db_.write_dbtip(tip); !ret)
@@ -516,7 +516,7 @@ RCQBenchmark::run_sequential()
     for (size_t block = 0; block < num_blocks; block++) {
       PerThreadARC<BlockTX> block_tx(db_, cost_model_,
                                      background_commit_worker_,
-                                     static_cast<BlockHeight>(block + 1));
+                                     static_cast<BlockHeight>(block + 1), BlockExecutionMode::kBlockExecutionModeProposal);
 
       size_t block_end =
           std::min(num_entries_,
@@ -577,7 +577,7 @@ RCQBenchmark::run_sequential()
       more.store(false, std::memory_order_relaxed);
       PerThreadARC<BlockTX> block_tx(db_, cost_model_,
                                      background_commit_worker_,
-                                     static_cast<BlockHeight>(num_blocks + 1));
+                                     static_cast<BlockHeight>(num_blocks + 1), BlockExecutionMode::kBlockExecutionModeProposal);
 
       std::vector<size_t> queue_indices;
       queue_indices.reserve(num_queues_);
@@ -803,7 +803,7 @@ RCQBenchmark::run_concurrent()
     for (size_t block = 0; block < num_blocks; block++) {
       PerThreadARC<BlockTX> block_tx(db_, cost_model_,
                                      background_commit_worker_,
-                                     static_cast<BlockHeight>(block + 1));
+                                     static_cast<BlockHeight>(block + 1), BlockExecutionMode::kBlockExecutionModeProposal);
 
       size_t cur_block_end =
           std::min(num_entries_,

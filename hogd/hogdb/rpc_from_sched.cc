@@ -196,7 +196,7 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
-  co_return to_db_result(ctx_.open_block_tx(new_id));
+  co_return to_db_result(ctx_.open_block_tx(new_id, mode));
 }
 
 x23::Async<DbBlockResult>
@@ -329,7 +329,7 @@ HogDBSchedRpc::dbsched_load_genesis_configuration(
   // calling close() below.
   DbHash base_hash = ctx_.get_db().compute_full_db_hash();
 
-  auto r = ctx_.open_block_tx(kGenesisBlockID);
+  auto r = ctx_.open_block_tx(kGenesisBlockID, BlockExecutionMode::kBlockExecutionModeProposal);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
     co_return DbSchedResult::DbSchedResultError;

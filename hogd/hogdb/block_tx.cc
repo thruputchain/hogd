@@ -104,8 +104,8 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
 HogDBStatus<int128_t>
 BlockTX::lock(const ItemKey &key, ItemChange &change)
 {
-  if (auto s = check_stale(); !s) [[unlikely]]
-    return s.error();
+  if (auto s = check_stale(); !s || mode_ == BlockExecutionMode::kBlockExecutionModeViewing) [[unlikely]]
+    return s ? HogDBError(HogDBCode::kInvalidExecutorBehavior) : s.error();
   // no storage cost for address balances.
   if (key.is_address_balance()) {
 
@@ -249,8 +249,10 @@ BlockTX::read_balance_base(const Address &addr)
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
-  if (!changeset_.has_value()) {
-    return HogDBError(HogDBCode::kInternal);
+  if (!changeset_.has_value() || mode_ == BlockExecutionMode::kBlockExecutionModeViewing) {
+    return HogDBError(mode_ == BlockExecutionMode::kBlockExecutionModeViewing
+                          ? HogDBCode::kInvalidExecutorBehavior
+                          : HogDBCode::kInternal);
   }
   if (auto r = db_.apply(*changeset_); !r) {
     return r.error();
