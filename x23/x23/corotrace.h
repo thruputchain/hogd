@@ -15,14 +15,6 @@
 #include <x23/debug.h>
 #include <x23/utility.h>
 
-#ifndef X23_CORO_TRACE
-#if defined(NDEBUG) || !X23_CORO_SLOC_OK
-#define X23_CORO_TRACE 0
-#else // !NDEBUG && X23_CORO_TRACE
-#define X23_CORO_TRACE 1
-#endif // !NDEBUG && X23_CORO_TRACE
-#endif // !defined(X23_CORO_TRACE)
-
 namespace x23 {
 
 using std::source_location;
@@ -177,15 +169,15 @@ public:
   void put(const CoroHandle &ch)
   {
 #ifdef NDEBUG
-    h_.store(ch, std::memory_order_relaxed);
+    h_.store(ch, std::memory_order_release);
 #else  // !NDEBUG
-    auto h = h_.exchange(ch, std::memory_order_relaxed);
+    auto h = h_.exchange(ch, std::memory_order_release);
     assert(!h);
 #endif // !NDEBUG
   }
   CoroHandle take()
   {
-    return {h_.exchange(nullptr, std::memory_order_relaxed), nullptr};
+    return {h_.exchange(nullptr, std::memory_order_acquire), nullptr};
   }
   explicit operator bool() const
   {
