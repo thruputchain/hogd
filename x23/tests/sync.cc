@@ -393,9 +393,7 @@ struct HandoffTask {
   };
 
   explicit HandoffTask(std::coroutine_handle<promise_type> h) : h_(h) {}
-  HandoffTask(HandoffTask &&other) noexcept
-    : h_(std::exchange(other.h_, {}))
-  {}
+  HandoffTask(HandoffTask &&other) noexcept : h_(std::exchange(other.h_, {})) {}
   HandoffTask(const HandoffTask &) = delete;
   ~HandoffTask()
   {
