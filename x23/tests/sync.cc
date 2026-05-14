@@ -1,13 +1,16 @@
 
 #include <atomic>
+#include <coroutine>
 #include <mutex>
 #include <print>
 #include <thread>
+#include <utility>
 
 #include <unistd.h>
 
 #include <gtest/gtest.h>
 
+#include "x23/corotrace.h"
 #include "x23/event.h"
 #include "x23/testlock.h"
 #include "x23/threadpool.h"
@@ -371,4 +374,87 @@ TEST(CoroFutex, BigValue)
     }()();
     co_await pool.async(&ThreadPool::drain, &pool);
   }()();
+}
+
+namespace {
+
+struct HandoffTask {
+  struct promise_type : PromiseBase {
+    promise_type() : PromiseBase(std::source_location::current()) {}
+    HandoffTask get_return_object()
+    {
+      return HandoffTask{
+          std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+    std::suspend_always initial_suspend() noexcept { return {}; }
+    std::suspend_always final_suspend() noexcept { return {}; }
+    void return_void() noexcept {}
+    void unhandled_exception() { std::terminate(); }
+  };
+
+  explicit HandoffTask(std::coroutine_handle<promise_type> h) : h_(h) {}
+  HandoffTask(HandoffTask &&other) noexcept
+    : h_(std::exchange(other.h_, {}))
+  {}
+  HandoffTask(const HandoffTask &) = delete;
+  ~HandoffTask()
+  {
+    if (h_)
+      h_.destroy();
+  }
+
+  void start() { h_.resume(); }
+
+private:
+  std::coroutine_handle<promise_type> h_;
+};
+
+struct FrameMarkerAwaiter {
+  static constexpr int kPublished = 0x5a17;
+
+  AtomicCoroHandle &slot_;
+  int marker_ = 0;
+
+  bool await_ready() const noexcept { return false; }
+  void await_suspend(CoroHandle h) noexcept
+  {
+    marker_ = kPublished;
+    slot_.put(h);
+  }
+  int await_resume() const noexcept { return marker_; }
+};
+
+HandoffTask
+atomic_handle_handoff_probe(AtomicCoroHandle &slot, std::atomic_int &observed,
+                            std::atomic_bool &complete)
+{
+  int marker = co_await FrameMarkerAwaiter{slot};
+  observed.store(marker, std::memory_order_relaxed);
+  complete.store(true, std::memory_order_release);
+  complete.notify_all();
+}
+
+} // namespace
+
+TEST(AtomicCoroHandle, RelaxedHandoffPublishesFrameWithoutSynchronization)
+{
+  AtomicCoroHandle slot;
+  std::atomic_int observed{0};
+  std::atomic_bool complete{false};
+
+  HandoffTask task = atomic_handle_handoff_probe(slot, observed, complete);
+  std::jthread resumer([&] {
+    while (!slot)
+      std::this_thread::yield();
+    CoroHandle h = slot.take();
+    EXPECT_TRUE(bool{h});
+    h();
+  });
+
+  task.start();
+  while (!complete.load(std::memory_order_acquire))
+    complete.wait(false);
+
+  EXPECT_EQ(observed.load(std::memory_order_relaxed),
+            FrameMarkerAwaiter::kPublished);
 }
