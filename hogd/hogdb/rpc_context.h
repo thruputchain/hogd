@@ -76,6 +76,8 @@ public:
   // getters.
   HogDBDAO &get_db() { return db_; }
   DbTip get_tip() { return *tip_.take(); }
+  static bool has_committed_tip(DbTip const &tip) { return tip.height >= 0; }
+  bool has_committed_tip() { return has_committed_tip(get_tip()); }
   void set_tip(DbTip new_tip) { *tip_.take() = std::move(new_tip); }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
   {

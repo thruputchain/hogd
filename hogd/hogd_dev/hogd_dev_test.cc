@@ -51,6 +51,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "view_gateway.hh"
 #include "x23/serialize.h"
 
 #ifndef HOGD_DEV_BINARY
@@ -75,6 +76,7 @@ struct Readiness {
   Endpoint scheduler;
   Endpoint read;
   Endpoint gateway;
+  Endpoint view_gateway;
 
   struct DevAccount {
     std::uint32_t index;
@@ -277,6 +279,9 @@ parse_readiness(std::string line)
       .gateway =
           parse_endpoint(require_string_field(*endpoints, "gateway", line),
                          "gateway", line),
+      .view_gateway =
+          parse_endpoint(require_string_field(*endpoints, "view_gateway", line),
+                         "view_gateway", line),
       .dev_accounts = parse_dev_accounts(*parsed, line),
   };
 }
@@ -594,6 +599,8 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_GT(readiness.read.port, 0);
   EXPECT_EQ(readiness.gateway.host, "127.0.0.1");
   EXPECT_GT(readiness.gateway.port, 0);
+  EXPECT_EQ(readiness.view_gateway.host, "127.0.0.1");
+  EXPECT_GT(readiness.view_gateway.port, 0);
   EXPECT_TRUE(readiness.dev_accounts.empty());
 
   expect_clean_exit(process);
@@ -611,7 +618,8 @@ TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
       parse_readiness(R"({"status":"ready","network_id":"groundhog-local",)"
                       R"("endpoints":{"scheduler":"[::1]:12345",)"
                       R"("read":"[::1]:23456",)"
-                      R"("gateway":"[::1]:34567"}})");
+                      R"("gateway":"[::1]:34567",)"
+                      R"("view_gateway":"[::1]:45678"}})");
 
   EXPECT_EQ(readiness.scheduler.host, "::1");
   EXPECT_EQ(readiness.scheduler.port, 12345);
@@ -619,6 +627,8 @@ TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
   EXPECT_EQ(readiness.read.port, 23456);
   EXPECT_EQ(readiness.gateway.host, "::1");
   EXPECT_EQ(readiness.gateway.port, 34567);
+  EXPECT_EQ(readiness.view_gateway.host, "::1");
+  EXPECT_EQ(readiness.view_gateway.port, 45678);
 }
 
 TEST(HogdDev, DevAccountDerivationMatchesRustGoldens)
@@ -763,6 +773,23 @@ TEST(HogdDev, GatewayEndpointAnswersIntroAndGetItems)
     ASSERT_EQ(result.error(), RPCError::kRPCNone);
     ASSERT_EQ(result.payload().items.size(), 1U);
     EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, ViewGatewayEndpointAnswersIntro)
+{
+  HogdDevProcess process = HogdDevProcess::start();
+  Readiness readiness = process.wait_for_readiness();
+
+  {
+    auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                              readiness.view_gateway.port,
+                                              /*retry=*/true)();
+
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
   }
 
   expect_clean_exit(process);
