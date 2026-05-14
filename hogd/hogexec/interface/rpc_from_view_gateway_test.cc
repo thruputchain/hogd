@@ -7,10 +7,13 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "auth_token.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "view.hh"
 #include "view_gateway.hh"
 

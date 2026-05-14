@@ -1,14 +1,16 @@
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <string>
 #include <utility>
 
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -16,6 +18,8 @@
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/view/view.h"
 #include "hogd/version.h"
+#include "invoke_flag.hh"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_exec.hh"
@@ -45,7 +49,7 @@ make_public_view_auth_claim()
 }
 
 DatabaseIdentifier
-make_view_database_identifier(std::string db_executor_address)
+make_view_database_identifier(std::string const &db_executor_address)
 {
   return ShardedDB(IntroExecResult{
       .exec_id = 0,
@@ -63,14 +67,13 @@ make_view_database_identifier(std::string db_executor_address)
 
 } // namespace
 
-ViewGatewayRpc::ViewGatewayRpc(RPCContext &ctx, std::string db_executor_address,
-                               std::string event_host,
+ViewGatewayRpc::ViewGatewayRpc(RPCContext &ctx,
+                               std::string const &db_executor_address,
+                               std::string const &event_host,
                                std::uint16_t event_exec_port,
                                std::size_t nthreads)
-  : ctx_(ctx),
-    db_proxy_(make_view_database_identifier(std::move(db_executor_address))),
-    event_server_proxy_(
-        make_bind_host_port(std::move(event_host), event_exec_port)),
+  : ctx_(ctx), db_proxy_(make_view_database_identifier(db_executor_address)),
+    event_server_proxy_(make_bind_host_port(event_host, event_exec_port)),
     worker_pool_(static_cast<int>(nthreads))
 {}
 
@@ -170,10 +173,9 @@ normalize_public_view_query(TransactionViewQuery query)
 ViewGatewayResult
 run_view_with_retries_for_gateway(
     TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
-    std::function<DbTip()> read_tip,
+    std::function<DbTip()> const &read_tip,
     std::function<ViewGatewayResult(TransactionViewQuery const &,
-                                    DbTip const &)>
-        run_attempt,
+                                    DbTip const &)> const &run_attempt,
     std::uint32_t max_attempts)
 {
   for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {

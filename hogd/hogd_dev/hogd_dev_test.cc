@@ -52,6 +52,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "view.hh"
 #include "view_gateway.hh"
 #include "x23/serialize.h"
 

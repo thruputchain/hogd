@@ -7,10 +7,8 @@
 #include <cstdint>
 #include <functional>
 #include <string>
-#include <utility>
 
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -28,8 +26,8 @@ class ViewGatewayRpc {
 public:
   using rpc_service = ViewGateway1;
 
-  ViewGatewayRpc(RPCContext &ctx, std::string db_executor_address,
-                 std::string event_host, std::uint16_t event_exec_port,
+  ViewGatewayRpc(RPCContext &ctx, std::string const &db_executor_address,
+                 std::string const &event_host, std::uint16_t event_exec_port,
                  std::size_t nthreads = 2);
 
   static ViewGatewayIntroOutcome viewgateway_intro(Protocol const &protocol);
@@ -58,10 +56,10 @@ static_assert(is_ViewGateway1<ViewGatewayRpc *, x23::MaybeAsync>);
 
 class ViewGatewayServer : public RpcServer<ViewGatewayRpc> {
 public:
-  ViewGatewayServer(RPCContext &ctx, std::string db_executor_address,
-                    std::string event_host, std::uint16_t event_exec_port)
-    : RpcServer(ctx, std::move(db_executor_address), std::move(event_host),
-                event_exec_port)
+  ViewGatewayServer(RPCContext &ctx, std::string const &db_executor_address,
+                    std::string const &event_host,
+                    std::uint16_t event_exec_port)
+    : RpcServer(ctx, db_executor_address, event_host, event_exec_port)
   {}
 };
 
@@ -73,10 +71,9 @@ TransactionViewQuery normalize_public_view_query(TransactionViewQuery query);
 
 ViewGatewayResult run_view_with_retries_for_gateway(
     TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
-    std::function<DbTip()> read_tip,
+    std::function<DbTip()> const &read_tip,
     std::function<ViewGatewayResult(TransactionViewQuery const &,
-                                    DbTip const &)>
-        run_attempt,
+                                    DbTip const &)> const &run_attempt,
     std::uint32_t max_attempts);
 
 } // namespace hogd
