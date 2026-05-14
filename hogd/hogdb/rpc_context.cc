@@ -18,7 +18,7 @@
 namespace hogd {
 
 HogDBStatus<PerThreadARC<BlockTX> *>
-RPCContext::open_block_tx(BlockTXID bid)
+RPCContext::open_block_tx(BlockTXID bid, BlockExecutionMode mode)
 {
   // create the block tx.
   std::scoped_lock g(lock_);
@@ -26,7 +26,7 @@ RPCContext::open_block_tx(BlockTXID bid)
       block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
                           std::forward_as_tuple(get_db(), get_cost_model(),
                                                 background_commit_worker_,
-                                                get_tip().height + 1));
+                                                get_tip().height + 1, mode));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDBError(HogDBCode::kExists);
