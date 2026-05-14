@@ -33,6 +33,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"

@@ -27,6 +27,7 @@
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/x23.h"
