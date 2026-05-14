@@ -130,6 +130,9 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw)
 {
+  // TODO(view-gateway): add a caller-error ViewGatewayOutcome. InvalidInput
+  // and bad user-supplied ndet are request problems, but v1 can only express
+  // Ok, Abandoned, or InternalError.
   switch (raw.status()) {
   case TransactionViewStatus::Ok:
   {
