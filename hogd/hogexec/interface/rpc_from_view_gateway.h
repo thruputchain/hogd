@@ -34,7 +34,11 @@ public:
 
   x23::Async<ViewGatewayResult> viewgateway_view(TransactionViewQuery query);
 
-  void shut_down() { shutdown_flag_ = true; }
+  void shut_down()
+  {
+    shutdown_flag_ = true;
+    shutdown_flag_.notify_all();
+  }
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 

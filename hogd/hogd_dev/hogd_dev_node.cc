@@ -185,6 +185,7 @@ HogdDevNode::~HogdDevNode()
     // shutdown is required so the [Executor] destructor does not block.
     executor_.shut_down();
 
+    view_gateway_server_->impl()->shut_down();
     view_gateway_server_.reset();
     db_gateway_server_.reset();
     db_auth_server_.reset();
