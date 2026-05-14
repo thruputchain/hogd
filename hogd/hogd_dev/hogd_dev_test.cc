@@ -47,6 +47,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -790,6 +791,56 @@ TEST(HogdDev, ViewGatewayEndpointAnswersIntro)
 
     EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, ViewGatewayViewsCommittedDevWallet)
+{
+  HogdDevProcess process = HogdDevProcess::start({
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.dev_accounts.size(), 1UL);
+
+  {
+    auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                              readiness.view_gateway.port,
+                                              /*retry=*/true)();
+
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    const ContractAddress wallet_address =
+        build_dev_account_bootstrap_artifact({.count = 1}).accounts[0].address;
+    EXPECT_EQ(hex_string(wallet_address), readiness.dev_accounts[0].address);
+
+    TransactionViewQuery query{
+        .invocation =
+            Invocation{
+                .invoked_address = wallet_address,
+                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = Calldata{},
+            },
+        .parent_address = {},
+        .auth_claim = source_address_auth_claim(),
+        .forwarded_tokens = {},
+        .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+    };
+
+    ViewGatewayResult result = client.viewgateway_view(query)();
+    ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_EQ(result.payload().height, 1);
+    EXPECT_EQ(result.payload().output.status_code(),
+              InvocationFrameStatusCode::Abort);
   }
 
   expect_clean_exit(process);
