@@ -593,7 +593,7 @@ private:
       h_ = h;
       *s_.last_ = this;
       s_.last_ = &next_;
-      ul_.unlock();
+      ul_.release()->unlock();
     }
     void await_resume() noexcept {}
   };
