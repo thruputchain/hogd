@@ -17,29 +17,35 @@ source ./scripts/ci/prepare_env.sh
 
 # Google benchmark builds can interact badly with sanitizers, so we disable
 # benchmark builds to save time and avoid spurious failures.
+#
+# Disable the C++23 <stacktrace> library: libbacktrace is not thread-safe
+# and isn't built with TSAN annotations, so stacktrace-on-failure produces
+# hundreds of bogus race reports inside libdwarf/libstdc++ symbolization.
 
 export TSAN_OPTIONS=halt_on_error=1
 
+TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF")
+
 echo 'build gcc tsan'
-./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run gcc tests'
 ctest --test-dir build/gcc_tsan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang tsan'
-./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tests'
 ctest --test-dir build/llvm_tsan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang tsan release'
-./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tsan tests release'
 ctest --test-dir build/llvm_tsan_release --parallel --timeout 100 --output-on-failure
 
 echo 'build gcc tsan release'
-./scripts/build.sh -d build/gcc_tsan_release -c gcc -f "-fsanitize=thread" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/gcc_tsan_release -c gcc -f "-fsanitize=thread" -t Release "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run gcc tests release'
 ctest --test-dir build/gcc_tsan_release --parallel --timeout 100 --output-on-failure
