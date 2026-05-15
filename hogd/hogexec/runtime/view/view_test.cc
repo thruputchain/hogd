@@ -1021,6 +1021,59 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
   EXPECT_EQ(events[1].serialized_event, make_event_vec("after"));
 }
 
+TEST_F(ViewTest, ViewForwardedTokenWithoutParentReturnsInvalidInput)
+{
+  ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
+  auto invocation = client.make_invocation<"fibonacci">(UINT64_MAX, 10U);
+  auto query = make_query(invocation);
+  query.forwarded_tokens.push_back(
+      AuthToken{.mint_address = kFibAddress,
+                .expiry_height = 100,
+                .root_node = {.consumer_address = kFibAddress,
+                              .payload = {},
+                              .child_nodes = {}}});
+
+  auto result = run_view(query);
+  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+}
+
+TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
+{
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+          return {};
+        }}});
+
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCalleeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(
+      AuthToken{.mint_address = kParentAddr,
+                .expiry_height = 1'000'000,
+                .root_node = {.consumer_address = kCalleeAddr,
+                              .payload = {},
+                              .child_nodes = {}}});
+
+  auto result = run_view(query, *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
