@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <utility>
 
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/read_only_test.h"
 #include "contract.hh"
@@ -161,7 +163,8 @@ protected:
     framework_.setup_grant_storage_token(addr, 1'000'000'000);
   }
 
-  NativeContractTestFramework framework_;
+  NativeContractTestFramework framework_{
+      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB};
 
   x23::Defer<> force_syscallhandler_commit_ =
       SystemCallHandler::force_commit_or_abort();
@@ -1019,6 +1022,79 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
   EXPECT_EQ(events[0].serialized_event, make_event_vec("before"));
   EXPECT_EQ(events[1].contract_address, kCallerAddr);
   EXPECT_EQ(events[1].serialized_event, make_event_vec("after"));
+}
+
+TEST_F(ViewTest, ViewForwardedTokenWithoutParentReturnsInvalidInput)
+{
+  ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
+  auto invocation = client.make_invocation<"fibonacci">(UINT64_MAX, 10U);
+  auto query = make_query(invocation);
+  query.forwarded_tokens.push_back(
+      AuthToken{.mint_address = kFibAddress,
+                .expiry_height = 100,
+                .root_node = {.consumer_address = kFibAddress,
+                              .payload = {},
+                              .child_nodes = {}}});
+
+  auto result = run_view(query);
+  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+}
+
+TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
+{
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          // The first forwarded token receives id 0 from the registry.
+          std::array<std::byte, 64> payload_buf{};
+          ContractAddress minter{};
+          RuntimeMemoryLength payload_written_len = 0;
+          uint32_t child_start = 0;
+          uint32_t child_count = 0;
+          auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+              0U, std::span<std::byte>{payload_buf}, minter,
+              payload_written_len, child_start, child_count);
+          if (!r.has_value()) {
+            ADD_FAILURE() << "consume_auth_token syscall failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "consume_auth_token returned error: "
+                          << static_cast<int>(r.value());
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          EXPECT_EQ(minter, kParentAddr);
+          EXPECT_EQ(child_count, 0U);
+          return {};
+        }}});
+
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCalleeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(
+      AuthToken{.mint_address = kParentAddr,
+                .expiry_height = 1'000'000,
+                .root_node = {.consumer_address = kCalleeAddr,
+                              .payload = {},
+                              .child_nodes = {}}});
+
+  auto result = run_view(query, *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

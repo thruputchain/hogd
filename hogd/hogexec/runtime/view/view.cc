@@ -37,15 +37,11 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
 
   assert(!syscall_handler.is_running());
 
-  std::vector<uint32_t> forwarded_token_ids;
-  forwarded_token_ids.reserve(query.forwarded_tokens.size());
-
-  for (auto const &token : query.forwarded_tokens) {
-    auto token_id = syscall_handler.mint_auth_token(token);
-    if (!token_id.has_value()) {
-      return ExpectedViewResult{TransactionViewStatus::InternalError};
-    }
-    forwarded_token_ids.push_back(token_id.value());
+  if (!query.forwarded_tokens.empty() && !query.parent_address) {
+    ExpectedViewResult result(TransactionViewStatus::InvalidInput);
+    result.error_code() =
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+    return result;
   }
 
   if (query.parent_address) {
@@ -59,6 +55,17 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
     // r is only non-null if tracing is on
     CHECK(!r);
+  }
+
+  std::vector<uint32_t> forwarded_token_ids;
+  forwarded_token_ids.reserve(query.forwarded_tokens.size());
+
+  for (auto const &token : query.forwarded_tokens) {
+    auto token_id = syscall_handler.mint_auth_token(token);
+    if (!token_id.has_value()) {
+      return ExpectedViewResult{TransactionViewStatus::InternalError};
+    }
+    forwarded_token_ids.push_back(token_id.value());
   }
 
   auto [res, gas_consumed] =
