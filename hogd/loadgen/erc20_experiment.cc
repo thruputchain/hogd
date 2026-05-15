@@ -166,7 +166,7 @@ ERC20ExperimentState::generate_experiment()
 
 x23::Async<LoadgenStatus<LoadgenExtension>>
 ERC20ExperimentState::extend_experiment(uint64_t num_txs,
-                                        BlockHeight expiry_height)
+                                        BlockHeight expiry_height) const
 {
   if (!check_config_valid()) {
     co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
