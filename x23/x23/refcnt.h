@@ -347,7 +347,7 @@ public:
     auto c = refcnt_.fetch_sub(2, std::memory_order_release) - 2;
     if (c == 1) {
       refcnt_.notify_all();
-      refcnt_.fetch_sub(1, std::memory_order_relaxed);
+      refcnt_.fetch_sub(1, std::memory_order_release);
     }
   }
   void destroy_wait()
