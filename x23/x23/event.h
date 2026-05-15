@@ -468,7 +468,7 @@ private:
 class CoroPoll : public detail::CoroPollImpl {
 public:
   static constexpr bool kAllowRefPtrConversion = true;
-  static inline bool ignore_sigpipe = true;
+  static inline std::atomic<bool> ignore_sigpipe{true};
 
   CoroPoll(ThreadPool &pool);
   ~CoroPoll();

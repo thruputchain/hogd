@@ -80,8 +80,7 @@ SRpcFd::go(const CpuSet *cpus)
   // If this fails, you have neither clients nor servers.
   x23assert(refcount() || !srvmap_.empty());
 
-  if (ignore_sigpipe_) {
-    ignore_sigpipe_ = false;
+  if (ignore_sigpipe_.exchange(false, std::memory_order_relaxed)) {
     signal(SIGPIPE, SIG_IGN);
   }
 
