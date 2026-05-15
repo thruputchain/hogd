@@ -81,18 +81,15 @@ if(RUST_TSAN)
     # parking_lot-style futex calls emit happens-before edges TSAN can
     # follow. -Zexternal-clangrt leaves the TSAN runtime to the C++ link,
     # which already uses -fsanitize=thread. The workspace profiles use
-    # panic=abort, so rebuild libstd with panic_abort and override Cargo's
-    # default build-std features, which otherwise include panic-unwind.
-    # Without -Zbuild-std, std's synchronization primitives stay
-    # precompiled-and-unsanitized and TSAN false-flags any Rust-internal
-    # synchronization.
+    # panic=abort, so rebuild libstd with panic_abort. Without -Zbuild-std,
+    # std's synchronization primitives stay precompiled-and-unsanitized and
+    # TSAN false-flags any Rust-internal synchronization.
     message(STATUS "RUST_TSAN=ON: enabling Rust ThreadSanitizer instrumentation")
     corrosion_add_target_rustflags(unified_lib
         "-Zsanitizer=thread"
         "-Zexternal-clangrt")
     corrosion_set_cargo_flags(unified_lib
-        "-Zbuild-std=std,panic_abort"
-        "-Zbuild-std-features=panic_immediate_abort")
+        "-Zbuild-std=std,panic_abort")
 endif()
 
 # Add cargo tests to ctest

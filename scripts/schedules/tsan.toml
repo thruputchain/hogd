@@ -27,8 +27,7 @@ rustup component add rust-src --toolchain nightly
 # dependencies such as wasip1 that are not in the workspace lockfile.
 CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch \
     --manifest-path hogd/rust/Cargo.toml \
-    -Zbuild-std=std,panic_abort \
-    -Zbuild-std-features=panic_immediate_abort
+    -Zbuild-std=std,panic_abort
 
 # Google benchmark builds can interact badly with sanitizers, so we disable
 # benchmark builds to save time and avoid spurious failures.
