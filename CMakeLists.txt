@@ -203,8 +203,24 @@ set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
 include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 
+option(RUST_TSAN
+    "Build Rust crates with ThreadSanitizer instrumentation. Requires \
+the nightly toolchain and the rust-src component. Pair with a C++ build \
+that has -fsanitize=thread; libtsan is shared across the two."
+    OFF)
+
 # Enable Corrosion
 # The rust toolchain must be set FIRST!
+#
+# -Zsanitizer=thread and -Zbuild-std (both needed to make Rust visible
+# to TSAN) are nightly-only, so RUST_TSAN forces the toolchain to
+# nightly here. Corrosion derives the cargo target triple from whatever
+# rustc resolves under this toolchain, so the target follows the host
+# architecture automatically.
+if(RUST_TSAN)
+    set(Rust_TOOLCHAIN "nightly" CACHE STRING "Rust toolchain to use" FORCE)
+    message(STATUS "RUST_TSAN=ON: forcing Rust_TOOLCHAIN=nightly")
+endif()
 set(Rust_TOOLCHAIN "1.93.0" CACHE STRING "Rust toolchain to use")
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
