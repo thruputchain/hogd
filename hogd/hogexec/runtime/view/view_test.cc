@@ -245,6 +245,34 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 }
 
+TEST_F(ViewTest, ViewExecutionModeMakesRootFrameReadOnly)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (!ctx.handler().is_read_only()) {
+            ADD_FAILURE()
+                << "view execution must make the root frame read-only";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+}
+
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
 {
   static constexpr ContractAddress kNativeAddr =

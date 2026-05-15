@@ -269,7 +269,8 @@ public:
 
   bool is_read_only() const
   {
-    return invocation_frame_stack_.is_active_frame_read_only();
+    return std::holds_alternative<ViewingModeData>(execution_mode_data_) ||
+           invocation_frame_stack_.is_active_frame_read_only();
   }
 
   // === Crypto syscalls ===
@@ -424,9 +425,13 @@ private:
 
   BlockExecutionMode get_block_execution_mode() const
   {
-    return std::holds_alternative<ProposalModeData>(execution_mode_data_)
-               ? BlockExecutionMode::kBlockExecutionModeProposal
-               : BlockExecutionMode::kBlockExecutionModeValidation;
+    if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+      return BlockExecutionMode::kBlockExecutionModeProposal;
+    }
+    if (std::holds_alternative<ViewingModeData>(execution_mode_data_)) {
+      return BlockExecutionMode::kBlockExecutionModeViewing;
+    }
+    return BlockExecutionMode::kBlockExecutionModeValidation;
   }
 };
 
