@@ -717,7 +717,7 @@ TEST(HogdDev, RejectsDevAccountCountAboveLimit)
       "1001",
   });
 
-  std::optional<int> status = process.wait_for_exit_for_test(kStartupTimeout);
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
   ASSERT_TRUE(status.has_value());
   const int wait_status = status.value_or(EXIT_SUCCESS);
   EXPECT_FALSE(WIFEXITED(wait_status) &&
