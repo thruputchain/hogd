@@ -26,6 +26,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cpumap.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
