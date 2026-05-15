@@ -127,8 +127,7 @@ public:
   ~RefPtr() { reset(); }
 
   // NOLINTNEXTLINE(misc-unconventional-assign-operator)
-  decltype(auto) operator=(this is_mutable auto &&self,
-                           std::nullptr_t) noexcept
+  decltype(auto) operator=(this is_mutable auto &&self, std::nullptr_t) noexcept
   {
     self.reset();
     return (self);

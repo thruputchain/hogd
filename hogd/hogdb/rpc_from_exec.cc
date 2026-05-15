@@ -138,7 +138,8 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
   };
 
   for (auto &contract : new_contracts) {
-    // write contract should only fail if a sibling block commits and this block is abandoned.
+    // write contract should only fail if a sibling block commits and this block
+    // is abandoned.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
       CHECK(r.error().code() == HogDBCode::kStaleBlock);
       itx->abort();

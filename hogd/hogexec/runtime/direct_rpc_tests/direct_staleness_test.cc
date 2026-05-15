@@ -117,7 +117,8 @@ TEST_F(DirectStalenessTest, DeploymentReadOnStaleBlockReturnsAbandon)
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
 
-TEST_F(DirectStalenessTest, StaleNewContractCommitReturnsAbandonAndReleasesBlock)
+TEST_F(DirectStalenessTest,
+       StaleNewContractCommitReturnsAbandonAndReleasesBlock)
 {
   auto contract_addr = make_contract_address(2);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
