@@ -191,6 +191,18 @@ SipHash24::operator()(x23::BufView buf)
   return siphash24_hash(key_[0], key_[1], detail::span_to_message_span(buf));
 }
 
+// SipHash24Hasher is a drop-in unordered_map/unordered_set hasher for fixed
+// byte arrays (ContractAddress, SHA256Hash, etc.) that uses the process-wide
+// keyed SipHash24, so adversaries can't pack containers full of bucket-
+// colliding keys.
+struct SipHash24Hasher {
+  template<std::size_t N>
+  std::size_t operator()(const std::array<uint8_t, N> &array) const
+  {
+    return SipHash24::get_default()(std::as_bytes(std::span(array)));
+  }
+};
+
 // ed25519_keygen generates a new ed25519 keypair.
 inline std::pair<Ed25519PublicKey, Ed25519SecretKey>
 ed25519_keygen()

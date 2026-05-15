@@ -16,7 +16,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -200,7 +200,7 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  std::unordered_map<ContractAddress, AuthCacheEntry, ByteArrayHasher>
+  std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
@@ -225,7 +225,7 @@ AuthServer::verify_transactions(BlockHeight height,
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
-                                    ByteArrayHasher> &auth_data,
+                                    SipHash24Hasher> &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
