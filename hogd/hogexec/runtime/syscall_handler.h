@@ -424,9 +424,14 @@ private:
 
   BlockExecutionMode get_block_execution_mode() const
   {
-    return std::holds_alternative<ProposalModeData>(execution_mode_data_)
-               ? BlockExecutionMode::kBlockExecutionModeProposal
-               : BlockExecutionMode::kBlockExecutionModeValidation;
+    if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+      return BlockExecutionMode::kBlockExecutionModeProposal;
+    }
+    if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+      return BlockExecutionMode::kBlockExecutionModeValidation;
+    }
+    assert(std::holds_alternative<ViewingModeData>(execution_mode_data_));
+    return BlockExecutionMode::kBlockExecutionModeViewing;
   }
 };
 
