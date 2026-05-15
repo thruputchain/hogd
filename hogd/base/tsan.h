@@ -45,20 +45,20 @@
 
 #pragma once
 
-#if defined(__SANITIZE_THREAD__) || \
+#if defined(__SANITIZE_THREAD__) ||                                            \
     (defined(__has_feature) && __has_feature(thread_sanitizer))
 
 #include <sanitizer/tsan_interface.h>
 
 #define HOG_TSAN_MUTEX_CREATE(addr) __tsan_mutex_create((addr), 0)
 #define HOG_TSAN_MUTEX_DESTROY(addr) __tsan_mutex_destroy((addr), 0)
-#define HOG_TSAN_MUTEX_PRE_LOCK(addr, flags) \
+#define HOG_TSAN_MUTEX_PRE_LOCK(addr, flags)                                   \
   __tsan_mutex_pre_lock((addr), (flags))
-#define HOG_TSAN_MUTEX_POST_LOCK(addr, flags, recursion) \
+#define HOG_TSAN_MUTEX_POST_LOCK(addr, flags, recursion)                       \
   __tsan_mutex_post_lock((addr), (flags), (recursion))
-#define HOG_TSAN_MUTEX_PRE_UNLOCK(addr, flags) \
+#define HOG_TSAN_MUTEX_PRE_UNLOCK(addr, flags)                                 \
   ((void)__tsan_mutex_pre_unlock((addr), (flags)))
-#define HOG_TSAN_MUTEX_POST_UNLOCK(addr, flags) \
+#define HOG_TSAN_MUTEX_POST_UNLOCK(addr, flags)                                \
   __tsan_mutex_post_unlock((addr), (flags))
 
 #define HOG_TSAN_FLAG_READ __tsan_mutex_read_lock
@@ -72,14 +72,11 @@
 // flagged as unused.
 #define HOG_TSAN_MUTEX_CREATE(addr) ((void)(addr))
 #define HOG_TSAN_MUTEX_DESTROY(addr) ((void)(addr))
-#define HOG_TSAN_MUTEX_PRE_LOCK(addr, flags) \
-  ((void)(addr), (void)(flags))
-#define HOG_TSAN_MUTEX_POST_LOCK(addr, flags, recursion) \
+#define HOG_TSAN_MUTEX_PRE_LOCK(addr, flags) ((void)(addr), (void)(flags))
+#define HOG_TSAN_MUTEX_POST_LOCK(addr, flags, recursion)                       \
   ((void)(addr), (void)(flags), (void)(recursion))
-#define HOG_TSAN_MUTEX_PRE_UNLOCK(addr, flags) \
-  ((void)(addr), (void)(flags))
-#define HOG_TSAN_MUTEX_POST_UNLOCK(addr, flags) \
-  ((void)(addr), (void)(flags))
+#define HOG_TSAN_MUTEX_PRE_UNLOCK(addr, flags) ((void)(addr), (void)(flags))
+#define HOG_TSAN_MUTEX_POST_UNLOCK(addr, flags) ((void)(addr), (void)(flags))
 
 #define HOG_TSAN_FLAG_READ 0u
 #define HOG_TSAN_FLAG_TRY 0u
