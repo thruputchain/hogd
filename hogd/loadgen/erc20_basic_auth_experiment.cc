@@ -70,7 +70,7 @@ ERC20BasicAuthExperimentState::initialize_wallets(
 
 void
 ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
-                                             size_t wallet_index)
+                                             size_t wallet_index) const
 {
   assert(wallet_index < wallets_.size());
 
@@ -189,8 +189,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
 }
 
 x23::Async<LoadgenStatus<LoadgenExtension>>
-ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
-                                                 BlockHeight expiry_height)
+ERC20BasicAuthExperimentState::extend_experiment(
+    uint64_t num_txs, BlockHeight expiry_height) const
 {
   const static AuthClaim self_auth_claim = [] {
     AuthClaim claim(AuthClaimType::kSourceAddressAuthData);

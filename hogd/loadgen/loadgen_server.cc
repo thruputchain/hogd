@@ -57,15 +57,23 @@ x23::Async<LoadgenExtensionResult>
 LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
                               BlockHeight expiry_height)
 {
-  auto st = experiment_states_.take();
-  auto state = st->find(context_id);
-  if (state == st->end()) {
-    co_return LoadgenExtensionResult(
-        LoadgenRPCError::kLoadgenRPCErrorInvalidContext);
+  // Copy the shared_ptr out under the lock so we don't hold std::mutex
+  // across the co_await below: a coroutine may resume on a different
+  // thread than the one that locked it, and unlocking std::mutex from
+  // the wrong thread is undefined behavior.
+  std::shared_ptr<ExperimentState> state;
+  {
+    auto st = experiment_states_.take();
+    auto it = st->find(context_id);
+    if (it == st->end()) {
+      co_return LoadgenExtensionResult(
+          LoadgenRPCError::kLoadgenRPCErrorInvalidContext);
+    }
+    state = it->second;
   }
   LoadgenExtensionResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
   LoadgenStatus<LoadgenExtension> r =
-      co_await state->second->extend_experiment(num_txs, expiry_height);
+      co_await state->extend_experiment(num_txs, expiry_height);
   if (!r) {
     co_return LoadgenExtensionResult(r.error().code());
   }
