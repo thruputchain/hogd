@@ -250,8 +250,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     auto res =
         client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
     return to_system_error_code<false>(res, [] { return true; });
-  }
-  catch (x23::XdrBadInput const &e) {
+  } catch (x23::XdrBadInput const &e) {
     error("Unrecoverable: try_push_new_subtransaction threw XdrBadInput "
           "(oversized delta batch?): {}",
           e.what());
