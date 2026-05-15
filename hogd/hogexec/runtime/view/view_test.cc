@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <utility>
 
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/read_only_test.h"
 #include "contract.hh"
