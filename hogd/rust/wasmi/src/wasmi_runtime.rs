@@ -56,7 +56,7 @@ impl WasmiRuntime {
     fn new(
         bytes: &[u8],
         hash: &[u8; 32],
-        context: &WasmiContext,
+        context: &mut WasmiContext,
         userctx: *mut c_void,
     ) -> Result<Option<WasmiRuntime>, SystemErrorCode> {
         let (module, linker) = if context.has_module_cache() {
@@ -233,9 +233,9 @@ impl NewWasmiRuntimeResult {
 /// wasmi_context_ptr must not be a nullptr, and must have been created by new_wasmi_context.
 /// userctx can be any (null or non-null) pointer.
 /// bytes must be either null or a valid memory slice.
-/// Multiple threads may call this function concurrently with the same
-/// wasmi_context_ptr; we materialize a shared borrow (`&WasmiContext`)
-/// rather than `&mut`, so overlapping calls do not violate Rust aliasing.
+/// Callers must not call this function concurrently with the same
+/// wasmi_context_ptr; WasmiContext owns a non-Sync module cache and is
+/// thread-confined by the C++ runtime context ownership.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_runtime(
     hash: *const u8,      // 32 bytes
@@ -248,8 +248,8 @@ pub unsafe extern "C" fn new_wasmi_runtime(
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
-    let wasmi_context: &WasmiContext =
-        unsafe { &*wasmi_context_ptr.cast::<WasmiContext>() };
+    let wasmi_context: &mut WasmiContext =
+        unsafe { &mut *wasmi_context_ptr.cast::<WasmiContext>() };
 
     let slice = match wasmi_context.fetch_contract(userctx, hash_slice) {
         Ok(Some(slice)) => slice,

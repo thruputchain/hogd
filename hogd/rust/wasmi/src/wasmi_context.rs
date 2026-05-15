@@ -15,8 +15,9 @@ use common::string_from_parts;
 use common::{LinkEntry, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
-// for multiple Wasmi runtimes.
-// This structure internally (appears to be) threadsafe.
+// for multiple Wasmi runtimes owned by one RuntimeContext.
+// This structure is not threadsafe; hogexec keeps RuntimeContext
+// thread-confined.
 // Specifically, Engine is a shared_pointer around EngineInner,
 // which appears to have appropriate mutexes.
 //
@@ -77,12 +78,10 @@ impl WasmiGlobalContext {
 pub struct WasmiContext {
     global_context: std::sync::Arc<WasmiGlobalContext>,
     // ModuleCache itself is !Sync because LRU lookup updates access
-    // order. Hogexec normally creates runtime contexts thread-locally,
-    // but new_wasmi_runtime now materializes a shared `&WasmiContext`
-    // from the FFI pointer. If a caller does share that pointer across
-    // threads, the cache needs interior synchronization rather than
-    // overlapping `&mut self` borrows.
-    pub module_cache: Option<std::sync::Mutex<ModuleCache>>,
+    // order. Hogexec keeps WasmiContext thread-confined, so runtime
+    // creation uses an exclusive borrow instead of synchronizing the
+    // cache internally.
+    pub module_cache: Option<ModuleCache>,
     contract_get_fn: ContractGetFn,
 }
 
@@ -121,7 +120,7 @@ impl WasmiContext {
             global_context,
             // Performance is somewhat sensitive to module cache size.
             // We need to change the caching strategy anyways once we go to winch.
-            module_cache: Some(std::sync::Mutex::new(ModuleCache::new(10))),
+            module_cache: Some(ModuleCache::new(10)),
             contract_get_fn: get_fn,
         }
     }
@@ -147,22 +146,20 @@ impl WasmiContext {
     }
 
     pub fn get_cached_module(
-        &self,
+        &mut self,
         hash: &[u8; 32],
     ) -> Option<ModuleCacheEntry> {
-        self.module_cache
-            .as_ref()
-            .and_then(|cache| cache.lock().unwrap().get(hash))
+        self.module_cache.as_mut().and_then(|cache| cache.get(hash))
     }
 
     pub fn put_cached_module(
-        &self,
+        &mut self,
         hash: &[u8; 32],
         module: &Module,
         linker: &Linker<*mut c_void>,
     ) {
-        if let Some(cache) = self.module_cache.as_ref() {
-            cache.lock().unwrap().put(hash, module, linker);
+        if let Some(cache) = self.module_cache.as_mut() {
+            cache.put(hash, module, linker);
         }
     }
 
@@ -585,15 +582,6 @@ pub unsafe extern "C" fn new_wasmi_context(
         &*global_context.cast::<std::sync::Arc<WasmiGlobalContext>>()
     };
 
-    // Compile-time assertion: WasmiContext is Send + Sync. Hogexec's
-    // executor normally keeps runtime contexts thread-local, but the
-    // Rust FFI boundary now permits shared `&WasmiContext` borrows if a
-    // caller does share the pointer. The module cache is wrapped in a
-    // Mutex; contract_get_fn is a fn pointer; global_context is in an Arc.
-    const _: fn() = || {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<WasmiContext>();
-    };
     let b = Box::new(WasmiContext::new(global_context.clone(), get_fn));
     Box::into_raw(b).cast::<c_void>()
 }
