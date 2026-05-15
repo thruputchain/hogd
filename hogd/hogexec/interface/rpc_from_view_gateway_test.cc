@@ -114,7 +114,7 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
   ASSERT_TRUE(normalized.parent_address);
   EXPECT_EQ(*normalized.parent_address, caller);
   EXPECT_TRUE(normalized.forwarded_tokens.empty());
-  EXPECT_EQ(normalized.invoke_flags, std::to_underlying(InvokeFlag::ReadOnly));
+  EXPECT_EQ(normalized.invoke_flags, std::to_underlying(InvokeFlag::None));
   ASSERT_EQ(normalized.auth_claim.claim_type(),
             AuthClaimType::kSourceAddressAuthData);
   EXPECT_EQ(normalized.auth_claim.source_address_claim().allowed_keys, 0);

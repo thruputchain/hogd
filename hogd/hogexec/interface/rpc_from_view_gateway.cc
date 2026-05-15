@@ -169,7 +169,7 @@ normalize_public_view_query(TransactionViewQuery query)
 {
   query.auth_claim = make_public_view_auth_claim();
   query.forwarded_tokens = {};
-  query.invoke_flags = std::to_underlying(InvokeFlag::ReadOnly);
+  query.invoke_flags = std::to_underlying(InvokeFlag::None);
   return query;
 }
 

@@ -69,7 +69,7 @@ RPCContext::get_block_tx_slow(BlockTXID bid, bool acquire_reference)
 }
 
 bool
-RPCContext::is_block_tx_stale_slow(BlockTXID bid)
+RPCContext::is_snapshot_read_stale_slow(BlockTXID bid)
 {
   PerThreadARC<BlockTX> *tx;
   // This lock should be held during the cache updates, not just the lookup.
