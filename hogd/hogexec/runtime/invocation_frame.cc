@@ -456,7 +456,9 @@ InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 SyscallStatus<uint32_t>
 InvocationFrameStack::mint_auth_token(AuthToken const &auth_token)
 {
-  assert(!frame_stack_.empty());
+  if (frame_stack_.empty()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   auto token_id = auth_token_registry_.register_auth_token(auth_token);
   if (!token_id.has_value()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
