@@ -45,15 +45,6 @@ set(X23_FD_TRACE "" CACHE STRING
 set(X23_CORO_TRACE "" CACHE STRING
   "Enable coroutine tracing (0=off, 1=on, empty=auto based on NDEBUG)")
 
-# Only pass X23_CORO_TRACE to configure_file if it's explicitly set
-if(NOT X23_CORO_TRACE STREQUAL "")
-    message(STATUS "X23_CORO_TRACE explicitly set to ${X23_CORO_TRACE}")
-else()
-    # If it's empty, unset it so it becomes undefined for #cmakedefine
-    unset(X23_CORO_TRACE)
-    message(STATUS "X23_CORO_TRACE is empty, will use !defined(NDEBUG)")
-endif()
-
 include(cmake/accept4.cmake)
 include(cmake/atomicsharedptr.cmake)
 include(cmake/demangle.cmake)
@@ -63,6 +54,24 @@ include(cmake/getprogname.cmake)
 include(cmake/pause.cmake)
 include(cmake/stacktrace.cmake)
 include(cmake/coroICE.cmake)
+
+# Resolve X23_CORO_TRACE to a concrete 0 or 1 here in CMake (rather than
+# leaving the auto-detect to the preprocessor in corotrace.h) so that we
+# can use #cmakedefine01 in config.h.in.  Plain `#cmakedefine X @X@` is a
+# footgun: CMake evaluates the value as a boolean (0/OFF/FALSE/NO/"" are
+# all falsy), so setting the cache var to "0" silently emits `#undef X`
+# instead of `#define X 0`.  With auto-detect living in the header, that
+# `#undef` would flip tracing back on in Debug builds, defeating the
+# explicit-off case.  Compute the value here, use #cmakedefine01, and the
+# header always sees a concrete 0/1.
+if(X23_CORO_TRACE STREQUAL "")
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND X23_CORO_SLOC_OK)
+        set(X23_CORO_TRACE 1)
+    else()
+        set(X23_CORO_TRACE 0)
+    endif()
+endif()
+message(STATUS "X23_CORO_TRACE = ${X23_CORO_TRACE}")
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in

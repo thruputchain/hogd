@@ -35,9 +35,10 @@
 #cmakedefine01 X23_CORO_SLOC_OK
 
 // Define to 1 to enable tracing of coroutine flow (when
-// x23::CoroTrace::enable is true), 0 to disable, or leave undefined
-// to use !defined(NDEBUG) && X23_CORO_SLOC_OK
-#cmakedefine X23_CORO_TRACE @X23_CORO_TRACE@
+// x23::CoroTrace::enable is true), or 0 to disable.  CMake resolves the
+// auto-detect to a concrete 0/1 in x23/CMakeLists.txt; see the comment
+// there for why this isn't a plain `#cmakedefine`.
+#cmakedefine01 X23_CORO_TRACE
 
 // Define to 1 to enable tracing of how file descriptors are handled.
 // 0 to disable.  Leave undefined to set it based on DEBUG.

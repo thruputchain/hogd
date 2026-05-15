@@ -68,7 +68,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     }));
     ASSERT_TRUE(
         ctx.get_db().write_cost_model(ctx.get_cost_model()).has_value());
-    auto open_result = ctx.open_block_tx(1);
+    auto open_result =
+        ctx.open_block_tx(1, BlockExecutionMode::kBlockExecutionModeProposal);
     ASSERT_TRUE(open_result.has_value());
 
     auto *itx = ctx.get_invoke_tx(1, 1);

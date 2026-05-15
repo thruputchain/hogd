@@ -22,7 +22,6 @@
 #include "types.hh"
 
 namespace hogd {
-
 // BlockTX manages a set of pending changes made in a block relative to the
 // current snapshot state. They can be applied to the ramdb via commit().
 // Multiple BlockTXes can be instantiated, but only one should be committed.
@@ -30,10 +29,10 @@ class BlockTX {
 public:
   BlockTX(HogDBDAO &db, const StorageCostModel &cost_model,
           BackgroundCommitWorker &background_commit_worker,
-          BlockHeight block_height)
+          BlockHeight block_height, BlockExecutionMode mode)
     : db_(db), cost_model_(cost_model),
       background_commit_worker_(background_commit_worker),
-      block_height_(block_height)
+      block_height_(block_height), mode_(mode)
   {}
   ~BlockTX() = default;
 
@@ -118,6 +117,7 @@ private:
   BlockHeight block_height_;
   std::optional<ChangeSet> changeset_;
   std::atomic<bool> invalidated_{false};
+  const BlockExecutionMode mode_;
 
   HogDBStatus<void> stage_locks(ChangeSet &changes);
 

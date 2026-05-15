@@ -593,7 +593,17 @@ private:
       h_ = h;
       *s_.last_ = this;
       s_.last_ = &next_;
-      ul_.unlock();
+      // release() before unlock(), not ul_.unlock().
+      // unique_lock::unlock() does __m_->unlock() then __owns_=false, so
+      // the __owns_ byte write lands AFTER the release on lk_.  Once lk_
+      // is released a concurrent CoroSem::release() can pop this waiter
+      // and resume the coroutine on another thread, and ~unique_lock on
+      // that thread reads __owns_ — a data race with no happens-before
+      // edge protecting it.  release()->unlock() reorders: __owns_=false
+      // is sequenced before the release on lk_, so it rides along in the
+      // release sequence and the resumer's acquire on lk_ makes it
+      // observable.
+      ul_.release()->unlock();
     }
     void await_resume() noexcept {}
   };
