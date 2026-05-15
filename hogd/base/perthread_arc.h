@@ -52,7 +52,7 @@ public:
   // is currently being destroyed.
   bool try_acquire_reference()
   {
-    auto r = refcount_->count_.fetch_add(1, std::memory_order_relaxed);
+    auto r = refcount_->count_.fetch_add(1, std::memory_order_acquire);
 
     // If this is the first access: make sure that if were were in the middle of
     // shutdown, our thread's refcount is tracked by initiate_shutdown().
@@ -83,7 +83,7 @@ public:
     // If the threadlocal count is still positive, then shutdown has not yet
     // been initiated.
     int64_t previous_threadlocal_count =
-        refcount_->count_.fetch_sub(1, std::memory_order_relaxed);
+        refcount_->count_.fetch_sub(1, std::memory_order_release);
 
     // This thread did not touch the refcount before; so, we must initialize the
     // refcount and try again
@@ -95,14 +95,14 @@ public:
         // now reduce the active refcount by 1, and check if there are any
         // references left
         auto prev =
-            shutdown_pending_refcount_.fetch_sub(1, std::memory_order_relaxed);
+            shutdown_pending_refcount_.fetch_sub(1, std::memory_order_acq_rel);
         CHECK(prev > 0);
         return prev == 1;
       }
 
       // otherwise, initialize the refcount to -1; we're not in shutdown, so we
       // must return false.
-      refcount_->count_.store(kInitializedValue - 1, std::memory_order_relaxed);
+      refcount_->count_.store(kInitializedValue - 1, std::memory_order_release);
       return false;
     }
 
@@ -121,7 +121,7 @@ public:
 
     // Subtract the reference from the aggregated refcount
     auto prev =
-        shutdown_pending_refcount_.fetch_sub(1, std::memory_order_relaxed);
+        shutdown_pending_refcount_.fetch_sub(1, std::memory_order_acq_rel);
     CHECK(prev > 0);
     return prev == 1;
   }
