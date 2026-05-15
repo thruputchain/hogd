@@ -14,6 +14,7 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/read_only_test.h"
 #include "contract.hh"
+#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
@@ -36,6 +37,7 @@
 #include "types.hh"
 #include "view.hh"
 #include "x23/cleanup.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
