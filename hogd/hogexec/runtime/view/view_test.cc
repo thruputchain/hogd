@@ -5,6 +5,8 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -103,6 +105,31 @@ protected:
         .forwarded_tokens = {},
         .invoke_flags = {},
     };
+  }
+
+  static x23::Vec<uint8_t, kMaxEventLength>
+  make_event_vec(std::string_view data)
+  {
+    return x23::Vec<uint8_t, kMaxEventLength>(
+        reinterpret_cast<uint8_t const *>(data.data()),
+        reinterpret_cast<uint8_t const *>(data.data() + data.size()));
+  }
+
+  static InvokeStatus<void> emit_event(NativeSyscallContext &ctx,
+                                       std::string const &payload)
+  {
+    auto s = ctx.syscall<SyscallNo::kLogEvent>(
+        static_cast<SHA256Hash const *>(nullptr),
+        static_cast<SHA256Hash const *>(nullptr),
+        static_cast<SHA256Hash const *>(nullptr),
+        std::as_bytes(std::span(payload)));
+    if (!s.has_value()) {
+      return InvokeError{InvokeErrorCode::Unrecoverable};
+    }
+    if (s.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
   }
 
   struct NativeViewSetup {
@@ -703,6 +730,292 @@ TEST_F(ViewTest, ViewRcqConsumePresentButNoEntryData)
       run_view(make_query(invocation), *setup.context, std::move(ndet));
   EXPECT_EQ(result.status(),
             TransactionViewStatus::NondeterministicDataValidationFailure);
+}
+
+TEST_F(ViewTest, ViewSingleFrameNoEvents)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(result.result().events.empty());
+}
+
+TEST_F(ViewTest, ViewSingleFrameEmitsMultipleEvents)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          for (auto const *payload : {"first", "second", "third"}) {
+            auto r = emit_event(ctx, std::string(payload));
+            if (!r.has_value()) {
+              return r;
+            }
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto const &events = result.result().events;
+  ASSERT_EQ(events.size(), 3U);
+  EXPECT_EQ(events[0].contract_address, kNativeAddr);
+  EXPECT_EQ(events[0].num_topics, 0U);
+  EXPECT_EQ(events[0].serialized_event, make_event_vec("first"));
+  EXPECT_EQ(events[1].contract_address, kNativeAddr);
+  EXPECT_EQ(events[1].num_topics, 0U);
+  EXPECT_EQ(events[1].serialized_event, make_event_vec("second"));
+  EXPECT_EQ(events[2].contract_address, kNativeAddr);
+  EXPECT_EQ(events[2].num_topics, 0U);
+  EXPECT_EQ(events[2].serialized_event, make_event_vec("third"));
+}
+
+TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
+{
+  // Caller (method 1) emits "outer_before", invokes callee (method 0) which
+  // emits "inner_leaf", then caller emits "outer_after". Events from the
+  // nested frame must be interleaved with the caller's events in invocation
+  // order and tagged with each emitter's contract address.
+
+  static constexpr ContractAddress kCallerAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(11);
+
+  NativeViewSetup setup(
+      {{0,
+        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          return emit_event(ctx, "inner_leaf");
+        }},
+       {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "outer_before"); !r.has_value()) {
+            return r;
+          }
+          RuntimeMemoryLength out_buf_len = 0;
+          RuntimeMemoryLength out_auth_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddr, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              out_buf_len, out_auth_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return emit_event(ctx, "outer_after");
+        }}});
+
+  deploy_native(kCallerAddr);
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCallerAddr,
+      .entrypoint = entrypoint_from_method_id(1),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto const &events = result.result().events;
+  ASSERT_EQ(events.size(), 3U);
+  EXPECT_EQ(events[0].contract_address, kCallerAddr);
+  EXPECT_EQ(events[0].serialized_event, make_event_vec("outer_before"));
+  EXPECT_EQ(events[1].contract_address, kCalleeAddr);
+  EXPECT_EQ(events[1].serialized_event, make_event_vec("inner_leaf"));
+  EXPECT_EQ(events[2].contract_address, kCallerAddr);
+  EXPECT_EQ(events[2].serialized_event, make_event_vec("outer_after"));
+}
+
+TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
+{
+  // Three-level nesting: outer (method 2) -> middle (method 1) -> leaf
+  // (method 0). Each frame emits one event before its child invoke and one
+  // after. The leaf emits a single event. Resulting order:
+  // outer_pre, middle_pre, leaf, middle_post, outer_post.
+
+  static constexpr ContractAddress kOuterAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kMiddleAddr =
+      NativeContractTestFramework::make_contract_address(11);
+  static constexpr ContractAddress kLeafAddr =
+      NativeContractTestFramework::make_contract_address(12);
+
+  NativeViewSetup setup(
+      {{0,
+        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          return emit_event(ctx, "leaf");
+        }},
+       {1,
+        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "middle_pre"); !r.has_value()) {
+            return r;
+          }
+          RuntimeMemoryLength out_buf_len = 0;
+          RuntimeMemoryLength out_auth_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kLeafAddr, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              out_buf_len, out_auth_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return emit_event(ctx, "middle_post");
+        }},
+       {2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "outer_pre"); !r.has_value()) {
+            return r;
+          }
+          RuntimeMemoryLength out_buf_len = 0;
+          RuntimeMemoryLength out_auth_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kMiddleAddr, 1, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              out_buf_len, out_auth_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return emit_event(ctx, "outer_post");
+        }}});
+
+  deploy_native(kOuterAddr);
+  deploy_native(kMiddleAddr);
+  deploy_native(kLeafAddr);
+
+  Invocation invocation{
+      .invoked_address = kOuterAddr,
+      .entrypoint = entrypoint_from_method_id(2),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto const &events = result.result().events;
+  ASSERT_EQ(events.size(), 5U);
+  EXPECT_EQ(events[0].contract_address, kOuterAddr);
+  EXPECT_EQ(events[0].serialized_event, make_event_vec("outer_pre"));
+  EXPECT_EQ(events[1].contract_address, kMiddleAddr);
+  EXPECT_EQ(events[1].serialized_event, make_event_vec("middle_pre"));
+  EXPECT_EQ(events[2].contract_address, kLeafAddr);
+  EXPECT_EQ(events[2].serialized_event, make_event_vec("leaf"));
+  EXPECT_EQ(events[3].contract_address, kMiddleAddr);
+  EXPECT_EQ(events[3].serialized_event, make_event_vec("middle_post"));
+  EXPECT_EQ(events[4].contract_address, kOuterAddr);
+  EXPECT_EQ(events[4].serialized_event, make_event_vec("outer_post"));
+}
+
+TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
+{
+  // Caller (method 1) emits "before", invokes callee (method 0) which emits
+  // "child_dropped" then manually reverts. Caller observes FrameReverted and
+  // emits "after". The reverted child frame's event must be dropped; only the
+  // caller's two events survive in the view's events list.
+
+  static constexpr ContractAddress kCallerAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(11);
+
+  NativeViewSetup setup(
+      {{0,
+        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "child_dropped"); !r.has_value()) {
+            return r;
+          }
+          auto ret = ctx.syscall<SyscallNo::kReturn>(
+              std::span<const std::byte>{}, true,
+              std::span<const std::byte>{});
+          if (ret.has_value() ||
+              ret.error().code() != HostFnErrorCode::Return) {
+            ADD_FAILURE() << "expected Return error from kReturn syscall";
+          }
+          return {};
+        }},
+       {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "before"); !r.has_value()) {
+            return r;
+          }
+          RuntimeMemoryLength out_buf_len = 0;
+          RuntimeMemoryLength out_auth_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddr, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+              out_buf_len, out_auth_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return emit_event(ctx, "after");
+        }}});
+
+  deploy_native(kCallerAddr);
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCallerAddr,
+      .entrypoint = entrypoint_from_method_id(1),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto const &events = result.result().events;
+  ASSERT_EQ(events.size(), 2U);
+  EXPECT_EQ(events[0].contract_address, kCallerAddr);
+  EXPECT_EQ(events[0].serialized_event, make_event_vec("before"));
+  EXPECT_EQ(events[1].contract_address, kCallerAddr);
+  EXPECT_EQ(events[1].serialized_event, make_event_vec("after"));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
