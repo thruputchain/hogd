@@ -100,7 +100,9 @@ public:
   PerTransactionDatabaseProxy(DatabaseProxy &db_proxy, BlockID block_id,
                               TransactionID tx_id)
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
-  {}
+  {
+     current_subtransaction_batch_.clear();
+  }
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void reserve(size_t delta_count)
