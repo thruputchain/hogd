@@ -161,7 +161,8 @@ protected:
     framework_.setup_grant_storage_token(addr, 1'000'000'000);
   }
 
-  NativeContractTestFramework framework_;
+  NativeContractTestFramework framework_{
+      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB};
 
   x23::Defer<> force_syscallhandler_commit_ =
       SystemCallHandler::force_commit_or_abort();
@@ -1047,7 +1048,27 @@ TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      {{0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          // The first forwarded token receives id 0 from the registry.
+          std::array<std::byte, 64> payload_buf{};
+          ContractAddress minter{};
+          RuntimeMemoryLength payload_written_len = 0;
+          uint32_t child_start = 0;
+          uint32_t child_count = 0;
+          auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+              0U, std::span<std::byte>{payload_buf}, minter,
+              payload_written_len, child_start, child_count);
+          if (!r.has_value()) {
+            ADD_FAILURE() << "consume_auth_token syscall failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "consume_auth_token returned error: "
+                          << static_cast<int>(r.value());
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          EXPECT_EQ(minter, kParentAddr);
+          EXPECT_EQ(child_count, 0U);
           return {};
         }}});
 
