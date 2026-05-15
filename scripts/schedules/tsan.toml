@@ -41,12 +41,6 @@ export TSAN_OPTIONS=halt_on_error=1:detect_deadlocks=0
 
 TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
-#echo 'build gcc tsan'
-#./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
-
-#echo 'run gcc tests'
-#ctest --test-dir build/gcc_tsan --parallel --timeout 100 --output-on-failure
-
 echo 'build clang tsan'
 ./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
 
@@ -59,11 +53,9 @@ echo 'build clang tsan release'
 echo 'run llvm tsan tests release'
 ctest --test-dir build/llvm_tsan_release --parallel --timeout 100 --output-on-failure
 
-echo 'build gcc tsan release'
-./scripts/build.sh -d build/gcc_tsan_release -c gcc -f "-fsanitize=thread" -t Release "${TSAN_CMAKE_FLAGS[@]}"
-
-echo 'run gcc tests release'
-ctest --test-dir build/gcc_tsan_release --parallel --timeout 100 --output-on-failure
+# Rust mixed-language sanitizer builds use -Zexternal-clangrt, so keep this
+# schedule on Clang's sanitizer runtime rather than mixing Rust LLVM
+# instrumentation with GCC's libtsan.
 
 """
 after = """
