@@ -41,6 +41,10 @@ export TSAN_OPTIONS=halt_on_error=1:detect_deadlocks=0
 
 TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
+# build-std artifacts compiled before Rust TSAN flags are fixed can be reused
+# incorrectly and trip rustc's sanitizer ABI-mismatch check.
+rm -rf build/llvm_tsan build/llvm_tsan_release
+
 echo 'build clang tsan'
 ./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
 
