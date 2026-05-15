@@ -24,22 +24,6 @@
 
 namespace hogd {
 
-namespace {
-
-// Keyed hasher for the batch-local source-auth prefetch map. ContractAddress
-// keys come straight out of attacker-controlled transaction bodies, so we use
-// SipHash24 (the same defense the persistent auth cache applies) to keep an
-// adversary from packing a batch full of bucket-colliding addresses.
-struct ContractAddressSipHasher {
-  size_t operator()(const ContractAddress &address) const
-  {
-    static SipHash24 hasher;
-    return hasher(std::as_bytes(std::span(address)));
-  }
-};
-
-} // namespace
-
 x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
@@ -216,7 +200,7 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  std::unordered_map<ContractAddress, AuthCacheEntry, ContractAddressSipHasher>
+  std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
@@ -241,7 +225,7 @@ AuthServer::verify_transactions(BlockHeight height,
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
-                                    ContractAddressSipHasher> &auth_data,
+                                    SipHash24Hasher> &auth_data,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
