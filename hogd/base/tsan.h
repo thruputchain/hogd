@@ -78,8 +78,10 @@
 #define HOG_TSAN_MUTEX_PRE_UNLOCK(addr, flags) ((void)(addr), (void)(flags))
 #define HOG_TSAN_MUTEX_POST_UNLOCK(addr, flags) ((void)(addr), (void)(flags))
 
-#define HOG_TSAN_FLAG_READ 0u
-#define HOG_TSAN_FLAG_TRY 0u
-#define HOG_TSAN_FLAG_TRY_FAILED 0u
+enum : unsigned {
+  HOG_TSAN_FLAG_READ = 0U,
+  HOG_TSAN_FLAG_TRY = 0U,
+  HOG_TSAN_FLAG_TRY_FAILED = 0U,
+};
 
 #endif
