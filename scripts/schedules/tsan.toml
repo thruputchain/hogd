@@ -15,6 +15,13 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
+# Rust-side TSAN requires nightly + the rust-src component (so libstd
+# can be rebuilt with -Zbuild-std). See hogd/rust/CMakeLists.txt for
+# the toolchain/build-flag wiring that consumes these. Idempotent, so
+# re-running the schedule on a host that already has them is cheap.
+rustup toolchain install nightly --profile minimal
+rustup component add rust-src --toolchain nightly
+
 # Google benchmark builds can interact badly with sanitizers, so we disable
 # benchmark builds to save time and avoid spurious failures.
 #
