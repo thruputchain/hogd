@@ -4,6 +4,7 @@
 #include <string_view>
 #include <utility>
 
+#include "contract.hh"
 #include "db_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/crypto/crypto.h"
