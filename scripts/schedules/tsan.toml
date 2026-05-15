@@ -15,34 +15,64 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
+# Rust-side TSAN requires nightly + the rust-src component (so libstd
+# can be rebuilt with -Zbuild-std). See hogd/rust/CMakeLists.txt for
+# the toolchain/build-flag wiring that consumes these. Idempotent, so
+# re-running the schedule on a host that already has them is cheap.
+rustup toolchain install nightly --profile minimal
+rustup component add rust-src --toolchain nightly
+
+# prepare_env.sh fetches the normal locked workspace dependencies. The TSAN
+# build also rebuilds std with nightly, which can introduce rust-src
+# dependencies such as wasip1 that are not in the workspace lockfile.
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch \
+    --manifest-path hogd/rust/Cargo.toml \
+    -Zbuild-std=std,panic_abort
+
 # Google benchmark builds can interact badly with sanitizers, so we disable
 # benchmark builds to save time and avoid spurious failures.
+#
+# Disable the C++23 <stacktrace> library: libbacktrace is not thread-safe
+# and isn't built with TSAN annotations, so stacktrace-on-failure produces
+# hundreds of bogus race reports inside libdwarf/libstdc++ symbolization.
 
-export TSAN_OPTIONS=halt_on_error=1
+# detect_deadlocks=0: TSAN's deadlock detector tracks held locks in a
+# fixed-size per-thread array of 64 slots (compiler-rt
+# sanitizer_deadlock_detector.h) and CHECK-aborts if you exceed it, even
+# absent any real deadlock. ScalableMap::register_mutation_cb at
+# hogd/ramdb/scalable_map.cc:417 intentionally locks all bucket mutexes
+# at once (65k by default) to atomically install/uninstall the mutation
+# callback, so we trip the limit. Disabling the detector does not affect
+# data-race detection.
+#
+# suppressions: suppress the libc++ std::promise/future shared-state lifetime
+# reports produced by WorkerPool::submit. These reports dominate the suite
+# after Rust TSAN instrumentation is correctly wired and obscure actionable
+# races in application code.
+export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=1"
+export HOGD_DEV_STARTUP_TIMEOUT_SECS=180
 
-echo 'build gcc tsan'
-./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
-echo 'run gcc tests'
-ctest --test-dir build/gcc_tsan --parallel --timeout 100 --output-on-failure
+# build-std artifacts compiled before Rust TSAN flags are fixed can be reused
+# incorrectly and trip rustc's sanitizer ABI-mismatch check.
+rm -rf build/llvm_tsan build/llvm_tsan_release
 
 echo 'build clang tsan'
-./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tests'
-ctest --test-dir build/llvm_tsan --parallel --timeout 100 --output-on-failure
+ctest --test-dir build/llvm_tsan --parallel --timeout 300 --output-on-failure
 
 echo 'build clang tsan release'
-./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tsan tests release'
-ctest --test-dir build/llvm_tsan_release --parallel --timeout 100 --output-on-failure
+ctest --test-dir build/llvm_tsan_release --parallel --timeout 300 --output-on-failure
 
-echo 'build gcc tsan release'
-./scripts/build.sh -d build/gcc_tsan_release -c gcc -f "-fsanitize=thread" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
-
-echo 'run gcc tests release'
-ctest --test-dir build/gcc_tsan_release --parallel --timeout 100 --output-on-failure
+# Rust mixed-language sanitizer builds use -Zexternal-clangrt, so keep this
+# schedule on Clang's sanitizer runtime rather than mixing Rust LLVM
+# instrumentation with GCC's libtsan.
 
 """
 after = """

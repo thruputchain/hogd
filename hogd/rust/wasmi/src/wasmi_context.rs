@@ -15,8 +15,9 @@ use common::string_from_parts;
 use common::{LinkEntry, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
-// for multiple Wasmi runtimes.
-// This structure internally (appears to be) threadsafe.
+// for multiple Wasmi runtimes owned by one RuntimeContext.
+// This structure is not threadsafe; hogexec keeps RuntimeContext
+// thread-confined.
 // Specifically, Engine is a shared_pointer around EngineInner,
 // which appears to have appropriate mutexes.
 //
@@ -76,6 +77,10 @@ impl WasmiGlobalContext {
 
 pub struct WasmiContext {
     global_context: std::sync::Arc<WasmiGlobalContext>,
+    // ModuleCache itself is !Sync because LRU lookup updates access
+    // order. Hogexec keeps WasmiContext thread-confined, so runtime
+    // creation uses an exclusive borrow instead of synchronizing the
+    // cache internally.
     pub module_cache: Option<ModuleCache>,
     contract_get_fn: ContractGetFn,
 }

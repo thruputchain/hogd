@@ -233,6 +233,9 @@ impl NewWasmiRuntimeResult {
 /// wasmi_context_ptr must not be a nullptr, and must have been created by new_wasmi_context.
 /// userctx can be any (null or non-null) pointer.
 /// bytes must be either null or a valid memory slice.
+/// Callers must not call this function concurrently with the same
+/// wasmi_context_ptr; WasmiContext owns a non-Sync module cache and is
+/// thread-confined by the C++ runtime context ownership.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_runtime(
     hash: *const u8,      // 32 bytes
