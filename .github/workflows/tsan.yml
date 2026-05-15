@@ -43,7 +43,7 @@ jobs:
                       ${{ secrets.HOGD_TO_XDR_RPC }}
                       ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
                       ${{ secrets.HOGD_TO_HOGX_KEY }}
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v6
             - name: Run hog schedule
               run: |
                   hog_sched \

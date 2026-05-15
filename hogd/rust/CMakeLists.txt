@@ -67,7 +67,7 @@ endif()
 
 #corrosion_set_env_vars(unified_lib RUSTFLAGS="-Zsanitizer=address")
 #corrosion_set_env_vars(unified_lib ASAN_OPTIONS=detect_stack_use_after_return=1:abort_on_error=1)
-#set_property(TARGET unified_lib PROPERTY CARGO_BUILD_FLAGS "+nightly -Zsanitizer=address")
+#corrosion_set_cargo_flags(unified_lib "-Zbuild-std=std,panic_abort")
 
 if(RUST_TSAN)
     # The RUST_TSAN option is declared at top level; the toolchain
@@ -90,7 +90,7 @@ if(RUST_TSAN)
     corrosion_add_target_rustflags(unified_lib
         "-Zsanitizer=thread"
         "-Zexternal-clangrt")
-    set_property(TARGET unified_lib APPEND PROPERTY CARGO_BUILD_FLAGS
+    corrosion_set_cargo_flags(unified_lib
         "-Zbuild-std=std,panic_abort"
         "-Zbuild-std-features=panic_immediate_abort")
 endif()

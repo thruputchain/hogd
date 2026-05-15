@@ -23,7 +23,7 @@ jobs:
           echo "Cleaning up .gitconfig"
           rm -f /home/hogci/.gitconfig
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Sync release mirror
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
