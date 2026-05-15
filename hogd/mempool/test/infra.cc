@@ -24,6 +24,10 @@ namespace hogd {
 
 MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 {
+  auto loopback_ephemeral = [] {
+    return x23::HostPort{kAddress, static_cast<uint16_t>(0)};
+  };
+
   // Multiple tests run within the same process, so we need to clear the
   // registration at the beginning of each test.
   Registration::registration().clear();
@@ -37,11 +41,11 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   // Start the mempool RPC servers. All of the subsystems register with the
   // mempool, so the mempool RPC servers need to start first.
-  sched_db_server_.start_server(/*port=*/0);
-  sched_event_server_.start_server(/*port=*/0);
-  sched_exec_server_.start_server(/*port=*/0);
-  mempool_coord_server_.start_server(/*port=*/0);
-  mempool_auth_server_.start_server(/*port=*/0);
+  sched_db_server_.start_server(loopback_ephemeral());
+  sched_event_server_.start_server(loopback_ephemeral());
+  sched_exec_server_.start_server(loopback_ephemeral());
+  mempool_coord_server_.start_server(loopback_ephemeral());
+  mempool_auth_server_.start_server(loopback_ephemeral());
 
   auto sched_db_client = std::make_unique<sched_db_client_t>(
       create_client<SchedDb1>(kAddress, sched_db_server_.port())());
@@ -52,13 +56,13 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // Start the database RPC servers.
   // [db_executor_server_] handles RPCs from the executor.
   db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
-  db_executor_server_->start_server(/*port=*/0);
+  db_executor_server_->start_server(loopback_ephemeral());
   // [db_scheduler_server_] handles RPCs from the mempool.
   db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
   (*db_scheduler_server_)->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  db_scheduler_server_->start_server(/*port=*/0);
+  db_scheduler_server_->start_server(loopback_ephemeral());
   db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
-  db_auth_server_->start_server(/*port=*/0);
+  db_auth_server_->start_server(loopback_ephemeral());
 
   // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
@@ -67,14 +71,14 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   auth_db_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   auth_mempool_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  auth_db_server_.start_server(/*port=*/0);
-  auth_mempool_server_.start_server(/*port=*/0);
+  auth_db_server_.start_server(loopback_ephemeral());
+  auth_mempool_server_.start_server(loopback_ephemeral());
   auth_db_server_->impl()->set_auth_server(*auth_server_);
   auth_mempool_server_->impl()->set_auth_server(*auth_server_);
 
   // Start the event RPC servers.
-  event_sched_server_.start_server(/*port=*/0);
-  event_exec_server_.start_server(/*port=*/0);
+  event_sched_server_.start_server(loopback_ephemeral());
+  event_exec_server_.start_server(loopback_ephemeral());
 
   // We start the executor server in [register_executor_with_mempool()].
 
@@ -83,7 +87,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // and is written in go. So to ease test implementation, we use a fake
   // coordinator.
   coordinator_sched_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  coordinator_sched_server_.start_server(/*port=*/0);
+  coordinator_sched_server_.start_server(loopback_ephemeral());
 
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();

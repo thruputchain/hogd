@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <expected>
+#include <system_error>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
@@ -64,9 +65,20 @@ public:
   std::pair<uint16_t, x23::UniqueFd> bind_server(uint16_t port)
   {
     CHECK(!bound_);
-    bound_ = true;
     int backlog = 5 + cp_.pool_.nthreads_;
-    auto lfd = x23::tcplisten(port, backlog);
+    x23::UniqueFd lfd;
+    for (size_t attempt = 0;; attempt++) {
+      try {
+        lfd = x23::tcplisten(port, backlog);
+        break;
+      } catch (const std::system_error &e) {
+        if (port != 0 || e.code() != std::errc::address_in_use ||
+            attempt >= 32) {
+          throw;
+        }
+      }
+    }
+    bound_ = true;
     if (port == 0)
       port = x23::get_port(x23::local_addr(lfd));
     port_ = port;
@@ -76,12 +88,24 @@ public:
   std::pair<uint16_t, x23::UniqueFd> bind_server(x23::HostPort bind_addr)
   {
     CHECK(!bound_);
-    bound_ = true;
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
-    auto lfd = x23::tcplisten(*addr, backlog);
+    const bool ephemeral_port = x23::get_port(*addr) == 0;
+    x23::UniqueFd lfd;
+    for (size_t attempt = 0;; attempt++) {
+      try {
+        lfd = x23::tcplisten(*addr, backlog);
+        break;
+      } catch (const std::system_error &e) {
+        if (!ephemeral_port || e.code() != std::errc::address_in_use ||
+            attempt >= 32) {
+          throw;
+        }
+      }
+    }
+    bound_ = true;
     port_ = x23::get_port(x23::local_addr(lfd));
     return {port_, std::move(lfd)};
   }

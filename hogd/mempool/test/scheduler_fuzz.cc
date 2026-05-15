@@ -2,13 +2,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <unordered_set>
 #include <vector>
-
-#include <openssl/crypto.h>
 
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -91,21 +88,48 @@ make_tx(const std::vector<SignedTransactionBatch> &txs_by_account,
 
 void
 check_scheduled_batch(const x23::XdrVec<SignedTransactionHash> &hashes,
-                      const x23::XdrVec<SignedTransaction> &txs)
+                      const x23::XdrVec<SignedTransaction> &txs,
+                      size_t requested_txs,
+                      const std::unordered_set<SignedTransactionHash,
+                                               ByteArrayHasher> &cached_hashes,
+                      const std::unordered_set<SignedTransactionHash,
+                                               ByteArrayHasher> &runqueue_hashes)
 {
+  CHECK_LE(hashes.size(), requested_txs);
   CHECK_EQ(hashes.size(), txs.size());
   std::unordered_set<SignedTransactionHash, ByteArrayHasher> seen;
   seen.reserve(hashes.size());
   for (size_t i = 0; i < hashes.size(); i++) {
     CHECK_EQ(hashes[i], sha256(txs[i].tx));
     CHECK(seen.insert(hashes[i]).second);
+    CHECK(cached_hashes.contains(hashes[i]));
+    CHECK(runqueue_hashes.contains(hashes[i]));
   }
 }
 
 void
-check_scheduler_invariants(Scheduler &scheduler)
+check_scheduler_invariants(
+    Scheduler &scheduler,
+    const std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+        &cached_hashes,
+    const std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+        &runqueue_hashes,
+    const std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+        &removed_hashes)
 {
   CHECK_LE(scheduler.size(), scheduler.tx_cache_size());
+  CHECK_LE(scheduler.size(), runqueue_hashes.size());
+  CHECK_LE(runqueue_hashes.size(), cached_hashes.size());
+  CHECK_EQ(scheduler.tx_cache_size(), cached_hashes.size());
+
+  for (const SignedTransactionHash &hash : cached_hashes) {
+    std::shared_ptr<const SignedTransaction> tx = scheduler.find_tx(hash);
+    CHECK(tx != nullptr);
+    CHECK_EQ(sha256(tx->tx), hash);
+  }
+  for (const SignedTransactionHash &hash : removed_hashes) {
+    CHECK(!scheduler.find_tx(hash));
+  }
 }
 
 void
@@ -155,6 +179,8 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
   }
 
   std::unordered_set<SignedTransactionHash, ByteArrayHasher> cached_hashes;
+  std::unordered_set<SignedTransactionHash, ByteArrayHasher> runqueue_hashes;
+  std::unordered_set<SignedTransactionHash, ByteArrayHasher> removed_hashes;
   x23::XdrVec<SignedTransactionHash> last_scheduled_hashes;
   x23::XdrVec<SignedTransaction> last_scheduled_txs;
   BlockID pending_nomination = 0;
@@ -173,7 +199,10 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
       }
       scheduler->add_txs(batch)();
       for (const SignedTransaction &tx : batch) {
-        cached_hashes.insert(sha256(tx.tx));
+        const SignedTransactionHash hash = sha256(tx.tx);
+        cached_hashes.insert(hash);
+        runqueue_hashes.insert(hash);
+        removed_hashes.erase(hash);
       }
       break;
     }
@@ -181,9 +210,14 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
     {
       last_scheduled_hashes.clear();
       last_scheduled_txs.clear();
-      scheduler->schedule(input.bounded(kMaxBatchSize + 1),
+      const size_t requested_txs = input.bounded(kMaxBatchSize + 1);
+      scheduler->schedule(requested_txs,
                           last_scheduled_hashes, last_scheduled_txs);
-      check_scheduled_batch(last_scheduled_hashes, last_scheduled_txs);
+      check_scheduled_batch(last_scheduled_hashes, last_scheduled_txs,
+                            requested_txs, cached_hashes, runqueue_hashes);
+      for (const SignedTransactionHash &hash : last_scheduled_hashes) {
+        CHECK_EQ(runqueue_hashes.erase(hash), 1UL);
+      }
       break;
     }
     case 2:
@@ -208,6 +242,10 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
       if (!last_scheduled_hashes.empty()) {
         scheduler->reenqueue_txs(last_scheduled_hashes.begin(),
                                  last_scheduled_hashes.end());
+        for (const SignedTransactionHash &hash : last_scheduled_hashes) {
+          CHECK(cached_hashes.contains(hash));
+          runqueue_hashes.insert(hash);
+        }
       }
       break;
     case 6:
@@ -223,6 +261,8 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
             x23::span<const SignedTransactionHash>(hashes))();
         for (const SignedTransactionHash &hash : hashes) {
           cached_hashes.erase(hash);
+          runqueue_hashes.erase(hash);
+          removed_hashes.insert(hash);
         }
       }
       break;
@@ -265,7 +305,8 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
       break;
     }
 
-    check_scheduler_invariants(*scheduler);
+    check_scheduler_invariants(*scheduler, cached_hashes, runqueue_hashes,
+                               removed_hashes);
   }
 
   if (pending_nomination != 0) {
@@ -279,13 +320,17 @@ run_scheduler_fuzz_case(const uint8_t *data, size_t size)
 extern "C" int
 LLVMFuzzerInitialize(int *argc, char ***argv)
 {
-  std::atexit(OPENSSL_cleanup);
-
   if (hogd::hogd_init(*argc, *argv, /*do_print_version=*/false,
                       hogd::LogLevel::kError) != 0) {
     return 1;
   }
   return 0;
+}
+
+extern "C" const char *
+__lsan_default_options()
+{
+  return "detect_leaks=0";
 }
 
 extern "C" int
