@@ -138,9 +138,12 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
   };
 
   for (auto &contract : new_contracts) {
-    // write contract should be infallible
+    // write contract should only fail if a sibling block commits and this block is abandoned.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
-      return RPCError::kRPCUnrecoverable;
+      CHECK(r.error().code() == HogDBCode::kStaleBlock);
+      itx->abort();
+      ctx_.close_invoke_tx(block, tx, itx);
+      return to_rpc_error(r.error());
     }
   }
   itx->commit();
