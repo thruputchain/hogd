@@ -170,14 +170,22 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
                                                       event.indexers_);
     }
 
-    x23::CoroGuard cg;
-    co_await cg(event.lock_);
+    // Scope cg so it unlocks event.lock_ before we decrement the
+    // pending-detached counter. ~EventRPCContext spins on that counter
+    // and proceeds to destroy lock_ once it reaches zero; if cg were
+    // still alive at that point its destructor would CAS into freed
+    // memory (event.lock_.last_). Observed as a TSAN data race in tests
+    // that stack-allocate EventRPCContext.
+    {
+      x23::CoroGuard cg;
+      co_await cg(event.lock_);
 
-    it = event.event_block_contexts_.find(block_id);
-    CHECK(it != event.event_block_contexts_.end());
-    bool released = it->second.release_reference();
-    if (released || it->second.initiate_shutdown()) {
-      event.gc_context_internal(it);
+      it = event.event_block_contexts_.find(block_id);
+      CHECK(it != event.event_block_contexts_.end());
+      bool released = it->second.release_reference();
+      if (released || it->second.initiate_shutdown()) {
+        event.gc_context_internal(it);
+      }
     }
     event.pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
     co_return;

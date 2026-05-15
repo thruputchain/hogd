@@ -9,6 +9,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/tsan.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -38,6 +39,7 @@ public:
 
   void lock_reader()
   {
+    HOG_TSAN_MUTEX_PRE_LOCK(this, HOG_TSAN_FLAG_READ);
     while (true) {
       int64_t cur = lock_.load(std::memory_order_relaxed);
       if (cur == kWriterLocked) {
@@ -53,6 +55,7 @@ public:
       }
       break;
     }
+    HOG_TSAN_MUTEX_POST_LOCK(this, HOG_TSAN_FLAG_READ, /*recursion=*/1);
   }
 
   // Tries to acquire the lock in reader mode. Returns false if a writer holds
@@ -60,21 +63,32 @@ public:
   // until the lock is acquired in reader mode and returns true.
   bool try_lock_reader()
   {
+    HOG_TSAN_MUTEX_PRE_LOCK(this, HOG_TSAN_FLAG_READ | HOG_TSAN_FLAG_TRY);
     while (true) {
       if (writer_waiting_for_upgrade_.load(std::memory_order_relaxed)) {
         // A writer is trying to acquire the lock, so return false. This ensures
         // that a writer is not starved when there is a large number of readers.
+        HOG_TSAN_MUTEX_POST_LOCK(this,
+                                 HOG_TSAN_FLAG_READ | HOG_TSAN_FLAG_TRY |
+                                     HOG_TSAN_FLAG_TRY_FAILED,
+                                 /*recursion=*/0);
         return false;
       }
 
       int64_t cur = lock_.load(std::memory_order_relaxed);
       if (cur == kWriterLocked) {
         // The lock is currently held by a writer.
+        HOG_TSAN_MUTEX_POST_LOCK(this,
+                                 HOG_TSAN_FLAG_READ | HOG_TSAN_FLAG_TRY |
+                                     HOG_TSAN_FLAG_TRY_FAILED,
+                                 /*recursion=*/0);
         return false;
       }
       if (lock_.compare_exchange_weak(/*expected=*/cur, /*desired=*/cur + 1,
                                       /*success=*/std::memory_order_acquire,
                                       /*failure=*/std::memory_order_relaxed)) {
+        HOG_TSAN_MUTEX_POST_LOCK(this, HOG_TSAN_FLAG_READ | HOG_TSAN_FLAG_TRY,
+                                 /*recursion=*/1);
         return true;
       }
       cpu_relax();
@@ -84,6 +98,7 @@ public:
   // Acquires the lock in writer mode.
   void lock_writer()
   {
+    HOG_TSAN_MUTEX_PRE_LOCK(this, /*flags=*/0);
     int64_t expected = kUnlocked;
     while (
         !lock_.compare_exchange_weak(expected,
@@ -95,17 +110,24 @@ public:
         cpu_relax();
       }
     }
+    HOG_TSAN_MUTEX_POST_LOCK(this, /*flags=*/0, /*recursion=*/1);
   }
 
   // Tries to acquire the lock in writer mode. Returns true if successful, false
   // otherwise.
   bool try_lock_writer()
   {
+    HOG_TSAN_MUTEX_PRE_LOCK(this, HOG_TSAN_FLAG_TRY);
     int64_t expected = kUnlocked;
     bool ret =
         lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
                                       /*success=*/std::memory_order_acquire,
                                       /*failure=*/std::memory_order_relaxed);
+    // NOLINTNEXTLINE(bugprone-branch-clone) -- macros are no-ops outside TSAN
+    HOG_TSAN_MUTEX_POST_LOCK(this,
+                             HOG_TSAN_FLAG_TRY |
+                                 (ret ? 0U : HOG_TSAN_FLAG_TRY_FAILED),
+                             /*recursion=*/ret ? 1 : 0);
     return ret;
   }
 
@@ -132,6 +154,11 @@ public:
       }
     }
 
+    // Model the upgrade to TSAN as a reader-unlock followed by a
+    // writer-lock. The single CAS below is functionally both: it tears
+    // down the reader hold and installs the writer hold atomically.
+    HOG_TSAN_MUTEX_PRE_UNLOCK(this, HOG_TSAN_FLAG_READ);
+    HOG_TSAN_MUTEX_PRE_LOCK(this, /*flags=*/0);
     {
       // Wait until we are the only reader left. This also ensures that we do
       // not race with another thread that calls [lock_writer()].
@@ -145,6 +172,8 @@ public:
         expected = 1;
       }
     }
+    HOG_TSAN_MUTEX_POST_UNLOCK(this, HOG_TSAN_FLAG_READ);
+    HOG_TSAN_MUTEX_POST_LOCK(this, /*flags=*/0, /*recursion=*/1);
 
     writer_waiting_for_upgrade_.store(false, std::memory_order_relaxed);
     return true;
@@ -185,6 +214,12 @@ public:
     // path) does not run the constructor.  When the allocator is reused, we
     // need to reset the lock to the unlocked state (or else we possibly could
     // be reading from uninitialized memory)
+    //
+    // From TSAN's perspective the lock is being reincarnated at the same
+    // address; tell the tracker to forget any stale mutex state from the
+    // previous lifetime before installing a fresh one.
+    HOG_TSAN_MUTEX_DESTROY(this);
+    HOG_TSAN_MUTEX_CREATE(this);
     lock_.store(kUnlocked, std::memory_order_relaxed);
     writer_waiting_for_upgrade_.store(false, std::memory_order_release);
   }
@@ -195,8 +230,18 @@ private:
   // A sentinel value that indicates the lock is held by a writer.
   static constexpr int64_t kWriterLocked = -1;
 
-  void unlock_reader() { lock_.fetch_sub(1, std::memory_order_release); }
-  void unlock_writer() { lock_.store(kUnlocked, std::memory_order_release); }
+  void unlock_reader()
+  {
+    HOG_TSAN_MUTEX_PRE_UNLOCK(this, HOG_TSAN_FLAG_READ);
+    lock_.fetch_sub(1, std::memory_order_release);
+    HOG_TSAN_MUTEX_POST_UNLOCK(this, HOG_TSAN_FLAG_READ);
+  }
+  void unlock_writer()
+  {
+    HOG_TSAN_MUTEX_PRE_UNLOCK(this, /*flags=*/0);
+    lock_.store(kUnlocked, std::memory_order_release);
+    HOG_TSAN_MUTEX_POST_UNLOCK(this, /*flags=*/0);
+  }
 
   // The spinlock. Holds a value of [kUnlocked] (0) when unlocked. Holds a
   // value of [kWriterLocked] (-1) when locked by a writer. Holds a positive
