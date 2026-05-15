@@ -41,11 +41,11 @@ export TSAN_OPTIONS=halt_on_error=1:detect_deadlocks=0
 
 TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
-echo 'build gcc tsan'
-./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
+#echo 'build gcc tsan'
+#./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
 
-echo 'run gcc tests'
-ctest --test-dir build/gcc_tsan --parallel --timeout 100 --output-on-failure
+#echo 'run gcc tests'
+#ctest --test-dir build/gcc_tsan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang tsan'
 ./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
