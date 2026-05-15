@@ -3,7 +3,16 @@ add_subdirectory(wasmi)
 add_subdirectory(wasmtime)
 add_subdirectory(wasm_meter)
 
-include(cmake/check_rust_version.cmake)
+# The version check enforces that the toolchain we configured matches
+# the pin in rust-toolchain.toml. RUST_TSAN intentionally bypasses that
+# pin to switch to nightly, so the check would fail in that mode.
+if(NOT RUST_TSAN)
+    include(cmake/check_rust_version.cmake)
+else()
+    message(STATUS
+        "RUST_TSAN=ON: skipping rust-toolchain.toml version check "
+        "(nightly toolchain override is intentional)")
+endif()
 
 # Check for sccache and configure it if available
 find_program(SCCACHE_EXECUTABLE sccache)
@@ -58,7 +67,30 @@ endif()
 
 #corrosion_set_env_vars(unified_lib RUSTFLAGS="-Zsanitizer=address")
 #corrosion_set_env_vars(unified_lib ASAN_OPTIONS=detect_stack_use_after_return=1:abort_on_error=1)
-#set_property(TARGET unified_lib PROPERTY CARGO_BUILD_FLAGS "+nightly -Zsanitizer=address")
+#corrosion_set_cargo_flags(unified_lib "-Zbuild-std=std,panic_abort")
+
+if(RUST_TSAN)
+    # The RUST_TSAN option is declared at top level; the toolchain
+    # override to nightly happens there too (Rust_TOOLCHAIN must be set
+    # before corrosion is loaded). Corrosion already passes --target on
+    # every cargo invocation (Corrosion.cmake ~line 700), so we don't
+    # need to inject one here — the host target is derived from the
+    # nightly toolchain corrosion is configured with.
+    #
+    # -Zsanitizer=thread instruments Rust code so atomics, Mutex, and
+    # parking_lot-style futex calls emit happens-before edges TSAN can
+    # follow. -Zexternal-clangrt leaves the TSAN runtime to the C++ link,
+    # which already uses -fsanitize=thread. The workspace profiles use
+    # panic=abort, so rebuild libstd with panic_abort. Without -Zbuild-std,
+    # std's synchronization primitives stay precompiled-and-unsanitized and
+    # TSAN false-flags any Rust-internal synchronization.
+    message(STATUS "RUST_TSAN=ON: enabling Rust ThreadSanitizer instrumentation")
+    corrosion_add_target_rustflags(unified_lib
+        "-Zsanitizer=thread"
+        "-Zexternal-clangrt")
+    corrosion_set_cargo_flags(unified_lib
+        "-Zbuild-std=std,panic_abort")
+endif()
 
 # Add cargo tests to ctest
 add_test(

@@ -83,3 +83,15 @@ impl InstancePreCache {
         guard.value().put(engine_index, instance_pre);
     }
 }
+
+// Compile-time assertion: InstancePreCache and the underlying
+// SynchronizedMap with its real value type are Send + Sync. The cache
+// lives behind an Arc<WasmtimeGlobalContext> shared across threads;
+// concurrent access is the whole point. If wasmtime ever changes
+// InstancePre or we add a !Send/!Sync field to InstancePreCacheEntry,
+// this fails to compile.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<InstancePreCache>();
+    assert_send_sync::<SynchronizedMap<SHA256Hash, InstancePreCacheEntry>>();
+};

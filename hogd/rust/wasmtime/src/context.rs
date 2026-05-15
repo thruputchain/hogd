@@ -106,9 +106,9 @@ fn validate_imports(
 
 /// A Wasmtime runtime context that can be reused across multiple transactions.
 ///
-/// This context is **not thread-safe** and must be used by a single thread at a time.
-/// However, it can be reused across multiple sequential transactions within the same thread,
-/// which provides better performance than creating a new context for each transaction.
+/// Hogexec normally owns one runtime context per worker thread, but this
+/// Rust type is immutable after construction and its shared global state is
+/// internally synchronized.
 pub struct WasmtimeContext {
     global_context: Arc<WasmtimeGlobalContext>,
     contract_get_fn: ContractGetFn,
@@ -153,8 +153,14 @@ impl WasmtimeContext {
 
     /// # Safety
     /// user_context must be a valid pointer to a HostCallContext
+    ///
+    /// Takes `&self` (not `&mut self`) because every field on
+    /// WasmtimeContext is either immutable after construction or behind
+    /// `Arc` with its own internal synchronization (InstancePreCache uses
+    /// SynchronizedMap). This avoids fabricating an exclusive Rust borrow
+    /// from an FFI pointer when only shared access is needed.
     pub unsafe fn get_instance_pre(
-        &mut self,
+        &self,
         hash: &[u8; 32],
         user_context: *mut c_void,
     ) -> Result<Option<Arc<InstancePre<*mut c_void>>>, SystemErrorCode> {
@@ -267,6 +273,15 @@ pub unsafe extern "C" fn new_wasmtime_context(
     let b = Box::new(WasmtimeContext::new(global_context, get_fn));
     Box::into_raw(b).cast::<c_void>()
 }
+
+// Compile-time assertion: WasmtimeContext is Send + Sync. Hogexec normally
+// keeps runtime contexts thread-local, but new_wasmtime_runtime only
+// materializes shared `&WasmtimeContext` borrows. If a future change
+// introduces a !Send or !Sync field, this assertion fails to compile.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<WasmtimeContext>();
+};
 
 /// # Safety
 /// If p is null, this function is a no-op.

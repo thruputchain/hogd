@@ -114,10 +114,17 @@ impl<'a, K, V, S> BucketReadGuard<'a, K, V, S> {
 /// Each bucket is protected by its own RwLock, allowing concurrent read access to
 /// the same bucket and exclusive write access. The number of buckets must be a
 /// power of 2 for efficient hash-based bucket selection.
+// The Send + Sync bounds on K, V, S are part of the type's contract: a
+// SynchronizedMap is meant to be shared across threads, and the
+// underlying RwLock<HashMap<K, V, S>> is only Send + Sync when K, V, S
+// are. Encoding the bounds on the struct itself rules out constructing
+// a !Send/!Sync instantiation at all, which is stronger than a single
+// compile-time assertion at one use site.
 pub struct SynchronizedMap<K, V, S = std::collections::hash_map::RandomState>
 where
-    K: Hash + Eq,
-    S: BuildHasher + Default,
+    K: Hash + Eq + Send + Sync,
+    V: Send + Sync,
+    S: BuildHasher + Default + Send + Sync,
 {
     /// Vector of RwLocks, one per bucket
     locks: Vec<RwLock<HashMap<K, V, S>>>,
@@ -128,7 +135,8 @@ where
 
 impl<K, V> SynchronizedMap<K, V>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync,
+    V: Send + Sync,
 {
     /// Create a new SynchronizedMap with a default number of shards.
     pub fn new() -> Self {
@@ -168,8 +176,9 @@ where
 
 impl<K, V, S> SynchronizedMap<K, V, S>
 where
-    K: Hash + Eq,
-    S: BuildHasher + Default,
+    K: Hash + Eq + Send + Sync,
+    V: Send + Sync,
+    S: BuildHasher + Default + Send + Sync,
 {
     /// Get the bucket index for a given key.
     #[inline]
@@ -311,7 +320,8 @@ where
 
 impl<K, V> Default for SynchronizedMap<K, V>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync,
+    V: Send + Sync,
 {
     fn default() -> Self {
         Self::new()
