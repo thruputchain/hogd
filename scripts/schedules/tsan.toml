@@ -22,7 +22,15 @@ source ./scripts/ci/prepare_env.sh
 # and isn't built with TSAN annotations, so stacktrace-on-failure produces
 # hundreds of bogus race reports inside libdwarf/libstdc++ symbolization.
 
-export TSAN_OPTIONS=halt_on_error=1
+# detect_deadlocks=0: TSAN's deadlock detector tracks held locks in a
+# fixed-size per-thread array of 64 slots (compiler-rt
+# sanitizer_deadlock_detector.h) and CHECK-aborts if you exceed it, even
+# absent any real deadlock. ScalableMap::register_mutation_cb at
+# hogd/ramdb/scalable_map.cc:417 intentionally locks all bucket mutexes
+# at once (65k by default) to atomically install/uninstall the mutation
+# callback, so we trip the limit. Disabling the detector does not affect
+# data-race detection.
+export TSAN_OPTIONS=halt_on_error=1:detect_deadlocks=0
 
 TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF")
 
