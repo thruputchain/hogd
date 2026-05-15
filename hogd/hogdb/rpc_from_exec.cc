@@ -251,7 +251,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     HogDBStatus<int128_t> nnint =
         ctx_.get_db().read_address_balance(key.get_address());
 
-    if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+    if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
       return ExpectedStorageItem(RPCError::kRPCBadBlockID);
 
     if (!nnint)
@@ -265,7 +265,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     HogDBStatus<AddressAuthData> auth_data =
         ctx_.get_db().read_address_auth_data(key.get_address());
 
-    if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+    if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
       return ExpectedStorageItem(RPCError::kRPCBadBlockID);
 
     if (!auth_data)
@@ -278,7 +278,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   else {
     HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
 
-    if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+    if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
       return ExpectedStorageItem(RPCError::kRPCBadBlockID);
 
     if (!item)
@@ -336,7 +336,7 @@ HogDBExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
   HogDBStatus<OwningSpan<const std::byte>> wasm =
       ctx_.get_db().read_wasm_code(hash);
 
-  if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+  if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
     return ExpectedContract(RPCError::kRPCBadBlockID);
 
   if (!wasm)
@@ -357,7 +357,7 @@ HogDBExecutorRpc::get_deployment(BlockID block,
   HogDBStatus<DeployedContractHash> hash =
       ctx_.get_db().read_address_metadata(contract_address);
 
-  if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+  if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
     return ExpectedDeployment(RPCError::kRPCBadBlockID);
 
   if (!hash)
@@ -383,7 +383,7 @@ HogDBExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
 
   // After the DAO read, check for staleness before returning either the result
   // or a deterministic error (like not found).
-  if (ctx_.is_block_tx_stale(block)) [[unlikely]]
+  if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
     return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
 
   if (!queue_block) {

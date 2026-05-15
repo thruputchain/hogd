@@ -21,6 +21,7 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/interface/executor.h"
+#include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -56,6 +57,11 @@ public:
   }
   // Advertised in the readiness JSON as the `gateway` endpoint.
   std::uint16_t gateway_port() const { return db_gateway_server_->port(); }
+  // Advertised in the readiness JSON as the `view_gateway` endpoint.
+  std::uint16_t view_gateway_port() const
+  {
+    return view_gateway_server_->port();
+  }
   std::vector<DevAccountMetadata> const &dev_accounts() const
   {
     return dev_accounts_;
@@ -102,6 +108,7 @@ private:
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
   std::unique_ptr<HogDBAuthServer> db_auth_server_;
   std::unique_ptr<HogDBGatewayServer> db_gateway_server_;
+  std::unique_ptr<ViewGatewayServer> view_gateway_server_;
 
   EventMempoolServer event_sched_server_;
   EventExecServer event_exec_server_;

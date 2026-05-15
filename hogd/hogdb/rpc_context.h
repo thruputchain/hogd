@@ -76,6 +76,8 @@ public:
   // getters.
   HogDBDAO &get_db() { return db_; }
   DbTip get_tip() { return *tip_.take(); }
+  static bool has_committed_tip(DbTip const &tip) { return tip.height >= 0; }
+  bool has_committed_tip() { return has_committed_tip(get_tip()); }
   void set_tip(DbTip new_tip) { *tip_.take() = std::move(new_tip); }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
   {
@@ -154,7 +156,7 @@ public:
 
   void invalidate_siblings(BlockTXID committer);
 
-  bool is_block_tx_stale(BlockTXID bid);
+  bool is_snapshot_read_stale(BlockTXID bid);
 
 private:
   struct BlockCache {
@@ -197,18 +199,24 @@ private:
   // slow path for get_block_tx().
   PerThreadARC<BlockTX> *get_block_tx_slow(BlockTXID bid,
                                            bool acquire_reference);
-  // slow path for is_block_tx_stale().
-  bool is_block_tx_stale_slow(BlockTXID bid);
+  // slow path for is_snapshot_read_stale().
+  bool is_snapshot_read_stale_slow(BlockTXID bid);
 
   void release_block_tx_reference(BlockTXID bid);
 };
 
-// Returns true if the blocktx does not exist or is on an abandoned branch.
+// Returns true if the snapshot id is neither the committed tip nor a live
+// non-abandoned blocktx.
 // Safe without acquiring a reference: the per-thread cache.lock (fast path) and
 // lock_ (slow path) prevent concurrent removal by remove_shutdown_block_tx().
 inline bool
-RPCContext::is_block_tx_stale(BlockTXID bid)
+RPCContext::is_snapshot_read_stale(BlockTXID bid)
 {
+  DbTip tip = get_tip();
+  if (has_committed_tip(tip) && tip.id == bid) {
+    return false;
+  }
+
   {
     BlockCache &cache = *block_tx_cache_;
     std::scoped_lock g(cache.lock);
@@ -218,7 +226,7 @@ RPCContext::is_block_tx_stale(BlockTXID bid)
     }
   }
 
-  return is_block_tx_stale_slow(bid);
+  return is_snapshot_read_stale_slow(bid);
 }
 
 inline PerThreadARC<BlockTX> *

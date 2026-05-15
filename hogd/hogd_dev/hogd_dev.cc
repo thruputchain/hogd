@@ -101,6 +101,9 @@ build_readiness_payload(const HogdDevNode &node)
               format_advertised_address(node.bind_host(), node.read_port()));
       w.field("gateway",
               format_advertised_address(node.bind_host(), node.gateway_port()));
+      w.field("view_gateway",
+              format_advertised_address(node.bind_host(),
+                                        node.view_gateway_port()));
     });
     if (!node.dev_accounts().empty()) {
       w.array_field("dev_accounts", [&](json::Writer &w) {

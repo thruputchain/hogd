@@ -49,6 +49,7 @@ add_xdr(
   ../../protocol/types.x
   ../../protocol/view.x
   ../../protocol/db_gateway.x
+  ../../protocol/view_gateway.x
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x
   event_cursor_internal.x
