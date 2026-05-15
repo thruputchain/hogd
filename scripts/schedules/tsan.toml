@@ -44,7 +44,12 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch \
 # at once (65k by default) to atomically install/uninstall the mutation
 # callback, so we trip the limit. Disabling the detector does not affect
 # data-race detection.
-export TSAN_OPTIONS=halt_on_error=1:detect_deadlocks=0
+#
+# suppressions: suppress the libc++ std::promise/future shared-state lifetime
+# reports produced by WorkerPool::submit. These reports dominate the suite
+# after Rust TSAN instrumentation is correctly wired and obscure actionable
+# races in application code.
+export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=1"
 
 TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
