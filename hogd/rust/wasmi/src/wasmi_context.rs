@@ -76,7 +76,13 @@ impl WasmiGlobalContext {
 
 pub struct WasmiContext {
     global_context: std::sync::Arc<WasmiGlobalContext>,
-    pub module_cache: Option<ModuleCache>,
+    // Wrapped in Mutex because the C++ side passes a single WasmiContext
+    // pointer to many worker threads via the FFI. ModuleCache itself is
+    // !Sync (LRU updates the access order on get), but it sees no real
+    // contention here, so a plain Mutex is fine. Allowing concurrent
+    // shared access at this layer matters: overlapping `&mut self`
+    // borrows from threads would be UB under Rust aliasing rules.
+    pub module_cache: Option<std::sync::Mutex<ModuleCache>>,
     contract_get_fn: ContractGetFn,
 }
 
@@ -115,7 +121,7 @@ impl WasmiContext {
             global_context,
             // Performance is somewhat sensitive to module cache size.
             // We need to change the caching strategy anyways once we go to winch.
-            module_cache: Some(ModuleCache::new(10)),
+            module_cache: Some(std::sync::Mutex::new(ModuleCache::new(10))),
             contract_get_fn: get_fn,
         }
     }
@@ -141,20 +147,22 @@ impl WasmiContext {
     }
 
     pub fn get_cached_module(
-        &mut self,
+        &self,
         hash: &[u8; 32],
     ) -> Option<ModuleCacheEntry> {
-        self.module_cache.as_mut().and_then(|cache| cache.get(hash))
+        self.module_cache
+            .as_ref()
+            .and_then(|cache| cache.lock().unwrap().get(hash))
     }
 
     pub fn put_cached_module(
-        &mut self,
+        &self,
         hash: &[u8; 32],
         module: &Module,
         linker: &Linker<*mut c_void>,
     ) {
-        if let Some(cache) = self.module_cache.as_mut() {
-            cache.put(hash, module, linker);
+        if let Some(cache) = self.module_cache.as_ref() {
+            cache.lock().unwrap().put(hash, module, linker);
         }
     }
 

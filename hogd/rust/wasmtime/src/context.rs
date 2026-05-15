@@ -153,8 +153,16 @@ impl WasmtimeContext {
 
     /// # Safety
     /// user_context must be a valid pointer to a HostCallContext
+    ///
+    /// Takes `&self` (not `&mut self`) because every field on
+    /// WasmtimeContext is either immutable after construction or behind
+    /// `Arc` with its own internal synchronization (InstancePreCache uses
+    /// SynchronizedMap). Allowing concurrent shared access at this layer
+    /// matters: the C++ side passes a single WasmtimeContext pointer to
+    /// many worker threads via the FFI, and overlapping `&mut self`
+    /// borrows from threads would be UB under Rust aliasing rules.
     pub unsafe fn get_instance_pre(
-        &mut self,
+        &self,
         hash: &[u8; 32],
         user_context: *mut c_void,
     ) -> Result<Option<Arc<InstancePre<*mut c_void>>>, SystemErrorCode> {

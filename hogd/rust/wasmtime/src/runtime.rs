@@ -49,7 +49,7 @@ impl WasmtimeRuntime {
     //   Err(code) — nondeterministic system error (e.g. pool exhaustion, OOM)
     fn new(
         hash: &[u8; 32],
-        context: &mut WasmtimeContext,
+        context: &WasmtimeContext,
         userctx: *mut c_void,
     ) -> Result<Option<WasmtimeRuntime>, SystemErrorCode> {
         let instance_pre =
@@ -252,6 +252,9 @@ impl NewWasmtimeRuntimeResult {
 /// wasmtime_context_ptr must not be a nullptr, and must have been created by new_wasmtime_context.
 /// userctx can be any (null or non-null) pointer.
 /// hash must be a valid pointer to 32 bytes.
+/// Multiple threads may call this function concurrently with the same
+/// wasmtime_context_ptr; we materialize a shared borrow (`&WasmtimeContext`)
+/// rather than `&mut`, so overlapping calls do not violate Rust aliasing.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmtime_runtime(
     hash: *const u8,      // 32 bytes
@@ -265,8 +268,8 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
-    let wasmtime_context: &mut WasmtimeContext =
-        unsafe { &mut *wasmtime_context_ptr.cast::<WasmtimeContext>() };
+    let wasmtime_context: &WasmtimeContext =
+        unsafe { &*wasmtime_context_ptr.cast::<WasmtimeContext>() };
 
     let b = match WasmtimeRuntime::new(hash_slice, wasmtime_context, userctx) {
         Ok(Some(res)) => Box::new(res),
