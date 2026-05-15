@@ -32,7 +32,7 @@ source ./scripts/ci/prepare_env.sh
 # data-race detection.
 export TSAN_OPTIONS=halt_on_error=1:detect_deadlocks=0
 
-TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF")
+TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DRUST_TSAN=ON")
 
 echo 'build gcc tsan'
 ./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"

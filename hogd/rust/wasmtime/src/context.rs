@@ -276,6 +276,16 @@ pub unsafe extern "C" fn new_wasmtime_context(
     Box::into_raw(b).cast::<c_void>()
 }
 
+// Compile-time assertion: WasmtimeContext is Send + Sync. The C++ side
+// passes a single WasmtimeContext pointer to many worker threads via
+// the FFI, and new_wasmtime_runtime materializes `&WasmtimeContext`
+// borrows on each call — that requires Sync. If a future change
+// introduces a !Send or !Sync field, this assertion fails to compile.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<WasmtimeContext>();
+};
+
 /// # Safety
 /// If p is null, this function is a no-op.
 /// If p is non-null, caller must have exclusive (non-concurrent) access,

@@ -585,6 +585,16 @@ pub unsafe extern "C" fn new_wasmi_context(
         &*global_context.cast::<std::sync::Arc<WasmiGlobalContext>>()
     };
 
+    // Compile-time assertion: WasmiContext is Send + Sync. The C++ side
+    // passes a single WasmiContext pointer to many worker threads via
+    // the FFI, and new_wasmi_runtime materializes `&WasmiContext`
+    // borrows on each call — that requires Sync. The module cache is
+    // wrapped in a Mutex; the contract_get_fn is a fn pointer; the
+    // global_context is in an Arc.
+    const _: fn() = || {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<WasmiContext>();
+    };
     let b = Box::new(WasmiContext::new(global_context.clone(), get_fn));
     Box::into_raw(b).cast::<c_void>()
 }

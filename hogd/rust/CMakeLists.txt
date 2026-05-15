@@ -60,6 +60,48 @@ endif()
 #corrosion_set_env_vars(unified_lib ASAN_OPTIONS=detect_stack_use_after_return=1:abort_on_error=1)
 #set_property(TARGET unified_lib PROPERTY CARGO_BUILD_FLAGS "+nightly -Zsanitizer=address")
 
+option(RUST_TSAN
+    "Build Rust crates with ThreadSanitizer instrumentation. Requires \
+the nightly toolchain and the rust-src component. Pair with a C++ \
+build that has -fsanitize=thread; libtsan is shared across the two."
+    OFF)
+
+if(RUST_TSAN)
+    # Derive the Rust host target from rustc rather than hard-coding it:
+    # -Zbuild-std requires an explicit --target, and we want it to match
+    # the architecture the C++ side is building for.
+    execute_process(
+        COMMAND rustc -vV
+        OUTPUT_VARIABLE _rustc_version
+        RESULT_VARIABLE _rustc_rc
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _rustc_rc EQUAL 0)
+        message(FATAL_ERROR
+            "RUST_TSAN=ON but `rustc -vV` failed (rc=${_rustc_rc}).")
+    endif()
+    if(NOT _rustc_version MATCHES "host: ([^\n\r]+)")
+        message(FATAL_ERROR
+            "RUST_TSAN=ON but could not parse host target from\n${_rustc_version}")
+    endif()
+    set(RUST_TSAN_TARGET "${CMAKE_MATCH_1}")
+    message(STATUS
+        "RUST_TSAN=ON: building Rust crates with -Zsanitizer=thread for "
+        "target ${RUST_TSAN_TARGET}")
+
+    # -Zsanitizer=thread instruments Rust code so atomics, Mutex, and
+    # parking_lot-style futex calls emit happens-before edges TSAN can
+    # follow. -Zbuild-std rebuilds libstd with the same instrumentation;
+    # without it, std's synchronization primitives stay precompiled-and-
+    # unsanitized and TSAN false-flags any Rust-internal synchronization.
+    # Both flags are unstable, so a nightly toolchain is required.
+    corrosion_set_env_vars(unified_lib
+        RUSTUP_TOOLCHAIN=nightly
+        RUSTFLAGS=-Zsanitizer=thread)
+    set_property(TARGET unified_lib APPEND PROPERTY CARGO_BUILD_FLAGS
+        "-Zbuild-std=std,core,alloc,panic_unwind"
+        "--target=${RUST_TSAN_TARGET}")
+endif()
+
 # Add cargo tests to ctest
 add_test(
   NAME rust_workspace_tests
