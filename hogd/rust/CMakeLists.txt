@@ -3,7 +3,16 @@ add_subdirectory(wasmi)
 add_subdirectory(wasmtime)
 add_subdirectory(wasm_meter)
 
-include(cmake/check_rust_version.cmake)
+# The version check enforces that the toolchain we configured matches
+# the pin in rust-toolchain.toml. RUST_TSAN intentionally bypasses that
+# pin to switch to nightly, so the check would fail in that mode.
+if(NOT RUST_TSAN)
+    include(cmake/check_rust_version.cmake)
+else()
+    message(STATUS
+        "RUST_TSAN=ON: skipping rust-toolchain.toml version check "
+        "(nightly toolchain override is intentional)")
+endif()
 
 # Check for sccache and configure it if available
 find_program(SCCACHE_EXECUTABLE sccache)
