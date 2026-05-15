@@ -89,8 +89,7 @@ CoroPoll::CoroPoll(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{})
 CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread /*unused*/)
   : CoroPollImpl(pool)
 {
-  if (ignore_sigpipe) {
-    ignore_sigpipe = false;
+  if (ignore_sigpipe.exchange(false, std::memory_order_relaxed)) {
     std::signal(SIGPIPE, SIG_IGN);
   }
 }
