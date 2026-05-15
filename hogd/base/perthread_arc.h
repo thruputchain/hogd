@@ -52,7 +52,7 @@ public:
   // is currently being destroyed.
   bool try_acquire_reference()
   {
-    auto r = refcount_->count_.fetch_add(1, std::memory_order_acquire);
+    auto r = refcount_->count_.fetch_add(1, std::memory_order_relaxed);
 
     // If this is the first access: make sure that if were were in the middle of
     // shutdown, our thread's refcount is tracked by initiate_shutdown().
