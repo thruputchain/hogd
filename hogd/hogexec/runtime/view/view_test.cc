@@ -967,9 +967,10 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
           if (auto r = emit_event(ctx, "child_dropped"); !r.has_value()) {
             return r;
           }
-          auto ret = ctx.syscall<SyscallNo::kReturn>(
-              std::span<const std::byte>{}, true,
-              std::span<const std::byte>{});
+          auto ret =
+              ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{},
+                                              true,
+                                              std::span<const std::byte>{});
           if (ret.has_value() ||
               ret.error().code() != HostFnErrorCode::Return) {
             ADD_FAILURE() << "expected Return error from kReturn syscall";
