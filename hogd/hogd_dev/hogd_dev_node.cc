@@ -29,6 +29,7 @@
 #include "hogd/hogdb/rpc_from_gateway.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
 #include "hogd/indexer/rpc_from_event.h"
@@ -136,6 +137,12 @@ HogdDevNode::HogdDevNode(std::string bind_host,
   event_indexer_server_.start_server(make_bind_host_port(bind_host_,
                                                          /*port=*/0));
 
+  view_gateway_server_ = std::make_unique<ViewGatewayServer>(
+      *ctx_, format_advertised_address(bind_host_, db_executor_server_->port()),
+      bind_host_, event_exec_server_.port());
+  view_gateway_server_->start_server(make_bind_host_port(bind_host_,
+                                                         /*port=*/0));
+
   init_indexer_backend();
 
   // We start the executor server in [register_executor_with_mempool()].
@@ -178,6 +185,8 @@ HogdDevNode::~HogdDevNode()
     // shutdown is required so the [Executor] destructor does not block.
     executor_.shut_down();
 
+    view_gateway_server_->impl()->shut_down();
+    view_gateway_server_.reset();
     db_gateway_server_.reset();
     db_auth_server_.reset();
     db_scheduler_server_.reset();

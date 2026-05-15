@@ -47,10 +47,13 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "view.hh"
+#include "view_gateway.hh"
 #include "x23/serialize.h"
 
 #ifndef HOGD_DEV_BINARY
@@ -93,6 +96,7 @@ struct Readiness {
   Endpoint scheduler;
   Endpoint read;
   Endpoint gateway;
+  Endpoint view_gateway;
 
   struct DevAccount {
     std::uint32_t index;
@@ -295,6 +299,9 @@ parse_readiness(std::string line)
       .gateway =
           parse_endpoint(require_string_field(*endpoints, "gateway", line),
                          "gateway", line),
+      .view_gateway =
+          parse_endpoint(require_string_field(*endpoints, "view_gateway", line),
+                         "view_gateway", line),
       .dev_accounts = parse_dev_accounts(*parsed, line),
   };
 }
@@ -612,6 +619,8 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_GT(readiness.read.port, 0);
   EXPECT_EQ(readiness.gateway.host, "127.0.0.1");
   EXPECT_GT(readiness.gateway.port, 0);
+  EXPECT_EQ(readiness.view_gateway.host, "127.0.0.1");
+  EXPECT_GT(readiness.view_gateway.port, 0);
   EXPECT_TRUE(readiness.dev_accounts.empty());
 
   expect_clean_exit(process);
@@ -629,7 +638,8 @@ TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
       parse_readiness(R"({"status":"ready","network_id":"groundhog-local",)"
                       R"("endpoints":{"scheduler":"[::1]:12345",)"
                       R"("read":"[::1]:23456",)"
-                      R"("gateway":"[::1]:34567"}})");
+                      R"("gateway":"[::1]:34567",)"
+                      R"("view_gateway":"[::1]:45678"}})");
 
   EXPECT_EQ(readiness.scheduler.host, "::1");
   EXPECT_EQ(readiness.scheduler.port, 12345);
@@ -637,6 +647,8 @@ TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
   EXPECT_EQ(readiness.read.port, 23456);
   EXPECT_EQ(readiness.gateway.host, "::1");
   EXPECT_EQ(readiness.gateway.port, 34567);
+  EXPECT_EQ(readiness.view_gateway.host, "::1");
+  EXPECT_EQ(readiness.view_gateway.port, 45678);
 }
 
 TEST(HogdDev, DevAccountDerivationMatchesRustGoldens)
@@ -781,6 +793,73 @@ TEST(HogdDev, GatewayEndpointAnswersIntroAndGetItems)
     ASSERT_EQ(result.error(), RPCError::kRPCNone);
     ASSERT_EQ(result.payload().items.size(), 1U);
     EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, ViewGatewayEndpointAnswersIntro)
+{
+  HogdDevProcess process = HogdDevProcess::start();
+  Readiness readiness = process.wait_for_readiness();
+
+  {
+    auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                              readiness.view_gateway.port,
+                                              /*retry=*/true)();
+
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+  }
+
+  expect_clean_exit(process);
+}
+
+TEST(HogdDev, ViewGatewayViewsCommittedDevWallet)
+{
+  HogdDevProcess process = HogdDevProcess::start({
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.dev_accounts.size(), 1UL);
+
+  {
+    auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                              readiness.view_gateway.port,
+                                              /*retry=*/true)();
+
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    const ContractAddress wallet_address =
+        build_dev_account_bootstrap_artifact({.count = 1}).accounts[0].address;
+    EXPECT_EQ(hex_string(wallet_address), readiness.dev_accounts[0].address);
+
+    TransactionViewQuery query{
+        .invocation =
+            Invocation{
+                .invoked_address = wallet_address,
+                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = Calldata{},
+            },
+        .parent_address = {},
+        .auth_claim = source_address_auth_claim(),
+        .forwarded_tokens = {},
+        .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+    };
+
+    ViewGatewayResult result = client.viewgateway_view(query)();
+    ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_EQ(result.payload().height, 1);
+    EXPECT_EQ(result.payload().output.status_code(),
+              InvocationFrameStatusCode::Abort);
   }
 
   expect_clean_exit(process);

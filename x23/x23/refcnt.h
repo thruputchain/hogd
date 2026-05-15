@@ -14,24 +14,6 @@ namespace x23 {
 
 namespace detail {
 
-// DestroyInhibit's decref/destroy_wait pair is correct per C++20
-// release sequences ([atomics.order]/2): the relaxed fetch_sub that
-// follows the release fetch_sub in decref() is part of the release
-// sequence, so the acquire-load in destroy_wait() synchronizes with the
-// release op. TSAN does not fully model release sequences and reports a
-// false positive on this pattern, so we make the happens-before edge
-// explicit with manual annotations that are no-ops outside TSAN builds.
-#if defined(__SANITIZE_THREAD__) || \
-    (defined(__has_feature) && __has_feature(thread_sanitizer))
-extern "C" void __tsan_acquire(void *);
-extern "C" void __tsan_release(void *);
-inline void tsan_release(void *p) noexcept { __tsan_release(p); }
-inline void tsan_acquire(void *p) noexcept { __tsan_acquire(p); }
-#else
-inline void tsan_release(void * /*p*/) noexcept {}
-inline void tsan_acquire(void * /*p*/) noexcept {}
-#endif
-
 template<typename Ptr> struct RefOps {
   static auto incref(Ptr p) noexcept(noexcept(p->incref()))
   {
@@ -144,8 +126,8 @@ public:
 
   ~RefPtr() { reset(); }
 
-  decltype(auto) operator=(this is_mutable auto &&self,
-                           std::nullptr_t) noexcept // NOLINT
+  // NOLINTNEXTLINE(misc-unconventional-assign-operator)
+  decltype(auto) operator=(this is_mutable auto &&self, std::nullptr_t) noexcept
   {
     self.reset();
     return (self);
@@ -365,30 +347,24 @@ public:
     auto c = refcnt_.fetch_sub(2, std::memory_order_release) - 2;
     if (c == 1) {
       refcnt_.notify_all();
-      refcnt_.fetch_sub(1, std::memory_order_relaxed);
-      // See note above detail::tsan_release.
-      detail::tsan_release(&refcnt_);
+      refcnt_.fetch_sub(1, std::memory_order_release);
     }
   }
   void destroy_wait()
   {
     // Here we assume that once there are no more references, incref
     // will no longer be called
-    auto c = refcnt_.fetch_add(1, std::memory_order_relaxed) + 1;
+    auto c = refcnt_.fetch_add(1, std::memory_order_acquire) + 1;
     if (c > 1) {
       do {
         refcnt_.wait(c, std::memory_order_relaxed);
-        c = refcnt_.load(std::memory_order_relaxed);
+        c = refcnt_.load(std::memory_order_acquire);
       } while (c > 1);
-      while (refcnt_.load(std::memory_order_relaxed) != 0)
+      while (refcnt_.load(std::memory_order_acquire) != 0)
         detail::pause_instruction();
     }
     else
       refcnt_.store(0, std::memory_order_relaxed);
-    // See note above detail::tsan_acquire.
-    detail::tsan_acquire(&refcnt_);
-    // Synchronize with all previous decrefs
-    [[maybe_unused]] auto _ = refcnt_.load(std::memory_order_acquire);
   }
 
 private:

@@ -27,6 +27,10 @@ public:
     case BlockExecutionMode::kBlockExecutionModeValidation:
       mark_failed_validation_tx();
       break;
+    case BlockExecutionMode::kBlockExecutionModeViewing:
+      error("mark_tx_failed: received "
+            "BlockExecutionMode::kBlockExecutionModeViewing");
+      break;
     }
     mark_gas_consumed(result.gas_consumed_);
   }
@@ -40,6 +44,10 @@ public:
       break;
     case BlockExecutionMode::kBlockExecutionModeValidation:
       mark_successful_validation_tx();
+      break;
+    case BlockExecutionMode::kBlockExecutionModeViewing:
+      error("mark_tx_success: received "
+            "BlockExecutionMode::kBlockExecutionModeViewing");
       break;
     }
     mark_gas_consumed(result.gas_consumed_);
