@@ -9,6 +9,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/tsan.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -53,6 +54,7 @@ public:
       }
       break;
     }
+    HOG_TSAN_ACQUIRE(this);
   }
 
   // Tries to acquire the lock in reader mode. Returns false if a writer holds
@@ -75,6 +77,7 @@ public:
       if (lock_.compare_exchange_weak(/*expected=*/cur, /*desired=*/cur + 1,
                                       /*success=*/std::memory_order_acquire,
                                       /*failure=*/std::memory_order_relaxed)) {
+        HOG_TSAN_ACQUIRE(this);
         return true;
       }
       cpu_relax();
@@ -95,6 +98,7 @@ public:
         cpu_relax();
       }
     }
+    HOG_TSAN_ACQUIRE(this);
   }
 
   // Tries to acquire the lock in writer mode. Returns true if successful, false
@@ -106,6 +110,9 @@ public:
         lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
                                       /*success=*/std::memory_order_acquire,
                                       /*failure=*/std::memory_order_relaxed);
+    if (ret) {
+      HOG_TSAN_ACQUIRE(this);
+    }
     return ret;
   }
 
@@ -132,6 +139,10 @@ public:
       }
     }
 
+    // Model the upgrade to TSAN as a reader-unlock followed by a writer-lock.
+    // The single CAS below is functionally both: it tears down the reader hold
+    // and installs the writer hold atomically.
+    HOG_TSAN_RELEASE(this);
     {
       // Wait until we are the only reader left. This also ensures that we do
       // not race with another thread that calls [lock_writer()].
@@ -145,6 +156,7 @@ public:
         expected = 1;
       }
     }
+    HOG_TSAN_ACQUIRE(this);
 
     writer_waiting_for_upgrade_.store(false, std::memory_order_relaxed);
     return true;
@@ -195,8 +207,16 @@ private:
   // A sentinel value that indicates the lock is held by a writer.
   static constexpr int64_t kWriterLocked = -1;
 
-  void unlock_reader() { lock_.fetch_sub(1, std::memory_order_release); }
-  void unlock_writer() { lock_.store(kUnlocked, std::memory_order_release); }
+  void unlock_reader()
+  {
+    HOG_TSAN_RELEASE(this);
+    lock_.fetch_sub(1, std::memory_order_release);
+  }
+  void unlock_writer()
+  {
+    HOG_TSAN_RELEASE(this);
+    lock_.store(kUnlocked, std::memory_order_release);
+  }
 
   // The spinlock. Holds a value of [kUnlocked] (0) when unlocked. Holds a
   // value of [kWriterLocked] (-1) when locked by a writer. Holds a positive
