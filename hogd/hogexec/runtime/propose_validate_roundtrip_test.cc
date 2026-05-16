@@ -1287,7 +1287,7 @@ TEST_P(ProposeValidateRoundtripTest,
 
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *native_context,
-                                               std::move(tampered));
+                                              std::move(tampered));
   auto validation_res = validation_handler.root_invoke();
   ASSERT_FALSE(validation_res.is_root_success());
 
