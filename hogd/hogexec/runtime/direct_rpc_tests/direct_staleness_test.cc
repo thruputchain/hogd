@@ -118,7 +118,7 @@ TEST_F(DirectStalenessTest, DeploymentReadOnStaleBlockReturnsAbandon)
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
 
-TEST_F(DirectStalenessTest, DbTipReadOnStaleBlockReturnsCommittedSiblingTip)
+TEST_F(DirectStalenessTest, DbTipReadOnStaleBlockReturnsAbandon)
 {
   advance_block();
 
