@@ -26,6 +26,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cpumap.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
@@ -246,8 +247,16 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
     }
   }
-  auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
-  return to_system_error_code<false>(res, [] { return true; });
+  try {
+    auto res =
+        client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
+    return to_system_error_code<false>(res, [] { return true; });
+  } catch (x23::XdrBadInput const &e) {
+    error("Unrecoverable: try_push_new_subtransaction threw XdrBadInput "
+          "(oversized delta batch?): {}",
+          e.what());
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
 SystemStatus<void>

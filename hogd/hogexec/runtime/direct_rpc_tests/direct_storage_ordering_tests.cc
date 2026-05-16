@@ -1,10 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <string>
 #include <utility>
 
 #include "executor_to_db_rpc.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/borrowed_contract_batch.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -12,6 +16,8 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
+#include "x23/rpc_common.h"
 
 namespace hogd {
 
@@ -228,5 +234,45 @@ INSTANTIATE_TEST_SUITE_P(AllDBs, DirectStorageOrderingTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
                          test_db_to_string);
+
+// Regression for #1975: an oversized StorageDeltaBatch used to throw
+// x23::XdrBadInput out of
+// PerTransactionDatabaseProxy::try_push_current_subtransaction(), which both
+// aborted detached executor workers and skipped the thread-local batch clear,
+// contaminating the next transaction on the same thread. The fix wraps the
+// inner client call to convert the exception into
+// SystemErrorCode::Unrecoverable, which also lets the post-call clear run.
+TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
+{
+  // Shrink the SRPC record cap before constructing the framework so both the
+  // exec-side client and the DB-side server adopt it.
+  const std::size_t saved_max = x23::default_max_message_size;
+  x23::default_max_message_size = 1024;
+  x23::Defer restore{
+      [saved_max] { x23::default_max_message_size = saved_max; }};
+
+  NativeContractTestFramework fw(
+      /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
+      TestDB::kHogDB);
+
+  const auto contract_addr =
+      NativeContractTestFramework::make_contract_address(0);
+  fw.setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto oversized_proxy = fw.make_new_per_tx_db_proxy(101);
+  for (std::size_t i = 0; i < 32; ++i) {
+    oversized_proxy.add_delta(
+        NativeContractTestFramework::make_contract_data_addrkey(
+            contract_addr, "poc_" + std::to_string(i)),
+        NativeContractTestFramework::make_bytestring_delta(
+            std::string(64, 'x')),
+        std::to_underlying(StorageDeltaFlags::None));
+  }
+
+  // Must not throw — the wrapper converts x23::XdrBadInput to Unrecoverable.
+  auto r = oversized_proxy.try_push_current_subtransaction();
+  ASSERT_FALSE(r.has_value());
+  ASSERT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
+}
 
 } // namespace hogd
