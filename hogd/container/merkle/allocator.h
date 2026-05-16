@@ -74,11 +74,11 @@ private:
   char *alloc_from_pool()
   {
     while (true) {
+      rw_lock_.lock_reader();
+
       char *current_region_offset =
           current_region_offset_.load(std::memory_order_relaxed);
       CHECK_PTR(current_region_offset);
-
-      rw_lock_.lock_reader();
       CHECK_LT(current_region_idx_,
                static_cast<ssize_t>(allocated_regions_.size()));
       if (current_region_offset + kPerThreadAllocLength >
