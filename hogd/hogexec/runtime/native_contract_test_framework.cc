@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
