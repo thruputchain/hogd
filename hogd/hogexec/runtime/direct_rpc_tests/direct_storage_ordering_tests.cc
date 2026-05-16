@@ -246,7 +246,7 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 {
   // Shrink the SRPC record cap before constructing the framework so both the
   // exec-side client and the DB-side server adopt it.
-  const size_t saved_max = x23::default_max_message_size;
+  const std::size_t saved_max = x23::default_max_message_size;
   x23::default_max_message_size = 1024;
   x23::Defer restore{
       [saved_max] { x23::default_max_message_size = saved_max; }};
@@ -260,7 +260,7 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
   fw.setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   auto oversized_proxy = fw.make_new_per_tx_db_proxy(101);
-  for (size_t i = 0; i < 32; ++i) {
+  for (std::size_t i = 0; i < 32; ++i) {
     oversized_proxy.add_delta(
         NativeContractTestFramework::make_contract_data_addrkey(
             contract_addr, "poc_" + std::to_string(i)),
