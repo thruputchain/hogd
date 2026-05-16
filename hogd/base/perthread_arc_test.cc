@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <memory>
 #include <thread>
 #include <utility>
 
@@ -281,6 +282,31 @@ TEST(PerThreadARCTest, SequentialOpsFromFreshThreadCannotReachPlusMinus2)
     shutdown_done.notify_all();
     t.join();
   }
+}
+
+TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
+{
+  auto arc = std::make_unique<PerThreadARC<int>>(0);
+  PerThreadARC<int> *raw_arc = arc.get();
+  ASSERT_TRUE(raw_arc->try_acquire_reference());
+
+  std::atomic<bool> released{false};
+  bool shutdown_result = false;
+
+  std::jthread t([&] {
+    while (!released.load(std::memory_order_relaxed)) {
+      std::this_thread::yield();
+    }
+
+    shutdown_result = raw_arc->initiate_shutdown();
+    arc.reset();
+  });
+
+  EXPECT_FALSE(raw_arc->release_reference());
+  released.store(true, std::memory_order_relaxed);
+  t.join();
+
+  EXPECT_TRUE(shutdown_result);
 }
 
 } // namespace hogd
