@@ -436,7 +436,16 @@ HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
 ExpectedDBTip
 HogDBExecutorRpc::get_db_tip(BlockID block_id)
 {
+  // Read the tip first, then check staleness. This ordering is paired with
+  // commit_block()'s ordering of invalidate_siblings before update_dbtip: if
+  // we observe a non-stale block at the stale check, then at the time of the
+  // tip read no sibling had begun committing yet, so the tip is still the
+  // parent's tip rather than a freshly committed sibling's.
   HogDBStatus<DbTip> tip = ctx_.get_tip();
+
+  if (ctx_.is_snapshot_read_stale(block_id)) [[unlikely]]
+    return ExpectedDBTip(RPCError::kRPCBadBlockID);
+
   if (!tip) {
     return ExpectedDBTip(to_rpc_error(tip.error()));
   }

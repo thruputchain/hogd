@@ -142,6 +142,10 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
     return HogDBError(HogDBCode::kInternal);
   }
 
+  // Invalidate siblings BEFORE updating the dbtip below. Executor RPCs such as
+  // get_db_tip read the tip and then check is_snapshot_read_stale; that pair
+  // only excludes the "stale block reads new committed sibling's tip" race if
+  // siblings have been marked invalidated by the time the tip is updated.
   ctx_.invalidate_siblings(id);
 
   HogDBStatus<void> ret = btx->get().commit();

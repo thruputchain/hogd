@@ -88,9 +88,15 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   }
 
   // Verify DAO is unchanged: since prepare failed before any mutation,
-  // the db hash must be identical to what it was before the block.
-  auto tip_after = get_db_tip();
-  if (tip_before.db_hash != tip_after.db_hash) {
+  // the db hash must be identical to what it was before the block. Read the
+  // dbtip directly from the DAO rather than through the executor RPC: after
+  // abandon, the per-block executor view of the tip is Abandon.
+  auto tip_after = std::get<HogdbWrapper>(db_wrapper_).get_db().read_dbtip();
+  if (!tip_after) {
+    throw std::runtime_error(
+        "reject_block: failed to read dbtip from DAO after abandon");
+  }
+  if (tip_before.db_hash != tip_after->db_hash) {
     throw std::runtime_error(
         "reject_block: db hash changed after block rejection — "
         "DAO was mutated before prepare failure");

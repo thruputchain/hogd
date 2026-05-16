@@ -118,6 +118,21 @@ TEST_F(DirectStalenessTest, DeploymentReadOnStaleBlockReturnsAbandon)
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
 
+TEST_F(DirectStalenessTest, DbTipReadOnStaleBlockReturnsCommittedSiblingTip)
+{
+  advance_block();
+
+  auto [block_a, block_b] = create_and_commit_sibling();
+
+  auto stale_snapshot_res = get_db_proxy().get_contract(block_b, SHA256Hash{});
+  ASSERT_FALSE(stale_snapshot_res.has_value());
+  EXPECT_EQ(stale_snapshot_res.error().code(), SystemErrorCode::Abandon);
+
+  auto res = get_db_proxy().get_db_tip(block_b);
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
+}
+
 TEST_F(DirectStalenessTest,
        StaleNewContractCommitReturnsAbandonAndReleasesBlock)
 {
