@@ -3511,6 +3511,10 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
 
 TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
 {
+  // One savepoint slot is reserved for the root commit frame, so the
+  // effective child TryInvoke cap is kMaxSavepointDepth - 1.
+  static constexpr int kChildCap = kMaxSavepointDepth - 1;
+
   static constexpr ContractAddress kAddressNoop = make_contract_address(0);
   static constexpr ContractAddress kAddressLooper = make_contract_address(1);
 
@@ -3524,7 +3528,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
         std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
                int successes = 0;
-               for (int i = 0; i < kMaxSavepointDepth + 1; i++) {
+               for (int i = 0; i < kChildCap + 1; i++) {
                  RuntimeMemoryLength out_ret = 0, out_auth = 0;
                  auto r = ctx.syscall<SyscallNo::kInvoke>(
                      kAddressNoop, 0, ctx.runtime().get_available_gas(),
@@ -3537,7 +3541,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
                    successes++;
                  }
                }
-               if (successes != kMaxSavepointDepth) {
+               if (successes != kChildCap) {
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
                return {};
@@ -3571,6 +3575,81 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+}
+
+TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
+{
+  // Regression test: after exhausting the child TryInvoke cap, root commit
+  // must still succeed because one savepoint slot is reserved for it.
+  if (GetParam() != TestDB::kHogDB) {
+    GTEST_SKIP() << "HogDB savepoint cap is required for this regression";
+  }
+
+  static constexpr int kChildCap = kMaxSavepointDepth - 1;
+
+  static constexpr ContractAddress kAddressNoop = make_contract_address(0);
+  static constexpr ContractAddress kAddressLooper = make_contract_address(1);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    auto noop = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0,
+             [](NativeSyscallContext &) -> InvokeStatus<void> { return {}; }}});
+
+    auto looper = std::make_unique<NativeContract>(
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+            {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+               int successes = 0;
+               for (int i = 0; i < kChildCap + 1; i++) {
+                 RuntimeMemoryLength out_ret = 0, out_auth = 0;
+                 auto r = ctx.syscall<SyscallNo::kInvoke>(
+                     kAddressNoop, 0, ctx.runtime().get_available_gas(),
+                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     std::span<uint32_t>{}, out_ret, out_auth);
+                 if (!r.has_value()) {
+                   return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+                 if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                   successes++;
+                 }
+               }
+               if (successes != kChildCap) {
+                 return InvokeError{InvokeErrorCode::Deterministic};
+               }
+               return {};
+             }}});
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(noop));
+    contract_map.emplace(1, std::move(looper));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  ContractAddress addrs[] = {kAddressNoop, kAddressLooper};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kAddressLooper,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, TryInvokeTest,
