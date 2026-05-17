@@ -127,9 +127,12 @@ if ! rustup component list --installed --toolchain nightly-2025-09-24 | grep -q 
 fi
 
 # Install cbindgen
-if ! command -v cbindgen &>/dev/null; then
-  echo "Installing cbindgen..."
-  cargo install cbindgen
+CBINDGEN_VERSION=0.29.2
+if command -v cbindgen >/dev/null 2>&1 && cbindgen --version | grep -qx "cbindgen ${CBINDGEN_VERSION}"; then
+  echo "cbindgen ${CBINDGEN_VERSION} already installed"
+else
+  echo "Installing cbindgen ${CBINDGEN_VERSION}..."
+  cargo install --locked --force --version "${CBINDGEN_VERSION}" cbindgen
 fi
 
 # Install bindgen CLI for test_ffi Rust bindings generation

@@ -64,10 +64,28 @@ namespace hogd {
 
 namespace {
 
-constexpr auto kStartupTimeout = std::chrono::seconds(30);
+constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
+
+std::chrono::seconds
+startup_timeout()
+{
+  const char *value = std::getenv("HOGD_DEV_STARTUP_TIMEOUT_SECS");
+  if (value == nullptr || *value == '\0') {
+    return kDefaultStartupTimeout;
+  }
+
+  errno = 0;
+  char *end = nullptr;
+  std::uint64_t seconds = std::strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
+      seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("invalid HOGD_DEV_STARTUP_TIMEOUT_SECS value");
+  }
+  return std::chrono::seconds(static_cast<int>(seconds));
+}
 
 struct Readiness {
   struct Endpoint {
@@ -448,7 +466,7 @@ public:
 
   Readiness wait_for_readiness()
   {
-    return parse_readiness(read_stdout_line(kStartupTimeout));
+    return parse_readiness(read_stdout_line(startup_timeout()));
   }
 
   std::optional<int> wait_for_exit_for_test(std::chrono::milliseconds timeout)
@@ -711,7 +729,7 @@ TEST(HogdDev, RejectsDevAccountCountAboveLimit)
       "1001",
   });
 
-  std::optional<int> status = process.wait_for_exit_for_test(kStartupTimeout);
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
   ASSERT_TRUE(status.has_value());
   const int wait_status = status.value_or(EXIT_SUCCESS);
   EXPECT_FALSE(WIFEXITED(wait_status) &&

@@ -8,8 +8,13 @@ source ./scripts/ci/setup_cargo.sh
 echo 'setting up ccache'
 ln -s "$USER_HOME/.cache" "$HOME/.cache"
 
-echo 'installing cbindgen'
-cargo install --force cbindgen
+CBINDGEN_VERSION=0.29.2
+if command -v cbindgen >/dev/null 2>&1 && cbindgen --version | grep -qx "cbindgen ${CBINDGEN_VERSION}"; then
+  echo "cbindgen ${CBINDGEN_VERSION} already installed"
+else
+  echo "installing cbindgen ${CBINDGEN_VERSION}"
+  cargo install --locked --force --version "${CBINDGEN_VERSION}" cbindgen
+fi
 
 echo 'gcc version check'
 gcc --version
