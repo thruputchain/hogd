@@ -1242,6 +1242,61 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   ASSERT_TRUE(validation_handler.abort_transaction().has_value());
 }
 
+// Regression: deterministic root errors must still check that all proposal
+// data was consumed.  Before the fix, finalize_after_root_frame() returned
+// early for non-success results, skipping check_all_consumed().
+TEST_P(ProposeValidateRoundtripTest,
+       DeterministicRootErrorSkipsExtraProposalBitCheck)
+{
+  auto contract_a =
+      make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto r = try_invoke_b(ctx, kWriteHello);
+        if (!r.has_value())
+          return InvokeError{InvokeErrorCode::Deterministic};
+        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+          return InvokeError{InvokeErrorCode::Deterministic};
+        return InvokeError{InvokeErrorCode::Deterministic};
+      }});
+
+  auto native_context =
+      make_ab_context(std::move(contract_a),
+                      make_write_contract({{"b_data0", "hello"}}));
+  auto tx = make_invoke_a_tx(0);
+
+  NondeterministicProposalData proposal_data;
+  {
+    auto proposal_handler = make_new_system_call_handler(tx, *native_context);
+    auto proposal_res = proposal_handler.root_invoke();
+    ASSERT_FALSE(proposal_res.is_root_success());
+    ASSERT_EQ(proposal_res.result_.error().code(),
+              InvokeErrorCode::Deterministic);
+
+    proposal_data = proposal_handler.get_proposal_data();
+    ASSERT_EQ(proposal_data.nondeterministic_bit_count, 1U);
+    ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
+    ASSERT_NE(proposal_data.nondeterministic_bits[0] & uint8_t{1}, 0);
+    ASSERT_EQ(proposal_handler.try_commit_transaction(),
+              ExecResult::ExecResultTxDeterministicError);
+  }
+
+  auto tampered = proposal_data;
+  tampered.nondeterministic_bit_count = 2;
+  tampered.nondeterministic_bits[0] |= uint8_t{1} << 1;
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *native_context,
+                                              std::move(tampered));
+  auto validation_res = validation_handler.root_invoke();
+  ASSERT_FALSE(validation_res.is_root_success());
+
+  EXPECT_EQ(validation_handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure)
+      << "Unused proposal bit must cause validation failure, not deterministic "
+         "error";
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

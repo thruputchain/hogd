@@ -215,7 +215,6 @@ SystemCallHandler::perform_initial_validation()
 void
 SystemCallHandler::check_final_validation_data()
 {
-  assert(cumulative_invoke_result_.is_root_success());
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.check_all_consumed()) {
@@ -265,11 +264,6 @@ SystemCallHandler::finalize_after_root_frame()
   assert(invocation_frame_stack_.empty());
   finalized_ = true;
 
-  if (!cumulative_invoke_result_.is_root_success()) {
-    return;
-  }
-
-  // update cumulative_invoke_result_ with the final validation data
   check_final_validation_data();
 
   if (cumulative_invoke_result_.is_root_success()) {
