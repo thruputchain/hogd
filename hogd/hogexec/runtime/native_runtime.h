@@ -1,11 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include <exception>
 #include <functional>
 #include <memory>
-#include <ranges>
-#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -137,9 +134,6 @@ public:
   {
     available_gas_ = gas;
   }
-
-  // No memory to access from within a native contract
-  std::span<std::byte> get_memory() noexcept override { std::terminate(); }
 
 private:
   InvokeStatus<void> invoke_internal(std::string_view method_name) override;

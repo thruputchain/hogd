@@ -6,7 +6,6 @@
 #include <format>
 #include <memory>
 #include <optional>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -16,7 +15,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/trampoline_result.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 
 namespace hogd {
 
@@ -94,44 +93,8 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   return detail::get_engine_info(engine).has_eager_link_guards;
 }
 
-extern "C" {
-using HostFn0 = TrampolineResult(HostCallContext *) noexcept;
-using HostFn1 = TrampolineResult(HostCallContext *, uint64_t) noexcept;
-using HostFn2 = TrampolineResult(HostCallContext *, uint64_t,
-                                 uint64_t) noexcept;
-using HostFn3 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t) noexcept;
-using HostFn4 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t, uint64_t) noexcept;
-using HostFn5 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t, uint64_t, uint64_t) noexcept;
-using HostFn6 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t, uint64_t, uint64_t,
-                                 uint64_t) noexcept;
-using HostFn7 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t, uint64_t, uint64_t, uint64_t,
-                                 uint64_t) noexcept;
-using HostFn8 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t, uint64_t, uint64_t, uint64_t,
-                                 uint64_t, uint64_t) noexcept;
-using HostFn9 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                 uint64_t, uint64_t, uint64_t, uint64_t,
-                                 uint64_t, uint64_t, uint64_t) noexcept;
-using HostFn10 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                  uint64_t, uint64_t, uint64_t, uint64_t,
-                                  uint64_t, uint64_t, uint64_t,
-                                  uint64_t) noexcept;
-using HostFn11 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                  uint64_t, uint64_t, uint64_t, uint64_t,
-                                  uint64_t, uint64_t, uint64_t, uint64_t,
-                                  uint64_t) noexcept;
-using HostFn12 = TrampolineResult(HostCallContext *, uint64_t, uint64_t,
-                                  uint64_t, uint64_t, uint64_t, uint64_t,
-                                  uint64_t, uint64_t, uint64_t, uint64_t,
-                                  uint64_t, uint64_t) noexcept;
 using ErasedHostFn = void();
 using ErasedFnPtr = ErasedHostFn *;
-}
 
 // Erased C-ABI function-pointer type for syscall trampoline dispatch.
 // Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
@@ -140,55 +103,55 @@ using ErasedFnPtr = ErasedHostFn *;
 // ([expr.reinterpret.cast]/6).
 template<typename Fn> struct HostFnTraits;
 
-template<> struct HostFnTraits<HostFn0 *> {
+template<> struct HostFnTraits<HostFn0> {
   static constexpr uint8_t kNargs = 0;
 };
 
-template<> struct HostFnTraits<HostFn1 *> {
+template<> struct HostFnTraits<HostFn1> {
   static constexpr uint8_t kNargs = 1;
 };
 
-template<> struct HostFnTraits<HostFn2 *> {
+template<> struct HostFnTraits<HostFn2> {
   static constexpr uint8_t kNargs = 2;
 };
 
-template<> struct HostFnTraits<HostFn3 *> {
+template<> struct HostFnTraits<HostFn3> {
   static constexpr uint8_t kNargs = 3;
 };
 
-template<> struct HostFnTraits<HostFn4 *> {
+template<> struct HostFnTraits<HostFn4> {
   static constexpr uint8_t kNargs = 4;
 };
 
-template<> struct HostFnTraits<HostFn5 *> {
+template<> struct HostFnTraits<HostFn5> {
   static constexpr uint8_t kNargs = 5;
 };
 
-template<> struct HostFnTraits<HostFn6 *> {
+template<> struct HostFnTraits<HostFn6> {
   static constexpr uint8_t kNargs = 6;
 };
 
-template<> struct HostFnTraits<HostFn7 *> {
+template<> struct HostFnTraits<HostFn7> {
   static constexpr uint8_t kNargs = 7;
 };
 
-template<> struct HostFnTraits<HostFn8 *> {
+template<> struct HostFnTraits<HostFn8> {
   static constexpr uint8_t kNargs = 8;
 };
 
-template<> struct HostFnTraits<HostFn9 *> {
+template<> struct HostFnTraits<HostFn9> {
   static constexpr uint8_t kNargs = 9;
 };
 
-template<> struct HostFnTraits<HostFn10 *> {
+template<> struct HostFnTraits<HostFn10> {
   static constexpr uint8_t kNargs = 10;
 };
 
-template<> struct HostFnTraits<HostFn11 *> {
+template<> struct HostFnTraits<HostFn11> {
   static constexpr uint8_t kNargs = 11;
 };
 
-template<> struct HostFnTraits<HostFn12 *> {
+template<> struct HostFnTraits<HostFn12> {
   static constexpr uint8_t kNargs = 12;
 };
 
@@ -305,13 +268,6 @@ public:
 
   [[nodiscard]] uint64_t virtual get_available_gas() const noexcept = 0;
   virtual void set_available_gas(uint64_t gas) noexcept = 0;
-
-  // Complex data types pass in/out of wasm via read/writes to wasm linear
-  // memory.
-  //
-  // Requires the module to export its memory as "memory"
-  // (export "memory" (memory 0))
-  virtual std::span<std::byte> get_memory() noexcept = 0;
 
   virtual ~Runtime() = default;
 

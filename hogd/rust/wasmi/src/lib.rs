@@ -29,42 +29,6 @@ macro_rules! wasmi_debug_log {
     };
 }
 
-#[repr(C)]
-pub struct WasmiMemorySlice {
-    mem: *mut u8,
-    sz: u64,
-}
-
-/// # Safety
-/// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
-/// Runtime must have been created by new_wasmi_runtime.
-#[no_mangle]
-pub unsafe extern "C" fn wasmi_get_memory(
-    runtime_void: *mut c_void,
-) -> WasmiMemorySlice {
-    debug_assert!(!runtime_void.is_null());
-
-    let runtime: *mut WasmiRuntime = runtime_void.cast::<WasmiRuntime>();
-
-    let r = unsafe { &mut *runtime };
-
-    match r.instance.get_memory(&r.store, "memory") {
-        Some(mem) => {
-            let mem_sz = mem.data_size(&r.store) as u64;
-            // wasmi docs say that _any_ call to data_ptr or use of store
-            // can invalidate returned pointers
-            WasmiMemorySlice {
-                mem: mem.data_ptr(&r.store),
-                sz: mem_sz,
-            }
-        }
-        _ => WasmiMemorySlice {
-            mem: std::ptr::null_mut(),
-            sz: 0,
-        },
-    }
-}
-
 /// # Safety
 /// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
 /// Runtime must have been created by new_wasmi_runtime.

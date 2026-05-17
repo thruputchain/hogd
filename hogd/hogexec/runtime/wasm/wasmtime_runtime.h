@@ -1,11 +1,9 @@
 #pragma once
 
 #include <cassert>
-#include <concepts>
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <type_traits>
 
@@ -14,7 +12,6 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/rust/wasmtime/bindings.h"
 
 namespace hogd {
@@ -50,6 +47,7 @@ public:
   bool link_fn(std::string_view module_name, std::string_view fn_name, Fn f)
   {
     auto erased = reinterpret_cast<ErasedFnPtr>(f);
+    CHECK(erased != nullptr);
     if (!RuntimeContext::validate_link_fn_params(module_name, fn_name, erased))
       return false;
     return link_fn_nargs(module_name, fn_name, erased,
@@ -105,13 +103,6 @@ public:
 
   [[nodiscard]] uint64_t get_available_gas() const noexcept override;
   void set_available_gas(uint64_t gas) noexcept override;
-
-  // Complex data types pass in/out of wasm via read/writes to wasm linear
-  // memory.
-  //
-  // Requires the module to export its memory as "memory"
-  // (export "memory" (memory 0))
-  std::span<std::byte> get_memory() noexcept override;
 
   // Get module statistics (e.g., serialized module size)
   bool get_module_stats(WasmtimeModuleStats *stats_out) const noexcept;

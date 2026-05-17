@@ -195,14 +195,6 @@ WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
       static_cast<uint32_t>(fn_name.size()), fn_ptr, nargs);
 }
 
-std::span<std::byte>
-WasmtimeRuntime::get_memory() noexcept
-{
-  assert(wasmtime_runtime_ptr_ != nullptr);
-  auto slice = wasmtime_get_memory(wasmtime_runtime_ptr_);
-  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
-}
-
 bool
 WasmtimeRuntime::get_module_stats(WasmtimeModuleStats *stats_out) const noexcept
 {

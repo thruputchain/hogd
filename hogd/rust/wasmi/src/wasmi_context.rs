@@ -12,7 +12,7 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinkEntry, SystemErrorCode};
+use common::{LinearMemorySlice, LinkEntry, SystemErrorCode};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes owned by one RuntimeContext.
@@ -85,6 +85,29 @@ pub struct WasmiContext {
     contract_get_fn: ContractGetFn,
 }
 
+fn get_memory_export(
+    caller: &mut Caller<'_, *mut c_void>,
+) -> Option<wasmi::Memory> {
+    caller.get_export("memory")?.into_memory()
+}
+
+fn get_linear_memory_slice(
+    caller: &mut Caller<'_, *mut c_void>,
+) -> LinearMemorySlice {
+    if let Some(memory) = get_memory_export(caller) {
+        let slice = memory.data_mut(caller);
+        LinearMemorySlice {
+            mem: slice.as_mut_ptr(),
+            sz: slice.len() as u64,
+        }
+    } else {
+        LinearMemorySlice {
+            mem: std::ptr::null_mut(),
+            sz: 0,
+        }
+    }
+}
+
 macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
         fn $name(
@@ -95,11 +118,12 @@ macro_rules! link_function_nargs {
         ) -> Result<(), Error> {
             let ptr = fn_pointer;
             linker
-                .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
+                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
                             ptr,
                             *caller.data(),
+                            get_linear_memory_slice(&mut caller),
                             $($arg),*
                         )
                     }.into();

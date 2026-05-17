@@ -186,14 +186,6 @@ WasmiContext::verify_contract(Contract const &contract) const
   }
 }
 
-std::span<std::byte>
-WasmiRuntime::get_memory() noexcept
-{
-  assert(wasmi_runtime_ptr_ != nullptr);
-  auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
-}
-
 InvokeStatus<void>
 WasmiRuntime::invoke_internal(std::string_view method_name)
 {

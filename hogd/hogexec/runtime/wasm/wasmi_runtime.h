@@ -122,13 +122,6 @@ public:
   [[nodiscard]] uint64_t get_available_gas() const noexcept override;
   void set_available_gas(uint64_t gas) noexcept override;
 
-  // Complex data types pass in/out of wasm via read/writes to wasm linear
-  // memory.
-  //
-  // Requires the module to export its memory as "memory"
-  // (export "memory" (memory 0))
-  std::span<std::byte> get_memory() noexcept override;
-
 private:
   InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
