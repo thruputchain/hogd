@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <utility>
 
@@ -14,7 +13,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmtime/bindings.h"
 #include "types.hh"

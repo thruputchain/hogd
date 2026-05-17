@@ -16,5 +16,5 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
-    println!("out_path = {}", out_path.display());
+    println!("cargo:rerun-if-changed=../../hogexec/runtime/runtime_exports.h");
 }
