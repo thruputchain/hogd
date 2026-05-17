@@ -122,18 +122,19 @@ public:
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
     auto syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, LinearMemorySlice{},
-                                           kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
+                                           LinearMemorySlice{},
+                                           kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                           0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
 
     runtime.set_available_gas(10);
-    syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, LinearMemorySlice{},
-                                           kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
+                                                     LinearMemorySlice{},
+                                                     kNoTracingSyscall, 0, 0, 0,
+                                                     0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
@@ -159,18 +160,19 @@ public:
     auto runtime = TestRuntime(std::move(host_call_context));
     runtime.set_available_gas(10000);
     auto syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, LinearMemorySlice{},
-                                           kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
+                                           LinearMemorySlice{},
+                                           kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                           0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(runtime.get_available_gas(), 9000);
 
     runtime.set_available_gas(10);
-    syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime, LinearMemorySlice{},
-                                           kNoTracingSyscall,
-                                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
+                                                     LinearMemorySlice{},
+                                                     kNoTracingSyscall, 0, 0, 0,
+                                                     0, 0, 0, 0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 
@@ -289,15 +291,15 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   runtime.set_available_gas(10000);
   auto syscall_res =
       wrap_outer<NoErrorSyscallMeta>(handler, runtime, LinearMemorySlice{},
-                                     kNoTracingSyscall, 0, 0,
-                                     0, 0, 0, 0, 0, 0, 0, 0);
+                                     kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0, 0,
+                                     0, 0);
   ASSERT_TRUE(syscall_res.has_value());
 
   runtime.set_available_gas(10);
   syscall_res =
       wrap_outer<NoErrorSyscallMeta>(handler, runtime, LinearMemorySlice{},
-                                     kNoTracingSyscall, 0, 0,
-                                     0, 0, 0, 0, 0, 0, 0, 0);
+                                     kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0, 0,
+                                     0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
 }
