@@ -13,7 +13,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
@@ -36,13 +35,13 @@ unexpected()
 }
 
 extern "C" TrampolineResult
-arity0(HostCallContext * /*unused*/) noexcept
+arity0(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return expected(100);
 }
 
 extern "C" TrampolineResult
-arity1(HostCallContext * /*unused*/, uint64_t arg0) noexcept
+arity1(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0)
 {
   if (arg0 != 1) {
     return unexpected();
@@ -51,7 +50,7 @@ arity1(HostCallContext * /*unused*/, uint64_t arg0) noexcept
 }
 
 extern "C" TrampolineResult
-arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1) noexcept
+arity2(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
     return unexpected();
@@ -60,8 +59,8 @@ arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1) noexcept
 }
 
 extern "C" TrampolineResult
-arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2) noexcept
+arity3(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     return unexpected();
@@ -70,8 +69,8 @@ arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 }
 
 extern "C" TrampolineResult
-arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2, uint64_t arg3) noexcept
+arity4(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     return unexpected();
@@ -80,8 +79,8 @@ arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 }
 
 extern "C" TrampolineResult
-arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2, uint64_t arg3, uint64_t arg4) noexcept
+arity5(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     return unexpected();
@@ -90,8 +89,8 @@ arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 }
 
 extern "C" TrampolineResult
-arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
-       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5) noexcept
+arity6(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6) {
@@ -101,9 +100,9 @@ arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 }
 
 extern "C" TrampolineResult
-arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+arity7(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-       uint64_t arg6) noexcept
+       uint64_t arg6)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6 || arg6 != 7) {
@@ -113,9 +112,9 @@ arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 }
 
 extern "C" TrampolineResult
-arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+arity8(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-       uint64_t arg6, uint64_t arg7) noexcept
+       uint64_t arg6, uint64_t arg7)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
       arg5 != 6 || arg6 != 7 || arg7 != 8) {
@@ -126,6 +125,7 @@ arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class InvokeArityTests : public ::testing::TestWithParam<WasmEngine>,
                          public WasmTestFramework {
 

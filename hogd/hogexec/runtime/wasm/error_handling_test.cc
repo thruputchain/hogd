@@ -9,7 +9,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
@@ -22,37 +21,37 @@ namespace hogd {
 namespace {
 
 extern "C" TrampolineResult
-throw_unrecoverable_host_error(HostCallContext * /*unused*/) noexcept
+throw_unrecoverable_host_error(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
 }
 
 extern "C" TrampolineResult
-throw_validation_error(HostCallContext * /*unused*/) noexcept
+throw_validation_error(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure});
 }
 
 extern "C" TrampolineResult
-throw_abort_transaction(HostCallContext * /*unused*/) noexcept
+throw_abort_transaction(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon});
 }
 
 extern "C" TrampolineResult
-good_call(HostCallContext * /*unused*/) noexcept
+good_call(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
 }
 
 extern "C" TrampolineResult
-exit_call(HostCallContext * /*unused*/) noexcept
+exit_call(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Exit});
 }
 
 extern "C" TrampolineResult
-return_syscall(HostCallContext * /*unused*/) noexcept
+return_syscall(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Return});
 }
@@ -61,8 +60,9 @@ return_syscall(HostCallContext * /*unused*/) noexcept
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
 extern "C" TrampolineResult
-consume_too_much_gas(HostCallContext *context) noexcept
+consume_too_much_gas(ExternHostCallContext external_context, LinearMemorySlice /*unused*/)
 {
+  auto* context = reinterpret_cast<HostCallContext *>(external_context);
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
   return to_trampoline_result(HostFnError{HostFnErrorCode::OutOfGas});
 }
@@ -73,7 +73,7 @@ bool reentrance_hit = false;
 } // namespace
 
 extern "C" TrampolineResult
-reentrance(HostCallContext * /*unused*/) noexcept
+reentrance(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 {
   reentrance_hit = true;
   if (s_runtime == nullptr) {
@@ -89,6 +89,7 @@ reentrance(HostCallContext * /*unused*/) noexcept
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class WasmiErrorHandlingTest : public ::testing::TestWithParam<WasmEngine>,
                                public WasmTestFramework {
 protected:

@@ -19,8 +19,9 @@ namespace {
 SystemCallHandler *ctx_check = nullptr;
 
 extern "C" TrampolineResult
-foo(HostCallContext *ctx, uint64_t value) noexcept
+foo(ExternHostCallContext external_context, LinearMemorySlice /*unused*/, uint64_t value)
 {
+  auto* ctx = reinterpret_cast<HostCallContext *>(external_context);
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
   return to_trampoline_result({SyscallErrorCode(15)});
@@ -28,6 +29,7 @@ foo(HostCallContext *ctx, uint64_t value) noexcept
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class UserCtxTest : public ::testing::TestWithParam<WasmEngine>,
                     public WasmTestFramework {
 protected:
