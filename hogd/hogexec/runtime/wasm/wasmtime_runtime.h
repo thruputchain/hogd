@@ -47,7 +47,6 @@ public:
   bool link_fn(std::string_view module_name, std::string_view fn_name, Fn f)
   {
     auto erased = reinterpret_cast<ErasedFnPtr>(f);
-    CHECK(erased != nullptr);
     if (!RuntimeContext::validate_link_fn_params(module_name, fn_name, erased))
       return false;
     return link_fn_nargs(module_name, fn_name, erased,
