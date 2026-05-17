@@ -638,7 +638,8 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
 constexpr HostFnStatus<SyscallErrorCode>
-wrap_outer(SystemCallHandler &handler, Runtime &runtime, LinearMemorySlice contract_memory, SyscallNo syscall_no,
+wrap_outer(SystemCallHandler &handler, Runtime &runtime,
+           LinearMemorySlice contract_memory, SyscallNo syscall_no,
            uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
            uint64_t arg5, uint64_t arg6, uint64_t arg7, uint64_t arg8,
            uint64_t arg9, uint64_t arg10) noexcept
@@ -649,7 +650,9 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, LinearMemorySlice contr
   auto input_args =
       std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10};
 
-  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(contract_memory.mem), contract_memory.sz);
+  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(
+                                                contract_memory.mem),
+                                            contract_memory.sz);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
@@ -657,10 +660,9 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, LinearMemorySlice contr
       -> HostFnStatus<SyscallErrorCode> {
     // Attempt to load syscall arguments from contract memory.
     AliasGuard guard;
-    auto parsed_args = std::tuple{
-        parse<syscall_t::template offset_i<Is>(),
-              typename syscall_t::template arg_i<Is>>(guard, contract_memory_span,
-                                                      input_args)...};
+    auto parsed_args = std::tuple{parse<syscall_t::template offset_i<Is>(),
+                                        typename syscall_t::template arg_i<Is>>(
+        guard, contract_memory_span, input_args)...};
 
     return wrap_after_parse<SyscallMeta>(guard, handler, runtime, syscall_no,
                                          std::move(parsed_args));

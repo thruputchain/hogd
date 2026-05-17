@@ -130,7 +130,8 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
 namespace {
 
 extern "C" TrampolineResult
-dummy_syscall_8args(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/, uint64_t /*unused*/,
+dummy_syscall_8args(ExternHostCallContext /*unused*/,
+                    LinearMemorySlice /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,

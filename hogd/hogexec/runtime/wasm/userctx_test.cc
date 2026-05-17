@@ -19,9 +19,10 @@ namespace {
 SystemCallHandler *ctx_check = nullptr;
 
 extern "C" TrampolineResult
-foo(ExternHostCallContext external_context, LinearMemorySlice /*unused*/, uint64_t value)
+foo(ExternHostCallContext external_context, LinearMemorySlice /*unused*/,
+    uint64_t value)
 {
-  auto* ctx = reinterpret_cast<HostCallContext *>(external_context);
+  auto *ctx = reinterpret_cast<HostCallContext *>(external_context);
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
   return to_trampoline_result({SyscallErrorCode(15)});

@@ -21,19 +21,22 @@ namespace hogd {
 namespace {
 
 extern "C" TrampolineResult
-throw_unrecoverable_host_error(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+throw_unrecoverable_host_error(ExternHostCallContext /*unused*/,
+                               LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
 }
 
 extern "C" TrampolineResult
-throw_validation_error(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+throw_validation_error(ExternHostCallContext /*unused*/,
+                       LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure});
 }
 
 extern "C" TrampolineResult
-throw_abort_transaction(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+throw_abort_transaction(ExternHostCallContext /*unused*/,
+                        LinearMemorySlice /*unused*/)
 {
   return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon});
 }
@@ -60,9 +63,10 @@ return_syscall(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
 extern "C" TrampolineResult
-consume_too_much_gas(ExternHostCallContext external_context, LinearMemorySlice /*unused*/)
+consume_too_much_gas(ExternHostCallContext external_context,
+                     LinearMemorySlice /*unused*/)
 {
-  auto* context = reinterpret_cast<HostCallContext *>(external_context);
+  auto *context = reinterpret_cast<HostCallContext *>(external_context);
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
   return to_trampoline_result(HostFnError{HostFnErrorCode::OutOfGas});
 }

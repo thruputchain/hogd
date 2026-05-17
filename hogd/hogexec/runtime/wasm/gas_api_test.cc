@@ -31,9 +31,10 @@ success()
 }
 
 extern "C" TrampolineResult
-consume_gas_call(ExternHostCallContext external_context, LinearMemorySlice /*unused*/)
+consume_gas_call(ExternHostCallContext external_context,
+                 LinearMemorySlice /*unused*/)
 {
-  auto* ctxp = reinterpret_cast<HostCallContext *>(external_context);
+  auto *ctxp = reinterpret_cast<HostCallContext *>(external_context);
   if (!ctxp->runtime->consume_gas(100)) {
     return error(HostFnErrorCode::OutOfGas);
   }
@@ -41,9 +42,10 @@ consume_gas_call(ExternHostCallContext external_context, LinearMemorySlice /*unu
 }
 
 extern "C" TrampolineResult
-consume_gas_call2(ExternHostCallContext external_context, LinearMemorySlice /*unused*/)
+consume_gas_call2(ExternHostCallContext external_context,
+                  LinearMemorySlice /*unused*/)
 {
-  auto* ctxp = reinterpret_cast<HostCallContext *>(external_context);
+  auto *ctxp = reinterpret_cast<HostCallContext *>(external_context);
   if (!ctxp->runtime->consume_gas(5000)) {
     return error(HostFnErrorCode::OutOfGas);
   }
