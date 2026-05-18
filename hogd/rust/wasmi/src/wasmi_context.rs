@@ -1,8 +1,8 @@
+use wasmi::core::ValType;
 use wasmi::{
     Caller, CompilationMode, Config, Engine, Error, ExternType, Linker, Module,
     StackLimits,
 };
-use wasmi::core::ValType;
 
 use core::ffi::c_void;
 use core::slice;
@@ -388,9 +388,7 @@ impl WasmiContext {
         }
         if !validate_imports(&module, self.global_context.entries()) {
             #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: import validation failed"
-            );
+            eprintln!("Contract verification failed: import validation failed");
             return false;
         }
         let config = groundhog_wasm_meter::Config {

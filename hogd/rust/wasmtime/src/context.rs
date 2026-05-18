@@ -242,9 +242,7 @@ impl WasmtimeContext {
         }
         if !validate_imports(&module, self.global_context.imports()) {
             #[cfg(debug_assertions)]
-            eprintln!(
-                "Contract verification failed: import validation failed"
-            );
+            eprintln!("Contract verification failed: import validation failed");
             return false;
         }
         let config = groundhog_wasm_meter::Config {

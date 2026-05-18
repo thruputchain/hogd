@@ -276,8 +276,7 @@ TEST_P(SelectiveDeploymentTest, MalformedImportAbiRejectedBeforeExecution)
   auto native_deployer = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
-           [malformed_hash](
-               NativeSyscallContext &ctx) -> InvokeStatus<void> {
+           [malformed_hash](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto deploy_result =
                  ctx.handler().deploy_contract(kDeployNonce, malformed_hash);
              if (!deploy_result.has_value()) {
@@ -324,8 +323,7 @@ TEST_P(SelectiveDeploymentTest, MalformedImportAbiRejectedBeforeExecution)
 
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(),
-            InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
