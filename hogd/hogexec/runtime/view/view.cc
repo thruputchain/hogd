@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_token.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
