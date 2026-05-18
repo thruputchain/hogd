@@ -83,9 +83,11 @@ private:
       CHECK_PTR(current_region_offset);
       CHECK_LT(current_region_idx_,
                static_cast<ssize_t>(allocated_regions_.size()));
-      // Avoid forming a pointer past the mmap region (UB if beyond one-past-the-end)
+      // Avoid forming a pointer past the mmap region (UB if beyond
+      // one-past-the-end)
       size_t remaining = static_cast<size_t>(
-          (allocated_regions_[current_region_idx_] + kMmapLength) - current_region_offset);
+          (allocated_regions_[current_region_idx_] + kMmapLength) -
+          current_region_offset);
       if (kPerThreadAllocLength > remaining) {
 
         // We may need to allocate a new region. Only one thread should should
