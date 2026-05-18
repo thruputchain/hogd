@@ -26,6 +26,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogexec/common/block_id_util.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_auth.h"
@@ -227,23 +228,7 @@ public:
   // the lifetime of this process. This function is thread-safe.
   static uint64_t generate_block_id()
   {
-    static std::atomic<uint64_t> last_ns = 0;
-    while (true) {
-      auto now = std::chrono::system_clock::now();
-      uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        now.time_since_epoch())
-                        .count();
-      uint64_t last_ns_relaxed = last_ns.load(std::memory_order_relaxed);
-      if (ns == last_ns_relaxed) {
-        continue;
-      }
-      if (last_ns.compare_exchange_weak(
-              /*expected=*/last_ns_relaxed,
-              /*desired=*/ns,
-              /*order=*/std::memory_order_relaxed)) {
-        return ns;
-      }
-    }
+    return hogd::generate_block_id();
   }
 
   static SHA256Hash
