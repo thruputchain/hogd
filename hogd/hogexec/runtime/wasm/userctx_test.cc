@@ -7,6 +7,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
@@ -19,8 +20,10 @@ namespace {
 SystemCallHandler *ctx_check = nullptr;
 
 extern "C" TrampolineResult
-foo(HostCallContext *ctx, uint64_t value) noexcept
+foo(ExternHostCallContext external_context, LinearMemorySlice /*unused*/,
+    uint64_t value)
 {
+  auto *ctx = reinterpret_cast<HostCallContext *>(external_context);
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
   return to_trampoline_result({SyscallErrorCode(15)});
@@ -28,6 +31,7 @@ foo(HostCallContext *ctx, uint64_t value) noexcept
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class UserCtxTest : public ::testing::TestWithParam<WasmEngine>,
                     public WasmTestFramework {
 protected:

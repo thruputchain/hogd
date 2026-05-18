@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <utility>
 
@@ -14,7 +13,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmi/bindings.h"
 #include "types.hh"
@@ -184,14 +182,6 @@ WasmiContext::verify_contract(Contract const &contract) const
     error("Unrecoverable: Bad union access: {}", e.what());
     return false;
   }
-}
-
-std::span<std::byte>
-WasmiRuntime::get_memory() noexcept
-{
-  assert(wasmi_runtime_ptr_ != nullptr);
-  auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
 
 InvokeStatus<void>

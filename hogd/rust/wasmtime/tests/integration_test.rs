@@ -7,8 +7,8 @@ use common::SystemErrorCode;
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
     new_wasmtime_context, new_wasmtime_global_context, new_wasmtime_runtime,
-    wasmtime_get_available_gas, wasmtime_get_memory, wasmtime_invoke,
-    wasmtime_set_available_gas, wasmtime_verify_contract, ContractGetResult,
+    wasmtime_get_available_gas, wasmtime_invoke, wasmtime_set_available_gas,
+    wasmtime_verify_contract, ContractGetResult,
 };
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
@@ -20,7 +20,7 @@ extern "C" fn c_call_0args(
     _userctx: *mut c_void,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -32,7 +32,7 @@ extern "C" fn c_call_1args(
     _arg1: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -45,7 +45,7 @@ extern "C" fn c_call_2args(
     _arg2: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -59,7 +59,7 @@ extern "C" fn c_call_3args(
     _arg3: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -74,7 +74,7 @@ extern "C" fn c_call_4args(
     _arg4: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -90,7 +90,7 @@ extern "C" fn c_call_5args(
     _arg5: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -107,7 +107,7 @@ extern "C" fn c_call_6args(
     _arg6: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -125,7 +125,7 @@ extern "C" fn c_call_7args(
     _arg7: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -144,7 +144,7 @@ extern "C" fn c_call_8args(
     _arg8: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
-        result: 0,
+        result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
     }
 }
@@ -271,43 +271,6 @@ fn test_create_runtime() {
                 .unwrap();
 
         assert!(!runtime.is_null(), "Should successfully create runtime");
-
-        free_wasmtime_runtime(runtime);
-        free_wasmtime_context(context);
-        free_wasmtime_global_context(global_context);
-
-        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
-    }
-}
-
-#[test]
-fn test_get_memory() {
-    unsafe {
-        let global_context = new_wasmtime_global_context(8);
-        let context = new_wasmtime_context(
-            test_get_simple_add_contract_get_fn,
-            global_context,
-        );
-        let contract_hash = [0u8; 32];
-
-        let context_ptr: *mut c_void =
-            core::mem::transmute(Box::into_raw(Box::new(1)));
-
-        let runtime =
-            new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context)
-                .get()
-                .unwrap();
-        assert!(!runtime.is_null());
-
-        // Get the memory
-        let mem_slice = wasmtime_get_memory(runtime);
-
-        // Should have some memory allocated (at least 1 page = 64KB)
-        assert!(mem_slice.sz > 0, "Memory size should be non-zero");
-        assert!(
-            !mem_slice.mem.is_null(),
-            "Memory pointer should be non-null"
-        );
 
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
@@ -637,18 +600,6 @@ fn test_module_cache() {
                 .unwrap();
 
         assert!(!runtime3.is_null(), "Third runtime should be created");
-
-        // Verify all three runtimes can access memory (proving they're functional)
-        let mem1 = wasmtime_get_memory(runtime1);
-        let mem2 = wasmtime_get_memory(runtime2);
-        let mem3 = wasmtime_get_memory(runtime3);
-
-        assert!(!mem1.mem.is_null(), "First runtime should have memory");
-        assert!(mem1.sz > 0, "First runtime memory should be non-zero");
-        assert!(!mem2.mem.is_null(), "Second runtime should have memory");
-        assert!(mem2.sz > 0, "Second runtime memory should be non-zero");
-        assert!(!mem3.mem.is_null(), "Third runtime should have memory");
-        assert!(mem3.sz > 0, "Third runtime memory should be non-zero");
 
         free_wasmtime_runtime(runtime1);
         free_wasmtime_runtime(runtime2);

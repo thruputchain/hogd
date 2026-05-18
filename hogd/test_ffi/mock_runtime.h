@@ -1,9 +1,7 @@
 #pragma once
 
-#include <cstddef>
 #include <map>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <utility>
 
@@ -94,11 +92,6 @@ public:
     gas_remaining_ = gas;
   }
 
-  std::span<std::byte> get_memory() noexcept override
-  {
-    panic("unreachable: MockRuntime::get_memory called");
-  }
-
 private:
   InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
@@ -131,11 +124,6 @@ public:
   {
     assert(gas_remaining_ <= initial_gas_);
     return initial_gas_ - gas_remaining_;
-  }
-
-  std::span<std::byte> get_memory() noexcept override
-  {
-    panic("unreachable: EmptyRuntime::get_memory called");
   }
 
 private:

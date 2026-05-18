@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
+use common::LinearMemorySlice;
 use common::LinkEntry;
 
 use wasmtime::{
@@ -14,6 +15,29 @@ use wasmtime::{
 
 use crate::error::TrampolineError;
 use crate::instance_pre_cache::InstancePreCache;
+
+fn get_memory_export(
+    caller: &mut Caller<'_, *mut c_void>,
+) -> Option<wasmtime::Memory> {
+    caller.get_export("memory")?.into_memory()
+}
+
+fn get_linear_memory_slice(
+    caller: &mut Caller<'_, *mut c_void>,
+) -> LinearMemorySlice {
+    if let Some(memory) = get_memory_export(caller) {
+        let slice = memory.data_mut(caller);
+        LinearMemorySlice {
+            mem: slice.as_mut_ptr(),
+            sz: slice.len() as u64,
+        }
+    } else {
+        LinearMemorySlice {
+            mem: std::ptr::null_mut(),
+            sz: 0,
+        }
+    }
+}
 
 macro_rules! link_function_nargs {
     ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
@@ -25,11 +49,15 @@ macro_rules! link_function_nargs {
         ) -> Result<(), wasmtime::Error> {
             let ptr = fn_pointer;
             linker
-                .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
+                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
+
+                    let contract_memory : LinearMemorySlice = get_linear_memory_slice(&mut caller);
+
                     let res : Result<i32, common::HostFnErrorCode> = {
                         common::$cfunc(
                             ptr,
                             *caller.data(),
+                            contract_memory,
                             $($arg),*
                         )
                     }.into();

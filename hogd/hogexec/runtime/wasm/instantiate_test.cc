@@ -9,12 +9,13 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/trampoline_result.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class InstantiateTest : public ::testing::TestWithParam<WasmEngine>,
                         public WasmTestFramework {
 protected:
@@ -128,14 +129,15 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
 
 namespace {
 
-TrampolineResult
-dummy_syscall_8args(HostCallContext * /*unused*/, uint64_t /*unused*/,
+extern "C" TrampolineResult
+dummy_syscall_8args(ExternHostCallContext /*unused*/,
+                    LinearMemorySlice /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
-                    uint64_t /*unused*/) noexcept
+                    uint64_t /*unused*/)
 {
-  return {.result = 0, .panic = 0};
+  return {.result_code = 0, .panic = 0};
 }
 
 } // namespace

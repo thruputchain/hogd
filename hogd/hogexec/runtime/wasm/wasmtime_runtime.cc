@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <span>
 #include <string_view>
 #include <utility>
 
@@ -14,7 +13,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmtime/bindings.h"
 #include "types.hh"
@@ -193,14 +191,6 @@ WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
       static_cast<uint32_t>(module_name.size()),
       reinterpret_cast<uint8_t const *>(fn_name.data()),
       static_cast<uint32_t>(fn_name.size()), fn_ptr, nargs);
-}
-
-std::span<std::byte>
-WasmtimeRuntime::get_memory() noexcept
-{
-  assert(wasmtime_runtime_ptr_ != nullptr);
-  auto slice = wasmtime_get_memory(wasmtime_runtime_ptr_);
-  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
 
 bool

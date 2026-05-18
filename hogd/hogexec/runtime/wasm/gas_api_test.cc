@@ -9,7 +9,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/hogexec/runtime/runtime_exports.h"
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm/wasm_test_framework.h"
@@ -32,8 +32,10 @@ success()
 }
 
 extern "C" TrampolineResult
-consume_gas_call(HostCallContext *ctxp) noexcept
+consume_gas_call(ExternHostCallContext external_context,
+                 LinearMemorySlice /*unused*/)
 {
+  auto *ctxp = reinterpret_cast<HostCallContext *>(external_context);
   if (!ctxp->runtime->consume_gas(100)) {
     return error(HostFnErrorCode::OutOfGas);
   }
@@ -41,8 +43,10 @@ consume_gas_call(HostCallContext *ctxp) noexcept
 }
 
 extern "C" TrampolineResult
-consume_gas_call2(HostCallContext *ctxp) noexcept
+consume_gas_call2(ExternHostCallContext external_context,
+                  LinearMemorySlice /*unused*/)
 {
+  auto *ctxp = reinterpret_cast<HostCallContext *>(external_context);
   if (!ctxp->runtime->consume_gas(5000)) {
     return error(HostFnErrorCode::OutOfGas);
   }
@@ -51,6 +55,7 @@ consume_gas_call2(HostCallContext *ctxp) noexcept
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class GasApiTest : public ::testing::TestWithParam<WasmEngine>,
                    public WasmTestFramework {
 protected:

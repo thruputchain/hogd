@@ -32,7 +32,6 @@ add_library(wasm_runtime_test_objects OBJECT
   invoke_arity_test.cc
   error_handling_test.cc
   gas_api_test.cc
-  memory_access_test.cc
   userctx_test.cc
 )
 
@@ -107,12 +106,6 @@ wat2wasm_target(
 )
 
 wat2wasm_target(
-  test_set_memory_wasm
-  wat/test_set_memory.wat
-  ${CMAKE_CURRENT_BINARY_DIR}/test_set_memory.wasm
-)
-
-wat2wasm_target(
   test_instantiate_fail_wasm
   wat/test_instantiate_fail.wat
   ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_fail.wasm
@@ -176,7 +169,6 @@ add_dependencies(
   test_invoke_wasm
   test_error_handling_wasm
   test_invoke_arity_wasm
-  test_set_memory_wasm
   test_instantiate_fail_wasm
   test_instantiate_unexported_memory_wasm
   test_no_start_wasm
