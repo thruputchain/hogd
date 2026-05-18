@@ -1104,11 +1104,13 @@ TEST_F(ViewTest, ViewForwardedTokenExceedingMaxDepthReturnsInvalidInput)
   static constexpr ContractAddress kParentAddr =
       NativeContractTestFramework::make_contract_address(20);
 
-  AuthTokenNode node{
-      .consumer_address = kCalleeAddr, .payload = {}, .child_nodes = {}};
+  AuthTokenNode node{.consumer_address = kCalleeAddr,
+                     .payload = {},
+                     .child_nodes = {}};
   for (uint32_t i = 0; i < static_cast<uint32_t>(kAuthTokenMaxDepth); ++i) {
-    node = AuthTokenNode{
-        .consumer_address = kCalleeAddr, .payload = {}, .child_nodes = {node}};
+    node = AuthTokenNode{.consumer_address = kCalleeAddr,
+                         .payload = {},
+                         .child_nodes = {node}};
   }
 
   NativeViewSetup setup(
@@ -1144,11 +1146,13 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
   static constexpr ContractAddress kParentAddr =
       NativeContractTestFramework::make_contract_address(20);
 
-  AuthTokenNode node{
-      .consumer_address = kCalleeAddr, .payload = {}, .child_nodes = {}};
+  AuthTokenNode node{.consumer_address = kCalleeAddr,
+                     .payload = {},
+                     .child_nodes = {}};
   for (uint32_t i = 1; i < static_cast<uint32_t>(kAuthTokenMaxDepth); ++i) {
-    node = AuthTokenNode{
-        .consumer_address = kCalleeAddr, .payload = {}, .child_nodes = {node}};
+    node = AuthTokenNode{.consumer_address = kCalleeAddr,
+                         .payload = {},
+                         .child_nodes = {node}};
   }
 
   NativeViewSetup setup(
