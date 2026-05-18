@@ -380,11 +380,10 @@ TEST_P(SelectiveDeploymentTest,
   setup_grant_storage_token(deployed_addr, 1'000'000'000);
 
   Transaction tx{
-      .invocation =
-          Invocation{.invoked_address = deployer_addr,
-                     .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = UINT64_MAX,
-                     .calldata = {}},
+      .invocation = Invocation{.invoked_address = deployer_addr,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
       .contracts_to_deploy = {malformed_contract},
   };
 
@@ -394,8 +393,9 @@ TEST_P(SelectiveDeploymentTest,
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-  auto handler = make_new_system_call_handler_validation(
-      tx, context, std::move(proposal_data));
+  auto handler =
+      make_new_system_call_handler_validation(tx, context,
+                                              std::move(proposal_data));
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
 

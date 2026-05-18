@@ -1322,8 +1322,9 @@ TEST_P(ProposeValidateRoundtripTest,
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-  auto handler = make_new_system_call_handler_validation(
-      tx, *native_context, std::move(proposal_data));
+  auto handler =
+      make_new_system_call_handler_validation(tx, *native_context,
+                                              std::move(proposal_data));
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
 
@@ -1353,8 +1354,9 @@ TEST_P(ProposeValidateRoundtripTest,
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-  auto handler = make_new_system_call_handler_validation(
-      tx, *native_context, std::move(proposal_data));
+  auto handler =
+      make_new_system_call_handler_validation(tx, *native_context,
+                                              std::move(proposal_data));
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
 
