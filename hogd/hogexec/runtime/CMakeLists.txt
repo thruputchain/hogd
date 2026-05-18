@@ -185,4 +185,5 @@ add_dependencies(
 add_dependencies(
   runtime_test
   all_wasm_contracts
+  test_unknown_import_wasm
 )

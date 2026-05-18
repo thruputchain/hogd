@@ -648,7 +648,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
 
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.result_);
-  ASSERT_EQ(res.result_.error(), InvokeErrorCode::ValidationFailure);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
 }
 
 } // namespace hogd

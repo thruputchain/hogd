@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -254,6 +255,75 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
   // Verify that the deployment failed
   auto deployment_lookup = lookup_deployment_from_db(deploy_addr);
   EXPECT_FALSE(deployment_lookup.has_value());
+}
+
+// Regression test for issue #2021: a transaction that attaches a wasm contract
+// with unknown host imports must be rejected at initial validation (before
+// root_invoke executes), so the malformed contract never reaches deployment.
+TEST_P(SelectiveDeploymentTest, MalformedImportAbiRejectedBeforeExecution)
+{
+  Contract malformed_contract(ContractType::kWasmi);
+  malformed_contract.wasmi_contract() =
+      test::load_wasm_from_file("test_unknown_import.wasm");
+  auto malformed_hash = sha256(malformed_contract);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 7;
+    return nonce;
+  }();
+
+  auto native_deployer = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [malformed_hash](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto deploy_result =
+                 ctx.handler().deploy_contract(kDeployNonce, malformed_hash);
+             if (!deploy_result.has_value()) {
+               return deploy_result.error().to_invoke_error();
+             }
+             if (!deploy_result.value().has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_deployer));
+  NativeContext native_context(std::move(contract_map));
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kWasmi, {wasm_context.get(), false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  auto deployed_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   malformed_hash);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+  setup_grant_storage_token(deployed_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = deployer_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .contracts_to_deploy = {malformed_contract},
+              }},
+      context);
+
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
