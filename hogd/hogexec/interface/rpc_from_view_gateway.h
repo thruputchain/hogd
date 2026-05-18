@@ -6,9 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/rpc_server.h"
@@ -47,20 +47,7 @@ public:
     {}
   };
 
-  void shut_down()
-  {
-    shutdown_flag_ = true;
-    shutdown_flag_.notify_all();
-
-    std::scoped_lock g(view_state_mutex_);
-    if (view_state_) {
-      BlockID block_id = view_state_->get().block_id;
-      if (view_state_->initiate_shutdown()) {
-        ctx_.remove_shutdown_block_tx(block_id);
-      }
-      (void)view_state_.release();
-    }
-  }
+  void shut_down();
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
@@ -72,11 +59,7 @@ private:
                                      DbTip const &tip,
                                      ViewState &view_state);
 
-  void gc_view_state(PerThreadARC<ViewState> *state)
-  {
-    ctx_.remove_shutdown_block_tx(state->get().block_id);
-    delete state;
-  }
+  void gc_view_state(BlockID block_id);
 
   std::atomic<bool> shutdown_flag_ = false;
   RPCContext &ctx_;
@@ -85,7 +68,8 @@ private:
   DispatchPool worker_pool_;
 
   std::mutex view_state_mutex_;
-  std::unique_ptr<PerThreadARC<ViewState>> view_state_;
+  BlockID current_view_block_id_ = 0;
+  std::unordered_map<BlockID, PerThreadARC<ViewState>> view_states_;
 };
 
 static_assert(is_ViewGateway1<ViewGatewayRpc *, x23::MaybeAsync>);

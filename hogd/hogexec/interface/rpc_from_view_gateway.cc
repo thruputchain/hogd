@@ -101,6 +101,27 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   co_return co_await awaitable;
 }
 
+void
+ViewGatewayRpc::shut_down()
+{
+  shutdown_flag_ = true;
+  shutdown_flag_.notify_all();
+
+  std::scoped_lock g(view_state_mutex_);
+  for (auto &[block_id, arc] : view_states_) {
+    arc.initiate_shutdown();
+  }
+  current_view_block_id_ = 0;
+}
+
+void
+ViewGatewayRpc::gc_view_state(BlockID block_id)
+{
+  ctx_.remove_shutdown_block_tx(block_id);
+  std::scoped_lock g(view_state_mutex_);
+  view_states_.erase(block_id);
+}
+
 ViewGatewayResult
 ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 {
@@ -118,12 +139,11 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
           ViewGatewayOutcome::ViewGatewayInternalError);
     }
 
-    // Acquire a reference on the current view state, lazy-initializing on the
-    // first request by opening a viewing block tx.
     PerThreadARC<ViewState> *state_ptr = nullptr;
+    BlockID state_block_id = 0;
     {
       std::scoped_lock g(view_state_mutex_);
-      if (!view_state_) {
+      if (current_view_block_id_ == 0) {
         BlockID block_id = generate_block_id();
         auto status = ctx_.open_block_tx(
             block_id, BlockExecutionMode::kBlockExecutionModeViewing);
@@ -132,14 +152,14 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
           return make_view_gateway_result(
               ViewGatewayOutcome::ViewGatewayInternalError);
         }
-        view_state_ =
-            std::make_unique<PerThreadARC<ViewState>>(block_id, db_proxy_);
+        view_states_.try_emplace(block_id, block_id, db_proxy_);
+        current_view_block_id_ = block_id;
       }
-      state_ptr = view_state_.get();
+      state_block_id = current_view_block_id_;
+      state_ptr = &view_states_.at(state_block_id);
     }
 
     if (!state_ptr->try_acquire_reference()) {
-      // Shutdown in progress on this arc — retry and we'll get the new one.
       continue;
     }
 
@@ -148,7 +168,7 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 
     if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
       if (state_ptr->release_reference()) {
-        gc_view_state(state_ptr);
+        gc_view_state(state_block_id);
       }
       return result;
     }
@@ -156,35 +176,29 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
     // Abandoned: rotate to a fresh viewing block tx.
     {
       std::scoped_lock g(view_state_mutex_);
-      // Check if someone already rotated while we waited for the mutex.
-      if (view_state_.get() == state_ptr) {
-        (void)view_state_->initiate_shutdown();
-        // Release from unique_ptr without destroying — the PerThreadARC
-        // destructor asserts shutdown_pending_refcount_ == 0, which only
-        // holds after all refs drain. The last release_reference() caller
-        // will gc via gc_view_state().
-        (void)view_state_.release();
+      if (current_view_block_id_ == state_block_id) {
+        state_ptr->initiate_shutdown();
 
         BlockID new_block_id = generate_block_id();
         auto status = ctx_.open_block_tx(
             new_block_id, BlockExecutionMode::kBlockExecutionModeViewing);
         if (!status.has_value()) {
           warn("viewgateway: failed to open replacement viewing block tx");
-          // Release our ref on the old state.
+          current_view_block_id_ = 0;
           if (state_ptr->release_reference()) {
-            gc_view_state(state_ptr);
+            ctx_.remove_shutdown_block_tx(state_block_id);
+            view_states_.erase(state_block_id);
           }
           return make_view_gateway_result(
               ViewGatewayOutcome::ViewGatewayInternalError);
         }
-        view_state_ = std::make_unique<PerThreadARC<ViewState>>(
-            new_block_id, db_proxy_);
+        view_states_.try_emplace(new_block_id, new_block_id, db_proxy_);
+        current_view_block_id_ = new_block_id;
       }
     }
 
-    // Release our ref on the old (now-shutting-down) state.
     if (state_ptr->release_reference()) {
-      gc_view_state(state_ptr);
+      gc_view_state(state_block_id);
     }
 
     if (shutdown_flag_.load(std::memory_order_relaxed)) {
