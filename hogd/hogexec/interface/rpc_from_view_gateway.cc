@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogexec/common/block_id_util.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
@@ -157,12 +158,12 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
       std::scoped_lock g(view_state_mutex_);
       // Check if someone already rotated while we waited for the mutex.
       if (view_state_.get() == state_ptr) {
-        view_state_->initiate_shutdown();
+        (void)view_state_->initiate_shutdown();
         // Release from unique_ptr without destroying — the PerThreadARC
         // destructor asserts shutdown_pending_refcount_ == 0, which only
         // holds after all refs drain. The last release_reference() caller
         // will gc via gc_view_state().
-        view_state_.release();
+        (void)view_state_.release();
 
         BlockID new_block_id = generate_block_id();
         auto status = ctx_.open_block_tx(

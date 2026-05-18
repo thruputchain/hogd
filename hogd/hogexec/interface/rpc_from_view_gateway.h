@@ -13,7 +13,6 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogexec/common/block_id_util.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
@@ -59,7 +58,7 @@ public:
       if (view_state_->initiate_shutdown()) {
         ctx_.remove_shutdown_block_tx(block_id);
       }
-      view_state_.release();
+      (void)view_state_.release();
     }
   }
 
