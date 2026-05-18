@@ -625,8 +625,8 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
   false_ndet.nondeterministic_bits.push_back(0x00);
   false_ndet.nondeterministic_bit_count = 1;
 
-  auto false_result = run_view(make_query(invocation), *setup.context,
-                               std::move(false_ndet));
+  auto false_result =
+      run_view(make_query(invocation), *setup.context, std::move(false_ndet));
   ASSERT_EQ(false_result.status(), TransactionViewStatus::Ok);
   ASSERT_EQ(false_result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
@@ -637,8 +637,8 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
   true_ndet.nondeterministic_bits.push_back(0x01);
   true_ndet.nondeterministic_bit_count = 1;
 
-  auto true_result = run_view(make_query(invocation), *setup.context,
-                              std::move(true_ndet));
+  auto true_result =
+      run_view(make_query(invocation), *setup.context, std::move(true_ndet));
   ASSERT_EQ(true_result.status(), TransactionViewStatus::Ok);
   ASSERT_EQ(true_result.result().output.status_code(),
             InvocationFrameStatusCode::Return);

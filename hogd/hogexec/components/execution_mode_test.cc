@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <utility>
+
 #include "hogd/base/types.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/init.h"
