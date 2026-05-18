@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -24,6 +25,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogexec_constants.hh"
 #include "invoke_flag.hh"
+#include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -1297,6 +1299,93 @@ TEST_P(ProposeValidateRoundtripTest,
             ExecResult::ExecResultTxValidationFailure)
       << "Unused proposal bit must cause validation failure, not deterministic "
          "error";
+}
+
+// Regression test for issue #2063: an invalid native contract ID in
+// contracts_to_deploy triggers a deterministic error during initial validation,
+// returning before check_all_consumed(). Unused proposal bits must still be
+// detected as a validation failure.
+TEST_P(ProposeValidateRoundtripTest,
+       InvalidAttachedNativeContractChecksUnusedProposalBits)
+{
+  auto native_context = make_noop_context();
+  auto tx = make_invoke_a_tx(0);
+
+  Contract invalid_contract(ContractType::kNative);
+  invalid_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
+  tx.contracts_to_deploy = {invalid_contract};
+
+  NondeterministicProposalData proposal_data;
+  proposal_data.nondeterministic_bit_count = 1;
+  proposal_data.nondeterministic_bits = {uint8_t{1}};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler = make_new_system_call_handler_validation(
+      tx, *native_context, std::move(proposal_data));
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure)
+      << "Unused proposal bit must cause validation failure even when initial "
+         "validation rejects an invalid native contract";
+}
+
+// Regression test for issue #2063: verify that unused queue entry observations
+// are also detected when initial validation fails before root execution.
+TEST_P(ProposeValidateRoundtripTest,
+       InvalidAttachedContractChecksUnusedQueueObservations)
+{
+  auto native_context = make_noop_context();
+  auto tx = make_invoke_a_tx(0);
+
+  Contract invalid_contract(ContractType::kNative);
+  invalid_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
+  tx.contracts_to_deploy = {invalid_contract};
+
+  NondeterministicProposalData proposal_data;
+  QueueEntry observation;
+  observation.push_back(42);
+  proposal_data.observed_queue_entry_sequence = {observation};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler = make_new_system_call_handler_validation(
+      tx, *native_context, std::move(proposal_data));
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure)
+      << "Unused queue entry observation must cause validation failure even "
+         "when initial validation rejects an invalid attached contract";
+}
+
+// Regression test for issue #2063: when initial validation itself reports
+// ValidationFailure (malformed proposal shape), adding extra unused data
+// should still result in ValidationFailure, not get downgraded.
+TEST_P(ProposeValidateRoundtripTest,
+       MalformedProposalShapeWithExtraDataStillValidationFailure)
+{
+  auto native_context = make_noop_context();
+  auto tx = make_invoke_a_tx(0);
+
+  NondeterministicProposalData malformed;
+  malformed.nondeterministic_bit_count = 10;
+  malformed.nondeterministic_bits.clear();
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler = make_new_system_call_handler_validation(tx, *native_context,
+                                                         std::move(malformed));
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,

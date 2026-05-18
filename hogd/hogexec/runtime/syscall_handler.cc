@@ -231,6 +231,7 @@ SystemCallHandler::root_invoke()
   // if validation fails, cumulative_invoke_result_ is set to the appropriate
   // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
+    check_final_validation_data();
     return cumulative_invoke_result_;
   }
 
