@@ -199,10 +199,14 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
 
 TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
 {
+  // One slot is reserved for root commit, so the child cap is
+  // kMaxSavepointDepth - 1.
+  static constexpr int kChildCap = kMaxSavepointDepth - 1;
+
   InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
   stack.start_frame(make_test_address(0), Calldata{}, 0, {});
 
-  for (int i = 0; i < kMaxSavepointDepth; i++) {
+  for (int i = 0; i < kChildCap; i++) {
     stack.start_frame(make_test_address(1), Calldata{},
                       std::to_underlying(InvokeFlag::TryInvoke), {});
     auto result =

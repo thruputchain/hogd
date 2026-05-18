@@ -955,6 +955,9 @@ TEST_P(ProposeValidateRoundtripTest,
   auto tx = make_invoke_a_tx(0);
 
   // Honest proposal cannot produce kMaxSavepointDepth+1 successes.
+  // The child TryInvoke cap is kMaxSavepointDepth - 1 (one slot reserved
+  // for root commit).
+  static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
   {
     auto proposal_handler = make_new_system_call_handler(tx, *native_context);
     auto proposal_res = proposal_handler.root_invoke();
@@ -963,9 +966,8 @@ TEST_P(ProposeValidateRoundtripTest,
               InvokeErrorCode::Deterministic);
 
     auto const &honest_proposal = proposal_handler.get_proposal_data();
-    // With the fix, proposal does NOT log a bit for the over-depth try.
-    ASSERT_EQ(honest_proposal.nondeterministic_bit_count, kMaxSavepointDepth);
-    for (uint32_t i = 0; i < kMaxSavepointDepth; ++i) {
+    ASSERT_EQ(honest_proposal.nondeterministic_bit_count, kChildCap);
+    for (uint32_t i = 0; i < kChildCap; ++i) {
       EXPECT_TRUE(proposal_bit(honest_proposal, i));
     }
     ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
@@ -1148,20 +1150,20 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
   ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
-// Nested-chain depth propagation: A -> TryInvoke(B); B -> kMaxSavepointDepth
-// successful TryInvokes of C; C is a no-op. After B's loop, B's
-// total_try_invoke_depth_ has accumulated to kMaxSavepointDepth (one per
-// C success, propagated up via commit_successful_child_frame). When B's own
-// frame finishes -- i.e., A's TryInvoke of B reaches finish_frame --
-// depth_cap_reached() fires on B's frame, so no bit is logged (proposal) or
-// consumed (validation) for B itself. A sees the TryInvoke of B as a
-// deterministic failure.
+// Nested-chain depth propagation: A -> TryInvoke(B); B ->
+// (kMaxSavepointDepth - 1) successful TryInvokes of C; C is a no-op.
+// After B's loop, B's total_try_invoke_depth_ has accumulated to
+// kMaxSavepointDepth - 1. When B's own frame finishes -- i.e., A's
+// TryInvoke of B reaches finish_frame -- depth_cap_reached() fires on B's
+// frame, so no bit is logged (proposal) or consumed (validation) for B
+// itself. A sees the TryInvoke of B as a deterministic failure.
 //
 // This exercises depth accumulation through a parent-child boundary
 // (B inherits depth from C), distinct from sequential siblings at one level.
 TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 {
   static constexpr ContractAddress kAddrC = make_contract_address(2);
+  static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
 
   // Deploy a third native contract at kAddrC, mirroring SetUp() for A and B.
   auto native_contract_c_xdr = make_native_contract(2);
@@ -1186,7 +1188,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
       }});
   auto contract_b =
       make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-        for (uint32_t i = 0; i < kMaxSavepointDepth; i++) {
+        for (uint32_t i = 0; i < kChildCap; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               kAddrC, 0, ctx.runtime().get_available_gas(), Calldata{},
@@ -1215,7 +1217,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   auto tx = make_invoke_a_tx(0);
 
   // Proposal: B's frame hits the cap, B's TryInvoke from A is deterministic
-  // failure, A propagates. Proposal logs exactly kMaxSavepointDepth bits
+  // failure, A propagates. Proposal logs exactly kChildCap bits
   // (one per C success); none for B's own try_invoke.
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   auto proposal_res = proposal_handler.root_invoke();
@@ -1224,11 +1226,11 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
             InvokeErrorCode::Deterministic);
   auto const &proposal_data = proposal_handler.get_proposal_data();
   EXPECT_EQ(proposal_data.nondeterministic_bit_count,
-            static_cast<uint32_t>(kMaxSavepointDepth));
+            static_cast<uint32_t>(kChildCap));
   ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
 
-  // Validation round-trips: A -> B -> kMaxSavepointDepth successful C
-  // invocations (each consuming a true bit and bumping depth via
+  // Validation round-trips: A -> B -> kChildCap successful C invocations
+  // (each consuming a true bit and bumping depth via
   // note_validation_try_invoke_success); B's frame hits the cap; no bit
   // consumed for B; A's TryInvoke of B fails deterministically; A propagates.
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);

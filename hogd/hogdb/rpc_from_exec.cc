@@ -177,11 +177,10 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
-  int depth = itx->create_savepoint();
-  if (depth > kMaxSavepointDepth) [[unlikely]] {
-    itx->rollback_to_savepoint(depth - 1);
+  if (itx->get_savepoint_head() >= kMaxSavepointDepth) [[unlikely]] {
     return RPCError::kRPCUnrecoverable;
   }
+  int depth = itx->create_savepoint();
 
   if constexpr (is_debug_build()) {
     // Invariant: hogexec sends at most one delta per key per subtransaction.

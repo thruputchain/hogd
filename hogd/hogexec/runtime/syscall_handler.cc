@@ -374,7 +374,7 @@ SystemCallHandler::try_commit_transaction()
   }
 
   // Root commit: push the accumulated delta batch in one HogDB subtransaction.
-  // The TryInvoke depth cap does not apply here; see invocation_frame.cc.
+  // The child TryInvoke depth cap reserves one slot for this push.
   //
   // Validation mode pushes no per-frame subtransactions, so the root frame's
   // try_invoke_frame_count_ must still be 0 here. This is load-bearing: if a
@@ -389,6 +389,11 @@ SystemCallHandler::try_commit_transaction()
                .value()
                .try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
+    two_phase_commit_failed_ = true;
+    auto abort_res = abort_transaction();
+    if (!abort_res.has_value()) {
+      return to_exec_result(abort_res.error().code());
+    }
     return to_exec_result(r.error().code());
   }
 

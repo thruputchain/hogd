@@ -119,7 +119,9 @@ public:
 
   bool depth_cap_reached() const
   {
-    return total_try_invoke_depth_ >= kMaxSavepointDepth;
+    // Reserve one savepoint slot for the root commit frame, which always
+    // pushes a subtransaction through the same HogDB path.
+    return total_try_invoke_depth_ >= kMaxSavepointDepth - 1;
   }
 
   // returned pointer is invalidated by any call to add_item_view
