@@ -121,6 +121,42 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
   EXPECT_EQ(normalized.auth_claim.source_address_claim().required_weight, 0);
 }
 
+// View queries are read-only simulations.  Public callers are intentionally
+// allowed to set parent_address (which the invoked contract observes via
+// GetMsgSender) so that off-chain tooling can simulate calls from any context.
+// This is safe because view execution never commits state.
+TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesParentAddress)
+{
+  ContractAddress arbitrary_parent{};
+  arbitrary_parent[0] = 0xAB;
+
+  TransactionViewQuery query = make_query();
+  query.parent_address = arbitrary_parent;
+
+  TransactionViewQuery normalized =
+      normalize_public_view_query(std::move(query));
+
+  ASSERT_TRUE(normalized.parent_address)
+      << "parent_address must survive normalization (WAI: read-only simulation "
+         "context)";
+  EXPECT_EQ(*normalized.parent_address, arbitrary_parent);
+}
+
+TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesForwardedTokens)
+{
+  TransactionViewQuery query = make_query();
+  query.parent_address = ContractAddress{};
+  query.forwarded_tokens.push_back(AuthToken{});
+  query.forwarded_tokens.push_back(AuthToken{});
+
+  TransactionViewQuery normalized =
+      normalize_public_view_query(std::move(query));
+
+  EXPECT_EQ(normalized.forwarded_tokens.size(), 2U)
+      << "forwarded_tokens must survive normalization (WAI: read-only "
+         "simulation context)";
+}
+
 TEST(ViewGatewayRpc, RetriesAbandonedThenReturnsSuccessfulAttemptHeight)
 {
   std::atomic<bool> shutdown_flag = false;
