@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <span>
@@ -559,6 +560,89 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+// WAI: view mode defaults missing TryInvoke bits to true, so a caller that
+// branches on the TryInvoke status sees the success branch by default and the
+// failure branch only with an explicit false bit. This divergence is deliberate
+// — see ViewingModeData::view_try_invoke_bit() in execution_mode.h.
+TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
+{
+  static constexpr ContractAddress kCallerAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(11);
+
+  NativeViewSetup setup(
+      {{0,
+        [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+          return {};
+        }},
+       {1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          RuntimeMemoryLength out_buf_len = 0;
+          RuntimeMemoryLength out_auth_len = 0;
+          auto r = ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddr, 0, UINT64_MAX, Calldata{},
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              out_buf_len, out_auth_len);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          std::string_view branch =
+              r.value() == SyscallErrorCode::kSyscallErrorCodeNone ? "success"
+                                                                   : "failure";
+          ReturnBuffer out;
+          out.resize(branch.size());
+          std::memcpy(out.data(), branch.data(), branch.size());
+          ctx.handler().set_return_buffer(std::move(out), false);
+          return {};
+        }}});
+
+  deploy_native(kCallerAddr);
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCallerAddr,
+      .entrypoint = entrypoint_from_method_id(1),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto to_sv = [](auto const &buf) -> std::string_view {
+    return {reinterpret_cast<char const *>(buf.data()), buf.size()};
+  };
+
+  // Default (empty ndet) → success branch
+  auto default_result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(default_result.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(default_result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(to_sv(default_result.result().output.return_buffer()), "success");
+
+  // Explicit false → failure branch
+  NondeterministicProposalData false_ndet{};
+  false_ndet.nondeterministic_bits.push_back(0x00);
+  false_ndet.nondeterministic_bit_count = 1;
+
+  auto false_result =
+      run_view(make_query(invocation), *setup.context, std::move(false_ndet));
+  ASSERT_EQ(false_result.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(false_result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(to_sv(false_result.result().output.return_buffer()), "failure");
+
+  // Explicit true → success branch (same as default)
+  NondeterministicProposalData true_ndet{};
+  true_ndet.nondeterministic_bits.push_back(0x01);
+  true_ndet.nondeterministic_bit_count = 1;
+
+  auto true_result =
+      run_view(make_query(invocation), *setup.context, std::move(true_ndet));
+  ASSERT_EQ(true_result.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(true_result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(to_sv(true_result.result().output.return_buffer()), "success");
 }
 
 TEST_F(ViewTest, ViewRcqConsumeDefaultNotPresent)
