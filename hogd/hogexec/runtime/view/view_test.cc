@@ -1278,6 +1278,62 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
             InvocationFrameStatusCode::Return);
 }
 
+TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          BlockHeight height = -1;
+          auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+  framework_.advance_block();
+
+  // Open a viewing block tx — this is what the ViewGateway now does instead
+  // of reusing the committed tip.id directly.
+  BlockID view_block_id = framework_.get_block_number() + 1000;
+  auto db_res = framework_.get_coord_client().dbsched_create_snapshot(
+      framework_.get_db_tip().id, view_block_id,
+      BlockExecutionMode::kBlockExecutionModeViewing);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+  StorageSnapshotCache snapshot_cache(view_block_id,
+                                      framework_.get_db_proxy());
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = View::run_view_transaction(
+      snapshot_cache,
+      PerTransactionDatabaseProxy(
+          framework_.get_db_proxy(), view_block_id,
+          std::numeric_limits<TransactionID>::max()),
+      framework_.make_new_per_tx_event_server_proxy(
+          std::numeric_limits<TransactionID>::max()),
+      make_query(invocation), *setup.context, {});
+
+  EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+
+  // Clean up the viewing block tx.
+  auto abandon_res =
+      framework_.get_coord_client().dbsched_abandon_snapshot(view_block_id);
+  EXPECT_EQ(abandon_res, DbSchedResult::DbSchedResultOK);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
