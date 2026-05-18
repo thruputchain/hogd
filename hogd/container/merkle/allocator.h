@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <sys/mman.h>
 #include <vector>
@@ -138,9 +140,18 @@ private:
     CHECK_NE(addr, MAP_FAILED);
     CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
 
-    current_region_offset_.store(static_cast<char *>(addr),
-                                 std::memory_order_relaxed);
-    allocated_regions_.push_back(static_cast<char *>(addr));
+#ifdef __cpp_lib_start_lifetime_as
+    char *region = std::start_lifetime_as_array<char>(addr, kMmapLength);
+#else
+    struct MmapRegion {
+      char data[kMmapLength];
+    };
+    static_assert(sizeof(MmapRegion) == kMmapLength);
+    char *region = (::new (addr) MmapRegion)->data;
+#endif
+
+    current_region_offset_.store(region, std::memory_order_relaxed);
+    allocated_regions_.push_back(region);
     current_region_idx_++;
   }
 
