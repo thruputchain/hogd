@@ -58,14 +58,19 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r);
   }
 
-  for (auto const &token : query.forwarded_tokens) {
-    if (!AuthTokenRegistry::node_within_depth(token.root_node,
-                                              kAuthTokenMaxDepth)) {
-      ExpectedViewResult result(TransactionViewStatus::InvalidInput);
-      result.error_code() =
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
-      return result;
+  try {
+    for (auto const &token : query.forwarded_tokens) {
+      if (!AuthTokenRegistry::node_within_depth(token.root_node,
+                                                kAuthTokenMaxDepth)) {
+        ExpectedViewResult result(TransactionViewStatus::InvalidInput);
+        result.error_code() =
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+        return result;
+      }
     }
+  } catch (...) {
+    error("unrecoverable: failed to validate forwarded auth token depth");
+    return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 
   std::vector<uint32_t> forwarded_token_ids;
