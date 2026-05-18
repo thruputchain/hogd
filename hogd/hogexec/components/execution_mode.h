@@ -138,12 +138,16 @@ public:
   ViewingModeData(ViewingModeData &&) noexcept = delete;
   ViewingModeData &operator=(ViewingModeData &&) noexcept = delete;
 
+  // WAI: view mode defaults missing TryInvoke bits to true (success).
+  // Views are optimistic read-only snapshots; defaulting to the success branch
+  // gives callers the most useful result without requiring nondeterministic
+  // data that only proposal mode can produce. Callers who need to explore the
+  // failure branch can supply an explicit false bit via the ndet parameter.
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   Nondeterministic<bool> view_try_invoke_bit()
   {
     auto bit = partial_validation_data_.consume_nondeterministic_bit();
     if (!bit.has_value()) {
-      // default to nondeterministic actions succeeding in view mode
       return true;
     }
     return bit.value();

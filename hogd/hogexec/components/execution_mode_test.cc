@@ -158,6 +158,36 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   EXPECT_TRUE(validation.check_all_consumed());
 }
 
+TEST(ExecutionModeTest, ViewingModeDefaultsTryInvokeBitToTrue)
+{
+  ViewingModeCtor empty_ctor{.proposal_data_segment_ = {}};
+  ViewingModeData viewing(empty_ctor);
+
+  // WAI: missing bits default to true (success) — views are optimistic.
+  auto bit = viewing.view_try_invoke_bit();
+  EXPECT_TRUE(bit.get());
+}
+
+TEST(ExecutionModeTest, ViewingModeConsumesTryInvokeBitWhenSupplied)
+{
+  NondeterministicProposalData ndet{};
+  ndet.nondeterministic_bits.push_back(0x02); // bits: false, true (LSB first)
+  ndet.nondeterministic_bit_count = 2;
+
+  ViewingModeCtor ctor{.proposal_data_segment_ = std::move(ndet)};
+  ViewingModeData viewing(ctor);
+
+  auto first = viewing.view_try_invoke_bit();
+  EXPECT_FALSE(first.get());
+
+  auto second = viewing.view_try_invoke_bit();
+  EXPECT_TRUE(second.get());
+
+  // Exhausted supplied bits; subsequent calls default to true.
+  auto defaulted = viewing.view_try_invoke_bit();
+  EXPECT_TRUE(defaulted.get());
+}
+
 // Guard against an overflow in bit count bug in an earlier version of hogd.
 TEST(ExecutionModeTest, NondeterministicBitOverflowGuard)
 {

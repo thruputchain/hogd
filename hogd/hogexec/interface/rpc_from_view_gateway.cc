@@ -116,6 +116,9 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
   static thread_local auto context = make_hogexec_context();
   StorageSnapshotCache snapshot_cache(tip.id, db_proxy_);
 
+  // WAI: empty nondeterministic data causes ViewingModeData to default
+  // TryInvoke outcomes to success. This is deliberate — see the comment on
+  // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = View::run_view_transaction(
       snapshot_cache,
       PerTransactionDatabaseProxy(db_proxy_, tip.id,
