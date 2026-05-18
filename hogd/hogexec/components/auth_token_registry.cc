@@ -4,6 +4,7 @@
 #include <limits>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "auth_token.hh"
 #include "hogd/base/compiler.h"
@@ -11,6 +12,30 @@
 #include "hogd/base/types.h"
 
 namespace hogd {
+
+bool
+AuthTokenRegistry::node_within_depth(AuthTokenNode const &root,
+                                     uint32_t max_depth)
+{
+  std::vector<std::pair<AuthTokenNode const *, uint32_t>> stack;
+  stack.emplace_back(&root, uint32_t{1});
+  while (!stack.empty()) {
+    auto [node, depth] = stack.back();
+    stack.pop_back();
+    if (depth > max_depth) {
+      return false;
+    }
+    if (!node->child_nodes.empty()) {
+      if (depth == max_depth) {
+        return false;
+      }
+      for (auto const &child : node->child_nodes) {
+        stack.emplace_back(&child, depth + 1);
+      }
+    }
+  }
+  return true;
+}
 
 std::optional<uint32_t>
 AuthTokenRegistry::register_auth_token(AuthToken auth_token)

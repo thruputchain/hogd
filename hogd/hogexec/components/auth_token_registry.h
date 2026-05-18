@@ -15,6 +15,8 @@ struct AuthTokenUnwrapResult {
 
 class AuthTokenRegistry {
 public:
+  static bool node_within_depth(AuthTokenNode const &root, uint32_t max_depth);
+
   std::optional<uint32_t> register_auth_token(AuthToken auth_token);
   AuthToken const *lookup_auth_token(uint32_t token_id) const;
 

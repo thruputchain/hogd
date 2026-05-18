@@ -9,6 +9,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/auth_token_registry.h"
 #include "hogd/hogexec/components/execution_mode.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -55,6 +56,16 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
     // r is only non-null if tracing is on
     CHECK(!r);
+  }
+
+  for (auto const &token : query.forwarded_tokens) {
+    if (!AuthTokenRegistry::node_within_depth(token.root_node,
+                                              kAuthTokenMaxDepth)) {
+      ExpectedViewResult result(TransactionViewStatus::InvalidInput);
+      result.error_code() =
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+      return result;
+    }
   }
 
   std::vector<uint32_t> forwarded_token_ids;

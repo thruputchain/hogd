@@ -10,7 +10,6 @@
 #include <new>
 #include <span>
 #include <utility>
-#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -18,6 +17,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
+#include "hogd/hogexec/components/auth_token_registry.h"
 #include "hogd/hogexec/components/ffi_helpers.h"
 #include "hogd/hogexec/components/ffi_types.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -142,32 +142,6 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-namespace {
-
-bool
-auth_token_node_within_depth(AuthTokenNode const &root, uint32_t max_depth)
-{
-  std::vector<std::pair<AuthTokenNode const *, uint32_t>> stack;
-  stack.emplace_back(&root, uint32_t{1});
-  while (!stack.empty()) {
-    auto [node, depth] = stack.back();
-    stack.pop_back();
-    if (depth > max_depth) {
-      return false;
-    }
-    if (!node->child_nodes.empty()) {
-      if (depth == max_depth) {
-        return false;
-      }
-      for (auto const &child : node->child_nodes) {
-        stack.emplace_back(&child, depth + 1);
-      }
-    }
-  }
-  return true;
-}
-
-} // namespace
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_MintAuthToken_inner(
@@ -201,8 +175,8 @@ syscall_MintAuthToken_inner(
   }
 
   try {
-    if (!auth_token_node_within_depth(auth_token.root_node,
-                                      kAuthTokenMaxDepth)) {
+    if (!AuthTokenRegistry::node_within_depth(auth_token.root_node,
+                                              kAuthTokenMaxDepth)) {
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
