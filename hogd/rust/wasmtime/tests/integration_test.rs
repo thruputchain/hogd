@@ -7,8 +7,8 @@ use common::SystemErrorCode;
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
     new_wasmtime_context, new_wasmtime_global_context, new_wasmtime_runtime,
-    wasmtime_get_available_gas, wasmtime_invoke,
-    wasmtime_set_available_gas, wasmtime_verify_contract, ContractGetResult,
+    wasmtime_get_available_gas, wasmtime_invoke, wasmtime_set_available_gas,
+    wasmtime_verify_contract, ContractGetResult,
 };
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
