@@ -1334,6 +1334,58 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   EXPECT_EQ(abandon_res, DbSchedResult::DbSchedResultOK);
 }
 
+TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
+{
+  if constexpr (is_debug_build()) {
+    GTEST_SKIP() << "Debug build hits assert in HogDB before DatabaseProxy "
+                    "can observe the error";
+  }
+
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(11);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          BlockHeight height = -1;
+          auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+  framework_.advance_block();
+
+  // Reproduce the original bug: use tip.id directly as the block ID.
+  DbTip tip = framework_.get_db_tip();
+  StorageSnapshotCache snapshot_cache(tip.id, framework_.get_db_proxy());
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = View::run_view_transaction(
+      snapshot_cache,
+      PerTransactionDatabaseProxy(
+          framework_.get_db_proxy(), tip.id,
+          std::numeric_limits<TransactionID>::max()),
+      framework_.make_new_per_tx_event_server_proxy(
+          std::numeric_limits<TransactionID>::max()),
+      make_query(invocation), *setup.context, {});
+
+  // This documents the bug: using the tip's own ID triggers the self-tip
+  // invariant check in DatabaseProxy::get_db_tip, which maps to
+  // InternalError.
+  EXPECT_EQ(result.status(), TransactionViewStatus::InternalError);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
