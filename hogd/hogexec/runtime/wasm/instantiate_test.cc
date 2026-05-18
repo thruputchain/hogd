@@ -142,46 +142,23 @@ dummy_syscall_8args(ExternHostCallContext /*unused*/,
 
 } // namespace
 
-// Regression test for issue #1464: a contract that imports marmot::syscall
-// under the correct module and function names but with the wrong Wasm function
-// type should be treated as a deterministic invalid contract (null runtime),
-// not escalated into kSystemUnrecoverable.
-//
-// Both engines are exercised: wasmi already handles type mismatches correctly
-// in linker.instantiate() (returns Ok(None) for all instantiation errors —
-// see wasmi_runtime.rs:107-112).  The fix was only needed for wasmtime, where
-// instantiate_pre() errors other than UnknownImportError were escalated to
-// kSystemUnrecoverable.
-TEST_P(InstantiateTest, WrongImportTypeSignatureMismatch)
+// Regression test for issue #1464 / #2021: a contract that imports
+// marmot::syscall with the wrong arity is now rejected at verify_contract
+// time, before it can be deployed.
+TEST_P(InstantiateTest, WrongImportTypeRejectedAtVerification)
 {
   ASSERT_TRUE(link_fn("marmot", "syscall", &dummy_syscall_8args));
 
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_wrong_import_type.wasm");
-  EXPECT_TRUE(get_context()->verify_contract(contract));
-
-  auto deployed_contract_hash = DeployedContractHash{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-
-  make_syscall_handler(contract);
-  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler());
-  ASSERT_TRUE(runtime.has_value())
-      << "type-mismatched import caused a SystemError";
-  EXPECT_FALSE(runtime.value());
+  EXPECT_FALSE(get_context()->verify_contract(contract));
 }
 
-// Regression guard for #1533: a contract that imports a name the host
-// does not register must be rejected as a deterministic invalid contract
-// (null runtime), not escalated to kSystemUnrecoverable. This guards
-// against accidentally removing unknown-import handling when the
-// string-based classifier was replaced with structural validation.
-TEST_P(InstantiateTest, UnknownImportRejectsDeterministically)
+// Regression guard for #1533 / #2021: a contract that imports a name the
+// host does not register must be rejected at verify_contract time, before
+// deployment metadata can be committed.
+TEST_P(InstantiateTest, UnknownImportRejectedAtVerification)
 {
   ASSERT_TRUE(link_fn("marmot", "syscall", &dummy_syscall_8args));
 
@@ -189,22 +166,7 @@ TEST_P(InstantiateTest, UnknownImportRejectsDeterministically)
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_unknown_import.wasm");
 
-  // An unknown-module import still passes wasm-meter (it is a valid function
-  // import); rejection happens structurally at instantiation time.
-  EXPECT_TRUE(get_context()->verify_contract(contract));
-
-  auto deployed_contract_hash = DeployedContractHash{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-
-  make_syscall_handler(contract);
-  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
-                                                 get_syscall_handler());
-  ASSERT_TRUE(runtime.has_value()) << "unknown import caused a SystemError";
-  EXPECT_FALSE(runtime.value());
+  EXPECT_FALSE(get_context()->verify_contract(contract));
 }
 
 // Regression test for issue #1472: both engines currently allow a method-name

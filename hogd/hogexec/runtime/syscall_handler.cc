@@ -207,7 +207,7 @@ SystemCallHandler::perform_initial_validation()
     if (!res) {
       error("Contract verification failed");
       cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
+          InvokeError{InvokeErrorCode::Deterministic};
     }
   }
 }
