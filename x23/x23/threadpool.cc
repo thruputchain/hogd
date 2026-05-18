@@ -209,7 +209,8 @@ ThreadPool::debug_dump()
 
 ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept
   : pool_(pool), threadno_(threadno),
-    rndseed_(fastclock::get_ns() << 21 | (threadno & 0xfffff))
+    // Zero is an absorbing state for xorshift, so ensure seed is nonzero.
+    rndseed_(fastclock::get_ns() << 21 | (threadno & 0xfffff) | 1UL << 20)
 {}
 
 void
