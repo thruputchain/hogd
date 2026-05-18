@@ -162,6 +162,24 @@ struct InvokeResult {
 
   constexpr bool is_root_success() const { return is_frame_success(); }
 
+  constexpr bool has_fatal_error() const
+  {
+    if (result_.has_value()) {
+      return false;
+    }
+    switch (result_.error().code()) {
+    case InvokeErrorCode::Abandon:
+    case InvokeErrorCode::Unrecoverable:
+      return true;
+    case InvokeErrorCode::None:
+    case InvokeErrorCode::Deterministic:
+    case InvokeErrorCode::OutOfGas:
+    case InvokeErrorCode::ValidationFailure:
+      return false;
+    }
+    return true;
+  }
+
   bool has_readable_proposal_data() const
   {
     return result_.has_value() ||
