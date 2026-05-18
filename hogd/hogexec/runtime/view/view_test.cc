@@ -1278,6 +1278,72 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
             InvocationFrameStatusCode::Return);
 }
 
+TEST_F(ViewTest, RootManualRevertOmitsEvents)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "reverted"); !r.has_value()) {
+            return r;
+          }
+          auto ret =
+              ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{},
+                                              true,
+                                              std::span<const std::byte>{});
+          if (ret.has_value() ||
+              ret.error().code() != HostFnErrorCode::Return) {
+            ADD_FAILURE() << "expected Return error from kReturn syscall";
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  EXPECT_TRUE(result.result().events.empty());
+}
+
+TEST_F(ViewTest, RootFaultOmitsEvents)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          if (auto r = emit_event(ctx, "faulted"); !r.has_value()) {
+            return r;
+          }
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }}});
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_TRUE(result.result().events.empty());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

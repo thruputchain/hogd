@@ -299,6 +299,9 @@ SystemCallHandler::get_most_recent_frame_events() const
     if (!last_frame_.has_value()) {
       return x23::Vec<TxEmittedEvent>();
     }
+    if (last_frame_.value().should_revert()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return last_frame_.value().get_events();
   }
