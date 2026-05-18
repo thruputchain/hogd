@@ -5,6 +5,8 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -101,29 +103,114 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
 ViewGatewayResult
 ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 {
-  return run_view_with_retries_for_gateway(
-      query, shutdown_flag_, [this] { return ctx_.get_tip(); },
-      [this](TransactionViewQuery const &attempt_query, DbTip const &tip) {
-        return run_view_attempt(attempt_query, tip);
-      },
-      kMaxViewAttempts);
+  for (std::uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      warn("viewgateway: shutdown requested before view attempt");
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+
+    DbTip tip = ctx_.get_tip();
+    if (!RPCContext::has_committed_tip(tip)) {
+      warn("viewgateway: no committed DbTip is available");
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+
+    // Acquire a reference on the current view state, lazy-initializing on the
+    // first request by opening a viewing block tx.
+    PerThreadARC<ViewState> *state_ptr = nullptr;
+    {
+      std::scoped_lock g(view_state_mutex_);
+      if (!view_state_) {
+        BlockID block_id = generate_block_id();
+        auto status = ctx_.open_block_tx(
+            block_id, BlockExecutionMode::kBlockExecutionModeViewing);
+        if (!status.has_value()) {
+          warn("viewgateway: failed to open viewing block tx");
+          return make_view_gateway_result(
+              ViewGatewayOutcome::ViewGatewayInternalError);
+        }
+        view_state_ =
+            std::make_unique<PerThreadARC<ViewState>>(block_id, db_proxy_);
+      }
+      state_ptr = view_state_.get();
+    }
+
+    if (!state_ptr->try_acquire_reference()) {
+      // Shutdown in progress on this arc — retry and we'll get the new one.
+      continue;
+    }
+
+    ViewGatewayResult result =
+        run_view_attempt(query, tip, state_ptr->get());
+
+    if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
+      if (state_ptr->release_reference()) {
+        gc_view_state(state_ptr);
+      }
+      return result;
+    }
+
+    // Abandoned: rotate to a fresh viewing block tx.
+    {
+      std::scoped_lock g(view_state_mutex_);
+      // Check if someone already rotated while we waited for the mutex.
+      if (view_state_.get() == state_ptr) {
+        view_state_->initiate_shutdown();
+        // Release from unique_ptr without destroying — the PerThreadARC
+        // destructor asserts shutdown_pending_refcount_ == 0, which only
+        // holds after all refs drain. The last release_reference() caller
+        // will gc via gc_view_state().
+        view_state_.release();
+
+        BlockID new_block_id = generate_block_id();
+        auto status = ctx_.open_block_tx(
+            new_block_id, BlockExecutionMode::kBlockExecutionModeViewing);
+        if (!status.has_value()) {
+          warn("viewgateway: failed to open replacement viewing block tx");
+          // Release our ref on the old state.
+          if (state_ptr->release_reference()) {
+            gc_view_state(state_ptr);
+          }
+          return make_view_gateway_result(
+              ViewGatewayOutcome::ViewGatewayInternalError);
+        }
+        view_state_ = std::make_unique<PerThreadARC<ViewState>>(
+            new_block_id, db_proxy_);
+      }
+    }
+
+    // Release our ref on the old (now-shutting-down) state.
+    if (state_ptr->release_reference()) {
+      gc_view_state(state_ptr);
+    }
+
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      warn("viewgateway: shutdown requested after abandoned view attempt");
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+  }
+
+  return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayAbandoned);
 }
 
 ViewGatewayResult
 ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
-                                 DbTip const &tip)
+                                 DbTip const &tip,
+                                 ViewState &view_state)
 {
   static thread_local auto context = make_hogexec_context();
-  StorageSnapshotCache snapshot_cache(tip.id, db_proxy_);
 
   // WAI: empty nondeterministic data causes ViewingModeData to default
   // TryInvoke outcomes to success. This is deliberate — see the comment on
   // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = View::run_view_transaction(
-      snapshot_cache,
-      PerTransactionDatabaseProxy(db_proxy_, tip.id,
+      view_state.snapshot_cache,
+      PerTransactionDatabaseProxy(db_proxy_, view_state.block_id,
                                   std::numeric_limits<TransactionID>::max()),
-      PerTransactionEventServerProxy(event_server_proxy_, tip.id,
+      PerTransactionEventServerProxy(event_server_proxy_, view_state.block_id,
                                      std::numeric_limits<TransactionID>::max()),
       query, *context, {});
   return view_gateway_result_from_raw_view_result(tip.height, std::move(raw));

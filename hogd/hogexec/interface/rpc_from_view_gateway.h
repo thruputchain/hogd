@@ -6,13 +6,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogexec/common/block_id_util.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
+#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
 #include "view.hh"
 #include "view_gateway.hh"
 #include "x23/async.h"
@@ -34,10 +39,28 @@ public:
 
   x23::Async<ViewGatewayResult> viewgateway_view(TransactionViewQuery query);
 
+  struct ViewState {
+    BlockID block_id;
+    StorageSnapshotCache snapshot_cache;
+
+    ViewState(BlockID id, DatabaseProxy &db_proxy)
+      : block_id(id), snapshot_cache(id, db_proxy)
+    {}
+  };
+
   void shut_down()
   {
     shutdown_flag_ = true;
     shutdown_flag_.notify_all();
+
+    std::scoped_lock g(view_state_mutex_);
+    if (view_state_) {
+      BlockID block_id = view_state_->get().block_id;
+      if (view_state_->initiate_shutdown()) {
+        ctx_.remove_shutdown_block_tx(block_id);
+      }
+      view_state_.release();
+    }
   }
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
@@ -47,13 +70,23 @@ private:
 
   ViewGatewayResult run_view_with_retries(TransactionViewQuery const &query);
   ViewGatewayResult run_view_attempt(TransactionViewQuery const &query,
-                                     DbTip const &tip);
+                                     DbTip const &tip,
+                                     ViewState &view_state);
+
+  void gc_view_state(PerThreadARC<ViewState> *state)
+  {
+    ctx_.remove_shutdown_block_tx(state->get().block_id);
+    delete state;
+  }
 
   std::atomic<bool> shutdown_flag_ = false;
   RPCContext &ctx_;
   DatabaseProxy db_proxy_;
   EventServerProxy event_server_proxy_;
   DispatchPool worker_pool_;
+
+  std::mutex view_state_mutex_;
+  std::unique_ptr<PerThreadARC<ViewState>> view_state_;
 };
 
 static_assert(is_ViewGateway1<ViewGatewayRpc *, x23::MaybeAsync>);
