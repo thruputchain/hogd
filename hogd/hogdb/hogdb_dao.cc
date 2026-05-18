@@ -684,10 +684,10 @@ HogDBDAO::apply(ChangeSet &changes, WorkerPool &pool)
   pool.for_each_parallel(
       vecs,
       [this, &had_error](std::vector<MaterializedChange> &vec) {
+        if (had_error.load(std::memory_order_relaxed)) {
+          return;
+        }
         for (const auto &change : vec) {
-          if (had_error.load(std::memory_order_relaxed)) {
-            return;
-          }
           switch (change.op) {
           case MaterializedChange::Op::kPut:
             if (auto r = db_.put(change.key(), change.type, change.value());
