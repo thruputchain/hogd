@@ -1097,6 +1097,103 @@ TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
             InvocationFrameStatusCode::Return);
 }
 
+TEST_F(ViewTest, ViewForwardedTokenExceedingMaxDepthReturnsInvalidInput)
+{
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  AuthTokenNode node{.consumer_address = kCalleeAddr,
+                     .payload = {},
+                     .child_nodes = {}};
+  for (uint32_t i = 0; i < static_cast<uint32_t>(kAuthTokenMaxDepth); ++i) {
+    node = AuthTokenNode{.consumer_address = kCalleeAddr,
+                         .payload = {},
+                         .child_nodes = {node}};
+  }
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext & /*unused*/) -> InvokeStatus<void> {
+          ADD_FAILURE() << "contract should not be invoked";
+          return {};
+        }}});
+
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCalleeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
+                                             .expiry_height = 1'000'000,
+                                             .root_node = node});
+
+  auto result = run_view(query, *setup.context);
+  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+}
+
+TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
+{
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  AuthTokenNode node{.consumer_address = kCalleeAddr,
+                     .payload = {},
+                     .child_nodes = {}};
+  for (uint32_t i = 1; i < static_cast<uint32_t>(kAuthTokenMaxDepth); ++i) {
+    node = AuthTokenNode{.consumer_address = kCalleeAddr,
+                         .payload = {},
+                         .child_nodes = {node}};
+  }
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          std::array<std::byte, 64> payload_buf{};
+          ContractAddress minter{};
+          RuntimeMemoryLength payload_written_len = 0;
+          uint32_t child_start = 0;
+          uint32_t child_count = 0;
+          auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+              0U, std::span<std::byte>{payload_buf}, minter,
+              payload_written_len, child_start, child_count);
+          if (!r.has_value()) {
+            ADD_FAILURE() << "consume_auth_token syscall failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+          EXPECT_EQ(minter, kParentAddr);
+          return {};
+        }}});
+
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCalleeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
+                                             .expiry_height = 1'000'000,
+                                             .root_node = node});
+
+  auto result = run_view(query, *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
