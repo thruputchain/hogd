@@ -129,7 +129,7 @@ private:
 
     ItemVersion(ItemChange &&change, unsigned int tx_depth,
                 int128_t locked_storage_cost = 0)
-      : change(change), tx_depth(tx_depth),
+      : change(std::move(change)), tx_depth(tx_depth),
         locked_storage_cost(locked_storage_cost)
     {}
 

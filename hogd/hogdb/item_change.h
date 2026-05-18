@@ -524,6 +524,10 @@ public:
   {}
   ItemChange(RetrocausalQueueIt &&rcq) : type_(std::move(rcq)) {}
   ItemChange(Balance &&balance) : type_(std::move(balance)) {}
+  ItemChange(const ItemChange &) = default;
+  ItemChange(ItemChange &&) noexcept = default;
+  ItemChange &operator=(const ItemChange &) = default;
+  ItemChange &operator=(ItemChange &&) noexcept = default;
   ~ItemChange() = default;
 
   // getters
