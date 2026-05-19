@@ -1241,7 +1241,6 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   });
 
   genesis_loader.join();
-  load_done.store(true, std::memory_order_release);
   tip_reader.join();
 
   EXPECT_FALSE(failure.load(std::memory_order_acquire));
