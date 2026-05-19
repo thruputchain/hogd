@@ -142,6 +142,40 @@ TEST(Mempool, SubmitUnvetted)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
+TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMempoolTxSizeLimit + 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  KeyChangeBatch key_changes = {
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  for (SignedTransaction &tx : txs) {
+    tx.tx.auth_claim = make_sign_claim(0);
+    tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
+  }
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
+            MempoolCoordinatorRpc::kMempoolTxSizeLimit);
+}
+
 TEST(Mempool, SubmitVetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -152,6 +186,23 @@ TEST(Mempool, SubmitVetted)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+TEST(Mempool, SubmitVettedMempoolMaxCapacityLimit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMempoolTxSizeLimit + 1);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
+            MempoolCoordinatorRpc::kMempoolTxSizeLimit);
 }
 
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
