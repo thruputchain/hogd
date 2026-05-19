@@ -1390,20 +1390,16 @@ TEST_P(ProposeValidateRoundtripTest,
             ExecResult::ExecResultTxValidationFailure);
 }
 
-TEST_P(ProposeValidateRoundtripTest,
-       FinalValidationDoesNotMaskFatalErrors)
+TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
 {
   auto tx = make_invoke_a_tx(0);
 
   auto run_case = [this, &tx](InvokeErrorCode root_error,
                               ExecResult expected_result) {
     auto make_error_context = [root_error] {
-      auto contract_a =
-          make_contract({[root_error](
-                             NativeSyscallContext & /*unused*/)
-                             -> InvokeStatus<void> {
-            return InvokeError{root_error};
-          }});
+      auto contract_a = make_contract(
+          {[root_error](NativeSyscallContext & /*unused*/)
+               -> InvokeStatus<void> { return InvokeError{root_error}; }});
       return make_ab_context(std::move(contract_a), make_contract({}));
     };
 
@@ -1416,8 +1412,9 @@ TEST_P(ProposeValidateRoundtripTest,
 
       discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-      auto handler = make_new_system_call_handler_validation(
-          tx, *ctx, std::move(empty_proposal));
+      auto handler =
+          make_new_system_call_handler_validation(tx, *ctx,
+                                                  std::move(empty_proposal));
       auto res = handler.root_invoke();
       ASSERT_FALSE(res.is_root_success());
       ASSERT_EQ(res.result_.error().code(), root_error);
@@ -1432,8 +1429,9 @@ TEST_P(ProposeValidateRoundtripTest,
 
       discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-      auto handler = make_new_system_call_handler_validation(
-          tx, *ctx, std::move(unused_bit));
+      auto handler =
+          make_new_system_call_handler_validation(tx, *ctx,
+                                                  std::move(unused_bit));
       auto res = handler.root_invoke();
       ASSERT_FALSE(res.is_root_success());
       EXPECT_EQ(res.result_.error().code(), root_error);
@@ -1442,8 +1440,7 @@ TEST_P(ProposeValidateRoundtripTest,
   };
 
   run_case(InvokeErrorCode::Abandon, ExecResult::ExecResultSystemError);
-  run_case(InvokeErrorCode::Unrecoverable,
-           ExecResult::ExecResultUnrecoverable);
+  run_case(InvokeErrorCode::Unrecoverable, ExecResult::ExecResultUnrecoverable);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
