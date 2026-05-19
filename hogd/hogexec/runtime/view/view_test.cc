@@ -1355,8 +1355,7 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
   auto const expired_height = BlockHeight{framework_.get_db_tip().height - 1};
 
   NativeViewSetup setup(
-      {{0,
-        [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           std::array<std::byte, 64> payload_buf{};
           ContractAddress minter{};
           RuntimeMemoryLength payload_written_len = 0;
