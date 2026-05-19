@@ -280,7 +280,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     info("submit_vetted rejected malformed transaction batch");
     co_return;
   }
-  record_submitted_vetted(txs.size());
+  num_submitted_txs = txs.size();
+  record_submitted_vetted(num_submitted_txs);
   info("submit_vetted, {} txs", txs.size());
 
   {
