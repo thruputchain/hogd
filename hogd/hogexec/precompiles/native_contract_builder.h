@@ -40,16 +40,6 @@ struct NativeContractArgs<InvokeStatus<R> (*)(NativeSyscallContext &,
 };
 
 template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(NativeRuntime &, Args...)> {
-  using return_t = R;
-  using args_t = std::tuple<Args...>;
-  static auto extra_args(NativeSyscallContext &ctx)
-  {
-    return std::tuple<NativeRuntime &>{ctx.runtime()};
-  }
-};
-
-template<typename R, typename... Args>
 struct NativeContractArgs<InvokeStatus<R> (*)(Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
@@ -69,10 +59,10 @@ struct AlwaysErrorMethod {
   constexpr static auto make_lambda()
   {
     return []<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
-      return [](NativeRuntime &runtime,
-                std::tuple_element_t<Is, args_t>... /*unused*/)
-                 -> std::pair<InvokeStatus<return_t>, GasAmount> {
-        return {InvokeError{InvokeErrorCode::Deterministic}, Gas};
+      return [](NativeSyscallContext& ctx, std::tuple_element_t<Is, args_t>... /*unused*/)
+                 -> InvokeStatus<return_t> {
+        ctx.consume_gas(Gas);
+        return InvokeError{InvokeErrorCode::Deterministic};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
   }
@@ -143,12 +133,13 @@ public:
     constexpr static GasAmount kErrorGas = 0;
 
     auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
-                         NativeSyscallContext &ctx) -> std::pair<InvokeStatus<void>, GasAmount> {
+                         NativeSyscallContext &ctx) -> InvokeStatus<void> {
       auto calldata = ctx.handler().get_calldata();
       auto args = Serializer<Format>::template deserialize<args_t>(
           std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
-        return {InvokeError{InvokeErrorCode::Deterministic}, kErrorGas};
+        ctx.consume_gas(kErrorGas);
+        return InvokeError{InvokeErrorCode::Deterministic};
       }
 
       // invoke the lambda, and return the error if there is one

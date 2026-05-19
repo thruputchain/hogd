@@ -50,7 +50,7 @@ class NativeSyscallContext;
 
 class NativeContract {
 public:
-  using function_t = std::function<std::pair<InvokeStatus<void>, GasAmount>(NativeSyscallContext &, uint64_t)>;
+  using function_t = std::function<InvokeStatus<void>(NativeSyscallContext &)>;
   using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
@@ -72,7 +72,6 @@ public:
 
   std::pair<InvokeStatus<void>, GasAmount> invoke(Runtime::MethodID method,
                             SystemCallHandler &syscall_handler,
-                            NativeRuntime &runtime,
                             uint64_t gas_limit) const;
 
 private:

@@ -31,16 +31,17 @@ NativeContract::find_function(Runtime::MethodID method) const
 std::pair<InvokeStatus<void>, GasAmount>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
-                       NativeRuntime &runtime,
                        uint64_t gas_limit) const
 {
   const auto *fn = find_function(method);
   if (fn == nullptr)
     return {InvokeError{InvokeErrorCode::Deterministic}, 0};
-  NativeSyscallContext ctx(syscall_handler, runtime);
-  auto [status, gas] = (*fn)(ctx, gas_limit);
+  NativeSyscallContext ctx(syscall_handler, gas_limit);
+  auto status = (*fn)(ctx);
 
-  GasAmount gas_consumed = std::min<GasAmount>(gas_limit, gas);
+
+  GasAmount gas_consumed = ctx.total_gas_consumed();
+  CHECK(gas_consumed <= gas_limit);
 
   if (!status.has_value()) {
     switch (status.error().code())
@@ -57,10 +58,10 @@ NativeContract::invoke(Runtime::MethodID method,
   }
 
   // These are the only error codes that can get upgraded to OutOfGas
-  if (gas >= gas_consumed) {
+  if (gas_limit == gas_consumed) {
     return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
   }
-  return {status, gas};
+  return {status, gas_consumed};
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
@@ -126,7 +127,7 @@ NativeRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
   }
 
   return contract_.invoke(*method_id, *host_call_context_->syscall_handler,
-                          *this, gas_limit);
+                          gas_limit);
 }
 
 } // namespace hogd

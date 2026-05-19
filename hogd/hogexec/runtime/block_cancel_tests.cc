@@ -17,10 +17,8 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
-#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -29,6 +27,7 @@ namespace hogd {
 
 // Tests to make sure that cancelling a block in the db is handled gracefully.
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class BlockCancelTest : public ::testing::Test,
                         public NativeContractTestFramework {
 public:
@@ -124,7 +123,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_writer, 0, ctx.runtime().get_available_gas(),
+                     addr_writer, 0, UINT64_MAX,
                      ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,

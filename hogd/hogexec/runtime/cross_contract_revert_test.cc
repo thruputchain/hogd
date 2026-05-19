@@ -40,6 +40,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class CrossContractRevertTest : public ::testing::TestWithParam<TestDB>,
                                 public NativeContractTestFramework {
 public:
@@ -95,7 +96,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_b_addr, 0, ctx.runtime().get_available_gas(),
+                   contract_b_addr, 0, UINT64_MAX,
                    Calldata{}, 0, std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -249,7 +250,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_b_addr, 0, ctx.runtime().get_available_gas(),
+                  contract_b_addr, 0, UINT64_MAX,
                    Calldata{}, 0, std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -303,7 +304,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_c_addr, 0, ctx.runtime().get_available_gas(),
+                   contract_c_addr, 0, UINT64_MAX,
                    Calldata{}, 0, std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -463,7 +464,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_b_addr, 0, ctx.runtime().get_available_gas(),
+                   contract_b_addr, 0, UINT64_MAX,
                    Calldata{}, 0, std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
