@@ -38,6 +38,13 @@ public:
 
   x23::Async<ViewGatewayResult> viewgateway_view(TransactionViewQuery query);
 
+  void shut_down();
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
+private:
+  static constexpr std::uint32_t kMaxViewAttempts = 3;
+
   struct ViewState {
     BlockID block_id;
     StorageSnapshotCache snapshot_cache;
@@ -46,13 +53,6 @@ public:
       : block_id(id), snapshot_cache(id, db_proxy)
     {}
   };
-
-  void shut_down();
-
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
-
-private:
-  static constexpr std::uint32_t kMaxViewAttempts = 3;
 
   ViewGatewayResult run_view_with_retries(TransactionViewQuery const &query);
   ViewGatewayResult run_view_attempt(TransactionViewQuery const &query,
@@ -75,11 +75,14 @@ private:
   RPCContext &ctx_;
   DatabaseProxy db_proxy_;
   EventServerProxy event_server_proxy_;
-  DispatchPool worker_pool_;
 
   std::mutex view_state_mutex_;
   BlockID current_view_block_id_ = 0;
   std::unordered_map<BlockID, PerThreadARC<ViewState>> view_states_;
+
+  // worker_pool_ must be declared last so it is destroyed (joined) before
+  // view_states_, preventing use-after-destroy of in-flight ViewState refs.
+  DispatchPool worker_pool_;
 };
 
 static_assert(is_ViewGateway1<ViewGatewayRpc *, x23::MaybeAsync>);

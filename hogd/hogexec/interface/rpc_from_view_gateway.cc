@@ -127,6 +127,9 @@ ViewGatewayRpc::get_current_view_state()
 {
   std::scoped_lock g(view_state_mutex_);
   if (current_view_block_id_ == 0) {
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      return nullptr;
+    }
     BlockID block_id = generate_block_id();
     auto status = ctx_.open_block_tx(
         block_id, BlockExecutionMode::kBlockExecutionModeViewing);
