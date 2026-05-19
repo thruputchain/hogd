@@ -135,6 +135,11 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
 
   assert(btx != nullptr);
 
+  if (btx->get().is_invalidated()) {
+    error("tried to commit already-invalidated block '{}'", id);
+    return HogDBError(HogDBCode::kInternal);
+  }
+
   if (!btx->initiate_shutdown()) {
     error("Started to commit block '{}' while there were still outstanding "
           "references",
