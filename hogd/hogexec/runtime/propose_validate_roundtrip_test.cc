@@ -1434,7 +1434,7 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
                                                   std::move(unused_bit));
       auto res = handler.root_invoke();
       ASSERT_FALSE(res.is_root_success());
-      EXPECT_EQ(res.result_.error().code(), root_error);
+      ASSERT_EQ(res.result_.error().code(), root_error);
       EXPECT_EQ(handler.try_commit_transaction(), expected_result);
     }
   };
