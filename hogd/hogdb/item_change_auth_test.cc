@@ -5,7 +5,6 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -74,10 +73,10 @@ protected:
   AddressAuthData base_data_;
   StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(int128_t{1000}),
+      .base_data_item_cost = 1000,
       .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(int128_t{1000}),
-      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      .base_contract_deployment_cost = 1000,
+      .contract_deployment_cost_per_byte = 10,
   });
 };
 

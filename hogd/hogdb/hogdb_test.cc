@@ -81,22 +81,22 @@ protected:
 
   StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .base_data_item_cost = 12000,
       .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-      .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+      .base_contract_deployment_cost = 12000,
+      .contract_deployment_cost_per_byte = 10,
+      .replay_cache_cost_per_entry = 7,
   });
 
   StorageCostModel cost_model_with_balance_cost_ =
       StorageCostModel(StorageCostModelXdr{
           .ext = ExtensionPoint(0),
-          .base_data_item_cost = to_xdr(int128_t{12000}),
+          .base_data_item_cost = 12000,
           .bytestring_cost_per_byte = 10,
-          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-          .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
-          .balance_cost = to_xdr(int128_t{1000}),
+          .base_contract_deployment_cost = 12000,
+          .contract_deployment_cost_per_byte = 10,
+          .replay_cache_cost_per_entry = 7,
+          .balance_cost = 1000,
       });
 
   AuthChangeSubscriptionManager subscription_manager_;
