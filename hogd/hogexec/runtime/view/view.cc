@@ -74,6 +74,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 
+  // No expiry_height validation here: a token that expired before the current
+  // block can still legitimately appear in a frame's forwarded inputs.
   std::vector<uint32_t> forwarded_token_ids;
   forwarded_token_ids.reserve(query.forwarded_tokens.size());
 
