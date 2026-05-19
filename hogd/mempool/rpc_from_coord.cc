@@ -194,13 +194,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       co_return;
     }
     size_t num_slots_left = scheduler_size - kMempoolTxSizeLimit;
-    if (num_slots_left < txs.size()) {
+    if (num_slots_left < txs->size()) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
       info("submit_unvetted received {} txs, but only {} will fit in the "
            "mempool. discarding {} txs.",
-           num_submitted_txs, num_slots_left, txs.size() - num_slots_left);
-      txs.resize(num_slots_left);
+           num_submitted_txs, num_slots_left, txs->size() - num_slots_left);
+      txs->resize(num_slots_left);
     }
   }
 
@@ -293,13 +293,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
       co_return;
     }
     size_t num_slots_left = scheduler_size - kMempoolTxSizeLimit;
-    if (num_slots_left < txs.size()) {
+    if (num_slots_left < txs->size()) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
       info("submit_vetted received {} txs, but only {} will fit in the "
            "mempool. discarding {} txs.",
-           num_submitted_txs, num_slots_left, txs.size() - num_slots_left);
-      txs.resize(num_slots_left);
+           num_submitted_txs, num_slots_left, txs->size() - num_slots_left);
+      txs->resize(num_slots_left);
     }
   }
 
