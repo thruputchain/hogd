@@ -24,9 +24,6 @@ using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 inline SignedTransactionBatch
 generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 {
-  constexpr char kProgramName[] = "slow_fibonacci";
-  constexpr uint32_t kFibonacciN = 10;
-
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   SignedTransactionBatch txs;
   txs.resize(num_txs);
@@ -37,10 +34,11 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 
   // We use threads rather than coroutines since not all tests use coroutines.
   for (const ChunkRange &chunk : chunks) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-lambda-capture"
     futures.push_back(worker_pool.submit(
         [chunk, &txs, &fib_client, &kProgramName, &kFibonacciN] {
+          constexpr char kProgramName[] = "slow_fibonacci";
+          constexpr uint32_t kFibonacciN = 10;
+
           for (size_t i = chunk.start; i < chunk.end; i++) {
             txs[i].tx = Transaction{
                 .invocation = fib_client.make_invocation<kProgramName>(
@@ -53,7 +51,6 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
             };
           }
         }));
-#pragma clang diagnostic pop
   }
   for (std::future<void> &future : futures) {
     future.get();
