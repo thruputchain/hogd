@@ -192,7 +192,7 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
   }
 
   std::promise<void> submitted_promise;
-  std::future<void> submitted_future;
+  std::future<void> submitted_future = submitted_promise.get_future();
   default_threadpool().spawn([&]() -> x23::Detached {
     ParallelSignedTransactionBatch batch =
         co_await t_to_parallel_batch(SignedTransactionBatch{txs});
@@ -229,7 +229,7 @@ TEST(Mempool, SubmitVettedMempoolMaxCapacityLimit)
   MempoolTestInfra server;
 
   std::promise<void> submitted_promise;
-  std::future<void> submitted_future;
+  std::future<void> submitted_future = submitted_promise.get_future();
   default_threadpool().spawn([&]() -> x23::Detached {
     ValidatorID validator_id{};
     ParallelSignedTransactionBatch batch =
