@@ -64,7 +64,7 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  static constexpr size_t kMempoolTxSizeLimit = 10'000'000;
+  static constexpr size_t kMempoolTxSizeLimit = 5'000'000;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id)
     : db_rpc_(db_rpc), network_id_(network_id)
