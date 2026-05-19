@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <atomic>
+#include <gtest/gtest.h>
 #include <latch>
 #include <memory>
 #include <set>
@@ -15,8 +15,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/init.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_gateway.h"
 #include "hogd/mempool/scheduler.h"
