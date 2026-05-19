@@ -245,17 +245,19 @@ SystemCallHandler::root_invoke()
   // root_invocation_ is nullopt only in the test harness
   CHECK(root_invocation_.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  auto const &root_invocation = root_invocation_.value();
+  Invocation root_invocation = std::move(root_invocation_.value());
+  root_invocation_.reset();
 
   GasAmount available_gas =
       cumulative_invoke_result_.gas_consumed_ < root_invocation.gas_limit
           ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
           : 0;
 
-  auto [res, gas_consumed] = invoke(root_invocation.invoked_address,
-                                    sdk_method_id(root_invocation.entrypoint),
-                                    available_gas, root_invocation.calldata,
-                                    std::to_underlying(InvokeFlag::None), {});
+  auto [res, gas_consumed] =
+      invoke(root_invocation.invoked_address,
+             sdk_method_id(root_invocation.entrypoint), available_gas,
+             std::move(root_invocation.calldata),
+             std::to_underlying(InvokeFlag::None), {});
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
