@@ -59,6 +59,16 @@ private:
                                      DbTip const &tip,
                                      ViewState &view_state);
 
+  // Returns a pointer to the current view state with a reference acquired,
+  // or nullptr if shutdown is in progress. Lazy-initializes the first
+  // viewing block tx. Caller must eventually call release_reference().
+  PerThreadARC<ViewState> *get_current_view_state();
+
+  // Rotates the current view state after an Abandon. Initiates shutdown on
+  // the old state and opens a new viewing block tx. Returns false if the
+  // new block tx could not be opened.
+  bool rotate_view_state(BlockID stale_block_id);
+
   void gc_view_state(BlockID block_id);
 
   std::atomic<bool> shutdown_flag_ = false;

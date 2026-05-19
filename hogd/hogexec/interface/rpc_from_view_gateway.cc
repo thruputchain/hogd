@@ -122,6 +122,50 @@ ViewGatewayRpc::gc_view_state(BlockID block_id)
   view_states_.erase(block_id);
 }
 
+PerThreadARC<ViewGatewayRpc::ViewState> *
+ViewGatewayRpc::get_current_view_state()
+{
+  std::scoped_lock g(view_state_mutex_);
+  if (current_view_block_id_ == 0) {
+    BlockID block_id = generate_block_id();
+    auto status = ctx_.open_block_tx(
+        block_id, BlockExecutionMode::kBlockExecutionModeViewing);
+    if (!status.has_value()) {
+      warn("viewgateway: failed to open viewing block tx");
+      return nullptr;
+    }
+    view_states_.try_emplace(block_id, block_id, db_proxy_);
+    current_view_block_id_ = block_id;
+  }
+  auto *state = &view_states_.at(current_view_block_id_);
+  if (!state->try_acquire_reference()) {
+    return nullptr;
+  }
+  return state;
+}
+
+bool
+ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
+{
+  std::scoped_lock g(view_state_mutex_);
+  if (current_view_block_id_ != stale_block_id) {
+    return true;
+  }
+  view_states_.at(stale_block_id).initiate_shutdown();
+
+  BlockID new_block_id = generate_block_id();
+  auto status = ctx_.open_block_tx(
+      new_block_id, BlockExecutionMode::kBlockExecutionModeViewing);
+  if (!status.has_value()) {
+    warn("viewgateway: failed to open replacement viewing block tx");
+    current_view_block_id_ = 0;
+    return false;
+  }
+  view_states_.try_emplace(new_block_id, new_block_id, db_proxy_);
+  current_view_block_id_ = new_block_id;
+  return true;
+}
+
 ViewGatewayResult
 ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 {
@@ -139,65 +183,31 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
           ViewGatewayOutcome::ViewGatewayInternalError);
     }
 
-    PerThreadARC<ViewState> *state_ptr = nullptr;
-    BlockID state_block_id = 0;
-    {
-      std::scoped_lock g(view_state_mutex_);
-      if (current_view_block_id_ == 0) {
-        BlockID block_id = generate_block_id();
-        auto status = ctx_.open_block_tx(
-            block_id, BlockExecutionMode::kBlockExecutionModeViewing);
-        if (!status.has_value()) {
-          warn("viewgateway: failed to open viewing block tx");
-          return make_view_gateway_result(
-              ViewGatewayOutcome::ViewGatewayInternalError);
-        }
-        view_states_.try_emplace(block_id, block_id, db_proxy_);
-        current_view_block_id_ = block_id;
-      }
-      state_block_id = current_view_block_id_;
-      state_ptr = &view_states_.at(state_block_id);
-    }
-
-    if (!state_ptr->try_acquire_reference()) {
+    auto *state = get_current_view_state();
+    if (!state) {
       continue;
     }
 
+    BlockID state_block_id = state->get().block_id;
     ViewGatewayResult result =
-        run_view_attempt(query, tip, state_ptr->get());
+        run_view_attempt(query, tip, state->get());
 
     if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
-      if (state_ptr->release_reference()) {
+      if (state->release_reference()) {
         gc_view_state(state_block_id);
       }
       return result;
     }
 
-    // Abandoned: rotate to a fresh viewing block tx.
-    {
-      std::scoped_lock g(view_state_mutex_);
-      if (current_view_block_id_ == state_block_id) {
-        state_ptr->initiate_shutdown();
-
-        BlockID new_block_id = generate_block_id();
-        auto status = ctx_.open_block_tx(
-            new_block_id, BlockExecutionMode::kBlockExecutionModeViewing);
-        if (!status.has_value()) {
-          warn("viewgateway: failed to open replacement viewing block tx");
-          current_view_block_id_ = 0;
-          if (state_ptr->release_reference()) {
-            ctx_.remove_shutdown_block_tx(state_block_id);
-            view_states_.erase(state_block_id);
-          }
-          return make_view_gateway_result(
-              ViewGatewayOutcome::ViewGatewayInternalError);
-        }
-        view_states_.try_emplace(new_block_id, new_block_id, db_proxy_);
-        current_view_block_id_ = new_block_id;
+    if (!rotate_view_state(state_block_id)) {
+      if (state->release_reference()) {
+        gc_view_state(state_block_id);
       }
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
     }
 
-    if (state_ptr->release_reference()) {
+    if (state->release_reference()) {
       gc_view_state(state_block_id);
     }
 
