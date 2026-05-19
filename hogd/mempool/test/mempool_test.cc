@@ -1,14 +1,19 @@
+#include <atomic>
+#include <future>
 #include <gtest/gtest.h>
 #include <memory>
 #include <set>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "block.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -23,8 +28,9 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
-#include "x23/x23/x23.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -185,8 +191,17 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
     future.get();
   }
 
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs})())();
+  std::promise<void> submitted_promise;
+  std::future<void> submitted_future;
+  default_threadpool().spawn([&]() -> x23::Detached {
+    ParallelSignedTransactionBatch batch =
+        co_await t_to_parallel_batch(SignedTransactionBatch{txs});
+    co_await server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        std::move(batch));
+
+    submitted_promise.set_value();
+  });
+  submitted_future.get();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
             MempoolCoordinatorRpc::kMempoolTxSizeLimit);
 }
@@ -213,9 +228,19 @@ TEST(Mempool, SubmitVettedMempoolMaxCapacityLimit)
 
   MempoolTestInfra server;
 
-  ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs})())();
+  std::promise<void> submitted_promise;
+  std::future<void> submitted_future;
+  default_threadpool().spawn([&]() -> x23::Detached {
+    ValidatorID validator_id{};
+    ParallelSignedTransactionBatch batch =
+        co_await t_to_parallel_batch(SignedTransactionBatch{txs});
+    co_await server.mempool_coord_rpc().schedulercoord_submit_vetted(
+        validator_id, std::move(batch));
+
+    submitted_promise.set_value();
+  });
+  submitted_future.get();
+
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
             MempoolCoordinatorRpc::kMempoolTxSizeLimit);
 }
