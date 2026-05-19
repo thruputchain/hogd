@@ -28,8 +28,6 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/threadpool.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -152,11 +150,12 @@ TEST(Mempool, SubmitUnvetted)
 TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client,
-                            MempoolCoordinatorRpc::kMempoolTxSizeLimit + 1);
 
-  MempoolTestInfra server;
+  size_t mempool_tx_size_limit = 1'000;
+  SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client, mempool_tx_size_limit + 1);
+
+  MempoolTestInfra server(/*skip_genesis_block=*/false, mempool_tx_size_limit);
 
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
@@ -192,19 +191,11 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
     future.get();
   }
 
-  std::promise<void> submitted_promise;
-  std::future<void> submitted_future = submitted_promise.get_future();
-  default_threadpool().spawn([&]() -> x23::Detached {
-    ParallelSignedTransactionBatch batch =
-        co_await t_to_parallel_batch(SignedTransactionBatch{txs});
-    co_await server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        std::move(batch));
-
-    submitted_promise.set_value();
-  });
-  submitted_future.get();
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{txs})();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(std::move(batch))();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
-            MempoolCoordinatorRpc::kMempoolTxSizeLimit);
+            mempool_tx_size_limit);
 }
 
 TEST(Mempool, SubmitVetted)
@@ -223,27 +214,20 @@ TEST(Mempool, SubmitVetted)
 TEST(Mempool, SubmitVettedMempoolMaxCapacityLimit)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+
+  size_t mempool_tx_size_limit = 1'000;
   const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client,
-                            MempoolCoordinatorRpc::kMempoolTxSizeLimit + 1);
+      generate_unsigned_txs(fib_client, mempool_tx_size_limit + 1);
 
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/false, mempool_tx_size_limit);
 
-  std::promise<void> submitted_promise;
-  std::future<void> submitted_future = submitted_promise.get_future();
-  default_threadpool().spawn([&]() -> x23::Detached {
-    ValidatorID validator_id{};
-    ParallelSignedTransactionBatch batch =
-        co_await t_to_parallel_batch(SignedTransactionBatch{txs});
-    co_await server.mempool_coord_rpc().schedulercoord_submit_vetted(
-        validator_id, std::move(batch));
-
-    submitted_promise.set_value();
-  });
-  submitted_future.get();
-
+  ValidatorID validator_id{};
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{txs})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          std::move(batch))();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
-            MempoolCoordinatorRpc::kMempoolTxSizeLimit);
+            mempool_tx_size_limit);
 }
 
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
@@ -553,7 +537,9 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   nomination.transactions_hash.segment_tokens[0]++;
   nomination.transactions_nondeterministic_data.segment_tokens[0]++;
 
-  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  MempoolCoordinatorRpc coord(
+      /*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
@@ -574,7 +560,9 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
           t_to_parallel_batch(tx_nondeterministic_data)(),
   };
 
-  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  MempoolCoordinatorRpc coord(
+      /*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);

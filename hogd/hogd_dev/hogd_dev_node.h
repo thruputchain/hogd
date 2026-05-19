@@ -121,7 +121,9 @@ private:
 
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(), kNetworkId);
+      RpcServer<MempoolCoordinatorRpc>(
+          sched_db_server_->impl(), kNetworkId,
+          MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;

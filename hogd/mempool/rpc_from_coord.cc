@@ -169,7 +169,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   double stage_filter_invalid = 0.0;
   double stage_add_txs = 0.0;
 
-  if (scheduler_->size() >= kMempoolTxSizeLimit) {
+  if (scheduler_->size() >= mempool_tx_size_limit_) {
     info(
         "submit_unvetted rejected txs as the mempool has too many pending txs");
     co_return;
@@ -188,12 +188,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     // [scheduler_->size()] may have changed since we last checked it above, so
     // we read it again here.
     size_t scheduler_size = scheduler_->size();
-    if (scheduler_size >= kMempoolTxSizeLimit) {
+    if (scheduler_size >= mempool_tx_size_limit_) {
       info("submit_unvetted rejected txs as the mempool has too many pending "
            "txs");
       co_return;
     }
-    size_t num_slots_left = kMempoolTxSizeLimit - scheduler_size;
+    size_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
     if (num_slots_left < txs->size()) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
@@ -270,7 +270,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
-  if (scheduler_->size() >= kMempoolTxSizeLimit) {
+  if (scheduler_->size() >= mempool_tx_size_limit_) {
     info("submit_vetted rejected txs as the mempool has too many pending txs");
     co_return;
   }
@@ -288,12 +288,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     // [scheduler_->size()] may have changed since we last checked it above, so
     // we read it again here.
     size_t scheduler_size = scheduler_->size();
-    if (scheduler_size >= kMempoolTxSizeLimit) {
+    if (scheduler_size >= mempool_tx_size_limit_) {
       info("submit_vetted rejected txs as the mempool has too many pending "
            "txs");
       co_return;
     }
-    size_t num_slots_left = kMempoolTxSizeLimit - scheduler_size;
+    size_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
     if (num_slots_left < txs.size()) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
