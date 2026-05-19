@@ -71,11 +71,8 @@ struct AlwaysErrorMethod {
     return []<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
       return [](NativeRuntime &runtime,
                 std::tuple_element_t<Is, args_t>... /*unused*/)
-                 -> InvokeStatus<return_t> {
-        if (!runtime.consume_gas(Gas)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
-        }
-        return InvokeError{InvokeErrorCode::Deterministic};
+                 -> std::pair<InvokeStatus<return_t>, GasAmount> {
+        return {InvokeError{InvokeErrorCode::Deterministic}, Gas};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
   }
@@ -142,13 +139,16 @@ public:
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
+    // TODO(geoff): figure out gas costs for native contracts like this
+    constexpr static GasAmount kErrorGas = 0;
+
     auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
-                         NativeSyscallContext &ctx) -> InvokeStatus<void> {
+                         NativeSyscallContext &ctx) -> std::pair<InvokeStatus<void>, GasAmount> {
       auto calldata = ctx.handler().get_calldata();
       auto args = Serializer<Format>::template deserialize<args_t>(
           std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
-        return InvokeError{InvokeErrorCode::Deterministic};
+        return {InvokeError{InvokeErrorCode::Deterministic}, kErrorGas};
       }
 
       // invoke the lambda, and return the error if there is one

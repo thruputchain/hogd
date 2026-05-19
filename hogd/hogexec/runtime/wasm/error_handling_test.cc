@@ -19,57 +19,59 @@
 
 namespace hogd {
 
+// sufficiently large as to actually execute the wasm components of the test
+constexpr static GasAmount kBaseGasAmount = 100;
+
 namespace {
 
 extern "C" TrampolineResult
 throw_unrecoverable_host_error(ExternHostCallContext /*unused*/,
-                               LinearMemorySlice /*unused*/)
+                               WasmContext /*unused*/)
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable}, kBaseGasAmount);
 }
 
 extern "C" TrampolineResult
 throw_validation_error(ExternHostCallContext /*unused*/,
-                       LinearMemorySlice /*unused*/)
+                       WasmContext /*unused*/)
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure}, kBaseGasAmount);
 }
 
 extern "C" TrampolineResult
-throw_abort_transaction(ExternHostCallContext /*unused*/,
-                        LinearMemorySlice /*unused*/)
+throw_abandon(ExternHostCallContext /*unused*/,
+                        WasmContext /*unused*/)
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon}, kBaseGasAmount);
 }
 
 extern "C" TrampolineResult
-good_call(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+good_call(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 {
-  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
+  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone}, kBaseGasAmount);
 }
 
 extern "C" TrampolineResult
-exit_call(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+exit_call(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Exit});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Exit}, kBaseGasAmount);
 }
 
 extern "C" TrampolineResult
-return_syscall(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+return_syscall(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Return});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Return}, kBaseGasAmount);
 }
 
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
 extern "C" TrampolineResult
-consume_too_much_gas(ExternHostCallContext external_context,
-                     LinearMemorySlice /*unused*/)
+consume_too_much_gas(ExternHostCallContext /*unused*/,
+                     WasmContext wasm_context)
 {
-  auto *context = reinterpret_cast<HostCallContext *>(external_context);
-  bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
-  return to_trampoline_result(HostFnError{HostFnErrorCode::OutOfGas});
+  // this should get turned into an out of gas error
+  return to_trampoline_result(SyscallErrorCode::kSyscallErrorCodeNone, wasm_context.gas_remaining + 1);
 }
 
 namespace {
@@ -78,18 +80,18 @@ bool reentrance_hit = false;
 } // namespace
 
 extern "C" TrampolineResult
-reentrance(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+reentrance(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 {
   reentrance_hit = true;
   if (s_runtime == nullptr) {
-    return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
+    return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable}, 0);
   }
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
   if (!res.result_.has_value()) {
-    return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
+    return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable}, 0);
   }
-  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone});
+  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone}, 0);
 }
 
 } // namespace
@@ -143,7 +145,7 @@ TEST_P(WasmiErrorHandlingTest, ExitHandling)
   EXPECT_FALSE(res.is_root_success());
 }
 
-TEST_P(WasmiErrorHandlingTest, HostError)
+TEST_P(WasmiErrorHandlingTest, Unrecoverable)
 {
   link_fn("test", "external_call", &throw_unrecoverable_host_error);
   make_syscall_handler(contract_);
@@ -157,9 +159,23 @@ TEST_P(WasmiErrorHandlingTest, HostError)
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
 }
 
+TEST_P(WasmiErrorHandlingTest, UnrecoverableBeatsOutOfGas)
+{
+  link_fn("test", "external_call", &throw_unrecoverable_host_error);
+  make_syscall_handler(contract_);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 get_syscall_handler());
+
+  ASSERT_TRUE(runtime.has_value());
+  ASSERT_TRUE(runtime.value() != nullptr);
+
+  auto res = runtime.value()->invoke("call1", kBaseGasAmount - 1);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
+}
+
 TEST_P(WasmiErrorHandlingTest, Abandon)
 {
-  link_fn("test", "external_call", &throw_abort_transaction);
+  link_fn("test", "external_call", &throw_abandon);
   make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
                                                  get_syscall_handler());
@@ -168,6 +184,20 @@ TEST_P(WasmiErrorHandlingTest, Abandon)
   ASSERT_TRUE(runtime.value() != nullptr);
 
   auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Abandon});
+}
+
+TEST_P(WasmiErrorHandlingTest, AbandonBeatsOutOfGas)
+{
+  link_fn("test", "external_call", &throw_abandon);
+  make_syscall_handler(contract_);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 get_syscall_handler());
+
+  ASSERT_TRUE(runtime.has_value());
+  ASSERT_TRUE(runtime.value() != nullptr);
+
+  auto res = runtime.value()->invoke("call1", kBaseGasAmount - 1);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Abandon});
 }
 
@@ -185,6 +215,34 @@ TEST_P(WasmiErrorHandlingTest, ValidationError)
 
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::ValidationFailure});
+}
+
+TEST_P(WasmiErrorHandlingTest, ValidationBeatsOutOfGas)
+{
+  link_fn("test", "external_call", &throw_validation_error);
+  make_syscall_handler(contract_);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 get_syscall_handler());
+
+  ASSERT_TRUE(runtime.has_value());
+  ASSERT_TRUE(runtime.value() != nullptr);
+
+  auto res = runtime.value()->invoke("call1", kBaseGasAmount - 1);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::ValidationFailure});
+}
+
+TEST_P(WasmiErrorHandlingTest, NormalCallDoesNotBeatOufOfGas)
+{
+  link_fn("test", "external_call", &good_call);
+  make_syscall_handler(contract_);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 get_syscall_handler());
+
+  ASSERT_TRUE(runtime.has_value());
+  ASSERT_TRUE(runtime.value() != nullptr);
+
+  auto res = runtime.value()->invoke("call1", kBaseGasAmount - 1);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});
 }
 
 TEST_P(WasmiErrorHandlingTest, WasmError)
@@ -348,7 +406,7 @@ TEST_P(WasmiErrorHandlingTest, OutOfGas)
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  auto res = runtime.value()->invoke("call1", UINT64_MAX);
+  auto res = runtime.value()->invoke("call1", UINT64_MAX - 1);
 
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::OutOfGas});

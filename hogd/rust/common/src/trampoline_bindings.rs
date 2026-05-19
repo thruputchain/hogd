@@ -7,18 +7,18 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 use crate::{HostFnErrorCode, InvokeErrorCode};
 
-impl Into<Result<i32, HostFnErrorCode>> for TrampolineResult {
-    fn into(self) -> Result<i32, HostFnErrorCode> {
+impl Into<(Result<i32, HostFnErrorCode>, u64)> for TrampolineResult {
+    fn into(self) -> (Result<i32, HostFnErrorCode>, u64) {
         let panic: HostFnErrorCode = {
             match self.panic.try_into() {
                 Ok(panic) => panic,
-                Err(_) => return Err(HostFnErrorCode::Unrecoverable),
+                Err(_) => return (Err(HostFnErrorCode::Unrecoverable), self.gas_consumed),
             }
         };
 
         match panic {
-            HostFnErrorCode::NoneOrRecoverable => Ok(self.result_code),
-            _ => Err(panic),
+            HostFnErrorCode::NoneOrRecoverable => (Ok(self.result_code), self.gas_consumed),
+            _ => (Err(panic), self.gas_consumed),
         }
     }
 }
@@ -45,7 +45,7 @@ macro_rules! define_trampoline {
         pub fn $fn_name(
             function_pointer: crate::ErasedFnPtr,
             host_call_context: *mut ::std::os::raw::c_void,
-            contract_memory: crate::LinearMemorySlice,
+            contract_memory: crate::WasmContext,
             $($arg: u64),*
         ) -> TrampolineResult {
             // fn-ptr to fn-ptr transmute is well-defined in Rust

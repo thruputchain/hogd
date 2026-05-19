@@ -245,9 +245,6 @@ public:
     return std::nullopt;
   }
 
-  // The gas counter is saved before calling this method
-  // (i.e. x = get_available_gas(); invoke(something); assert(x ==
-  // get_available_gas()))
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
   InvokeResult invoke(MethodID entrypoint, uint64_t gas_limit)
   {
@@ -256,23 +253,11 @@ public:
     return invoke(std::string_view(buf, 16), gas_limit);
   }
 
-  // Returns FALSE if gas consumption failed.
-  //
-  // Wasmi maintains the gas counter internally, which it updates while
-  // running a wasm contract.  It also exposes a set/get API, which this
-  // function uses.  This should, e.g., be called from within a syscall. This
-  // function returns false if and only if the amount of gas left in the
-  // counter at the time of call is less than the input parameter.
-  [[nodiscard]]
-  bool consume_gas(uint64_t gas) noexcept;
-
-  [[nodiscard]] uint64_t virtual get_available_gas() const noexcept = 0;
-  virtual void set_available_gas(uint64_t gas) noexcept = 0;
-
   virtual ~Runtime() = default;
 
 protected:
-  virtual InvokeStatus<void> invoke_internal(std::string_view method_name) = 0;
+  // Invariant:  The returned GasAmount must be <= the input gas_limit
+  virtual std::pair<InvokeStatus<void>, GasAmount> invoke_internal(std::string_view method_name, uint64_t gas_limit) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };

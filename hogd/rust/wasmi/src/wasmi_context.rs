@@ -7,6 +7,7 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
+use crate::wasmi_debug_log as debug_log;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use crate::wasmi_error::TrampolineError;
 use crate::wasmi_runtime::check_memory_limit;
@@ -14,7 +15,7 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinearMemorySlice, LinkEntry, SystemErrorCode};
+use common::{LinearMemorySlice, LinkEntry, SystemErrorCode, WasmContext};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes owned by one RuntimeContext.
@@ -182,15 +183,51 @@ macro_rules! link_function_nargs {
         ) -> Result<(), Error> {
             let ptr = fn_pointer;
             linker
-                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
-                    let res : Result<i32, common::HostFnErrorCode> = {
+                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| -> Result<i32, wasmi::Error> {
+
+                    let gas_remaining = match caller.get_fuel() {
+                        Ok(fuel) => fuel,
+                        Err(_e) => {
+                            debug_log!(eprintln!("Unrecoverable: failed to get fuel: {_e:?}"));
+                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::Unrecoverable }));
+                        }
+                    };
+
+                    let wasm_context : WasmContext = WasmContext {
+                        memory: get_linear_memory_slice(&mut caller),
+                        gas_remaining,
+                    };
+
+                    let (res, gas_consumed) : (Result<i32, common::HostFnErrorCode>, u64) = {
                         common::$cfunc(
                             ptr,
                             *caller.data(),
-                            get_linear_memory_slice(&mut caller),
+                            wasm_context,
                             $($arg),*
                         )
                     }.into();
+
+                    // make sure that out of gas does not overwrite a critical error
+                    match res {
+                        Ok(_) => (),
+                        Err(common::HostFnErrorCode::Unrecoverable) => {
+                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::Unrecoverable }));
+                        }
+                        Err(common::HostFnErrorCode::Abandon) => {
+                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::Abandon }));
+                        }
+                        Err(common::HostFnErrorCode::ValidationFailure) => {
+                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::ValidationFailure }));
+                        }
+                        _ => ()
+                    }
+
+                    if gas_consumed >= gas_remaining {
+                        return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::OutOfGas }));
+                    }
+
+                    caller.set_fuel(gas_remaining - gas_consumed).unwrap();
+                    
                     res.map_err(|error| Error::host(TrampolineError { error }))
                 })
                 .map_err(Into::into)

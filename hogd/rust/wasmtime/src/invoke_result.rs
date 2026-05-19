@@ -5,23 +5,26 @@ use common::InvokeErrorCode;
 #[derive(Debug, Copy, Clone)]
 pub struct WasmtimeInvokeResult {
     pub error: i32, // InvokeErrorCode
+    pub gas_consumed: u64,
 }
 
 impl WasmtimeInvokeResult {
-    pub fn error(err: InvokeErrorCode) -> WasmtimeInvokeResult {
-        Self { error: err.0 }
+    pub fn error(err: InvokeErrorCode, gas_consumed: u64) -> WasmtimeInvokeResult {
+        Self { error: err.0, gas_consumed }
     }
 
-    pub fn success() -> WasmtimeInvokeResult {
+    pub fn success(gas_consumed: u64) -> WasmtimeInvokeResult {
         Self {
             error: InvokeErrorCode::None.0,
+            gas_consumed,
         }
     }
 
     pub fn from_wasmtime_trap_code(
         trap: &wasmtime::Trap,
+        gas_consumed: u64,
     ) -> WasmtimeInvokeResult {
-        Self::error(wasmtime_trap_to_invoke_error(trap))
+        Self::error(wasmtime_trap_to_invoke_error(trap), gas_consumed)
     }
 }
 

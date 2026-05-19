@@ -201,37 +201,24 @@ WasmtimeRuntime::get_module_stats(WasmtimeModuleStats *stats_out) const noexcept
   return wasmtime_get_module_stats(wasmtime_runtime_ptr_, stats_out);
 }
 
-InvokeStatus<void>
-WasmtimeRuntime::invoke_internal(std::string_view method_name)
+std::pair<InvokeStatus<void>, GasAmount>
+WasmtimeRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
 {
   assert(wasmtime_runtime_ptr_ != nullptr);
 
   WasmtimeInvokeResult res =
       wasmtime_invoke(wasmtime_runtime_ptr_,
                       reinterpret_cast<uint8_t const *>(method_name.data()),
-                      static_cast<uint32_t>(method_name.size()));
+                      static_cast<uint32_t>(method_name.size()),
+                      gas_limit);
 
   InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
   trace("Wasmtime Invoke Result: {}",
         x23::show(static_cast<InvokeErrorCode>(res.error)));
   if (wasmtime_error != InvokeErrorCode::None) {
-    return InvokeError{wasmtime_error};
+    return {InvokeError{wasmtime_error}, res.gas_consumed};
   }
-  return {};
-}
-
-uint64_t
-WasmtimeRuntime::get_available_gas() const noexcept
-{
-  assert(wasmtime_runtime_ptr_ != nullptr);
-  return wasmtime_get_available_gas(wasmtime_runtime_ptr_);
-}
-
-void
-WasmtimeRuntime::set_available_gas(uint64_t gas) noexcept
-{
-  assert(wasmtime_runtime_ptr_ != nullptr);
-  wasmtime_set_available_gas(wasmtime_runtime_ptr_, gas);
+  return {{}, res.gas_consumed};
 }
 
 WasmtimeRuntime::WasmtimeRuntime(

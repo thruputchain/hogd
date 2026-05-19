@@ -466,15 +466,15 @@ disarm_outputs(std::tuple<Args...> &args)
 // Passes in the syscall number so that tracing can handle invalid syscall
 // numbers.
 template<is_syscall_meta SyscallMeta>
-constexpr HostFnStatus<SyscallErrorCode>
+constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
-                 Runtime &runtime, SyscallNo syscall_no, auto &&args)
+                 const GasAmount gas_remaining, SyscallNo syscall_no, auto &&args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
   constexpr static SyscallNo kSyscall = SyscallMeta::kSyscallNo;
 
-  handler.start_syscall_trace(syscall_no, runtime.get_available_gas());
+  handler.start_syscall_trace(syscall_no, gas_remaining);
 
   // Wrapping the logic in a lambda so that no matter what, the checks at the
   // end to consume gas and validate return state cannot be skipped.
@@ -539,7 +539,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 
     auto extra_args =
         syscall_t::extra_args(handler,
-                              WrappedGasAmount{runtime.get_available_gas()});
+                              WrappedGasAmount{gas_remaining});
 
     // Invoke the inner syscall
     // template only required because we can't do auto [...handler] =
@@ -578,6 +578,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     }
   }
 
+  /*
   // Here we perform gas accounting.  Errors that might be handled by a contract
   // (via a parent frame) still need to have gas accounting performed.  Errors
   // that fail the whole transaction cannot be accidentally turned into an out
@@ -601,17 +602,9 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       panic("Unhandled HostFnErrorCode (invalid enum?)");
     }
     return true;
-  }();
+  }(); */
 
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
-    bool gas_consume_res = runtime.consume_gas(gas_consumed.get());
-    // If the error is not something that can be handled at any layer of the
-    // transaction, then cannot swap to OutOfGas here.
-    if (is_handleable_error) {
-      if (!gas_consume_res) {
-        return {HostFnError{HostFnErrorCode::OutOfGas}};
-      }
-    }
 
     // The syscall_result.has_value() check means that we only
     // override syscall_result (by returning Exit) in a subset
@@ -629,17 +622,17 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     return syscall_result;
   }();
 
-  handler.finish_syscall_trace(syscall_result, runtime.get_available_gas());
-  return syscall_result;
+  handler.finish_syscall_trace(syscall_result, gas_consumed.get());
+  return {syscall_result, gas_consumed.get()};
 }
 
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
-constexpr HostFnStatus<SyscallErrorCode>
-wrap_outer(SystemCallHandler &handler, Runtime &runtime,
-           LinearMemorySlice contract_memory, SyscallNo syscall_no,
+constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+wrap_outer(SystemCallHandler &handler,
+           WasmContext wasm_context, SyscallNo syscall_no,
            uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
            uint64_t arg5, uint64_t arg6, uint64_t arg7, uint64_t arg8,
            uint64_t arg9, uint64_t arg10) noexcept
@@ -650,21 +643,20 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime,
   auto input_args =
       std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10};
 
-  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(
-                                                contract_memory.mem),
-                                            contract_memory.sz);
+  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(wasm_context.memory.mem),
+                                            wasm_context.memory.sz);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   auto res = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
-      -> HostFnStatus<SyscallErrorCode> {
+      -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
     // Attempt to load syscall arguments from contract memory.
     AliasGuard guard;
     auto parsed_args = std::tuple{parse<syscall_t::template offset_i<Is>(),
                                         typename syscall_t::template arg_i<Is>>(
         guard, contract_memory_span, input_args)...};
 
-    return wrap_after_parse<SyscallMeta>(guard, handler, runtime, syscall_no,
+    return wrap_after_parse<SyscallMeta>(guard, handler, wasm_context.gas_remaining, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
   return res;

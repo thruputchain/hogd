@@ -28,16 +28,39 @@ NativeContract::find_function(Runtime::MethodID method) const
   return &it->second;
 }
 
-InvokeStatus<void>
+std::pair<InvokeStatus<void>, GasAmount>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
-                       NativeRuntime &runtime) const
+                       NativeRuntime &runtime,
+                       uint64_t gas_limit) const
 {
   const auto *fn = find_function(method);
   if (fn == nullptr)
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return {InvokeError{InvokeErrorCode::Deterministic}, 0};
   NativeSyscallContext ctx(syscall_handler, runtime);
-  return (*fn)(ctx);
+  auto [status, gas] = (*fn)(ctx, gas_limit);
+
+  GasAmount gas_consumed = std::min<GasAmount>(gas_limit, gas);
+
+  if (!status.has_value()) {
+    switch (status.error().code())
+    {
+      case InvokeErrorCode::Unrecoverable:
+      case InvokeErrorCode::ValidationFailure:
+      case InvokeErrorCode::Abandon:
+      case InvokeErrorCode::OutOfGas:
+        return {status, gas_consumed};
+      case InvokeErrorCode::None:
+      case InvokeErrorCode::Deterministic:
+        // nothing to do
+    }
+  }
+
+  // These are the only error codes that can get upgraded to OutOfGas
+  if (gas >= gas_consumed) {
+    return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
+  }
+  return {status, gas};
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
@@ -91,19 +114,19 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
   : Runtime(std::move(host_call_context)), contract_(contract)
 {}
 
-InvokeStatus<void>
-NativeRuntime::invoke_internal(std::string_view method_name)
+std::pair<InvokeStatus<void>, GasAmount>
+NativeRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
 {
   auto method_id = Runtime::method_id_from_name(method_name);
   if (!method_id) {
     error("Unrecoverable: NativeRuntime::invoke_internal failed to parse "
           "method name '{}'",
           method_name);
-    return InvokeError{InvokeErrorCode::Unrecoverable};
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
   }
 
   return contract_.invoke(*method_id, *host_call_context_->syscall_handler,
-                          *this);
+                          *this, gas_limit);
 }
 
 } // namespace hogd

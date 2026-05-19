@@ -23,8 +23,8 @@ namespace hogd {
 
 namespace {
 
-using SyscallFunc = HostFnStatus<SyscallErrorCode> (*)(
-    SystemCallHandler &, Runtime &, LinearMemorySlice, SyscallNo, uint64_t,
+using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> (*)(
+    SystemCallHandler &, WasmContext, SyscallNo, uint64_t,
     uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
     uint64_t, uint64_t) noexcept;
 
@@ -46,9 +46,9 @@ constexpr auto kSyscallTable =
 
 // returns gas_consumed, syscall error>
 template<std::same_as<uint64_t>... Args>
-HostFnStatus<SyscallErrorCode>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_entry_inner(HostCallContext *call_context,
-                    LinearMemorySlice contract_memory, uint64_t syscall_no,
+                    WasmContext wasm_context, uint64_t syscall_no,
                     Args... args) noexcept
 {
   SyscallFunc syscall_fn = nullptr;
@@ -77,8 +77,8 @@ syscall_entry_inner(HostCallContext *call_context,
     }
   }
 
-  return syscall_fn(*call_context->syscall_handler, *call_context->runtime,
-                    contract_memory, static_cast<SyscallNo>(syscall_no),
+  return syscall_fn(*call_context->syscall_handler,
+                    wasm_context, static_cast<SyscallNo>(syscall_no),
                     args...);
 }
 
@@ -86,7 +86,7 @@ syscall_entry_inner(HostCallContext *call_context,
 
 extern "C" TrampolineResult
 syscall_entry(ExternHostCallContext call_context,
-              LinearMemorySlice contract_memory, uint64_t arg0, uint64_t arg1,
+              WasmContext wasm_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
               uint64_t arg6, uint64_t arg7, uint64_t arg8, uint64_t arg9,
               uint64_t arg10)
@@ -94,11 +94,11 @@ syscall_entry(ExternHostCallContext call_context,
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");
 
-  auto err =
+  auto [err, gas_consumed] =
       syscall_entry_inner(reinterpret_cast<HostCallContext *>(call_context),
-                          contract_memory, arg0, arg1, arg2, arg3, arg4, arg5,
+                          wasm_context, arg0, arg1, arg2, arg3, arg4, arg5,
                           arg6, arg7, arg8, arg9, arg10);
-  return to_trampoline_result(err);
+  return to_trampoline_result(err, gas_consumed);
 }
 
 } // namespace hogd

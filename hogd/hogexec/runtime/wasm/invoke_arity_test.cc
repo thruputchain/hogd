@@ -26,23 +26,23 @@ namespace {
 TrampolineResult
 expected(int32_t result)
 {
-  return to_trampoline_result({SyscallErrorCode(result)});
+  return to_trampoline_result({SyscallErrorCode(result)}, 0);
 }
 
 TrampolineResult
 unexpected()
 {
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable});
+  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable}, 0);
 }
 
 extern "C" TrampolineResult
-arity0(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/)
+arity0(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
 {
   return expected(100);
 }
 
 extern "C" TrampolineResult
-arity1(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity1(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0)
 {
   if (arg0 != 1) {
@@ -52,7 +52,7 @@ arity1(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity2(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity2(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
@@ -62,7 +62,7 @@ arity2(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity3(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity3(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1, uint64_t arg2)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
@@ -72,7 +72,7 @@ arity3(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity4(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity4(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
@@ -82,7 +82,7 @@ arity4(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity5(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity5(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
        uint64_t arg4)
 {
@@ -93,7 +93,7 @@ arity5(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity6(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity6(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
        uint64_t arg4, uint64_t arg5)
 {
@@ -105,7 +105,7 @@ arity6(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity7(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity7(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
        uint64_t arg4, uint64_t arg5, uint64_t arg6)
 {
@@ -117,7 +117,7 @@ arity7(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
 }
 
 extern "C" TrampolineResult
-arity8(ExternHostCallContext /*unused*/, LinearMemorySlice /*unused*/,
+arity8(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
        uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
        uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7)
 {

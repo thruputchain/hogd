@@ -50,7 +50,7 @@ class NativeSyscallContext;
 
 class NativeContract {
 public:
-  using function_t = std::function<InvokeStatus<void>(NativeSyscallContext &)>;
+  using function_t = std::function<std::pair<InvokeStatus<void>, GasAmount>(NativeSyscallContext &, uint64_t)>;
   using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
@@ -70,9 +70,10 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  InvokeStatus<void> invoke(Runtime::MethodID method,
+  std::pair<InvokeStatus<void>, GasAmount> invoke(Runtime::MethodID method,
                             SystemCallHandler &syscall_handler,
-                            NativeRuntime &runtime) const;
+                            NativeRuntime &runtime,
+                            uint64_t gas_limit) const;
 
 private:
   const function_t *find_function(Runtime::MethodID method) const;
@@ -126,20 +127,10 @@ public:
 
   ~NativeRuntime() override = default;
 
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override
-  {
-    return available_gas_;
-  }
-  void set_available_gas(uint64_t gas) noexcept override
-  {
-    available_gas_ = gas;
-  }
-
 private:
-  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
+  std::pair<InvokeStatus<void>, GasAmount> invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   NativeContract &contract_;
-  uint64_t available_gas_ = 0;
 };
 
 } // namespace hogd
