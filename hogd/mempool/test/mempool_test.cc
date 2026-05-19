@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
+#include <atomic>
+#include <latch>
 #include <memory>
 #include <set>
+#include <thread>
 #include <utility>
 
 #include "address_auth.hh"
@@ -13,7 +16,9 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/rpc_from_gateway.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
@@ -1184,6 +1189,65 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+}
+
+TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
+{
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  GenesisConfigurationBuilder builder;
+  GenesisConfiguration genesis_configuration =
+      builder.build(StorageCostModel::default_cost_model());
+
+  constexpr size_t kWarmupReads = 100;
+  std::atomic<bool> load_done = false;
+  std::atomic<bool> failure = false;
+  std::atomic<size_t> public_tip_reads = 0;
+  std::latch start_latch(2);
+
+  std::thread tip_reader([&]() {
+    start_latch.arrive_and_wait();
+    do {
+      ExpectedDBTip tip = gateway.schedgateway_get_tip()();
+      const RPCError error = tip.error();
+      if (error != RPCError::kRPCNotFound && error != RPCError::kRPCNone) {
+        failure.store(true, std::memory_order_release);
+        break;
+      }
+      if (error == RPCError::kRPCNone && tip.db_tip().height != 0) {
+        failure.store(true, std::memory_order_release);
+        break;
+      }
+      public_tip_reads.fetch_add(1, std::memory_order_relaxed);
+    } while (!load_done.load(std::memory_order_acquire));
+  });
+
+  std::thread genesis_loader([&]() {
+    start_latch.arrive_and_wait();
+    while (public_tip_reads.load(std::memory_order_acquire) < kWarmupReads &&
+           !failure.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    DbSchedResult result =
+        server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
+            std::move(genesis_configuration))();
+    if (result != DbSchedResult::DbSchedResultOK) {
+      failure.store(true, std::memory_order_release);
+    }
+    load_done.store(true, std::memory_order_release);
+  });
+
+  genesis_loader.join();
+  load_done.store(true, std::memory_order_release);
+  tip_reader.join();
+
+  EXPECT_FALSE(failure.load(std::memory_order_acquire));
+  EXPECT_GE(public_tip_reads.load(std::memory_order_relaxed), kWarmupReads);
+
+  ExpectedDBTip final_tip = gateway.schedgateway_get_tip()();
+  EXPECT_EQ(final_tip.error(), RPCError::kRPCNone);
+  EXPECT_EQ(final_tip.db_tip().height, 0);
 }
 
 } // namespace hogd
