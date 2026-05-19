@@ -133,9 +133,9 @@ ViewGatewayRpc::get_current_view_state()
       return nullptr;
     }
     auto &snapshot = res.value();
-    view_states_.try_emplace(snapshot.block_id, snapshot.block_id, db_proxy_);
+    view_states_.try_emplace(
+        snapshot.block_id, snapshot.block_id, snapshot.tip, db_proxy_);
     current_view_block_id_ = snapshot.block_id;
-    cached_tip_ = snapshot.tip;
   }
   auto *state = &view_states_.at(current_view_block_id_);
   if (!state->try_acquire_reference()) {
@@ -160,9 +160,9 @@ ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
     return false;
   }
   auto &snapshot = res.value();
-  view_states_.try_emplace(snapshot.block_id, snapshot.block_id, db_proxy_);
+  view_states_.try_emplace(
+      snapshot.block_id, snapshot.block_id, snapshot.tip, db_proxy_);
   current_view_block_id_ = snapshot.block_id;
-  cached_tip_ = snapshot.tip;
   return true;
 }
 
@@ -182,9 +182,8 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
     }
 
     BlockID state_block_id = state->get().block_id;
-    DbTip tip = cached_tip_;
     ViewGatewayResult result =
-        run_view_attempt(query, tip, state->get());
+        run_view_attempt(query, state->get().tip, state->get());
 
     if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
       if (state->release_reference()) {

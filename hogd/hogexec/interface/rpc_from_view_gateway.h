@@ -45,10 +45,11 @@ private:
 
   struct ViewState {
     BlockID block_id;
+    DbTip tip;
     StorageSnapshotCache snapshot_cache;
 
-    ViewState(BlockID id, DatabaseProxy &db_proxy)
-      : block_id(id), snapshot_cache(id, db_proxy)
+    ViewState(BlockID id, DbTip t, DatabaseProxy &db_proxy)
+      : block_id(id), tip(std::move(t)), snapshot_cache(id, db_proxy)
     {}
   };
 
@@ -75,7 +76,6 @@ private:
 
   std::mutex view_state_mutex_;
   BlockID current_view_block_id_ = 0;
-  DbTip cached_tip_{};
   std::unordered_map<BlockID, PerThreadARC<ViewState>> view_states_;
 
   // worker_pool_ must be declared last so it is destroyed (joined) before
