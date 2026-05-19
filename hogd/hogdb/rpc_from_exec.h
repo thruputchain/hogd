@@ -49,6 +49,9 @@ public:
 
   ExpectedDBTip get_db_tip(BlockID block);
 
+  ExpectedViewingSnapshot open_viewing_snapshot();
+  RPCError close_viewing_snapshot(BlockID block);
+
   void shut_down()
   {
     // TODO(jhumphri): Implement.

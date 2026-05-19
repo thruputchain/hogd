@@ -5,14 +5,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
@@ -30,7 +28,7 @@ class ViewGatewayRpc {
 public:
   using rpc_service = ViewGateway1;
 
-  ViewGatewayRpc(RPCContext &ctx, std::string const &db_executor_address,
+  ViewGatewayRpc(std::string const &db_executor_address,
                  std::string const &event_host, std::uint16_t event_exec_port,
                  std::size_t nthreads = 2);
 
@@ -72,12 +70,12 @@ private:
   void gc_view_state(BlockID block_id);
 
   std::atomic<bool> shutdown_flag_ = false;
-  RPCContext &ctx_;
   DatabaseProxy db_proxy_;
   EventServerProxy event_server_proxy_;
 
   std::mutex view_state_mutex_;
   BlockID current_view_block_id_ = 0;
+  DbTip cached_tip_{};
   std::unordered_map<BlockID, PerThreadARC<ViewState>> view_states_;
 
   // worker_pool_ must be declared last so it is destroyed (joined) before
@@ -89,10 +87,10 @@ static_assert(is_ViewGateway1<ViewGatewayRpc *, x23::MaybeAsync>);
 
 class ViewGatewayServer : public RpcServer<ViewGatewayRpc> {
 public:
-  ViewGatewayServer(RPCContext &ctx, std::string const &db_executor_address,
+  ViewGatewayServer(std::string const &db_executor_address,
                     std::string const &event_host,
                     std::uint16_t event_exec_port)
-    : RpcServer(ctx, db_executor_address, event_host, event_exec_port)
+    : RpcServer(db_executor_address, event_host, event_exec_port)
   {}
 };
 
@@ -101,12 +99,5 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw);
 
 TransactionViewQuery normalize_public_view_query(TransactionViewQuery query);
-
-ViewGatewayResult run_view_with_retries_for_gateway(
-    TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
-    std::function<DbTip()> const &read_tip,
-    std::function<ViewGatewayResult(TransactionViewQuery const &,
-                                    DbTip const &)> const &run_attempt,
-    std::uint32_t max_attempts);
 
 } // namespace hogd

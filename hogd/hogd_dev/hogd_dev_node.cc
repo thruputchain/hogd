@@ -138,7 +138,7 @@ HogdDevNode::HogdDevNode(std::string bind_host,
                                                          /*port=*/0));
 
   view_gateway_server_ = std::make_unique<ViewGatewayServer>(
-      *ctx_, format_advertised_address(bind_host_, db_executor_server_->port()),
+      format_advertised_address(bind_host_, db_executor_server_->port()),
       bind_host_, event_exec_server_.port());
   view_gateway_server_->start_server(make_bind_host_port(bind_host_,
                                                          /*port=*/0));

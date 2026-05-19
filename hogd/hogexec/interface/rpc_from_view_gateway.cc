@@ -3,9 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <limits>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -13,8 +11,6 @@
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogexec/common/block_id_util.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
@@ -24,7 +20,6 @@
 #include "invoke_flag.hh"
 #include "network.hh"
 #include "rpc_types.hh"
-#include "sched_db.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -70,12 +65,11 @@ make_view_database_identifier(std::string const &db_executor_address)
 
 } // namespace
 
-ViewGatewayRpc::ViewGatewayRpc(RPCContext &ctx,
-                               std::string const &db_executor_address,
+ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::string const &event_host,
                                std::uint16_t event_exec_port,
                                std::size_t nthreads)
-  : ctx_(ctx), db_proxy_(make_view_database_identifier(db_executor_address)),
+  : db_proxy_(make_view_database_identifier(db_executor_address)),
     event_server_proxy_(make_bind_host_port(event_host, event_exec_port)),
     worker_pool_(static_cast<int>(nthreads))
 {}
@@ -117,7 +111,10 @@ ViewGatewayRpc::shut_down()
 void
 ViewGatewayRpc::gc_view_state(BlockID block_id)
 {
-  ctx_.remove_shutdown_block_tx(block_id);
+  auto close_res = db_proxy_.close_viewing_snapshot(block_id);
+  if (!close_res.has_value()) {
+    warn("viewgateway: failed to close viewing snapshot {}", block_id);
+  }
   std::scoped_lock g(view_state_mutex_);
   view_states_.erase(block_id);
 }
@@ -130,15 +127,15 @@ ViewGatewayRpc::get_current_view_state()
     if (shutdown_flag_.load(std::memory_order_relaxed)) {
       return nullptr;
     }
-    BlockID block_id = generate_block_id();
-    auto status = ctx_.open_block_tx(
-        block_id, BlockExecutionMode::kBlockExecutionModeViewing);
-    if (!status.has_value()) {
-      warn("viewgateway: failed to open viewing block tx");
+    auto res = db_proxy_.open_viewing_snapshot();
+    if (!res.has_value()) {
+      warn("viewgateway: failed to open viewing snapshot");
       return nullptr;
     }
-    view_states_.try_emplace(block_id, block_id, db_proxy_);
-    current_view_block_id_ = block_id;
+    auto &snapshot = res.value();
+    view_states_.try_emplace(snapshot.block_id, snapshot.block_id, db_proxy_);
+    current_view_block_id_ = snapshot.block_id;
+    cached_tip_ = snapshot.tip;
   }
   auto *state = &view_states_.at(current_view_block_id_);
   if (!state->try_acquire_reference()) {
@@ -156,16 +153,16 @@ ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
   }
   view_states_.at(stale_block_id).initiate_shutdown();
 
-  BlockID new_block_id = generate_block_id();
-  auto status = ctx_.open_block_tx(
-      new_block_id, BlockExecutionMode::kBlockExecutionModeViewing);
-  if (!status.has_value()) {
-    warn("viewgateway: failed to open replacement viewing block tx");
+  auto res = db_proxy_.open_viewing_snapshot();
+  if (!res.has_value()) {
+    warn("viewgateway: failed to open replacement viewing snapshot");
     current_view_block_id_ = 0;
     return false;
   }
-  view_states_.try_emplace(new_block_id, new_block_id, db_proxy_);
-  current_view_block_id_ = new_block_id;
+  auto &snapshot = res.value();
+  view_states_.try_emplace(snapshot.block_id, snapshot.block_id, db_proxy_);
+  current_view_block_id_ = snapshot.block_id;
+  cached_tip_ = snapshot.tip;
   return true;
 }
 
@@ -179,19 +176,13 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
           ViewGatewayOutcome::ViewGatewayInternalError);
     }
 
-    DbTip tip = ctx_.get_tip();
-    if (!RPCContext::has_committed_tip(tip)) {
-      warn("viewgateway: no committed DbTip is available");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-
     auto *state = get_current_view_state();
     if (!state) {
       continue;
     }
 
     BlockID state_block_id = state->get().block_id;
+    DbTip tip = cached_tip_;
     ViewGatewayResult result =
         run_view_attempt(query, tip, state->get());
 
@@ -231,9 +222,6 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
 {
   static thread_local auto context = make_hogexec_context();
 
-  // WAI: empty nondeterministic data causes ViewingModeData to default
-  // TryInvoke outcomes to success. This is deliberate — see the comment on
-  // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = View::run_view_transaction(
       view_state.snapshot_cache,
       PerTransactionDatabaseProxy(db_proxy_, view_state.block_id,
@@ -248,9 +236,6 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw)
 {
-  // TODO(view-gateway): add a caller-error ViewGatewayOutcome. InvalidInput
-  // and bad user-supplied ndet are request problems, but v1 can only express
-  // Ok, Abandoned, or InternalError.
   switch (raw.status()) {
   case TransactionViewStatus::Ok:
   {
@@ -282,56 +267,12 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
   return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
-// Normalize a caller-supplied view query for unauthenticated public use.
-// We strip auth_claim (no real signer) and invoke_flags (no TryInvoke /
-// DelegateCall), but intentionally preserve parent_address and
-// forwarded_tokens.  View queries are read-only (no state commits), so
-// letting the caller choose a parent_address — which the invoked contract
-// sees via GetMsgSender — is safe and gives off-chain tooling the ability
-// to simulate calls from any context.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {
   query.auth_claim = make_public_view_auth_claim();
   query.invoke_flags = std::to_underlying(InvokeFlag::None);
   return query;
-}
-
-ViewGatewayResult
-run_view_with_retries_for_gateway(
-    TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
-    std::function<DbTip()> const &read_tip,
-    std::function<ViewGatewayResult(TransactionViewQuery const &,
-                                    DbTip const &)> const &run_attempt,
-    std::uint32_t max_attempts)
-{
-  for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-    if (shutdown_flag.load(std::memory_order_relaxed)) {
-      warn("viewgateway: shutdown requested before view attempt");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-
-    DbTip tip = read_tip();
-    if (!RPCContext::has_committed_tip(tip)) {
-      warn("viewgateway: no committed DbTip is available");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-
-    ViewGatewayResult result = run_attempt(query, tip);
-    if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
-      return result;
-    }
-
-    if (shutdown_flag.load(std::memory_order_relaxed)) {
-      warn("viewgateway: shutdown requested after abandoned view attempt");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-  }
-
-  return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayAbandoned);
 }
 
 } // namespace hogd

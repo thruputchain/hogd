@@ -6,6 +6,8 @@
 #include <span>
 #include <utility>
 
+#include "hogd/hogexec/common/block_id_util.h"
+
 // generated x23 headers
 #include "address_auth.hh"
 #include "contract.hh"
@@ -455,6 +457,45 @@ HogDBExecutorRpc::get_db_tip(BlockID block_id)
   out.error(RPCError::kRPCNone);
   out.db_tip() = *tip;
   return out;
+}
+
+ExpectedViewingSnapshot
+HogDBExecutorRpc::open_viewing_snapshot()
+{
+  HogDBStatus<DbTip> tip = ctx_.get_tip();
+  if (!tip) {
+    return ExpectedViewingSnapshot(to_rpc_error(tip.error()));
+  }
+
+  if (!RPCContext::has_committed_tip(*tip)) {
+    return ExpectedViewingSnapshot(RPCError::kRPCNotFound);
+  }
+
+  BlockID block_id = generate_block_id();
+  auto res =
+      ctx_.open_block_tx(block_id, BlockExecutionMode::kBlockExecutionModeViewing);
+  if (!res) {
+    return ExpectedViewingSnapshot(to_rpc_error(res.error()));
+  }
+
+  ExpectedViewingSnapshot out;
+  out.error(RPCError::kRPCNone);
+  out.snapshot().block_id = block_id;
+  out.snapshot().tip = *tip;
+  return out;
+}
+
+RPCError
+HogDBExecutorRpc::close_viewing_snapshot(BlockID block_id)
+{
+  auto *btx = ctx_.get_block_tx(block_id, false);
+  if (!btx) {
+    return RPCError::kRPCBadBlockID;
+  }
+  if (btx->initiate_shutdown()) {
+    ctx_.remove_shutdown_block_tx(block_id);
+  }
+  return RPCError::kRPCNone;
 }
 
 } // namespace hogd

@@ -1299,15 +1299,11 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  // Open a viewing block tx — this is what the ViewGateway now does instead
-  // of reusing the committed tip.id directly.
-  BlockID view_block_id = framework_.get_block_number() + 1000;
-  auto db_res = framework_.get_coord_client().dbsched_create_snapshot(
-      framework_.get_db_tip().id, view_block_id,
-      BlockExecutionMode::kBlockExecutionModeViewing);
-  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snapshot_res.has_value());
+  auto &snapshot = snapshot_res.value();
 
-  StorageSnapshotCache snapshot_cache(view_block_id,
+  StorageSnapshotCache snapshot_cache(snapshot.block_id,
                                       framework_.get_db_proxy());
 
   Invocation invocation{
@@ -1320,7 +1316,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   auto result = View::run_view_transaction(
       snapshot_cache,
       PerTransactionDatabaseProxy(
-          framework_.get_db_proxy(), view_block_id,
+          framework_.get_db_proxy(), snapshot.block_id,
           std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
@@ -1328,10 +1324,9 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
-  // Clean up the viewing block tx.
-  auto abandon_res =
-      framework_.get_coord_client().dbsched_abandon_snapshot(view_block_id);
-  EXPECT_EQ(abandon_res, DbSchedResult::DbSchedResultOK);
+  auto close_res =
+      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  EXPECT_TRUE(close_res.has_value());
 }
 
 TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
