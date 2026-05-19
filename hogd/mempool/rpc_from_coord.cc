@@ -193,7 +193,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
            "txs");
       co_return;
     }
-    size_t num_slots_left = scheduler_size - kMempoolTxSizeLimit;
+    size_t num_slots_left = kMempoolTxSizeLimit - scheduler_size;
     if (num_slots_left < txs->size()) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
@@ -293,7 +293,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
            "txs");
       co_return;
     }
-    size_t num_slots_left = scheduler_size - kMempoolTxSizeLimit;
+    size_t num_slots_left = kMempoolTxSizeLimit - scheduler_size;
     if (num_slots_left < txs.size()) {
       // The submitted txs will bring the mempool beyond its pending tx capacity
       // limit, so we discard the extra txs.
