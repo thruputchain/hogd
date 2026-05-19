@@ -300,6 +300,10 @@ SystemCallHandler::get_most_recent_frame_events() const
       return x23::Vec<TxEmittedEvent>();
     }
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (last_frame_.value().should_revert()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return last_frame_.value().get_events();
   }
   return invocation_frame_stack_.copy_active_frame_events();
