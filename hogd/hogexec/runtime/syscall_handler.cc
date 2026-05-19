@@ -218,8 +218,15 @@ SystemCallHandler::check_final_validation_data()
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.check_all_consumed()) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
+      // Allowlist: also excludes overwriting an existing ValidationFailure.
+      if (cumulative_invoke_result_.is_root_success() ||
+          cumulative_invoke_result_.result_.error().code() ==
+              InvokeErrorCode::Deterministic ||
+          cumulative_invoke_result_.result_.error().code() ==
+              InvokeErrorCode::OutOfGas) {
+        cumulative_invoke_result_.result_ =
+            InvokeError{InvokeErrorCode::ValidationFailure};
+      }
     }
   }
 }
@@ -297,6 +304,10 @@ SystemCallHandler::get_most_recent_frame_events() const
   if (last_frame_finished_) {
     assert(invocation_frame_stack_.empty());
     if (!last_frame_.has_value()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (last_frame_.value().should_revert()) {
       return x23::Vec<TxEmittedEvent>();
     }
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

@@ -69,16 +69,16 @@ public:
 
 private:
   struct PrivateRegion {
-    char *region_{nullptr};
+    unsigned char *region_{nullptr};
     size_t num_elements_{0};
   };
 
-  char *alloc_from_pool()
+  unsigned char *alloc_from_pool()
   {
     while (true) {
       rw_lock_.lock_reader();
 
-      char *current_region_offset =
+      unsigned char *current_region_offset =
           current_region_offset_.load(std::memory_order_relaxed);
       CHECK_PTR(current_region_offset);
       CHECK_LT(current_region_idx_,
@@ -145,13 +145,14 @@ private:
     CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
 
 #ifdef __cpp_lib_start_lifetime_as
-    char *region = std::start_lifetime_as_array<char>(addr, kMmapLength);
+    unsigned char *region =
+        std::start_lifetime_as_array<unsigned char>(addr, kMmapLength);
 #else
     struct MmapRegion {
-      char data[kMmapLength];
+      unsigned char data[kMmapLength];
     };
     static_assert(sizeof(MmapRegion) == kMmapLength);
-    char *region = (::new (addr) MmapRegion)->data;
+    unsigned char *region = (::new (addr) MmapRegion)->data;
 #endif
 
     current_region_offset_.store(region, std::memory_order_relaxed);
@@ -161,15 +162,15 @@ private:
 
   void free_all_regions()
   {
-    for (char *region : allocated_regions_) {
+    for (unsigned char *region : allocated_regions_) {
       CHECK_EQ(munmap(region, kMmapLength), 0);
     }
   }
 
   RwLock rw_lock_;
-  std::atomic<char *> current_region_offset_ = nullptr;
+  std::atomic<unsigned char *> current_region_offset_ = nullptr;
   ssize_t current_region_idx_ = -1;
-  std::vector<char *> allocated_regions_;
+  std::vector<unsigned char *> allocated_regions_;
   PerThread<PrivateRegion> private_region_;
 };
 
