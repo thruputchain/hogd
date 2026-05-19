@@ -169,6 +169,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   double stage_filter_invalid = 0.0;
   double stage_add_txs = 0.0;
 
+  if (scheduler_->size() >= kMempoolTxSizeLimit) {
+    info(
+        "submit_unvetted rejected txs as the mempool has too many pending txs");
+    co_return;
+  }
+
   auto txs = std::make_shared<SignedTransactionBatch>();
   if (!(co_await parallel_batch_to_t(batch, *txs))) {
     info("submit_unvetted rejected malformed transaction batch");
@@ -177,6 +183,26 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   size_t num_submitted_txs = txs->size();
   record_submitted_unvetted(num_submitted_txs);
   record_stage(stage_deserialize_batch);
+
+  {
+    // [scheduler_->size()] may have changed since we last checked it above, so
+    // we read it again here.
+    size_t scheduler_size = scheduler_->size();
+    if (scheduler_size >= kMempoolTxSizeLimit) {
+      info("submit_unvetted rejected txs as the mempool has too many pending "
+           "txs");
+      co_return;
+    }
+    size_t num_slots_left = scheduler_size - kMempoolTxSizeLimit;
+    if (num_slots_left < txs.size()) {
+      // The submitted txs will bring the mempool beyond its pending tx capacity
+      // limit, so we discard the extra txs.
+      info("submit_unvetted received {} txs, but only {} will fit in the "
+           "mempool. discarding {} txs.",
+           num_submitted_txs, num_slots_left, txs.size() - num_slots_left);
+      txs.resize(num_slots_left);
+    }
+  }
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
@@ -244,6 +270,11 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
+  if (scheduler_->size() >= kMempoolTxSizeLimit) {
+    info("submit_vetted rejected txs as the mempool has too many pending txs");
+    co_return;
+  }
+
   SignedTransactionBatch txs;
   if (!(co_await parallel_batch_to_t(batch, txs))) {
     info("submit_vetted rejected malformed transaction batch");
@@ -251,6 +282,27 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   }
   record_submitted_vetted(txs.size());
   info("submit_vetted, {} txs", txs.size());
+
+  {
+    // [scheduler_->size()] may have changed since we last checked it above, so
+    // we read it again here.
+    size_t scheduler_size = scheduler_->size();
+    if (scheduler_size >= kMempoolTxSizeLimit) {
+      info("submit_vetted rejected txs as the mempool has too many pending "
+           "txs");
+      co_return;
+    }
+    size_t num_slots_left = scheduler_size - kMempoolTxSizeLimit;
+    if (num_slots_left < txs.size()) {
+      // The submitted txs will bring the mempool beyond its pending tx capacity
+      // limit, so we discard the extra txs.
+      info("submit_vetted received {} txs, but only {} will fit in the "
+           "mempool. discarding {} txs.",
+           num_submitted_txs, num_slots_left, txs.size() - num_slots_left);
+      txs.resize(num_slots_left);
+    }
+  }
+
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
   info("submit_vetted, got lock. will now add txs");
