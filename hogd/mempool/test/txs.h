@@ -27,20 +27,33 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
   constexpr char kProgramName[] = "slow_fibonacci";
   constexpr uint32_t kFibonacciN = 10;
 
+  WorkerPool &worker_pool = WorkerPool::get_default_pool();
   SignedTransactionBatch txs;
-  txs.reserve(num_txs);
-  for (uint64_t i = 0; i < num_txs; i++) {
-    SignedTransaction tx{
-        .tx = Transaction{
-            .invocation = fib_client.make_invocation<kProgramName>(
-                // TODO(jhumphri): How to get this number automatically?
-                /*gas_amount=*/5'000'000'000, kFibonacciN),
-            .uniquifier = {.block_expiry_height =
-                               std::numeric_limits<BlockHeight>::max(),
-                           .nonce = i},
-            .contracts_to_deploy = {},
-        }};
-    txs.push_back(tx);
+  txs.resize(num_txs);
+  const std::vector<ChunkRange> chunks =
+      make_chunks(num_txs, available_parallelism());
+  std::vector<std::future<void>> futures;
+  futures.reserve(chunks.size());
+
+  // We use threads rather than coroutines since not all tests use coroutines.
+  for (const ChunkRange &chunk : chunks) {
+    futures.push_back(worker_pool.submit(
+        [chunk, &txs, &fib_client, &kProgramName, &kFibonacciN] {
+          for (size_t i = chunk.start; i < chunk.end; i++) {
+            txs[i].tx = Transaction{
+                .invocation = fib_client.make_invocation<kProgramName>(
+                    // TODO(jhumphri): How to get this number automatically?
+                    /*gas_amount=*/5'000'000'000, kFibonacciN),
+                .uniquifier = {.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = i},
+                .contracts_to_deploy = {},
+            };
+          }
+        }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
   }
   return txs;
 }

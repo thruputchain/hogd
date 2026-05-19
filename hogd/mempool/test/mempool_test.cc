@@ -145,9 +145,11 @@ TEST(Mempool, SubmitUnvetted)
 TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  info("A");
   SignedTransactionBatch txs =
       generate_unsigned_txs(fib_client,
                             MempoolCoordinatorRpc::kMempoolTxSizeLimit + 1);
+  info("B");
 
   MempoolTestInfra server;
 
@@ -165,10 +167,16 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
        .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
+  info("C");
+
+  WorkerPool &worker_pool = WorkerPool::get_default_pool();
+  // TODO
   for (SignedTransaction &tx : txs) {
     tx.tx.auth_claim = make_sign_claim(0);
     tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
   }
+
+  info("D");
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs})())();
