@@ -683,6 +683,29 @@ TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
+TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
+{
+  HogdDevProcess process = HogdDevProcess::start({"--readiness", "stderr"});
+
+  std::optional<int> status =
+      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  if (!status.has_value()) {
+    FAIL() << "hogd-dev did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Invalid readiness sink: stderr"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
 TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
 {
   HogdDevProcess process =
@@ -714,14 +737,22 @@ TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
     auto parsed = json::parse(line);
     ASSERT_TRUE(parsed.has_value()) << line;
     const json::Value *level = parsed->find("level");
+    const json::Value *timestamp_ms = parsed->find("timestamp_ms");
     const json::Value *target = parsed->find("target");
     const json::Value *message = parsed->find("message");
     const json::Value *fields = parsed->find("fields");
     ASSERT_NE(level, nullptr) << line;
+    ASSERT_NE(timestamp_ms, nullptr) << line;
     ASSERT_NE(target, nullptr) << line;
     ASSERT_NE(message, nullptr) << line;
     ASSERT_NE(fields, nullptr) << line;
     EXPECT_TRUE(level->as_string().has_value()) << line;
+    std::optional<std::int64_t> timestamp = timestamp_ms->as_integer();
+    if (!timestamp.has_value()) {
+      FAIL() << line;
+      return;
+    }
+    EXPECT_GT(timestamp.value(), 0);
     EXPECT_TRUE(target->as_string().has_value()) << line;
     EXPECT_TRUE(message->as_string().has_value()) << line;
     ASSERT_EQ(fields->type(), json::Value::Type::kObject) << line;

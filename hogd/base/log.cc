@@ -151,6 +151,12 @@ JsonConsoleLogger::vlog(LogLevel level, std::string_view fmt,
   if (level > max_level_)
     return;
 
+  const auto now = std::chrono::system_clock::now();
+  const auto timestamp_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          now.time_since_epoch())
+          .count();
+
   // TODO(mm): this is a JSON envelope around the existing printf-style log
   // message. Should be a structured-field logging API once real user workflows
   // identify which fields need first-class filtering.
@@ -159,6 +165,7 @@ JsonConsoleLogger::vlog(LogLevel level, std::string_view fmt,
 
   std::string buf;
   json::Writer(buf).object([&](json::Writer &w) {
+    w.field("timestamp_ms", static_cast<std::int64_t>(timestamp_ms));
     w.field("level", log_level_to_string(level));
     w.field("target", source_target(loc.file_name()));
     w.field("message", message);

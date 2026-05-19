@@ -289,7 +289,8 @@ parse_args(int argc, char *argv[])
     if (arg == "--readiness" && i + 1 < argc) {
       const std::string readiness = argv[++i];
       if (readiness != "stdout") {
-        usage(argv);
+        throw std::runtime_error(
+            std::format("Invalid readiness sink: {}", readiness));
       }
       options.readiness_sink = hogd::ReadinessSink::kStdout;
       continue;
