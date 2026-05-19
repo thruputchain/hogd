@@ -1,4 +1,3 @@
-#include <atomic>
 #include <future>
 #include <gtest/gtest.h>
 #include <memory>
@@ -15,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
@@ -28,6 +28,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
