@@ -2,6 +2,8 @@
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -379,7 +381,7 @@ class HogdDevProcess {
 public:
   static HogdDevProcess
   start(std::vector<std::string> extra_args = {},
-        std::vector<std::pair<std::string, std::string>> extra_env = {})
+        const std::vector<std::pair<std::string, std::string>> &extra_env = {})
   {
     int stdout_pipe[2];
     int stderr_pipe[2];
@@ -423,6 +425,7 @@ public:
       args.insert(args.end(), extra_args.begin(), extra_args.end());
 
       for (auto const &[key, value] : extra_env) {
+        // NOLINTNEXTLINE(misc-include-cleaner)
         if (setenv(key.c_str(), value.c_str(), /*overwrite=*/1) != 0) {
           _exit(127);
         }
@@ -640,9 +643,13 @@ TEST(HogdDev, HelpPrintsBeforeInitialization)
 
   std::optional<int> status =
       process.wait_for_exit_for_test(std::chrono::seconds(10));
-  ASSERT_TRUE(status.has_value());
-  ASSERT_TRUE(WIFEXITED(*status));
-  EXPECT_EQ(WEXITSTATUS(*status), EXIT_SUCCESS);
+  if (!status.has_value()) {
+    FAIL() << "hogd-dev did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_SUCCESS);
 
   std::string stdout_output = process.read_remaining_stdout();
   std::string stderr_output = process.read_remaining_stderr();
@@ -660,9 +667,13 @@ TEST(HogdDev, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
 
   std::optional<int> status =
       process.wait_for_exit_for_test(std::chrono::seconds(10));
-  ASSERT_TRUE(status.has_value());
-  ASSERT_TRUE(WIFEXITED(*status));
-  EXPECT_EQ(WEXITSTATUS(*status), EXIT_FAILURE);
+  if (!status.has_value()) {
+    FAIL() << "hogd-dev did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
 
   std::string stdout_output = process.read_remaining_stdout();
   std::string stderr_output = process.read_remaining_stderr();
