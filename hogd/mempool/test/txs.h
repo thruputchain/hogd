@@ -37,8 +37,8 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 
   // We use threads rather than coroutines since not all tests use coroutines.
   for (const ChunkRange &chunk : chunks) {
-    futures.push_back(
-        worker_pool.submit([chunk, &txs, &fib_client, &kFibonacciN] {
+    futures.push_back(worker_pool.submit(
+        [chunk, &txs, &fib_client, &kProgramName, &kFibonacciN] {
           for (size_t i = chunk.start; i < chunk.end; i++) {
             txs[i].tx = Transaction{
                 .invocation = fib_client.make_invocation<kProgramName>(
