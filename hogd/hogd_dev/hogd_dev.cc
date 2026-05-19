@@ -158,15 +158,49 @@ hogd_dev_init(std::string listen_host, std::uint16_t requested_scheduler_port,
 
 namespace {
 
+struct HogdDevOptions {
+  std::string listen_host = "127.0.0.1";
+  std::uint16_t scheduler_port = 0;
+  hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
+  hogd::DevAccountBootstrapConfig bootstrap_config;
+};
+
+void
+print_usage(FILE *stream, char *argv[])
+{
+  std::println(stream, R"(Usage: {} [OPTIONS]
+
+Start an ephemeral local Groundhog development node.
+
+Options:
+  --listen-host <ip>             Host/interface for internal x23 services
+                                 [default: 127.0.0.1]
+  --scheduler-port <port>        SchedulerCoord port; use 0 for an OS port
+                                 [default: 0]
+  --readiness stdout             Emit one readiness JSON line on stdout
+                                 [default: stdout]
+  --dev-accounts <count>         Deterministic dev accounts to bootstrap
+                                 [default: 0]
+  --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
+                                 [default: groundhog-dev-accounts]
+  --dev-account-tokens <tokens>  Initial storage-token balance per dev account
+                                 [default: 1000000000]
+  -h, --help                     Print help
+
+Environment:
+  HOGD_LOG_FORMAT=json           Emit newline-delimited JSON logs to stderr.
+                                 The default is human-readable stderr logs.
+
+Readiness:
+  stdout is reserved for the readiness line when --readiness stdout is used.
+  Operational logs are written to stderr.)",
+               argv[0]);
+}
+
 [[noreturn]] void
 usage(char *argv[])
 {
-  std::println(stderr,
-               "usage: {} [--listen-host <ip>] [--scheduler-port <port>] "
-               "[--readiness stdout] [--dev-accounts <count>] "
-               "[--dev-account-seed <seed>] "
-               "[--dev-account-tokens <tokens>]",
-               argv[0]);
+  print_usage(stderr, argv);
   exit(EXIT_FAILURE);
 }
 
@@ -174,7 +208,12 @@ std::uint16_t
 parse_port(const std::string &value)
 {
   std::size_t pos = 0;
-  std::uint64_t port = std::stoul(value, &pos, 10);
+  std::uint64_t port = 0;
+  try {
+    port = std::stoul(value, &pos, 10);
+  } catch (const std::exception &) {
+    throw std::runtime_error(std::format("Invalid port: {}", value));
+  }
   if (pos != value.size() || port > 65535) {
     throw std::runtime_error(std::format("Invalid port: {}", value));
   }
@@ -185,7 +224,12 @@ std::uint32_t
 parse_u32(const std::string &value, std::string_view name)
 {
   std::size_t pos = 0;
-  std::uint64_t parsed = std::stoull(value, &pos, 10);
+  std::uint64_t parsed = 0;
+  try {
+    parsed = std::stoull(value, &pos, 10);
+  } catch (const std::exception &) {
+    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  }
   if (pos != value.size() ||
       parsed > std::numeric_limits<std::uint32_t>::max()) {
     throw std::runtime_error(std::format("Invalid {}: {}", name, value));
@@ -209,7 +253,12 @@ std::uint64_t
 parse_u64(const std::string &value, std::string_view name)
 {
   std::size_t pos = 0;
-  std::uint64_t parsed = std::stoull(value, &pos, 10);
+  std::uint64_t parsed = 0;
+  try {
+    parsed = std::stoull(value, &pos, 10);
+  } catch (const std::exception &) {
+    throw std::runtime_error(std::format("Invalid {}: {}", name, value));
+  }
   if (pos != value.size() ||
       parsed > static_cast<std::uint64_t>(
                    std::numeric_limits<std::int64_t>::max())) {
@@ -218,29 +267,22 @@ parse_u64(const std::string &value, std::string_view name)
   return parsed;
 }
 
-} // namespace
-
-int
-main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
+HogdDevOptions
+parse_args(int argc, char *argv[])
 {
-  int ret = hogd::hogd_init(argc, argv);
-  if (ret)
-    return ret;
-  hogd::info("starting hogd-dev!");
-
-  std::string listen_host = "127.0.0.1";
-  std::uint16_t scheduler_port = 0;
-  hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
-  hogd::DevAccountBootstrapConfig bootstrap_config;
-
+  HogdDevOptions options;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "-h" || arg == "--help") {
+      print_usage(stdout, argv);
+      exit(EXIT_SUCCESS);
+    }
     if (arg == "--listen-host" && i + 1 < argc) {
-      listen_host = argv[++i];
+      options.listen_host = argv[++i];
       continue;
     }
     if (arg == "--scheduler-port" && i + 1 < argc) {
-      scheduler_port = parse_port(argv[++i]);
+      options.scheduler_port = parse_port(argv[++i]);
       continue;
     }
     if (arg == "--readiness" && i + 1 < argc) {
@@ -248,25 +290,47 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       if (readiness != "stdout") {
         usage(argv);
       }
-      readiness_sink = hogd::ReadinessSink::kStdout;
+      options.readiness_sink = hogd::ReadinessSink::kStdout;
       continue;
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {
-      bootstrap_config.count = parse_dev_account_count(argv[++i]);
+      options.bootstrap_config.count = parse_dev_account_count(argv[++i]);
       continue;
     }
     if (arg == "--dev-account-seed" && i + 1 < argc) {
-      bootstrap_config.seed = argv[++i];
+      options.bootstrap_config.seed = argv[++i];
       continue;
     }
     if (arg == "--dev-account-tokens" && i + 1 < argc) {
-      bootstrap_config.storage_tokens =
+      options.bootstrap_config.storage_tokens =
           parse_u64(argv[++i], "dev account tokens");
       continue;
     }
     usage(argv);
   }
+  return options;
+}
 
-  return hogd::hogd_dev_init(std::move(listen_host), scheduler_port,
-                             readiness_sink, bootstrap_config);
+} // namespace
+
+int
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
+{
+  HogdDevOptions options;
+  try {
+    options = parse_args(argc, argv);
+  } catch (const std::exception &error) {
+    std::println(stderr, "error: {}", error.what());
+    print_usage(stderr, argv);
+    return EXIT_FAILURE;
+  }
+
+  int ret = hogd::hogd_init(argc, argv);
+  if (ret)
+    return ret;
+  hogd::info("starting hogd-dev!");
+
+  return hogd::hogd_dev_init(std::move(options.listen_host),
+                             options.scheduler_port, options.readiness_sink,
+                             options.bootstrap_config);
 }

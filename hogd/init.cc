@@ -37,6 +37,18 @@ const std::pair<InitFunc, std::string_view> init_tbl[] = {
     {crypto_init, "crypto"},
 };
 
+constexpr std::string_view kJsonLogFormat = "json";
+
+std::unique_ptr<Logger>
+make_logger(LogLevel log_level)
+{
+  const char *log_format = std::getenv("HOGD_LOG_FORMAT");
+  if (log_format != nullptr && std::string_view(log_format) == kJsonLogFormat) {
+    return std::make_unique<JsonConsoleLogger>(log_level);
+  }
+  return std::make_unique<ConsoleLogger>(log_level);
+}
+
 // Reads the binary of the currently running process.
 x23::Buf
 read_self_binary()
@@ -95,7 +107,7 @@ hogd_init(int argc, char *argv[], bool do_print_version, LogLevel log_level)
 
   // initialize logging
   // NOTE: this must come before any use of the CHECK macros
-  log_init(std::make_unique<ConsoleLogger>(log_level));
+  log_init(make_logger(log_level));
 
   // Ensure we have a pathname for our executable
   if (x23::getprogpath().empty()) {
