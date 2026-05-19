@@ -163,6 +163,9 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
       GenesisConfiguration genesis_configuration)
   {
+    x23::CoroGuard commit_cg;
+    co_await commit_cg(commit_lock_);
+
     CHECK_GE(last_committed_block_.height, -1);
     if (last_committed_block_.height != -1) {
       // The genesis block has already been loaded.
