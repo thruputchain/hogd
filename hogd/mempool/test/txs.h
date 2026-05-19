@@ -37,6 +37,8 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 
   // We use threads rather than coroutines since not all tests use coroutines.
   for (const ChunkRange &chunk : chunks) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-lambda-capture"
     futures.push_back(worker_pool.submit(
         [chunk, &txs, &fib_client, &kProgramName, &kFibonacciN] {
           for (size_t i = chunk.start; i < chunk.end; i++) {
@@ -51,6 +53,7 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
             };
           }
         }));
+#pragma clang diagnostic pop
   }
   for (std::future<void> &future : futures) {
     future.get();
