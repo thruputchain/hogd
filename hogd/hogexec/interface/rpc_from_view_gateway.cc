@@ -222,6 +222,9 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
 {
   static thread_local auto context = make_hogexec_context();
 
+  // WAI: empty nondeterministic data causes ViewingModeData to default
+  // TryInvoke outcomes to success. This is deliberate — see the comment on
+  // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = View::run_view_transaction(
       view_state.snapshot_cache,
       PerTransactionDatabaseProxy(db_proxy_, view_state.block_id,
@@ -236,6 +239,9 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw)
 {
+  // TODO(view-gateway): add a caller-error ViewGatewayOutcome. InvalidInput
+  // and bad user-supplied ndet are request problems, but v1 can only express
+  // Ok, Abandoned, or InternalError.
   switch (raw.status()) {
   case TransactionViewStatus::Ok:
   {
@@ -267,6 +273,13 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
   return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
+// Normalize a caller-supplied view query for unauthenticated public use.
+// We strip auth_claim (no real signer) and invoke_flags (no TryInvoke /
+// DelegateCall), but intentionally preserve parent_address and
+// forwarded_tokens.  View queries are read-only (no state commits), so
+// letting the caller choose a parent_address — which the invoked contract
+// sees via GetMsgSender — is safe and gives off-chain tooling the ability
+// to simulate calls from any context.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {
