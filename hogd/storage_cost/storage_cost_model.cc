@@ -1,7 +1,6 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "storage_cost.hh"
 #include "types.hh"
 
@@ -33,16 +32,17 @@ StorageCostModel::to_xdr() const
 {
   return StorageCostModelXdr{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = ::hogd::to_xdr(kBaseItemCost),
+      .base_data_item_cost = static_cast<uint64_t>(kBaseItemCost),
       .bytestring_cost_per_byte = kBytestringCostPerByte,
       .base_contract_deployment_cost =
-          ::hogd::to_xdr(kBaseContractDeploymentCost),
+          static_cast<uint64_t>(kBaseContractDeploymentCost),
       .contract_deployment_cost_per_byte =
-          ::hogd::to_xdr(kContractDeploymentCostPerByte),
-      .auth_per_key_cost = ::hogd::to_xdr(kAuthPerKeyCost),
-      .rcq_cost_per_entry = ::hogd::to_xdr(kRCQCostPerEntry),
-      .replay_cache_cost_per_entry = ::hogd::to_xdr(kReplayCacheCostPerEntry),
-      .balance_cost = ::hogd::to_xdr(kBalanceCost),
+          static_cast<uint64_t>(kContractDeploymentCostPerByte),
+      .auth_per_key_cost = static_cast<uint64_t>(kAuthPerKeyCost),
+      .rcq_cost_per_entry = static_cast<uint64_t>(kRCQCostPerEntry),
+      .replay_cache_cost_per_entry =
+          static_cast<uint64_t>(kReplayCacheCostPerEntry),
+      .balance_cost = static_cast<uint64_t>(kBalanceCost),
   };
 }
 
