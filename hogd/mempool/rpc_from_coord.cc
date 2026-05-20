@@ -279,13 +279,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    coordinator.
   // 3. The coordinator sends the requested txs to the mempool via this current
   //    RPC call ([schedulercoord_submit_vetted()]).
-  // 4. If the mempool is at capacity, it will drop the txs.
-  // 5. Now the block can never be validated because the requested txs are never
-  //    enqueued in the mempool. Note that if the validated block becomes
-  //    committed on other nodes, this mempool will never be able to advance.
-  //    And furthermore, this node will never be asked to nominate a block, so
-  //    it will be unable to process and erase the currently enqueued txs, so it
-  //    will never free up capacity.
+  // 4. If the mempool is at capacity and we were to check for that here, the
+  //    mempool would drop the txs.
+  // 5. Now the block can never be validated by this mempool because the
+  //    requested txs are never enqueued in the mempool. Note that if the
+  //    validated block becomes committed on other nodes, this mempool will
+  //    never be able to advance to future blocks in the chain. And furthermore,
+  //    this mempool will never be asked to nominate a block, so it will be
+  //    unable to process and erase the currently enqueued txs, so it will never
+  //    free up capacity.
   SignedTransactionBatch txs;
   if (!(co_await parallel_batch_to_t(batch, txs))) {
     info("submit_vetted rejected malformed transaction batch");
