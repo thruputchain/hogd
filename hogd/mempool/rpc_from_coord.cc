@@ -184,9 +184,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   record_submitted_unvetted(num_submitted_txs);
   record_stage(stage_deserialize_batch);
 
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+
   {
     // [scheduler_->size()] may have changed since we last checked it above, so
-    // we read it again here.
+    // we read it again here. Importantly, we do this under while holding
+    // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond the
+    // mempool tx capacity limit.
     size_t scheduler_size = scheduler_->size();
     if (scheduler_size >= mempool_tx_size_limit_) {
       info("submit_unvetted rejected txs as the mempool has too many pending "
@@ -203,9 +208,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       txs->resize(num_slots_left);
     }
   }
-
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
 
   const BlockHeight verify_height = scheduler_->current_block();
   info("submit_unvetted will check if {} txs are valid for height {}",
@@ -284,9 +286,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   record_submitted_vetted(num_submitted_txs);
   info("submit_vetted, {} txs", txs.size());
 
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+  info("submit_vetted, got lock. will now add txs");
+
   {
     // [scheduler_->size()] may have changed since we last checked it above, so
-    // we read it again here.
+    // we read it again here. Importantly, we do this under while holding
+    // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond the
+    // mempool tx capacity limit.
     size_t scheduler_size = scheduler_->size();
     if (scheduler_size >= mempool_tx_size_limit_) {
       info("submit_vetted rejected txs as the mempool has too many pending "
@@ -304,9 +312,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     }
   }
 
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
-  info("submit_vetted, got lock. will now add txs");
   co_await scheduler_->add_txs(txs);
   info("submit_vetted, finished adding txs. will now return");
   co_return;
