@@ -2,7 +2,6 @@ name: E2E Payment Multi-Node Run Forever (hog_sched)
 
 on:
     schedule:
-        - cron: "0 14 * * *" # Daily at 7am PDT/6am PST
     workflow_dispatch:
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
