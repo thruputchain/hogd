@@ -202,15 +202,15 @@ WasmtimeRuntime::get_module_stats(WasmtimeModuleStats *stats_out) const noexcept
 }
 
 std::pair<InvokeStatus<void>, GasAmount>
-WasmtimeRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
+WasmtimeRuntime::invoke_internal(std::string_view method_name,
+                                 uint64_t gas_limit)
 {
   assert(wasmtime_runtime_ptr_ != nullptr);
 
   WasmtimeInvokeResult res =
       wasmtime_invoke(wasmtime_runtime_ptr_,
                       reinterpret_cast<uint8_t const *>(method_name.data()),
-                      static_cast<uint32_t>(method_name.size()),
-                      gas_limit);
+                      static_cast<uint32_t>(method_name.size()), gas_limit);
 
   InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
   trace("Wasmtime Invoke Result: {}",

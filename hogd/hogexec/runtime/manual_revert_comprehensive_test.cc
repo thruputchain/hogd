@@ -179,9 +179,9 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressChild, 0, UINT64_MAX,
-                   Calldata{}, 0, std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+                   kAddressChild, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -538,8 +538,8 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressB, 0, UINT64_MAX, Calldata{},
-                   0, std::span<uint32_t>{}, output_return_buffer_len,
+                   kAddressB, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
              if (!r2.has_value()) {
@@ -578,8 +578,8 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressC, 0, UINT64_MAX, Calldata{},
-                   0, std::span<uint32_t>{}, output_return_buffer_len,
+                   kAddressC, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
              if (!r3.has_value()) {
@@ -899,8 +899,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressChild, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressChild, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -951,8 +951,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressGrandchild, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressGrandchild, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();

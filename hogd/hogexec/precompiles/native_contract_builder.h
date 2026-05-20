@@ -59,7 +59,8 @@ struct AlwaysErrorMethod {
   constexpr static auto make_lambda()
   {
     return []<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
-      return [](NativeSyscallContext& ctx, std::tuple_element_t<Is, args_t>... /*unused*/)
+      return [](NativeSyscallContext &ctx,
+                std::tuple_element_t<Is, args_t>... /*unused*/)
                  -> InvokeStatus<return_t> {
         ctx.consume_gas(Gas);
         return InvokeError{InvokeErrorCode::Deterministic};

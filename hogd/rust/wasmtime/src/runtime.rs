@@ -1,5 +1,5 @@
-use std::slice;
 use std::os::raw::c_void;
+use std::slice;
 use wasmtime::{Instance, Store};
 
 use crate::context::WasmtimeContext;
@@ -135,7 +135,10 @@ impl WasmtimeRuntime {
             debug_log!(eprintln!(
                 "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
             ));
-            return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic, 0);
+            return WasmtimeInvokeResult::error(
+                InvokeErrorCode::Deterministic,
+                0,
+            );
         }
 
         // set_fuel returns an error if allocation fails or if fuel is not configured.
@@ -144,7 +147,10 @@ impl WasmtimeRuntime {
             Ok(()) => (),
             Err(e) => {
                 eprintln!("Unrecoverable: failed to set fuel: {e:?}");
-                return WasmtimeInvokeResult::error(InvokeErrorCode::Unrecoverable, 0);
+                return WasmtimeInvokeResult::error(
+                    InvokeErrorCode::Unrecoverable,
+                    0,
+                );
             }
         };
 
@@ -157,7 +163,10 @@ impl WasmtimeRuntime {
             Ok(fuel) => fuel,
             Err(e) => {
                 eprintln!("Unrecoverable: failed to get fuel: {e:?}");
-                return WasmtimeInvokeResult::error(InvokeErrorCode::Unrecoverable, 0);
+                return WasmtimeInvokeResult::error(
+                    InvokeErrorCode::Unrecoverable,
+                    0,
+                );
             }
         };
         assert!(gas_remaining <= gas_limit);
@@ -234,7 +243,10 @@ pub unsafe extern "C" fn wasmtime_invoke(
     let string = match std::str::from_utf8(method_name_slice) {
         Ok(v) => v,
         _ => {
-            return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic, 0)
+            return WasmtimeInvokeResult::error(
+                InvokeErrorCode::Deterministic,
+                0,
+            )
         }
     };
 

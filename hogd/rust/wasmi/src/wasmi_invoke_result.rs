@@ -9,7 +9,10 @@ pub struct WasmiInvokeResult {
 
 impl WasmiInvokeResult {
     pub fn error(err: InvokeErrorCode, gas_consumed: u64) -> WasmiInvokeResult {
-        Self { error: err.0, gas_consumed }
+        Self {
+            error: err.0,
+            gas_consumed,
+        }
     }
 
     pub fn success(gas_consumed: u64) -> WasmiInvokeResult {

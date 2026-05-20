@@ -238,7 +238,8 @@ syscall_Invoke_inner(
       syscall_handler.invoke(input_address, input_entrypoint_id,
                              std::min<GasAmount>(input_gas_limit,
                                                  remaining_gas.get()),
-                             std::move(calldata), input_flags, owned_auth_token_ids_vec);
+                             std::move(calldata), input_flags,
+                             owned_auth_token_ids_vec);
 
   // invocation returned successfully
   if (invoke_res.has_value() &&

@@ -468,7 +468,8 @@ disarm_outputs(std::tuple<Args...> &args)
 template<is_syscall_meta SyscallMeta>
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
-                 const GasAmount gas_remaining, SyscallNo syscall_no, auto &&args)
+                 const GasAmount gas_remaining, SyscallNo syscall_no,
+                 auto &&args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
@@ -538,8 +539,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     }
 
     auto extra_args =
-        syscall_t::extra_args(handler,
-                              WrappedGasAmount{gas_remaining});
+        syscall_t::extra_args(handler, WrappedGasAmount{gas_remaining});
 
     // Invoke the inner syscall
     // template only required because we can't do auto [...handler] =
@@ -610,7 +610,6 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
   }
 
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
-
     // The syscall_result.has_value() check means that we only
     // override syscall_result (by returning Exit) in a subset
     // of the cases covered by the is_handleable_error guard.
@@ -627,10 +626,13 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     return syscall_result;
   }();
 
-  GasAmount gas_remaining_at_end = gas_remaining > gas_consumed.get() ? gas_remaining - gas_consumed.get() : 0;
+  GasAmount gas_remaining_at_end = gas_remaining > gas_consumed.get()
+                                       ? gas_remaining - gas_consumed.get()
+                                       : 0;
   handler.finish_syscall_trace(syscall_result, gas_remaining_at_end);
 
-  return {syscall_result, std::min<GasAmount>(gas_consumed.get(), gas_remaining)};
+  return {syscall_result,
+          std::min<GasAmount>(gas_consumed.get(), gas_remaining)};
 }
 
 // Wraps a call to an inner syscall with checks to load syscall arguments
@@ -638,11 +640,10 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-wrap_outer(SystemCallHandler &handler,
-           WasmContext wasm_context, SyscallNo syscall_no,
-           uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-           uint64_t arg5, uint64_t arg6, uint64_t arg7, uint64_t arg8,
-           uint64_t arg9, uint64_t arg10) noexcept
+wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
+           SyscallNo syscall_no, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+           uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7,
+           uint64_t arg8, uint64_t arg9, uint64_t arg10) noexcept
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
@@ -650,7 +651,8 @@ wrap_outer(SystemCallHandler &handler,
   auto input_args =
       std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10};
 
-  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(wasm_context.memory.mem),
+  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(
+                                                wasm_context.memory.mem),
                                             wasm_context.memory.sz);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
@@ -663,7 +665,8 @@ wrap_outer(SystemCallHandler &handler,
                                         typename syscall_t::template arg_i<Is>>(
         guard, contract_memory_span, input_args)...};
 
-    return wrap_after_parse<SyscallMeta>(guard, handler, wasm_context.gas_remaining, syscall_no,
+    return wrap_after_parse<SyscallMeta>(guard, handler,
+                                         wasm_context.gas_remaining, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::debug_log;
 use common::string_from_parts;
 use common::LinearMemorySlice;
-use common::WasmContext;
 use common::LinkEntry;
+use common::WasmContext;
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker,
@@ -76,7 +76,7 @@ macro_rules! link_function_nargs {
 
                     assert!(gas_consumed <= gas_remaining);
                     caller.set_fuel(gas_remaining - gas_consumed).unwrap();
-                    
+
                     res.map_err(|error| wasmtime::Error::new(TrampolineError { error }))
                 })
                 .map_err(Into::into)

@@ -47,8 +47,9 @@ public:
     }(std::make_index_sequence<sizeof...(Args)>{});
 
     // std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-    auto [res, gas_consumed] = wrap_after_parse<Meta>(guard, handler_, gas_remaining(), Meta::kSyscallNo,
-                                  parsed);
+    auto [res, gas_consumed] =
+        wrap_after_parse<Meta>(guard, handler_, gas_remaining(),
+                               Meta::kSyscallNo, parsed);
 
     consume_gas(gas_consumed);
     return res;
@@ -56,28 +57,33 @@ public:
 
   SystemCallHandler &handler() { return handler_; }
 
-  GasAmount gas_remaining() const {
+  GasAmount gas_remaining() const
+  {
     if (gas_consumed_ > initial_gas_amount_) {
       return 0;
     }
     return initial_gas_amount_ - gas_consumed_;
   }
 
-  GasAmount total_gas_consumed() const {
+  GasAmount total_gas_consumed() const
+  {
     return initial_gas_amount_ - gas_remaining();
   }
 
-  bool consume_gas(GasAmount amount) {
+  bool consume_gas(GasAmount amount)
+  {
     auto [sum, of] = overflowing_add(amount, gas_consumed_);
     std::println("consume_gas: {} + {} = {}", gas_consumed_, amount, sum);
 
     if (of) {
       gas_consumed_ = std::numeric_limits<GasAmount>::max();
-    } else {
+    }
+    else {
       gas_consumed_ = sum;
     }
 
-    std::println("Gas consumed: {}, initial_gas_amount_: {}", gas_consumed_, initial_gas_amount_);
+    std::println("Gas consumed: {}, initial_gas_amount_: {}", gas_consumed_,
+                 initial_gas_amount_);
 
     return initial_gas_amount_ > gas_consumed_;
   }
@@ -86,8 +92,6 @@ private:
   SystemCallHandler &handler_;
   const GasAmount initial_gas_amount_;
   GasAmount gas_consumed_ = 0;
-
-
 
   // Convert a native arg to the parsed form that wrap_after_parse expects.
   //

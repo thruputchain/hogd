@@ -387,14 +387,14 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
   // T1: Consumer TX. Propose consume.
   auto handler_t1 = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = contract_address_,
-                                 .entrypoint =
-                                     entrypoint_from_method_id(1), // Consume
-                                 .gas_limit = UINT64_MAX, 
-                                 .calldata = Calldata({1}),}}}, // Consume 1 item
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = contract_address_,
+                                    .entrypoint =
+                                        entrypoint_from_method_id(1), // Consume
+                                    .gas_limit = UINT64_MAX,
+                                    .calldata = Calldata({1}),
+                                }}}, // Consume 1 item
       *context_);
   ASSERT_TRUE(handler_t1.root_invoke().is_root_success());
   // At this point, T1's RetrocausalQueueIt should have consumed_past_entries_
@@ -408,7 +408,7 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX, 
+                                           .gas_limit = UINT64_MAX,
                                            .calldata = Calldata({5, 4})}}},
       *context_);
   ASSERT_TRUE(handler_t2.root_invoke().is_root_success());
@@ -455,7 +455,7 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    1), // Consume
-                                           .gas_limit = UINT64_MAX, 
+                                           .gas_limit = UINT64_MAX,
                                            .calldata = Calldata({2})}}},
       *context_);
   ASSERT_TRUE(handler_consume.root_invoke().is_root_success());
@@ -467,7 +467,7 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX, 
+                                           .gas_limit = UINT64_MAX,
                                            .calldata = Calldata({9})}}},
       *context_);
   ASSERT_TRUE(handler_insert.root_invoke().is_root_success());
@@ -834,7 +834,7 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                   .invocation =
                       Invocation{.invoked_address = contract_address_,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX, 
+                                 .gas_limit = UINT64_MAX,
                                  .calldata =
                                      Calldata(values.begin(), values.end())}}},
       *context_);
@@ -846,7 +846,7 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                   .invocation =
                       Invocation{.invoked_address = contract_address_,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX, 
+                                 .gas_limit = UINT64_MAX,
                                  .calldata =
                                      Calldata(values.begin(), values.end())}}},
       *context_);
@@ -900,7 +900,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
                                    .entrypoint = entrypoint_from_method_id(5),
-                                   .gas_limit = UINT64_MAX, 
+                                   .gas_limit = UINT64_MAX,
                                    .calldata = Calldata({0x2f})}}},
         *context);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
@@ -922,7 +922,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX, 
+                                   .gas_limit = UINT64_MAX,
                                    .calldata = Calldata({0x41})}}},
         *context);
     ASSERT_TRUE(handler1.root_invoke().is_root_success());
@@ -936,7 +936,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX, 
+                                   .gas_limit = UINT64_MAX,
                                    .calldata =
                                        Calldata({0x07, 0x02, 0x42, 0x43})}}},
         *context);

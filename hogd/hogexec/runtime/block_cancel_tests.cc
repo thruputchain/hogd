@@ -123,8 +123,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_writer, 0, UINT64_MAX,
-                     ctx.handler().get_calldata(),
+                     addr_writer, 0, UINT64_MAX, ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);

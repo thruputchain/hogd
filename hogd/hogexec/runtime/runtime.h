@@ -257,7 +257,8 @@ public:
 
 protected:
   // Invariant:  The returned GasAmount must be <= the input gas_limit
-  virtual std::pair<InvokeStatus<void>, GasAmount> invoke_internal(std::string_view method_name, uint64_t gas_limit) = 0;
+  virtual std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };

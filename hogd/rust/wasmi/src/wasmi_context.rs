@@ -7,8 +7,8 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
-use crate::wasmi_debug_log as debug_log;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::wasmi_debug_log as debug_log;
 use crate::wasmi_error::TrampolineError;
 use crate::wasmi_runtime::check_memory_limit;
 use crate::SHA256Hash;
@@ -209,7 +209,7 @@ macro_rules! link_function_nargs {
 
                     assert!(gas_consumed <= gas_remaining);
                     caller.set_fuel(gas_remaining - gas_consumed).unwrap();
-                    
+
                     res.map_err(|error| Error::host(TrampolineError { error }))
                 })
                 .map_err(Into::into)

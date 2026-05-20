@@ -122,8 +122,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_storage, 0, UINT64_MAX,
-                     ctx.handler().get_calldata(),
+                     addr_storage, 0, UINT64_MAX, ctx.handler().get_calldata(),
                      std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
@@ -137,8 +136,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_storage, 1, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     addr_storage, 1, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -379,8 +378,7 @@ make_try_invoke_handle_errors_context()
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kTryInvokeHandleErrorsWriter, 0,
-                   UINT64_MAX, Calldata{},
+                   kTryInvokeHandleErrorsWriter, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -392,8 +390,7 @@ make_try_invoke_handle_errors_context()
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kTryInvokeHandleErrorsWriter, 1,
-                   UINT64_MAX, Calldata{},
+                   kTryInvokeHandleErrorsWriter, 1, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -409,8 +406,7 @@ make_try_invoke_handle_errors_context()
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kTryInvokeHandleErrorsWriter, 0,
-                   UINT64_MAX, Calldata{},
+                   kTryInvokeHandleErrorsWriter, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -430,8 +426,7 @@ make_try_invoke_handle_errors_context()
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kTryInvokeHandleErrorsWriter, 0,
-                   UINT64_MAX, Calldata{},
+                   kTryInvokeHandleErrorsWriter, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -451,8 +446,7 @@ make_try_invoke_handle_errors_context()
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kTryInvokeHandleErrorsFault, 0,
-                   UINT64_MAX, Calldata{},
+                   kTryInvokeHandleErrorsFault, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -463,8 +457,7 @@ make_try_invoke_handle_errors_context()
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kTryInvokeHandleErrorsWriter, 1,
-                   UINT64_MAX, Calldata{},
+                   kTryInvokeHandleErrorsWriter, 1, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -826,8 +819,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressWriter, 0, UINT64_MAX,
-                     args_hello, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, UINT64_MAX, args_hello,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -842,8 +835,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressWriter, 0, UINT64_MAX,
-                     args_world, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, UINT64_MAX, args_world,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -863,8 +856,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressWriter, 0, UINT64_MAX,
-                     args_foo, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, UINT64_MAX, args_foo,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -991,8 +984,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressWriter, 0, UINT64_MAX,
-                     args_hello, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, UINT64_MAX, args_hello,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -1007,8 +1000,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressWriter, 0, UINT64_MAX,
-                     args_world, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, UINT64_MAX, args_world,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -1028,8 +1021,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                    kAddressWriter, 0, UINT64_MAX,
-                     args_foo, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressWriter, 0, UINT64_MAX, args_foo,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -1352,8 +1345,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     writer_addr, 0, UINT64_MAX,
-                     args_first_invoke,
+                     writer_addr, 0, UINT64_MAX, args_first_invoke,
                      std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
@@ -1373,8 +1365,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     writer_addr, 0, UINT64_MAX,
-                     args_second_invoke,
+                     writer_addr, 0, UINT64_MAX, args_second_invoke,
                      std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
@@ -1404,8 +1395,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     writer_addr, 0, UINT64_MAX,
-                     args_invoke, std::to_underlying(InvokeFlag::TryInvoke),
+                     writer_addr, 0, UINT64_MAX, args_invoke,
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -1665,7 +1656,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
              auto key0 = make_storage_key("test0");
              auto key1 = make_storage_key("test1");
              auto res0 = ctx.syscall<SyscallNo::kBytestringSet>(
-                key0, std::as_bytes(std::span(str_abc)),
+                 key0, std::as_bytes(std::span(str_abc)),
                  std::to_underlying(StorageDeltaFlags::None));
              if (!res0.has_value() ||
                  res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1674,7 +1665,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              auto res1 = ctx.syscall<SyscallNo::kBytestringSet>(
-                key1, std::as_bytes(std::span(str_def)),
+                 key1, std::as_bytes(std::span(str_def)),
                  std::to_underlying(StorageDeltaFlags::None));
              if (!res1.has_value() ||
                  res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1694,8 +1685,8 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -1711,8 +1702,8 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -1860,8 +1851,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -1874,8 +1865,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -1888,8 +1879,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 2, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 2, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2057,8 +2048,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2071,8 +2062,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2085,8 +2076,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 2, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 2, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2221,8 +2212,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2235,8 +2226,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2376,8 +2367,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2399,8 +2390,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -2414,8 +2405,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressTryInvokeThenError, 0,
-                   UINT64_MAX, Calldata{},
+                   kAddressTryInvokeThenError, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -2557,10 +2547,9 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   receiver_addr, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::None),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
+                   receiver_addr, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              [[maybe_unused]] auto g_receive = GasAmount{0};
 
@@ -2766,8 +2755,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
             RuntimeMemoryLength output_return_buffer_len = 0,
                                 output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
-                kNNIntInterleavingWriter, 1, UINT64_MAX,
-                calldata0, std::to_underlying(InvokeFlag::TryInvoke),
+                kNNIntInterleavingWriter, 1, UINT64_MAX, calldata0,
+                std::to_underlying(InvokeFlag::TryInvoke),
                 std::span<uint32_t>{}, output_return_buffer_len,
                 output_returned_auth_token_len);
           }();
@@ -2785,8 +2774,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
             RuntimeMemoryLength output_return_buffer_len = 0,
                                 output_returned_auth_token_len = 0;
             return ctx.syscall<SyscallNo::kInvoke>(
-                kNNIntInterleavingWriter, 0, UINT64_MAX,
-                calldata1, std::to_underlying(InvokeFlag::TryInvoke),
+                kNNIntInterleavingWriter, 0, UINT64_MAX, calldata1,
+                std::to_underlying(InvokeFlag::TryInvoke),
                 std::span<uint32_t>{}, output_return_buffer_len,
                 output_returned_auth_token_len);
           }();
@@ -3175,8 +3164,8 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -3202,8 +3191,8 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressMiddle, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressMiddle, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -3222,8 +3211,8 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressWriter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                   kAddressWriter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -3347,8 +3336,8 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressTarget, method, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressTarget, method, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                };
@@ -3455,8 +3444,8 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressTarget, method, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressTarget, method, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                };
@@ -3531,8 +3520,8 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
                for (int i = 0; i < kChildCap + 1; i++) {
                  RuntimeMemoryLength out_ret = 0, out_auth = 0;
                  auto r = ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressNoop, 0, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressNoop, 0, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, out_ret, out_auth);
                  if (!r.has_value()) {
                    return InvokeError{InvokeErrorCode::Deterministic};
@@ -3603,8 +3592,8 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
                for (int i = 0; i < kChildCap + 1; i++) {
                  RuntimeMemoryLength out_ret = 0, out_auth = 0;
                  auto r = ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressNoop, 0, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
+                     kAddressNoop, 0, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::TryInvoke),
                      std::span<uint32_t>{}, out_ret, out_auth);
                  if (!r.has_value()) {
                    return InvokeError{InvokeErrorCode::Deterministic};

@@ -340,9 +340,9 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
                return ctx.syscall<SyscallNo::kInvoke>(
                    native_token_addr,
                    sdk_method_id(erc20_meta::entrypoint<"transfer">()),
-                   UINT64_MAX, calldata1,
-                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+                   UINT64_MAX, calldata1, std::to_underlying(InvokeFlag::None),
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
 
              if (!r2.has_value()) {

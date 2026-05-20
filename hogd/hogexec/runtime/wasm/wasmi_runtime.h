@@ -117,7 +117,8 @@ public:
   ~WasmiRuntime() override;
 
 private:
-  std::pair<InvokeStatus<void>, GasAmount> invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;

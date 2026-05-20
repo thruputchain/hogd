@@ -192,8 +192,7 @@ WasmiRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
   WasmiInvokeResult res =
       wasmi_invoke(wasmi_runtime_ptr_,
                    reinterpret_cast<const uint8_t *>(method_name.data()),
-                   method_name.size(),
-                   gas_limit);
+                   method_name.size(), gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
   trace("Wasmi Invoke Result: {}",

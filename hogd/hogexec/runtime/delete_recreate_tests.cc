@@ -146,8 +146,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 1, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 1, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -160,8 +160,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 0, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -313,8 +313,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 1, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 1, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -327,8 +327,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 0, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -481,8 +481,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 1, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 1, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -495,8 +495,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     kAddressStorage, 0, UINT64_MAX,
-                     Calldata{}, std::to_underlying(InvokeFlag::None),
+                     kAddressStorage, 0, UINT64_MAX, Calldata{},
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();

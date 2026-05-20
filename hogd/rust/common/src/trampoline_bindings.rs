@@ -12,12 +12,19 @@ impl Into<(Result<i32, HostFnErrorCode>, u64)> for TrampolineResult {
         let panic: HostFnErrorCode = {
             match self.panic.try_into() {
                 Ok(panic) => panic,
-                Err(_) => return (Err(HostFnErrorCode::Unrecoverable), self.gas_consumed),
+                Err(_) => {
+                    return (
+                        Err(HostFnErrorCode::Unrecoverable),
+                        self.gas_consumed,
+                    )
+                }
             }
         };
 
         match panic {
-            HostFnErrorCode::NoneOrRecoverable => (Ok(self.result_code), self.gas_consumed),
+            HostFnErrorCode::NoneOrRecoverable => {
+                (Ok(self.result_code), self.gas_consumed)
+            }
             _ => (Err(panic), self.gas_consumed),
         }
     }

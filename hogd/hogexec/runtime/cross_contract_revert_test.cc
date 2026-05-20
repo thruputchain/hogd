@@ -96,9 +96,9 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_b_addr, 0, UINT64_MAX,
-                   Calldata{}, 0, std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+                   contract_b_addr, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -250,9 +250,9 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                  contract_b_addr, 0, UINT64_MAX,
-                   Calldata{}, 0, std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+                   contract_b_addr, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -304,9 +304,9 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_c_addr, 0, UINT64_MAX,
-                   Calldata{}, 0, std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+                   contract_c_addr, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};
@@ -464,9 +464,9 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   contract_b_addr, 0, UINT64_MAX,
-                   Calldata{}, 0, std::span<uint32_t>{},
-                   output_return_buffer_len, output_returned_auth_token_len);
+                   contract_b_addr, 0, UINT64_MAX, Calldata{}, 0,
+                   std::span<uint32_t>{}, output_return_buffer_len,
+                   output_returned_auth_token_len);
              }();
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::Deterministic};

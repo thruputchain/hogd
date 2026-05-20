@@ -113,10 +113,9 @@ TEST_F(EventTest, EventSuccess)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_emitter, 0, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::None),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
+                   addr_emitter, 0, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              [[maybe_unused]] auto gas = GasAmount{0};
              if (!status.has_value()) {
@@ -131,10 +130,9 @@ TEST_F(EventTest, EventSuccess)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_emitter, 1, UINT64_MAX,
-                   Calldata{}, std::to_underlying(InvokeFlag::None),
-                   std::span<uint32_t>{}, output_return_buffer_len,
-                   output_returned_auth_token_len);
+                   addr_emitter, 1, UINT64_MAX, Calldata{},
+                   std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+                   output_return_buffer_len, output_returned_auth_token_len);
              }();
              [[maybe_unused]] auto gas2 = GasAmount{0};
              if (!status2.has_value()) {
@@ -648,8 +646,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_emitter, 0, UINT64_MAX,
-                     calldata, std::to_underlying(InvokeFlag::None),
+                     addr_emitter, 0, UINT64_MAX, calldata,
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -681,8 +679,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                  RuntimeMemoryLength output_return_buffer_len = 0,
                                      output_returned_auth_token_len = 0;
                  return ctx.syscall<SyscallNo::kInvoke>(
-                     addr_emitter, 0, UINT64_MAX,
-                     calldata, std::to_underlying(InvokeFlag::None),
+                     addr_emitter, 0, UINT64_MAX, calldata,
+                     std::to_underlying(InvokeFlag::None),
                      std::span<uint32_t>{}, output_return_buffer_len,
                      output_returned_auth_token_len);
                }();
@@ -715,8 +713,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    RuntimeMemoryLength output_return_buffer_len = 0,
                                        output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_emitter, 0, UINT64_MAX,
-                       calldata, std::to_underlying(InvokeFlag::None),
+                       addr_emitter, 0, UINT64_MAX, calldata,
+                       std::to_underlying(InvokeFlag::None),
                        std::span<uint32_t>{}, output_return_buffer_len,
                        output_returned_auth_token_len);
                  }();
@@ -740,8 +738,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    RuntimeMemoryLength output_return_buffer_len = 0,
                                        output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_manual_revert, 0, UINT64_MAX,
-                       Calldata{}, std::to_underlying(InvokeFlag::None),
+                       addr_manual_revert, 0, UINT64_MAX, Calldata{},
+                       std::to_underlying(InvokeFlag::None),
                        std::span<uint32_t>{}, output_return_buffer_len,
                        output_returned_auth_token_len);
                  }();
@@ -768,8 +766,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    RuntimeMemoryLength output_return_buffer_len = 0,
                                        output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_emitter, 0, UINT64_MAX,
-                       calldata, std::to_underlying(InvokeFlag::None),
+                       addr_emitter, 0, UINT64_MAX, calldata,
+                       std::to_underlying(InvokeFlag::None),
                        std::span<uint32_t>{}, output_return_buffer_len,
                        output_returned_auth_token_len);
                  }();
@@ -793,8 +791,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    RuntimeMemoryLength output_return_buffer_len = 0,
                                        output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_deterministic, 0, UINT64_MAX,
-                       Calldata{}, std::to_underlying(InvokeFlag::None),
+                       addr_deterministic, 0, UINT64_MAX, Calldata{},
+                       std::to_underlying(InvokeFlag::None),
                        std::span<uint32_t>{}, output_return_buffer_len,
                        output_returned_auth_token_len);
                  }();
@@ -821,8 +819,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
                    RuntimeMemoryLength output_return_buffer_len = 0,
                                        output_returned_auth_token_len = 0;
                    return ctx.syscall<SyscallNo::kInvoke>(
-                       addr_emitter, 0, UINT64_MAX,
-                       calldata, std::to_underlying(InvokeFlag::None),
+                       addr_emitter, 0, UINT64_MAX, calldata,
+                       std::to_underlying(InvokeFlag::None),
                        std::span<uint32_t>{}, output_return_buffer_len,
                        output_returned_auth_token_len);
                  }();

@@ -104,7 +104,8 @@ public:
   bool get_module_stats(WasmtimeModuleStats *stats_out) const noexcept;
 
 private:
-  std::pair<InvokeStatus<void>, GasAmount> invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   // manipulated in rust
   void *wasmtime_runtime_ptr_;

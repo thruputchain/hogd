@@ -39,26 +39,23 @@ NativeContract::invoke(Runtime::MethodID method,
   NativeSyscallContext ctx(syscall_handler, gas_limit);
   auto status = (*fn)(ctx);
 
-
   GasAmount gas_consumed = ctx.total_gas_consumed();
   CHECK(gas_consumed <= gas_limit);
 
   std::println("NativeContract::invoke gas_consumed: {}", gas_consumed);
 
   if (!status.has_value()) {
-    switch (status.error().code())
-    {
-      case InvokeErrorCode::Unrecoverable:
-      case InvokeErrorCode::ValidationFailure:
-      case InvokeErrorCode::Abandon:
-      case InvokeErrorCode::OutOfGas:
-        return {status, gas_consumed};
-      case InvokeErrorCode::None:
-      case InvokeErrorCode::Deterministic:
-        // nothing to do
+    switch (status.error().code()) {
+    case InvokeErrorCode::Unrecoverable:
+    case InvokeErrorCode::ValidationFailure:
+    case InvokeErrorCode::Abandon:
+    case InvokeErrorCode::OutOfGas:
+      return {status, gas_consumed};
+    case InvokeErrorCode::None:
+    case InvokeErrorCode::Deterministic:
+      // nothing to do
     }
   }
-
 
   // These are the only error codes that can get upgraded to OutOfGas
   if (gas_limit == gas_consumed) {

@@ -510,7 +510,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
       start_frame(invocation, flags, owned_auth_token_ids);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
-  std::println("cumulative_result consumed: {}", cumulative_result.gas_consumed_);
+  std::println("cumulative_result consumed: {}",
+               cumulative_result.gas_consumed_);
 
   auto finish_status =
       finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));
@@ -640,13 +641,13 @@ SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
     CHECK(!invocation_frame_trace_->system_calls.empty());
     // field is uninitialized
     CHECK_EQ(invocation_frame_trace_->system_calls.back().gas_remaining_at_end,
-           std::numeric_limits<GasAmount>::max());
+             std::numeric_limits<GasAmount>::max());
     invocation_frame_trace_->system_calls.back().gas_remaining_at_end =
         gas_remaining_at_end;
 
     // field is uninitialized
     CHECK_EQ(invocation_frame_trace_->system_calls.back().status.error(),
-           HostFnErrorCode::Unrecoverable);
+             HostFnErrorCode::Unrecoverable);
     auto &status_field = invocation_frame_trace_->system_calls.back().status;
     if (status.has_value()) {
       status_field.error(HostFnErrorCode::NoneOrRecoverable);

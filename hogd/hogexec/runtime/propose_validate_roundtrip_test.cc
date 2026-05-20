@@ -915,10 +915,9 @@ TEST_P(ProposeValidateRoundtripTest,
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, UINT64_MAX,
-              make_index_calldata(i), std::to_underlying(InvokeFlag::TryInvoke),
-              std::span<uint32_t>{}, output_return_buffer_len,
-              output_returned_auth_token_len);
+              kAddrB, 0, UINT64_MAX, make_index_calldata(i),
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }

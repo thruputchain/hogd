@@ -16,7 +16,10 @@ pub struct TrampolineError {
 }
 
 impl TrampolineError {
-    pub fn to_wasmi_invoke_result(self, gas_consumed: u64) -> WasmiInvokeResult {
+    pub fn to_wasmi_invoke_result(
+        self,
+        gas_consumed: u64,
+    ) -> WasmiInvokeResult {
         to_invoke_result(self.error).map_or_else(
             |err| WasmiInvokeResult::error(err, gas_consumed),
             |_| WasmiInvokeResult::success(gas_consumed),

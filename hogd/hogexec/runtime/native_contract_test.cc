@@ -289,8 +289,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               kAddressMiddle, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
               output_return_buffer_len, output_returned_auth_token_len);
-          return std::pair{invoke_status,
-                           gas_before - ctx.gas_remaining()};
+          return std::pair{invoke_status, gas_before - ctx.gas_remaining()};
         }();
         auto const &[invoke_status, g] = r;
         if (!invoke_status.has_value()) {
@@ -370,27 +369,27 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
+            kAddressConsumer, 0, 256, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+            output_return_buffer_len, output_returned_auth_token_len);
+        if (!invoke_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-          RuntimeMemoryLength output_return_buffer_len = 0,
-                              output_returned_auth_token_len = 0;
-          auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
-              kAddressConsumer, 0, 256, Calldata{0x00, 0x00, 0x00, 0xFF},
-              std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
-              output_return_buffer_len, output_returned_auth_token_len);
-          if (!invoke_status.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-
-          invoke_status = ctx.syscall<SyscallNo::kInvoke>(
+        invoke_status = ctx.syscall<SyscallNo::kInvoke>(
             kAddressConsumer, 0, 255, Calldata{0x00, 0x00, 0x00, 0xFF},
             std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
             output_return_buffer_len, output_returned_auth_token_len);
-          if (!invoke_status.has_value() || invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+        if (!invoke_status.has_value() ||
+            invoke_status.value() !=
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-          return {};
-          
+        return {};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -402,8 +401,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
-  ContractAddress const deployment_addrs[] = {kAddressConsumer,
-                                              kAddressEntry};
+  ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
     Contract contract(ContractType::kNative);
     contract.native_contract_id() =

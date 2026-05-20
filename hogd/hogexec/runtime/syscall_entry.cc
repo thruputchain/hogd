@@ -24,9 +24,9 @@ namespace hogd {
 namespace {
 
 using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> (*)(
-    SystemCallHandler &, WasmContext, SyscallNo, uint64_t,
-    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
-    uint64_t, uint64_t) noexcept;
+    SystemCallHandler &, WasmContext, SyscallNo, uint64_t, uint64_t, uint64_t,
+    uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+    uint64_t) noexcept;
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
@@ -47,9 +47,8 @@ constexpr auto kSyscallTable =
 // returns gas_consumed, syscall error>
 template<std::same_as<uint64_t>... Args>
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_entry_inner(HostCallContext *call_context,
-                    WasmContext wasm_context, uint64_t syscall_no,
-                    Args... args) noexcept
+syscall_entry_inner(HostCallContext *call_context, WasmContext wasm_context,
+                    uint64_t syscall_no, Args... args) noexcept
 {
   SyscallFunc syscall_fn = nullptr;
   assert(call_context->syscall_handler);
@@ -77,19 +76,17 @@ syscall_entry_inner(HostCallContext *call_context,
     }
   }
 
-  return syscall_fn(*call_context->syscall_handler,
-                    wasm_context, static_cast<SyscallNo>(syscall_no),
-                    args...);
+  return syscall_fn(*call_context->syscall_handler, wasm_context,
+                    static_cast<SyscallNo>(syscall_no), args...);
 }
 
 } // namespace
 
 extern "C" TrampolineResult
-syscall_entry(ExternHostCallContext call_context,
-              WasmContext wasm_context, uint64_t arg0, uint64_t arg1,
-              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-              uint64_t arg6, uint64_t arg7, uint64_t arg8, uint64_t arg9,
-              uint64_t arg10)
+syscall_entry(ExternHostCallContext call_context, WasmContext wasm_context,
+              uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+              uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7,
+              uint64_t arg8, uint64_t arg9, uint64_t arg10)
 {
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");

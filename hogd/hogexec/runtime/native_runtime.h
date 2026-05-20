@@ -70,9 +70,9 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  std::pair<InvokeStatus<void>, GasAmount> invoke(Runtime::MethodID method,
-                            SystemCallHandler &syscall_handler,
-                            uint64_t gas_limit) const;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
+         uint64_t gas_limit) const;
 
 private:
   const function_t *find_function(Runtime::MethodID method) const;
@@ -127,7 +127,8 @@ public:
   ~NativeRuntime() override = default;
 
 private:
-  std::pair<InvokeStatus<void>, GasAmount> invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   NativeContract &contract_;
 };

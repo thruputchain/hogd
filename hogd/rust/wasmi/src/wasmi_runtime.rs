@@ -146,7 +146,7 @@ impl WasmiRuntime {
                 debug_log!(eprintln!("Function {method} not found"));
                 return WasmiInvokeResult::error(
                     InvokeErrorCode::Deterministic,
-                    0
+                    0,
                 );
             }
         };
@@ -168,7 +168,10 @@ impl WasmiRuntime {
         let gas_remaining = match self.store.get_fuel() {
             Ok(fuel) => fuel,
             Err(_) => {
-                return WasmiInvokeResult::error(InvokeErrorCode::Unrecoverable, 0);
+                return WasmiInvokeResult::error(
+                    InvokeErrorCode::Unrecoverable,
+                    0,
+                );
             }
         };
         let gas_consumed = gas_limit - gas_remaining;
@@ -177,14 +180,20 @@ impl WasmiRuntime {
             Ok(_) => WasmiInvokeResult::success(gas_consumed),
             Err(err) => {
                 if let Some(trap_code) = err.as_trap_code() {
-                    return WasmiInvokeResult::from_wasmi_trap_code(trap_code, gas_consumed);
+                    return WasmiInvokeResult::from_wasmi_trap_code(
+                        trap_code,
+                        gas_consumed,
+                    );
                 }
                 err.downcast_ref::<TrampolineError>().map_or_else(
                     || {
                         debug_log!(eprintln!(
                             "Unknown error from func.call: {err:?}"
                         ));
-                        WasmiInvokeResult::error(InvokeErrorCode::Unrecoverable, gas_consumed)
+                        WasmiInvokeResult::error(
+                            InvokeErrorCode::Unrecoverable,
+                            gas_consumed,
+                        )
                     },
                     |trampoline_error| {
                         trampoline_error.to_wasmi_invoke_result(gas_consumed)
@@ -217,7 +226,9 @@ pub unsafe extern "C" fn wasmi_invoke(
 
     let string = match std::str::from_utf8(method_name_slice) {
         Ok(v) => v,
-        _ => return WasmiInvokeResult::error(InvokeErrorCode::Deterministic, 0),
+        _ => {
+            return WasmiInvokeResult::error(InvokeErrorCode::Deterministic, 0)
+        }
     };
 
     let r = unsafe { &mut *runtime };
