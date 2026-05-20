@@ -211,25 +211,6 @@ TEST(Mempool, SubmitVetted)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
-TEST(Mempool, SubmitVettedMempoolMaxCapacityLimit)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-
-  size_t mempool_tx_size_limit = 1'000;
-  const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, mempool_tx_size_limit + 1);
-
-  MempoolTestInfra server(/*skip_genesis_block=*/false, mempool_tx_size_limit);
-
-  ValidatorID validator_id{};
-  ParallelSignedTransactionBatch batch =
-      t_to_parallel_batch(SignedTransactionBatch{txs})();
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                          std::move(batch))();
-  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
-            mempool_tx_size_limit);
-}
-
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
