@@ -189,7 +189,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   {
     // [scheduler_->size()] may have changed since we last checked it above, so
-    // we read it again here. Importantly, we do this under while holding
+    // we read it again here. Importantly, we do this while holding
     // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond the
     // mempool tx capacity limit.
     size_t scheduler_size = scheduler_->size();
@@ -292,7 +292,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   {
     // [scheduler_->size()] may have changed since we last checked it above, so
-    // we read it again here. Importantly, we do this under while holding
+    // we read it again here. Importantly, we do this while holding
     // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond the
     // mempool tx capacity limit.
     size_t scheduler_size = scheduler_->size();
