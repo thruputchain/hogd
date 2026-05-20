@@ -73,7 +73,9 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra(bool skip_genesis_block = false);
+  MempoolTestInfra(bool skip_genesis_block = false,
+                   size_t mempool_tx_size_limit =
+                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
 
   ~MempoolTestInfra()
   {
@@ -364,8 +366,7 @@ private:
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
-  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(), kNetworkId);
+  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_;
   RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
