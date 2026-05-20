@@ -113,8 +113,8 @@ static_assert(std::is_trivially_copyable_v<ItemHeader>);
 // Loglet::free() constructs std::atomic_ref<ItemStorage> over item->storage
 // to write the tombstone marker; the standard requires the referenced object
 // to satisfy atomic_ref::required_alignment.
-static_assert(
-    alignof(ItemHeader) >= std::atomic_ref<ItemStorage>::required_alignment);
+static_assert(alignof(ItemHeader) >=
+              std::atomic_ref<ItemStorage>::required_alignment);
 static_assert(offsetof(ItemHeader, storage) %
                   std::atomic_ref<ItemStorage>::required_alignment ==
               0);
