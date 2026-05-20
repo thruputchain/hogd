@@ -14,6 +14,7 @@
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -51,7 +52,7 @@ NativeContract::invoke(Runtime::MethodID method,
       return {status, gas_consumed};
     case InvokeErrorCode::None:
     case InvokeErrorCode::Deterministic:
-      // nothing to do
+      break;
     }
   }
 

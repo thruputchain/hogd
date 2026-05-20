@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/trampoline_result.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "types.hh"
 
 namespace hogd {
 

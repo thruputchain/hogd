@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "contract.hh"

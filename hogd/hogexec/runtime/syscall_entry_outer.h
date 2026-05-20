@@ -605,7 +605,10 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 
   if (is_handleable_error) {
     if (gas_consumed.get() >= gas_remaining) {
-      return {HostFnError{HostFnErrorCode::OutOfGas}, gas_remaining};
+      auto oog = HostFnStatus<SyscallErrorCode>{
+          HostFnError{HostFnErrorCode::OutOfGas}};
+      handler.finish_syscall_trace(oog, 0);
+      return {oog, gas_remaining};
     }
   }
 
