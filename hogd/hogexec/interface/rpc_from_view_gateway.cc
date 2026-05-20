@@ -102,8 +102,17 @@ ViewGatewayRpc::shut_down()
   shutdown_flag_.notify_all();
 
   std::scoped_lock g(view_state_mutex_);
-  for (auto &[block_id, arc] : view_states_) {
-    arc.initiate_shutdown();
+  for (auto it = view_states_.begin(); it != view_states_.end();) {
+    if (it->second.initiate_shutdown()) {
+      auto close_res = db_proxy_.close_viewing_snapshot(it->first);
+      if (!close_res.has_value()) {
+        warn("viewgateway: failed to close viewing snapshot {} on shutdown",
+             it->first);
+      }
+      it = view_states_.erase(it);
+    } else {
+      ++it;
+    }
   }
   current_view_block_id_ = 0;
 }
@@ -178,7 +187,8 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 
     auto *state = get_current_view_state();
     if (!state) {
-      continue;
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
     }
 
     BlockID state_block_id = state->get().block_id;
