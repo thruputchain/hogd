@@ -207,25 +207,7 @@ macro_rules! link_function_nargs {
                         )
                     }.into();
 
-                    // make sure that out of gas does not overwrite a critical error
-                    match res {
-                        Ok(_) => (),
-                        Err(common::HostFnErrorCode::Unrecoverable) => {
-                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::Unrecoverable }));
-                        }
-                        Err(common::HostFnErrorCode::Abandon) => {
-                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::Abandon }));
-                        }
-                        Err(common::HostFnErrorCode::ValidationFailure) => {
-                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::ValidationFailure }));
-                        }
-                        _ => ()
-                    }
-
-                    if gas_consumed >= gas_remaining {
-                        return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::OutOfGas }));
-                    }
-
+                    assert!(gas_consumed <= gas_remaining);
                     caller.set_fuel(gas_remaining - gas_consumed).unwrap();
                     
                     res.map_err(|error| Error::host(TrampolineError { error }))

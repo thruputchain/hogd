@@ -510,6 +510,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
       start_frame(invocation, flags, owned_auth_token_ids);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
+  std::println("cumulative_result consumed: {}", cumulative_result.gas_consumed_);
 
   auto finish_status =
       finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));
@@ -617,7 +618,7 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
     invocation_frame_trace_->system_calls.push_back(SyscallTrace{
         .gas_remaining_at_start = current_gas_remaining,
         // This field is filled in when the syscall finishes.
-        .gas_remaining_at_end = current_gas_remaining,
+        .gas_remaining_at_end = std::numeric_limits<GasAmount>::max(),
         // This field is filled in by the individual syscall
         .body = SyscallTraceBody(syscall_number),
         // This field is filled in when the syscall finishes.
@@ -636,15 +637,15 @@ SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
   }
 
   if (invocation_frame_trace_) {
-    assert(!invocation_frame_trace_->system_calls.empty());
+    CHECK(!invocation_frame_trace_->system_calls.empty());
     // field is uninitialized
-    assert(invocation_frame_trace_->system_calls.back().gas_remaining_at_end ==
-           invocation_frame_trace_->system_calls.back().gas_remaining_at_start);
+    CHECK_EQ(invocation_frame_trace_->system_calls.back().gas_remaining_at_end,
+           std::numeric_limits<GasAmount>::max());
     invocation_frame_trace_->system_calls.back().gas_remaining_at_end =
         gas_remaining_at_end;
 
     // field is uninitialized
-    assert(invocation_frame_trace_->system_calls.back().status.error() ==
+    CHECK_EQ(invocation_frame_trace_->system_calls.back().status.error(),
            HostFnErrorCode::Unrecoverable);
     auto &status_field = invocation_frame_trace_->system_calls.back().status;
     if (status.has_value()) {

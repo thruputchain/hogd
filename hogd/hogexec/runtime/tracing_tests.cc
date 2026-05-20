@@ -35,6 +35,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class TracingTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   TracingTest()
@@ -281,7 +282,7 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
                                  output_returned_auth_token_len = 0;
              Calldata calldata{};
              auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 target_addr, 0, ctx.runtime().get_available_gas(),
+                 target_addr, 0, UINT64_MAX,
                  std::as_bytes(std::span(calldata)), 0, std::span<uint32_t>{},
                  output_return_buffer_len, output_returned_auth_token_len);
 
@@ -365,7 +366,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
                                  output_returned_auth_token_len = 0;
              Calldata calldata{};
              auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 callee_addr, 0, ctx.runtime().get_available_gas(),
+                 callee_addr, 0, UINT64_MAX,
                  std::as_bytes(std::span(calldata)), 0, std::span<uint32_t>{},
                  output_return_buffer_len, output_returned_auth_token_len);
 
@@ -472,7 +473,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                [[maybe_unused]] auto r = ctx.syscall<SyscallNo::kInvoke>(
-                   addr_writer, 0, ctx.runtime().get_available_gas(),
+                   addr_writer, 0, UINT64_MAX,
                    std::as_bytes(std::span(args)),
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,

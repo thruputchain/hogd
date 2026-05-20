@@ -38,6 +38,7 @@ namespace hogd {
 // NondeterministicProposalData, then replay in validation mode and verify
 // the results match.  Also test that tampered proposal data causes
 // validation failure.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class ProposeValidateRoundtripTest : public ::testing::TestWithParam<TestDB>,
                                      public NativeContractTestFramework {
 public:
@@ -160,7 +161,7 @@ protected:
     RuntimeMemoryLength output_return_buffer_len = 0,
                         output_returned_auth_token_len = 0;
     return ctx.syscall<SyscallNo::kInvoke>(
-        kAddrB, method, ctx.runtime().get_available_gas(), Calldata{},
+        kAddrB, method, UINT64_MAX, Calldata{},
         std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
         output_return_buffer_len, output_returned_auth_token_len);
   }
@@ -914,7 +915,7 @@ TEST_P(ProposeValidateRoundtripTest,
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(),
+              kAddrB, 0, UINT64_MAX,
               make_index_calldata(i), std::to_underlying(InvokeFlag::TryInvoke),
               std::span<uint32_t>{}, output_return_buffer_len,
               output_returned_auth_token_len);
@@ -1007,7 +1008,7 @@ TEST_P(ProposeValidateRoundtripTest,
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrB, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           // Tolerant: propagate system errors but ignore user-level failures
@@ -1057,7 +1058,7 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
         for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrB, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           if (!r.has_value() ||
@@ -1106,7 +1107,7 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
         for (uint32_t i = 0; i < kAttempts; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrB, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           // Tolerant: propagate system errors, ignore deterministic child
@@ -1175,7 +1176,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
       make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         RuntimeMemoryLength out_ret = 0, out_auth = 0;
         auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+            kAddrB, 0, UINT64_MAX, Calldata{},
             std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
             out_ret, out_auth);
         if (!r.has_value()) {
@@ -1191,7 +1192,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         for (uint32_t i = 0; i < kChildCap; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrC, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrC, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           if (!r.has_value()) {

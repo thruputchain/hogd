@@ -89,9 +89,11 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
+             auto [r_transfer, g] = native_token_client.invoke_opt<"transfer">(
                  ctx.handler(), kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kTransferAmount)));
+             std::println("g: {}", g);
+             ctx.consume_gas(g);
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
                  !r_transfer.value().value().has_value() ||

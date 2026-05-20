@@ -69,6 +69,7 @@ public:
 
   bool consume_gas(GasAmount amount) {
     auto [sum, of] = overflowing_add(amount, gas_consumed_);
+    std::println("consume_gas: {} + {} = {}", gas_consumed_, amount, sum);
 
     if (of) {
       gas_consumed_ = std::numeric_limits<GasAmount>::max();
@@ -76,7 +77,9 @@ public:
       gas_consumed_ = sum;
     }
 
-    return initial_gas_amount_ <= gas_consumed_;
+    std::println("Gas consumed: {}, initial_gas_amount_: {}", gas_consumed_, initial_gas_amount_);
+
+    return initial_gas_amount_ > gas_consumed_;
   }
 
 private:

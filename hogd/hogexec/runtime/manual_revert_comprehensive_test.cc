@@ -22,7 +22,6 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -48,6 +47,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class ManualRevertTest : public ::testing::TestWithParam<TestDB>,
                          public NativeContractTestFramework {
 public:
@@ -179,7 +179,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressChild, 0, ctx.runtime().get_available_gas(),
+                   kAddressChild, 0, UINT64_MAX,
                    Calldata{}, 0, std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -436,7 +436,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                  return InvokeError{InvokeErrorCode::Deterministic};
                }
 
-               if (!ctx.runtime().consume_gas(1000)) {
+               if (!ctx.consume_gas(1000)) {
                  ADD_FAILURE() << "Failed to consume gas";
                }
              }
@@ -538,7 +538,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressB, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   kAddressB, 0, UINT64_MAX, Calldata{},
                    0, std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -578,7 +578,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressC, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   kAddressC, 0, UINT64_MAX, Calldata{},
                    0, std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();
@@ -899,7 +899,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressChild, 0, ctx.runtime().get_available_gas(),
+                   kAddressChild, 0, UINT64_MAX,
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -951,7 +951,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kAddressGrandchild, 0, ctx.runtime().get_available_gas(),
+                   kAddressGrandchild, 0, UINT64_MAX,
                    Calldata{}, std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);

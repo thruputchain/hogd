@@ -43,6 +43,8 @@ NativeContract::invoke(Runtime::MethodID method,
   GasAmount gas_consumed = ctx.total_gas_consumed();
   CHECK(gas_consumed <= gas_limit);
 
+  std::println("NativeContract::invoke gas_consumed: {}", gas_consumed);
+
   if (!status.has_value()) {
     switch (status.error().code())
     {
@@ -56,6 +58,7 @@ NativeContract::invoke(Runtime::MethodID method,
         // nothing to do
     }
   }
+
 
   // These are the only error codes that can get upgraded to OutOfGas
   if (gas_limit == gas_consumed) {

@@ -5,7 +5,6 @@
 #include <memory>
 #include <span>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 
 #include "contract.hh"
@@ -30,32 +29,6 @@
 
 namespace hogd {
 
-class TestRuntime : public Runtime {
-public:
-  TestRuntime(std::unique_ptr<HostCallContext> host_call_context)
-    : Runtime(std::move(host_call_context))
-  {}
-
-  ~TestRuntime() override = default;
-
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override
-  {
-    return available_gas_;
-  }
-  void set_available_gas(uint64_t gas) noexcept override
-  {
-    available_gas_ = gas;
-  }
-
-private:
-  InvokeStatus<void> invoke_internal(std::string_view /*unused*/) override
-  {
-    return {};
-  }
-
-  uint64_t available_gas_ = 0;
-};
-
 namespace {
 
 template<HostFnErrorCode Code>
@@ -66,6 +39,7 @@ error_syscall_func() noexcept
 }
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 template<HostFnErrorCode Code> struct ErrorSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &error_syscall_func<Code>;
@@ -86,9 +60,7 @@ static_assert(is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::Exit>>);
 static_assert(
     is_syscall_meta<ErrorSyscallMeta<HostFnErrorCode::ValidationFailure>>);
 
-// Tests for reference leak bugs in storage item delta management
-// These tests verify that when a delta reservation fails, the reference count
-// is properly released, allowing subsequent reservations of different types.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class SyscallErrorHandlingTest : public ::testing::Test,
                                  public NativeContractTestFramework {
 public:
@@ -103,6 +75,14 @@ public:
       .entrypoint = ContractEntrypointID{},
       .gas_limit = 10000,
       .calldata = Calldata{}};
+
+  constexpr static WasmContext make_null_context(GasAmount gas_limit)
+  {
+    return WasmContext {
+      .memory = LinearMemorySlice{},
+      .gas_remaining = gas_limit,
+    };
+  }
 
   template<HostFnErrorCode Code> void run_error_override_test()
   {
@@ -120,24 +100,19 @@ public:
                         std::span<uint32_t>{});
 
     // Runtime ctor sets host_call_context->runtime
-    auto runtime = TestRuntime(std::move(host_call_context));
-    runtime.set_available_gas(10000);
-    auto syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
-                                           LinearMemorySlice{},
+    auto [syscall_res, gas_consumed] =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
                                            0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
-    ASSERT_EQ(runtime.get_available_gas(), 9000);
 
-    runtime.set_available_gas(10);
-    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
-                                                     LinearMemorySlice{},
+    auto [syscall_res2, gas_consumed2] = wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
                                                      kNoTracingSyscall, 0, 0, 0,
                                                      0, 0, 0, 0, 0, 0, 0);
-    ASSERT_FALSE(syscall_res.has_value());
-    ASSERT_EQ(syscall_res.error().code(), Code);
+    ASSERT_FALSE(syscall_res2.has_value());
+    ASSERT_EQ(syscall_res2.error().code(), Code);
+    ASSERT_EQ(gas_consumed2, 10);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
   }
@@ -158,24 +133,20 @@ public:
                         std::span<uint32_t>{});
 
     // Runtime ctor sets host_call_context->runtime
-    auto runtime = TestRuntime(std::move(host_call_context));
-    runtime.set_available_gas(10000);
-    auto syscall_res =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
-                                           LinearMemorySlice{},
+    auto [syscall_res, gas_consumed] =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
                                            0, 0, 0, 0);
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
-    ASSERT_EQ(runtime.get_available_gas(), 9000);
+    ASSERT_EQ(gas_consumed, 1000);
 
-    runtime.set_available_gas(10);
-    syscall_res = wrap_outer<ErrorSyscallMeta<Code>>(handler, runtime,
-                                                     LinearMemorySlice{},
+    auto [syscall_res2, gas_consumed2] = wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
                                                      kNoTracingSyscall, 0, 0, 0,
                                                      0, 0, 0, 0, 0, 0, 0);
-    ASSERT_FALSE(syscall_res.has_value());
-    ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+    ASSERT_FALSE(syscall_res2.has_value());
+    ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
+    ASSERT_EQ(gas_consumed2, 10);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
   }
@@ -214,6 +185,7 @@ noreturn_failing_syscall_func() noexcept
 }
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct NoreturnFailingSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &noreturn_failing_syscall_func;
@@ -240,11 +212,8 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
                       std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
-  auto runtime = TestRuntime(std::move(host_call_context));
-  runtime.set_available_gas(10000);
-  auto syscall_res =
-      wrap_outer<NoreturnFailingSyscallMeta>(handler, runtime,
-                                             LinearMemorySlice{},
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<NoreturnFailingSyscallMeta>(handler, make_null_context(10000),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
                                              0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
@@ -261,6 +230,7 @@ noerror_syscall_func() noexcept
 }
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct NoErrorSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &noerror_syscall_func;
@@ -288,23 +258,22 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
                       std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
-  auto runtime = TestRuntime(std::move(host_call_context));
-  runtime.set_available_gas(10000);
-  auto syscall_res =
-      wrap_outer<NoErrorSyscallMeta>(handler, runtime, LinearMemorySlice{},
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<NoErrorSyscallMeta>(handler, make_null_context(10000),
                                      kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0, 0,
                                      0, 0);
   ASSERT_TRUE(syscall_res.has_value());
 
-  runtime.set_available_gas(10);
-  syscall_res =
-      wrap_outer<NoErrorSyscallMeta>(handler, runtime, LinearMemorySlice{},
+  auto [syscall_res2, gas_consumed2] =
+      wrap_outer<NoErrorSyscallMeta>(handler, make_null_context(10),
                                      kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0, 0,
                                      0, 0);
-  ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_FALSE(syscall_res2.has_value());
+  ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_consumed2, 10);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct NoReturnNoErrorSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &noerror_syscall_func;
@@ -332,25 +301,22 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
                       std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
-  auto runtime = TestRuntime(std::move(host_call_context));
-  runtime.set_available_gas(10000);
-  auto syscall_res =
-      wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
-                                             LinearMemorySlice{},
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<NoReturnNoErrorSyscallMeta>(handler, make_null_context(10000),
                                              kNoTracingSyscall, 0, 0, 0, 0, 0,
                                              0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
 
-  runtime.set_available_gas(10);
-  syscall_res = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, runtime,
-                                                       LinearMemorySlice{},
+  auto [syscall_res2, gas_consumed2] = wrap_outer<NoReturnNoErrorSyscallMeta>(handler, make_null_context(10),
                                                        kNoTracingSyscall, 0, 0,
                                                        0, 0, 0, 0, 0, 0, 0, 0);
-  ASSERT_FALSE(syscall_res.has_value());
-  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_FALSE(syscall_res2.has_value());
+  ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_consumed2, 10);
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct NoReturnReadOnlySyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = &noerror_syscall_func;
@@ -379,11 +345,8 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
                       std::span<uint32_t>{});
 
   // Runtime ctor sets host_call_context->runtime
-  auto runtime = TestRuntime(std::move(host_call_context));
-  runtime.set_available_gas(10000);
-  auto syscall_res =
-      wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime,
-                                              LinearMemorySlice{},
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10000),
                                               kNoTracingSyscall, 0, 0, 0, 0, 0,
                                               0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
@@ -392,17 +355,15 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   // TODO(geoff): This will break when we add a default gas cost for the error
   // handling (calling a non-readonly syscal in read-only mode should cost at
   // least some gas)
-  ASSERT_EQ(runtime.get_available_gas(), 10000);
+  ASSERT_EQ(gas_consumed, 0);
 
-  runtime.set_available_gas(10);
-  syscall_res = wrap_outer<NoReturnReadOnlySyscallMeta>(handler, runtime,
-                                                        LinearMemorySlice{},
+  auto [syscall_res2, gas_consumed2] = wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10),
                                                         kNoTracingSyscall, 0, 0,
                                                         0, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // TODO(geoff): same as above
-  ASSERT_EQ(runtime.get_available_gas(), 10);
+  ASSERT_EQ(gas_consumed2, 0);
 }
 
 // WrappedGasAmount must not be implicitly constructible from int,

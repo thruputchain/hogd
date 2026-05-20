@@ -578,7 +578,6 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     }
   }
 
-  /*
   // Here we perform gas accounting.  Errors that might be handled by a contract
   // (via a parent frame) still need to have gas accounting performed.  Errors
   // that fail the whole transaction cannot be accidentally turned into an out
@@ -602,7 +601,13 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
       panic("Unhandled HostFnErrorCode (invalid enum?)");
     }
     return true;
-  }(); */
+  }();
+
+  if (is_handleable_error) {
+    if (gas_consumed.get() >= gas_remaining) {
+      return {HostFnError{HostFnErrorCode::OutOfGas}, gas_remaining};
+    }
+  }
 
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
 
@@ -622,8 +627,10 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     return syscall_result;
   }();
 
-  handler.finish_syscall_trace(syscall_result, gas_consumed.get());
-  return {syscall_result, gas_consumed.get()};
+  GasAmount gas_remaining_at_end = gas_remaining > gas_consumed.get() ? gas_remaining - gas_consumed.get() : 0;
+  handler.finish_syscall_trace(syscall_result, gas_remaining_at_end);
+
+  return {syscall_result, std::min<GasAmount>(gas_consumed.get(), gas_remaining)};
 }
 
 // Wraps a call to an inner syscall with checks to load syscall arguments
@@ -659,6 +666,7 @@ wrap_outer(SystemCallHandler &handler,
     return wrap_after_parse<SyscallMeta>(guard, handler, wasm_context.gas_remaining, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+
   return res;
 }
 

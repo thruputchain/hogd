@@ -59,6 +59,7 @@ public:
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
                        UINT64_MAX, calldata, Flags, {});
+    std::println("invoke_opt gas_consumed: {}", res.second);
 
     SystemStatus<SyscallErrorCode> host_fn_res = res.first;
 
