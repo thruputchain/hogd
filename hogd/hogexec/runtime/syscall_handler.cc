@@ -510,8 +510,6 @@ SystemCallHandler::invoke(ContractAddress const &address,
       start_frame(invocation, flags, owned_auth_token_ids);
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
-  std::println("cumulative_result consumed: {}",
-               cumulative_result.gas_consumed_);
 
   auto finish_status =
       finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));

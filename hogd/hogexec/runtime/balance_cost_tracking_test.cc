@@ -92,7 +92,6 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
              auto [r_transfer, g] = native_token_client.invoke_opt<"transfer">(
                  ctx.handler(), kReceiverAddr,
                  make_amount(static_cast<uint128_t>(kTransferAmount)));
-             std::println("g: {}", g);
              ctx.consume_gas(g);
 
              if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
