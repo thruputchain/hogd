@@ -148,6 +148,11 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
+  if (auto *runtime = get_mock_runtime()) {
+    auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+    CHECK(gas_runtime != nullptr);
+    current_gas = gas_runtime->gas_remaining();
+  }
 
   if (handler_.is_running()) {
     handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
@@ -199,7 +204,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   auto *runtime = pop_mock_runtime();
   CHECK(runtime != nullptr);
-  uint64_t consumed_gas = 0;
+  auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+  CHECK(gas_runtime != nullptr);
+  uint64_t consumed_gas = gas_runtime->gas_consumed();
   x23::Defer _([runtime]() { delete runtime; });
 
   auto result =
@@ -225,8 +232,15 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   }
   auto [frame_result, manually_reverted] = res.value();
   result += frame_result;
+  GasAmount total_gas_consumed = result.gas_consumed_;
 
   GasAmount gas_remaining = std::numeric_limits<GasAmount>::max();
+  if (auto *runtime = get_mock_runtime()) {
+    auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+    CHECK(gas_runtime != nullptr);
+    gas_runtime->consume_gas(total_gas_consumed);
+    gas_remaining = gas_runtime->gas_remaining();
+  }
 
   if (handler_.is_running()) {
     auto status = [&]() -> HostFnStatus<SyscallErrorCode> {
@@ -278,7 +292,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   return ForeignTracedInvokeResult{
       .serialized_output = serialized_output.value(),
-      .gas_consumed = consumed_gas + res->first.gas_consumed_,
+      .gas_consumed = total_gas_consumed,
       .serialized_trace = serialized_trace,
       .serialized_events = serialized_events,
       .ffi_error_code = kTestFFIErrorCodeNone,

@@ -425,7 +425,6 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
   }
   assert(!key.is_address_balance());
 
-  // TODO(geoff): consider caching this
   HogDBStatus<int128_t> base = block_.get().read_nnint128_base(key);
   if (!base) {
     assert(base.error() != HogDBCode::kTypeMismatch &&
