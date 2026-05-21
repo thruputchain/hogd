@@ -375,8 +375,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
     pos += sizeof(key_disc);
 
     if (key_disc == hogd::StorageKeyType::ContractData) {
-      std::memcpy(buf.data() + pos,
-                  addrkey.key.contract_data_key().data(),
+      std::memcpy(buf.data() + pos, addrkey.key.contract_data_key().data(),
                   addrkey.key.contract_data_key().size());
       pos += addrkey.key.contract_data_key().size();
     }
