@@ -15,7 +15,6 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -588,14 +587,14 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   // default field.
   StorageCostModelXdr custom_model{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = ::hogd::to_xdr(int128_t{42}),
+      .base_data_item_cost = 42,
       .bytestring_cost_per_byte = 7,
-      .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{100}),
-      .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{3}),
-      .auth_per_key_cost = ::hogd::to_xdr(int128_t{55}),
-      .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{11}),
-      .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{17}),
-      .balance_cost = ::hogd::to_xdr(int128_t{9999}),
+      .base_contract_deployment_cost = 100,
+      .contract_deployment_cost_per_byte = 3,
+      .auth_per_key_cost = 55,
+      .rcq_cost_per_entry = 11,
+      .replay_cache_cost_per_entry = 17,
+      .balance_cost = 9999,
   };
 
   auto serialized_model = x23::serialize(custom_model);
