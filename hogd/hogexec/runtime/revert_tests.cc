@@ -484,7 +484,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
              RuntimeMemoryLength output_return_buffer_len = 0;
              RuntimeMemoryLength output_returned_auth_token_len = 0;
              auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 kAddrChild, 0, ctx.runtime().get_available_gas(), Calldata{},
+                 kAddrChild, 0, ctx.gas_remaining(), Calldata{},
                  std::to_underlying(InvokeFlag::TryInvoke),
                  std::span<uint32_t>{}, output_return_buffer_len,
                  output_returned_auth_token_len);
@@ -604,7 +604,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
              RuntimeMemoryLength output_return_buffer_len = 0;
              RuntimeMemoryLength output_returned_auth_token_len = 0;
              auto r = ctx.syscall<SyscallNo::kInvoke>(
-                 kAddrChild, 0, ctx.runtime().get_available_gas(), Calldata{},
+                 kAddrChild, 0, ctx.gas_remaining(), Calldata{},
                  std::to_underlying(InvokeFlag::TryInvoke),
                  std::span<uint32_t>{}, output_return_buffer_len,
                  output_returned_auth_token_len);
