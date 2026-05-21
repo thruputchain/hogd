@@ -211,6 +211,8 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
 
   auto *mock_runtime = handler->get_mock_runtime();
   CHECK(mock_runtime != nullptr);
+  auto *gas_runtime = dynamic_cast<MockGasRuntime *>(mock_runtime);
+  CHECK(gas_runtime != nullptr);
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
@@ -224,10 +226,11 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
                    typename syscall_t::template arg_i<Is>>(guard,
                                                            input_args)...};
 
-    auto [inner_res, _gas] =
+    auto [inner_res, gas] =
         wrap_after_parse<SyscallMeta>(guard, handler->to_handler(),
-                                      std::numeric_limits<GasAmount>::max(),
-                                      syscall_no, std::move(parsed_args));
+                                      gas_runtime->gas_remaining(), syscall_no,
+                                      std::move(parsed_args));
+    gas_runtime->consume_gas(gas);
 
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

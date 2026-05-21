@@ -345,12 +345,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
-  // Verifies that gas spent in nested invocations is charged to the root
-  // transaction: a leaf contract consumes configurable gas; a middle contract
-  // invokes the leaf three times (100, 200, 150) and checks each delta; an
-  // entry contract invokes the middle once and checks that the nested total
-  // (450) matches the gas consumed for that subtree. The three roles are
-  // deployed as separate native contracts at separate addresses.
+  // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
+  // a child that consumes 255 gas, while gas_limit 255 is converted to
+  // OutOfGas/DeterministicWasm and still charges the full child limit.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);

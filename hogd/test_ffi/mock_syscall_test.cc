@@ -78,6 +78,12 @@ signed_i32_type_test(int32_t input_value) noexcept
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+gas_metering_test() noexcept
+{
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
+}
+
 // just used to instantiate the mock contract
 ForeignInvokeResult
 dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
@@ -138,6 +144,16 @@ struct SignedI32TypeTestSyscallMeta {
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
+struct GasMeteringTestSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = true;
+  constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
+  constexpr static auto kInnerFunc = &gas_metering_test;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
 TEST(MockSyscallTest, IntTypeTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
@@ -175,6 +191,39 @@ TEST(MockSyscallTest, IntTypeTest)
   EXPECT_EQ(out_1, 10);
   EXPECT_EQ(out_2, UINT64_MAX);
   EXPECT_EQ(out_128, int128_t{10} + int128_t{UINT64_MAX});
+}
+
+TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  EmptyRuntime runtime(Invocation{.gas_limit = 7});
+  context.push_mock_runtime(&runtime);
+
+  auto res =
+      mock_syscall_parser<GasMeteringTestSyscallMeta>(SyscallNo::kExit, 0, 0, 0,
+                                                      0, 0, 0, 0, 0, 0, 0);
+  ASSERT_EQ(res.panic, 0);
+  ASSERT_EQ(res.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(runtime.gas_consumed(), 5);
+  EXPECT_EQ(runtime.gas_remaining(), 2);
+
+  auto out_of_gas =
+      mock_syscall_parser<GasMeteringTestSyscallMeta>(SyscallNo::kExit, 0, 0, 0,
+                                                      0, 0, 0, 0, 0, 0, 0);
+  EXPECT_EQ(out_of_gas.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
+  EXPECT_EQ(out_of_gas.result_code, 0);
+  EXPECT_EQ(runtime.gas_consumed(), 7);
+  EXPECT_EQ(runtime.gas_remaining(), 0);
+
+  context.pop_mock_runtime();
+  context.pop_context();
 }
 
 TEST(MockSyscallTest, SpanTest)

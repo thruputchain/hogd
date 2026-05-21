@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <string_view>
@@ -73,11 +74,48 @@ private:
 // does NOT keep track of a SystemCallHandler* pointer.
 // The mock testing system uses a separate method for tracking
 // SystemCallHandler* context.
-class MockRuntime : public Runtime {
+class MockGasRuntime : public Runtime {
+public:
+  GasAmount gas_remaining() const { return gas_remaining_; }
+
+  GasAmount gas_consumed() const
+  {
+    assert(gas_remaining_ <= initial_gas_);
+    return initial_gas_ - gas_remaining_;
+  }
+
+  bool consume_gas(GasAmount gas)
+  {
+    if (gas < gas_remaining_) {
+      gas_remaining_ -= gas;
+      return true;
+    }
+    gas_remaining_ = 0;
+    return false;
+  }
+
+protected:
+  explicit MockGasRuntime(
+      GasAmount initial_gas = std::numeric_limits<GasAmount>::max())
+    : Runtime(std::make_unique<HostCallContext>()), initial_gas_(initial_gas),
+      gas_remaining_(initial_gas)
+  {}
+
+  void reset_gas(GasAmount initial_gas)
+  {
+    initial_gas_ = initial_gas;
+    gas_remaining_ = initial_gas;
+  }
+
+private:
+  GasAmount initial_gas_;
+  GasAmount gas_remaining_;
+};
+
+class MockRuntime : public MockGasRuntime {
 public:
   MockRuntime(MockContract contract)
-    : Runtime(std::make_unique<HostCallContext>()),
-      backing_contract_(std::move(contract))
+    : MockGasRuntime(), backing_contract_(std::move(contract))
   {}
 
   ~MockRuntime() override = default;
@@ -89,10 +127,10 @@ private:
   MockContract backing_contract_;
 };
 
-class EmptyRuntime : public Runtime {
+class EmptyRuntime : public MockGasRuntime {
 public:
-  EmptyRuntime(Invocation const & /*invocation*/)
-    : Runtime(std::make_unique<HostCallContext>())
+  EmptyRuntime(Invocation const &invocation)
+    : MockGasRuntime(invocation.gas_limit)
   {}
 
   ~EmptyRuntime() override = default;

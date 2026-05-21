@@ -603,16 +603,13 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     return true;
   }();
 
-  if (is_handleable_error) {
-    if (gas_consumed.get() >= gas_remaining) {
-      auto oog = HostFnStatus<SyscallErrorCode>{
-          HostFnError{HostFnErrorCode::OutOfGas}};
-      handler.finish_syscall_trace(oog, 0);
-      return {oog, gas_remaining};
-    }
-  }
-
   syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
+    if (is_handleable_error) {
+      if (gas_consumed.get() >= gas_remaining) {
+        return {HostFnError{HostFnErrorCode::OutOfGas}};
+      }
+    }
+
     // The syscall_result.has_value() check means that we only
     // override syscall_result (by returning Exit) in a subset
     // of the cases covered by the is_handleable_error guard.
