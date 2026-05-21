@@ -386,9 +386,9 @@ template<> struct std::hash<hogd::AddressAndKey> {
     }
     else {
       CHECK(key_disc == hogd::StorageKeyType::FreeNativeTokenBalance ||
-             key_disc == hogd::StorageKeyType::AuthData ||
-             key_disc == hogd::StorageKeyType::Metadata ||
-             key_disc == hogd::StorageKeyType::ReplayCache);
+            key_disc == hogd::StorageKeyType::AuthData ||
+            key_disc == hogd::StorageKeyType::Metadata ||
+            key_disc == hogd::StorageKeyType::ReplayCache);
     }
 
     return hogd::SipHash24::get_default()(
