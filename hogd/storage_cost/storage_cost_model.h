@@ -10,11 +10,11 @@ namespace hogd {
 
 struct StorageCostModel {
   // TODO(geoff): remove: this is for compat with the mockdb implementation.
-  constexpr StorageCostModel(int128_t base_item_cost,
-                             int128_t bytestring_cost_per_byte,
-                             int128_t rcq_cost_per_entry,
-                             int128_t replay_cache_cost_per_entry,
-                             int128_t balance_cost)
+  constexpr StorageCostModel(uint64_t base_item_cost,
+                             uint32_t bytestring_cost_per_byte,
+                             uint64_t rcq_cost_per_entry,
+                             uint64_t replay_cache_cost_per_entry,
+                             uint64_t balance_cost)
     : kBaseItemCost(base_item_cost),
       kBytestringCostPerByte(bytestring_cost_per_byte),
       kBaseContractDeploymentCost(kBaseItemCost),
@@ -53,27 +53,27 @@ struct StorageCostModel {
       return 0;
     }
     return kBaseContractDeploymentCost +
-           (hash.contract_size * kContractDeploymentCostPerByte);
+           (int128_t{hash.contract_size} * kContractDeploymentCostPerByte);
   }
 
   constexpr int128_t get_auth_data_cost(size_t num_keys) const
   {
-    return kBaseItemCost + (num_keys * kAuthPerKeyCost);
+    return kBaseItemCost + (int128_t{num_keys} * kAuthPerKeyCost);
   }
 
   constexpr int128_t get_balance_cost() const { return kBalanceCost; }
 
-  const int128_t kBaseItemCost;
+  const uint64_t kBaseItemCost;
   const uint32_t kBytestringCostPerByte;
-  const int128_t kBaseContractDeploymentCost;
-  const int128_t kContractDeploymentCostPerByte;
-  const int128_t kAuthPerKeyCost;
+  const uint64_t kBaseContractDeploymentCost;
+  const uint64_t kContractDeploymentCostPerByte;
+  const uint64_t kAuthPerKeyCost;
 
-  const int128_t kRCQCostPerEntry;
+  const uint64_t kRCQCostPerEntry;
 
-  const int128_t kReplayCacheCostPerEntry;
+  const uint64_t kReplayCacheCostPerEntry;
 
-  const int128_t kBalanceCost;
+  const uint64_t kBalanceCost;
 
   StorageCostModelXdr to_xdr() const;
 
