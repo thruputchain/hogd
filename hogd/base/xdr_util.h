@@ -385,7 +385,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
       pos += addrkey.key.contract_data_key().size();
     }
     else {
-      assert(key_disc == hogd::StorageKeyType::FreeNativeTokenBalance ||
+      CHECK(key_disc == hogd::StorageKeyType::FreeNativeTokenBalance ||
              key_disc == hogd::StorageKeyType::AuthData ||
              key_disc == hogd::StorageKeyType::Metadata ||
              key_disc == hogd::StorageKeyType::ReplayCache);
