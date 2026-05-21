@@ -634,7 +634,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   // Verify wasm contracts before storing — reject contracts that would
   // fail during instantiation (e.g., memory exceeding limits).
   if (contract.contract_type() == ContractType::kWasmi) {
-    if (!(*context_cast)->verify_contract(contract)) {
+    if ((*context_cast)->verify_contract(contract) != InvokeErrorCode::None) {
       return kTestFFIErrorCodeContractVerificationFailed;
     }
   }
@@ -816,18 +816,22 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     Contract contract;
     x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
 
-    bool valid = rc->verify_contract(contract);
-    return VerifyContractResult{.success = valid ? static_cast<uint8_t>(1)
-                                                 : static_cast<uint8_t>(0),
+    auto result = rc->verify_contract(contract);
+    return VerifyContractResult{.success = result == InvokeErrorCode::None
+                                               ? static_cast<uint8_t>(1)
+                                               : static_cast<uint8_t>(0),
+                                .invoke_error_code = std::to_underlying(result),
                                 .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException const &e) {
     log_error("error deserializing contract in do_verify_contract: {}", e);
     return VerifyContractResult{.success = 0,
+                                .invoke_error_code = 0,
                                 .ffi_error_code =
                                     kTestFFIErrorCodeDeserializeError};
   } catch (std::exception const &e) {
     log_error("error in do_verify_contract: {}", e);
     return VerifyContractResult{.success = 0,
+                                .invoke_error_code = 0,
                                 .ffi_error_code =
                                     kTestFFIErrorCodeUnrecoverableError};
   }
