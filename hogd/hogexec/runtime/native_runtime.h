@@ -72,7 +72,7 @@ public:
 
   std::pair<InvokeStatus<void>, GasAmount>
   invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
-         uint64_t gas_limit) const;
+         uint64_t gas_limit) const noexcept;
 
 private:
   const function_t *find_function(Runtime::MethodID method) const;
