@@ -749,16 +749,16 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
   std::ranges::fill(tx1, 0x01);
   std::ranges::fill(tx2, 0x02);
 
-  TxEventLog log1;
-  log1.proposed_tx_hash = tx1;
-  log1.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log1;
+  event_log1.proposed_tx_hash = tx1;
+  event_log1.events.push_back(make_event(addr, 0, 0));
 
-  TxEventLog log2;
-  log2.proposed_tx_hash = tx2;
-  log2.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log2;
+  event_log2.proposed_tx_hash = tx2;
+  event_log2.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(5, std::vector{log1}));
-  ASSERT_TRUE(db->consume_events(10, std::vector{log2}));
+  ASSERT_TRUE(db->consume_events(5, std::vector{event_log1}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}));
 
   EventCursorPayload payload;
   payload.schema_version = cursor::kCursorVersion;
@@ -792,17 +792,17 @@ TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
   SHA256Hash tx1;
   std::ranges::fill(tx1, 0x01);
 
-  TxEventLog log1;
-  log1.proposed_tx_hash = tx1;
-  log1.events.push_back(make_event(addr, 0, 0));
+  TxEventLog event_log;
+  event_log.proposed_tx_hash = tx1;
+  event_log.events.push_back(make_event(addr, 0, 0));
 
-  ASSERT_TRUE(db->consume_events(10, std::vector{log1}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{event_log}));
 
   EventFilterList filters;
   filters.push_back(filter_with_contracts_no_topics({addr}));
-  auto page = db->get_events(
-      make_query(std::move(filters), static_cast<IterationOrder>(2),
-                 anchor_at_height(10)));
+  auto page = db->get_events(make_query(std::move(filters),
+                                        static_cast<IterationOrder>(2),
+                                        anchor_at_height(10)));
   ASSERT_TRUE(page.has_value());
   EXPECT_TRUE(page->events.empty());
   EXPECT_TRUE(page->cursor.empty());
