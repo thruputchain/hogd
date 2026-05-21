@@ -12,12 +12,15 @@
 #include <utility>
 #include <vector>
 
+#include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/components/execution_mode.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -833,6 +836,75 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+}
+
+TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
+{
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+  auto runtime_context = make_hogexec_precompiles_context();
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim;
+  snapshot_server_->impl()->setup_create_contract(contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      GenesisConfigurationLoader::kDeployContractAddress,
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 0,
+                           .contract_type = contract.contract_type()});
+
+  // Forge calldata: valid SHA256Hash + SHA256Hash + ContractEntrypointID,
+  // then a Calldata field whose CXS length header claims 32 MiB but
+  // the buffer is only a few bytes longer than the header.
+  using itc_meta = ContractTraitMeta<initial_token_claim::InitialTokenClaim>;
+
+  SHA256Hash hash{};
+  SHA256Hash nonce{};
+  ContractEntrypointID entrypoint{};
+
+  // Serialize the fixed-size args as valid CXS prefix.
+  // For fixed-size opaque arrays, CXS serialization is raw bytes.
+  auto prefix =
+      Serializer<itc_meta::kSerializationFormat>::serialize(
+          hash, nonce, entrypoint);
+  ASSERT_TRUE(prefix.has_value());
+
+  // Append a CXS-encoded length claiming 32 MiB.
+  // CXS compact-uint encoding for a uint32 value:
+  //   header byte 0xBF (kCxsHeader4Byte) + 4 bytes little-endian value.
+  constexpr uint32_t kFakeSize = 32 * 1024 * 1024;
+  uint8_t cxs_len_bytes[5];
+  cxs_len_bytes[0] = 0xBF; // CXS header for 4-byte unsigned integer
+  std::memcpy(cxs_len_bytes + 1, &kFakeSize, sizeof(kFakeSize));
+
+  Calldata forged;
+  forged.append_range(*prefix);
+  forged.append(std::begin(cxs_len_bytes), std::end(cxs_len_bytes));
+  // Don't append the claimed 32 MiB — the buffer is truncated
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address =
+                      GenesisConfigurationLoader::kDeployContractAddress,
+                  .entrypoint =
+                      itc_meta::entrypoint<"claim_initial_tokens">(),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = std::move(forged),
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+
+  // This must NOT throw std::bad_alloc. The zero-copy BufView
+  // deserialization path validates the declared size against the
+  // actual input buffer via check_size(), which throws CxsBadInput
+  // (caught by serialize_calldata.h), returning a deterministic error.
+  EXPECT_NO_THROW({
+    auto res = handler.root_invoke();
+    // Should be a deterministic error (deserialization failure), not a crash
+    EXPECT_FALSE(res.result_.has_value());
+  });
 }
 
 } // namespace hogd
