@@ -491,16 +491,14 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
              }
              if (r.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               ADD_FAILURE()
-                   << "Expected FrameReverted, got "
-                   << static_cast<int32_t>(r.value());
+               ADD_FAILURE() << "Expected FrameReverted, got "
+                             << static_cast<int32_t>(r.value());
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              if (output_return_buffer_len != abort_payload.size()) {
-               ADD_FAILURE()
-                   << "Abort payload length mismatch: expected "
-                   << abort_payload.size() << ", got "
-                   << output_return_buffer_len;
+               ADD_FAILURE() << "Abort payload length mismatch: expected "
+                             << abort_payload.size() << ", got "
+                             << output_return_buffer_len;
                return InvokeError{InvokeErrorCode::Deterministic};
              }
 
@@ -600,8 +598,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   // Parent: TryInvoke the child.
   auto contract_parent = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0, [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              RuntimeMemoryLength output_return_buffer_len = 0;
              RuntimeMemoryLength output_returned_auth_token_len = 0;
              auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -614,9 +611,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
              }
              if (r.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               ADD_FAILURE()
-                   << "Expected FrameReverted, got "
-                   << static_cast<int32_t>(r.value());
+               ADD_FAILURE() << "Expected FrameReverted, got "
+                             << static_cast<int32_t>(r.value());
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
@@ -625,12 +621,10 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   // Child: write to storage, then manually revert.
   auto contract_child = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [kWriteKey](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0, [kWriteKey](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto data = make_bytestring("written");
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), kWriteKey,
-                 std::as_bytes(std::span(data)),
+                 ctx.handler(), kWriteKey, std::as_bytes(std::span(data)),
                  std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -655,11 +649,11 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   setup_grant_storage_token(kAddrParent, 1'000'000'000);
   setup_grant_storage_token(kAddrChild, 1'000'000'000);
 
-  Transaction tx{.invocation = Invocation{.invoked_address = kAddrParent,
-                                          .entrypoint =
-                                              entrypoint_from_method_id(0),
-                                          .gas_limit = UINT64_MAX,
-                                          .calldata = {}}};
+  Transaction tx{.invocation =
+                     Invocation{.invoked_address = kAddrParent,
+                                .entrypoint = entrypoint_from_method_id(0),
+                                .gas_limit = UINT64_MAX,
+                                .calldata = {}}};
 
   // Proposal mode: run and extract proposal data.
   auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);
@@ -674,8 +668,9 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   // Validation mode: replay with the proposal data.
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
-  auto validation_handler = make_new_system_call_handler_validation(
-      tx, *runtime_context, proposal_data);
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *runtime_context,
+                                              proposal_data);
   auto validation_res = validation_handler.root_invoke();
   ASSERT_TRUE(validation_res.is_root_success());
   ASSERT_EQ(validation_handler.try_commit_transaction(),

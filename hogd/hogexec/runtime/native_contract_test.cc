@@ -668,8 +668,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   // Parent: TryInvoke the child, assert FrameReverted.
   auto contract_parent = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0, [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              RuntimeMemoryLength output_return_buffer_len = 0;
              RuntimeMemoryLength output_returned_auth_token_len = 0;
              auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -685,9 +684,8 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
              }
              if (r.value() !=
                  SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-               ADD_FAILURE()
-                   << "Expected FrameReverted, got "
-                   << static_cast<int32_t>(r.value());
+               ADD_FAILURE() << "Expected FrameReverted, got "
+                             << static_cast<int32_t>(r.value());
                return InvokeError{InvokeErrorCode::Deterministic};
              }
              return {};
@@ -696,13 +694,11 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   // Child: write to the banned key, then manually revert.
   auto contract_child = std::make_unique<NativeContract>(
       std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
-          {0,
-           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
              auto data = make_bytestring("child_write");
              constexpr StorageKeyContractData kKey{};
              auto [res, _gas] = syscall_BytestringSet_inner(
-                 ctx.handler(), kKey,
-                 std::as_bytes(std::span(data)),
+                 ctx.handler(), kKey, std::as_bytes(std::span(data)),
                  std::to_underlying(StorageDeltaFlags::None));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -741,13 +737,14 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
                            .contract_size = 0,
                            .contract_type = child_contract.contract_type()});
 
-  SystemCallHandler handler = make_handler(
-      Transaction{.invocation =
-                      Invocation{.invoked_address = kAddrParent,
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}},
-      snapshot, 0, 0, *runtime_context);
+  SystemCallHandler handler =
+      make_handler(Transaction{.invocation =
+                                   Invocation{.invoked_address = kAddrParent,
+                                              .entrypoint =
+                                                  entrypoint_from_method_id(0),
+                                              .gas_limit = UINT64_MAX,
+                                              .calldata = {}}},
+                   snapshot, 0, 0, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

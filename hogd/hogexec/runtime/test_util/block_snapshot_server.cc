@@ -101,9 +101,9 @@ BlockSnapshotRpc::get_deployment(BlockID block,
 }
 
 RPCError
-BlockSnapshotRpc::try_push_new_subtransaction(
-    BlockID /*unused*/, TransactionID /*unused*/,
-    StorageDeltaBatch const &batch)
+BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
+                                              TransactionID /*unused*/,
+                                              StorageDeltaBatch const &batch)
 {
   for (auto const &delta : batch) {
     if (blocked_subtransaction_keys_.contains(delta.addrkey)) {
