@@ -226,8 +226,15 @@ SystemStatus<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
-  auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  try {
+    auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
+    return to_system_error_code<VoidMarker{}>(res, [] {});
+  } catch (x23::XdrBadInput const &e) {
+    error("Unrecoverable: commit_transaction threw XdrBadInput "
+          "(oversized new contract batch?): {}",
+          e.what());
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
 SystemStatus<void>

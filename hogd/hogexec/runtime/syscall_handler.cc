@@ -433,9 +433,8 @@ SystemCallHandler::try_commit_transaction()
   auto res = db_proxy_.commit_transaction(
       BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
   if (!res.has_value()) {
-    CHECK(res.error().code() == SystemErrorCode::Abandon);
     two_phase_commit_failed_ = true;
-    return ExecResult::ExecResultSystemError;
+    return to_exec_result(res.error().code());
   }
 
   // This is past the point of successful commitment;
