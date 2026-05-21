@@ -401,7 +401,6 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   nnint_item = read_res.value().nnint();
   ASSERT_EQ(from_xdr(nnint_item), 200);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 // Regression test for #2155: negative set_value is intentionally allowed.
 // The protocol invariant is value >= min(set_value, 0), not value >= 0.
@@ -576,6 +575,7 @@ TEST_P(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(NNIntAddTest, NNIntAddTest,
                          ::testing::Values(TestDB::kMockInMemory,
