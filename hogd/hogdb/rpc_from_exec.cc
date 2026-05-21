@@ -462,26 +462,15 @@ HogDBExecutorRpc::get_db_tip(BlockID block_id)
 ExpectedViewingSnapshot
 HogDBExecutorRpc::open_viewing_snapshot()
 {
-  HogDBStatus<DbTip> tip = ctx_.get_tip();
-  if (!tip) {
-    return ExpectedViewingSnapshot(to_rpc_error(tip.error()));
-  }
-
-  if (!RPCContext::has_committed_tip(*tip)) {
-    return ExpectedViewingSnapshot(RPCError::kRPCNotFound);
-  }
-
   BlockID block_id = generate_block_id();
-  auto res = ctx_.open_block_tx(block_id,
-                                BlockExecutionMode::kBlockExecutionModeViewing);
+  auto res = ctx_.open_viewing_snapshot(block_id);
   if (!res) {
     return ExpectedViewingSnapshot(to_rpc_error(res.error()));
   }
 
   ExpectedViewingSnapshot out;
   out.error(RPCError::kRPCNone);
-  out.snapshot().block_id = block_id;
-  out.snapshot().tip = *tip;
+  out.snapshot() = std::move(*res);
   return out;
 }
 

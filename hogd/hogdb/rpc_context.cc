@@ -20,8 +20,14 @@ namespace hogd {
 HogDBStatus<PerThreadARC<BlockTX> *>
 RPCContext::open_block_tx(BlockTXID bid, BlockExecutionMode mode)
 {
-  // create the block tx.
   std::scoped_lock g(lock_);
+  return open_block_tx_locked(bid, mode);
+}
+
+HogDBStatus<PerThreadARC<BlockTX> *>
+RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
+{
+  // create the block tx.
   auto [it, inserted] =
       block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
                           std::forward_as_tuple(get_db(), get_cost_model(),
@@ -33,6 +39,51 @@ RPCContext::open_block_tx(BlockTXID bid, BlockExecutionMode mode)
   }
 
   return &it->second;
+}
+
+HogDBStatus<PerThreadARC<BlockTX> *>
+RPCContext::open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
+                                    BlockExecutionMode mode)
+{
+  while (true) {
+    {
+      std::scoped_lock g(lock_);
+      if (!commit_publishing_.load(std::memory_order_acquire)) {
+        if (parent_id != get_tip().id) {
+          return HogDBError(HogDBCode::kStaleBlock);
+        }
+        return open_block_tx_locked(bid, mode);
+      }
+    }
+    commit_publishing_.wait(true, std::memory_order_acquire);
+  }
+}
+
+HogDBStatus<ViewingSnapshot>
+RPCContext::open_viewing_snapshot(BlockTXID bid)
+{
+  while (true) {
+    {
+      std::scoped_lock g(lock_);
+      if (!commit_publishing_.load(std::memory_order_acquire)) {
+        DbTip tip = get_tip();
+        if (!has_committed_tip(tip)) {
+          return HogDBError(HogDBCode::kNotFound);
+        }
+        auto res = open_block_tx_locked(
+            bid, BlockExecutionMode::kBlockExecutionModeViewing);
+        if (!res) {
+          return res.error();
+        }
+
+        ViewingSnapshot snapshot;
+        snapshot.block_id = bid;
+        snapshot.tip = std::move(tip);
+        return snapshot;
+      }
+    }
+    commit_publishing_.wait(true, std::memory_order_acquire);
+  }
 }
 
 PerThreadARC<BlockTX> *
@@ -117,11 +168,45 @@ void
 RPCContext::invalidate_siblings(BlockTXID committer)
 {
   std::scoped_lock g(lock_);
+  invalidate_siblings_locked(committer);
+}
+
+void
+RPCContext::invalidate_siblings_locked(BlockTXID committer)
+{
   for (auto &[id, arc] : block_txes_) {
     if (id != committer) {
       arc.get().invalidate();
     }
   }
+}
+
+void
+RPCContext::begin_commit_publication(BlockTXID committer)
+{
+  std::scoped_lock g(lock_);
+  CHECK(!commit_publishing_.load(std::memory_order_relaxed));
+  commit_publishing_.store(true, std::memory_order_release);
+  invalidate_siblings_locked(committer);
+}
+
+void
+RPCContext::finish_commit_publication() noexcept
+{
+  commit_publishing_.store(false, std::memory_order_release);
+  commit_publishing_.notify_all();
+}
+
+RPCContext::CommitPublicationGuard::CommitPublicationGuard(RPCContext &ctx,
+                                                           BlockTXID committer)
+  : ctx_(&ctx)
+{
+  ctx_->begin_commit_publication(committer);
+}
+
+RPCContext::CommitPublicationGuard::~CommitPublicationGuard()
+{
+  ctx_->finish_commit_publication();
 }
 
 HogDBStatus<void>
