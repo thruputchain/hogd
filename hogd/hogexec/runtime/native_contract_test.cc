@@ -651,4 +651,106 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
 }
 
+TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
+{
+  constexpr ContractAddress kAddrParent = test_contract_address(30);
+  constexpr ContractAddress kAddrChild = test_contract_address(31);
+  constexpr StorageKeyContractData kBannedDataKey{};
+
+  StorageKey banned_full_key(StorageKeyType::ContractData);
+  banned_full_key.contract_data_key() = kBannedDataKey;
+  AddressAndKey banned_addrkey{.address = kAddrChild, .key = banned_full_key};
+
+  // Ban the child's key in the subtransaction path — any lock probe touching
+  // this key will return kRPCUnrecoverable.
+  snapshot_server_->impl()->setup_ban_subtransaction_key(banned_addrkey);
+
+  // Parent: TryInvoke the child, assert FrameReverted.
+  auto contract_parent = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_returned_auth_token_len = 0;
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 kAddrChild, 0, ctx.runtime().get_available_gas(), Calldata{},
+                 std::to_underlying(InvokeFlag::TryInvoke),
+                 std::span<uint32_t>{}, output_return_buffer_len,
+                 output_returned_auth_token_len);
+             if (!r.has_value()) {
+               ADD_FAILURE()
+                   << "TryInvoke returned system error (lock probe reached "
+                      "banned key?)";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (r.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+               ADD_FAILURE()
+                   << "Expected FrameReverted, got "
+                   << static_cast<int32_t>(r.value());
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  // Child: write to the banned key, then manually revert.
+  auto contract_child = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto data = make_bytestring("child_write");
+             constexpr StorageKeyContractData kKey{};
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), kKey,
+                 std::as_bytes(std::span(data)),
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_parent));
+  contract_map.emplace(1, std::move(contract_child));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract parent_contract(ContractType::kNative);
+  parent_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  Contract child_contract(ContractType::kNative);
+  child_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(1);
+
+  snapshot_server_->impl()->setup_create_contract(parent_contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddrParent,
+      DeployedContractHash{.hash = sha256(parent_contract),
+                           .contract_size = 0,
+                           .contract_type = parent_contract.contract_type()});
+
+  snapshot_server_->impl()->setup_create_contract(child_contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddrChild,
+      DeployedContractHash{.hash = sha256(child_contract),
+                           .contract_size = 0,
+                           .contract_type = child_contract.contract_type()});
+
+  SystemCallHandler handler = make_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kAddrParent,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}},
+      snapshot, 0, 0, *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+}
+
 } // namespace hogd

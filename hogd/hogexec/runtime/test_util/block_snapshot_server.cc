@@ -103,10 +103,13 @@ BlockSnapshotRpc::get_deployment(BlockID block,
 RPCError
 BlockSnapshotRpc::try_push_new_subtransaction(
     BlockID /*unused*/, TransactionID /*unused*/,
-    StorageDeltaBatch const & /*unused*/)
+    StorageDeltaBatch const &batch)
 {
-  // This test server only models snapshot reads. Treat transaction mutations as
-  // successful no-ops so read-side execution tests can run against it.
+  for (auto const &delta : batch) {
+    if (blocked_subtransaction_keys_.contains(delta.addrkey)) {
+      return RPCError::kRPCUnrecoverable;
+    }
+  }
   return RPCError::kRPCNone;
 }
 
@@ -215,6 +218,12 @@ void
 BlockSnapshotRpc::setup_ban_item(AddressAndKey const &addrkey)
 {
   blocked_items_->insert(addrkey);
+}
+
+void
+BlockSnapshotRpc::setup_ban_subtransaction_key(AddressAndKey const &addrkey)
+{
+  blocked_subtransaction_keys_.insert(addrkey);
 }
 
 void
