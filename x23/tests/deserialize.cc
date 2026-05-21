@@ -492,6 +492,13 @@ TEST(Deserialize, BufViewRejectsTruncatedInput)
                x23::XdrBadInput);
 }
 
+TEST(Deserialize, BufViewSerializesLikeCalldata)
+{
+  // Calldata = Vec<uint8_t, 0xffffffff>
+  static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 0xffffffff>>);
+  static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 100>>);
+}
+
 // NOLINTEND(modernize-type-traits)
 
 } // namespace x23

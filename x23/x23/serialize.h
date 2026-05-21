@@ -405,6 +405,9 @@ xdr_serialize(auto &serializer, BufView v)
 
 static_assert(is_xdr_serializable<BufView>);
 
+template<size_t N, typename A>
+struct serialize_equiv<Vec<uint8_t, N, A>, BufView> : std::true_type {};
+
 template<typename X, size_t N, typename T> requires serializes_like<T, X>
 struct serialize_equiv<Vec<X, N>, span<T>> : std::true_type {};
 
@@ -779,6 +782,8 @@ struct Deserializer
         }
       }
       else {
+        static_assert(!requires { x.resize_uninitialized(size); }
+                      && is_xdr_cat<X, XdrCategory::kOpaqueVec>);
         x = X(p, size);
         if (size)
           p += size;
@@ -793,6 +798,8 @@ struct Deserializer
         memcpy(x.data(), p, size);
       }
       else {
+        static_assert(!requires { x.resize_uninitialized(size); }
+                      && is_xdr_cat<X, XdrCategory::kOpaqueVec>);
         x = X(p, size);
       }
       p += binlen;
