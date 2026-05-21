@@ -3312,7 +3312,8 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
     itx_a.release_blocktx_reference();
   }
 
-  std::vector<std::byte> large_value(1024, std::byte{0x42});
+  std::array<std::byte, 1024> large_value;
+  large_value.fill(std::byte{0x42});
   ASSERT_TRUE(block_b.try_acquire_reference());
   {
     InvokeTX itx_b(block_b);
