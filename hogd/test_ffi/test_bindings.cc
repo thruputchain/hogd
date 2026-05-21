@@ -821,6 +821,11 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
 
     auto result = rc->verify_contract(contract);
+    if (result == InvokeErrorCode::Unrecoverable) {
+      return VerifyContractResult{.success = 0,
+                                  .ffi_error_code =
+                                      kTestFFIErrorCodeUnrecoverableError};
+    }
     return VerifyContractResult{.success = result == InvokeErrorCode::None
                                                ? static_cast<uint8_t>(1)
                                                : static_cast<uint8_t>(0),
