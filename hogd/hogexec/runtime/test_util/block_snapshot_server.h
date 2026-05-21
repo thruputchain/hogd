@@ -90,7 +90,7 @@ public:
     return ExpectedViewingSnapshot(RPCError::kRPCUnimplemented);
   }
 
-  static RPCError close_viewing_snapshot(BlockID)
+  static RPCError close_viewing_snapshot(BlockID /*unused*/)
   {
     return RPCError::kRPCUnimplemented;
   }

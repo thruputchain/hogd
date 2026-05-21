@@ -19,6 +19,7 @@
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
