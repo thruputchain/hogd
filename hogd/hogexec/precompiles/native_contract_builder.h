@@ -21,10 +21,20 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
 namespace detail {
+
+template<typename Expected, typename Actual>
+struct tuple_serializes_like : std::false_type {};
+
+template<typename... Es, typename... As>
+requires (sizeof...(Es) == sizeof...(As))
+struct tuple_serializes_like<std::tuple<Es...>, std::tuple<As...>>
+  : std::bool_constant<(x23::serializes_like<As, Es> && ...)> {};
+
 template<typename T> struct NativeContractArgs;
 
 template<typename R, typename... Args>
@@ -99,7 +109,9 @@ public:
     using meta_t = ContractTraitMeta<ContractTrait>;
 
     using expected_args_t = meta_t::template args_t<Name>;
-    static_assert(std::is_same_v<args_t, expected_args_t>, "Argument mismatch");
+    static_assert(
+        detail::tuple_serializes_like<expected_args_t, args_t>::value,
+        "Argument mismatch (types must be same or serialize-equivalent)");
 
     using expected_return_t = meta_t::template return_t<Name>;
     if constexpr (std::is_void_v<return_t>) {
