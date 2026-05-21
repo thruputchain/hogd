@@ -369,10 +369,7 @@ fn test_gas_metering() {
         );
 
         assert_eq!(result.error, 0, "Fibonacci invoke should succeed");
-        assert!(
-            result.gas_consumed > 0,
-            "Some gas should be consumed"
-        );
+        assert!(result.gas_consumed > 0, "Some gas should be consumed");
         assert!(
             result.gas_consumed <= gas_limit,
             "Gas consumed should not exceed limit"
@@ -484,10 +481,7 @@ fn test_fibonacci_computation() {
 
         assert_eq!(result.error, 0, "Fibonacci invoke should succeed");
 
-        assert!(
-            result.gas_consumed > 0,
-            "Gas should be consumed"
-        );
+        assert!(result.gas_consumed > 0, "Gas should be consumed");
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
