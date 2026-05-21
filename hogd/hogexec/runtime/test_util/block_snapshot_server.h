@@ -126,7 +126,7 @@ private:
   x23::MVar<std::set<AddressAndKey>> blocked_items_;
 
   // For testing subtransaction key banning:
-  std::set<AddressAndKey> blocked_subtransaction_keys_;
+  x23::MVar<std::set<AddressAndKey>> blocked_subtransaction_keys_;
 
   // For testing in-flight snapshot access:
   // Reads to these items suspend (via CoroFutex) until released by the test

@@ -105,9 +105,12 @@ BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
                                               TransactionID /*unused*/,
                                               StorageDeltaBatch const &batch)
 {
-  for (auto const &delta : batch) {
-    if (blocked_subtransaction_keys_.contains(delta.addrkey)) {
-      return RPCError::kRPCUnrecoverable;
+  {
+    auto blocked = blocked_subtransaction_keys_.take();
+    for (auto const &delta : batch) {
+      if (blocked->contains(delta.addrkey)) {
+        return RPCError::kRPCUnrecoverable;
+      }
     }
   }
   return RPCError::kRPCNone;
@@ -223,7 +226,7 @@ BlockSnapshotRpc::setup_ban_item(AddressAndKey const &addrkey)
 void
 BlockSnapshotRpc::setup_ban_subtransaction_key(AddressAndKey const &addrkey)
 {
-  blocked_subtransaction_keys_.insert(addrkey);
+  blocked_subtransaction_keys_->insert(addrkey);
 }
 
 void
