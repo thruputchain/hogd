@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
 
