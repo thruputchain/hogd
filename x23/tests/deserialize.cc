@@ -431,6 +431,21 @@ TEST(Deserialize, OpaqueVecBadPad1Byte)
   EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrBadInput);
 }
 
+TEST(Deserialize, BufViewOpaqueRoundTrip)
+{
+  // Serialize a 5-byte opaque: 4-byte length (5) + 5 bytes + 3 pad = 12 bytes
+  x23::Vec<uint8_t, 100> src{0x01, 0x02, 0x03, 0x04, 0x05};
+  auto buf = x23::serialize(src);
+
+  // Deserialize into a BufView (zero-copy)
+  x23::BufView view;
+  x23::deserialize(&view, x23::BufView(buf));
+
+  EXPECT_EQ(view.size(), 5U);
+  EXPECT_EQ(view[0], 0x01);
+  EXPECT_EQ(view[4], 0x05);
+}
+
 // NOLINTEND(modernize-type-traits)
 
 } // namespace x23

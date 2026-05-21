@@ -834,6 +834,7 @@ static_assert(
 // Analogous to std::string_view, but can be initialized from a
 // variety of containers of std::uint8_t or char.
 struct BufView : span<const uint8_t> {
+  static constexpr size_t kMaxSize = 0xffffffff;
   using super = span<const uint8_t>;
   BufView() noexcept : super() {}
   template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
