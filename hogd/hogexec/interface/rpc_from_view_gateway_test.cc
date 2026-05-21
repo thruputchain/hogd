@@ -2,13 +2,11 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <utility>
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "invoke_flag.hh"
-#include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
