@@ -878,7 +878,7 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
   std::memcpy(cxs_len_bytes + 1, &kFakeSize, sizeof(kFakeSize));
 
   Calldata forged;
-  forged.append_range(*prefix);
+  forged.append_range(prefix.value()); // NOLINT(bugprone-unchecked-optional-access)
   forged.append(std::begin(cxs_len_bytes), std::end(cxs_len_bytes));
   // Don't append the claimed 32 MiB — the buffer is truncated
 
