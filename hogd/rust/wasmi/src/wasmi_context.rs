@@ -796,8 +796,8 @@ mod h001_float_rejection_tests {
     // End-to-end via the public verify_contract entry point. Either the
     // wasmi-level .floats(false) gate (Module::new) or the
     // groundhog_wasm_meter::verify reject_floats gate will reject —
-    // verify_contract returning false is the only behavior callers
-    // observe, and that's what consensus depends on.
+    // verify_contract returning a non-None error is the only behavior
+    // callers observe, and that's what consensus depends on.
     #[test]
     fn verify_contract_rejects_float_module() {
         // Stub contract_get_fn — verify_contract doesn't touch it, but
@@ -812,8 +812,9 @@ mod h001_float_rejection_tests {
         let global_context = std::sync::Arc::new(WasmiGlobalContext::default());
         let ctx = WasmiContext::new(global_context, stub_get_fn);
         let bytes = float_module_bytes();
-        assert!(
-            !ctx.verify_contract(&bytes),
+        assert_ne!(
+            ctx.verify_contract(&bytes),
+            InvokeErrorCode::None,
             "wasmi verify_contract must reject float-bearing modules"
         );
     }
