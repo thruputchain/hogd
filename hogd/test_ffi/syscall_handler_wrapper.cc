@@ -148,8 +148,10 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
-  if (auto const *runtime = get_mock_runtime()) {
-    current_gas = runtime->get_available_gas();
+  if (auto *runtime = get_mock_runtime()) {
+    auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+    CHECK(gas_runtime != nullptr);
+    current_gas = gas_runtime->gas_remaining();
   }
 
   if (handler_.is_running()) {
@@ -200,12 +202,11 @@ SyscallHandlerContext::finish_mock_invocation_frame(
                                        ? InvokeStatus<void>{}
                                        : InvokeError{invoke_error_code};
 
-  // get the runtime and gas consumed by the invocation
   auto *runtime = pop_mock_runtime();
   CHECK(runtime != nullptr);
-  auto *empty_runtime = dynamic_cast<EmptyRuntime *>(runtime);
-  CHECK(empty_runtime != nullptr);
-  uint64_t consumed_gas = empty_runtime->get_consumed_gas();
+  auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+  CHECK(gas_runtime != nullptr);
+  uint64_t consumed_gas = gas_runtime->gas_consumed();
   x23::Defer _([runtime]() { delete runtime; });
 
   auto result =
@@ -231,11 +232,14 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   }
   auto [frame_result, manually_reverted] = res.value();
   result += frame_result;
+  GasAmount total_gas_consumed = result.gas_consumed_;
 
   GasAmount gas_remaining = std::numeric_limits<GasAmount>::max();
   if (auto *runtime = get_mock_runtime()) {
-    auto _ = runtime->consume_gas(consumed_gas);
-    gas_remaining = runtime->get_available_gas();
+    auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+    CHECK(gas_runtime != nullptr);
+    gas_runtime->consume_gas(total_gas_consumed);
+    gas_remaining = gas_runtime->gas_remaining();
   }
 
   if (handler_.is_running()) {
@@ -288,7 +292,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   return ForeignTracedInvokeResult{
       .serialized_output = serialized_output.value(),
-      .gas_consumed = consumed_gas + res->first.gas_consumed_,
+      .gas_consumed = total_gas_consumed,
       .serialized_trace = serialized_trace,
       .serialized_events = serialized_events,
       .ffi_error_code = kTestFFIErrorCodeNone,

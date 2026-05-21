@@ -31,7 +31,6 @@ add_library(wasm_runtime_test_objects OBJECT
   instantiate_test.cc
   invoke_arity_test.cc
   error_handling_test.cc
-  gas_api_test.cc
   userctx_test.cc
 )
 

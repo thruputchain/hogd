@@ -56,6 +56,8 @@ public:
 
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 1'000'000;
+  static constexpr size_t kDefaultMempoolTxSizeLimit = 5'000'000;
+
   static constexpr size_t kNumSchedulerIterations = 25;
   static_assert(kMaxBlockSize % kNumSchedulerIterations == 0);
   static constexpr size_t kNumTxsPerNominationChunk =
@@ -64,8 +66,10 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id)
-    : db_rpc_(db_rpc), network_id_(network_id)
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, uint64_t network_id,
+                        size_t mempool_tx_size_limit)
+    : db_rpc_(db_rpc), network_id_(network_id),
+      mempool_tx_size_limit_(mempool_tx_size_limit)
   {}
 
   ~MempoolCoordinatorRpc()
@@ -545,6 +549,7 @@ private:
 
   MempoolDbRpc *db_rpc_;
   const uint64_t network_id_;
+  const size_t mempool_tx_size_limit_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

@@ -43,6 +43,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
 protected:
   void SetUp() override
@@ -199,7 +200,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   NativeContractBuilder builder_consumer;
   builder_consumer.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [](NativeRuntime &runtime,
+      [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> InvokeStatus<int32_t> {
         if (!runtime.consume_gas(test_amount)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
@@ -212,7 +213,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         // Invoke consumer method 0 three times, with various gas costs
         auto r1 = [&]() {
-          auto gas_before = ctx.runtime().get_available_gas();
+          auto gas_before = ctx.gas_remaining();
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -222,7 +223,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                       .value(),
               std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
               output_return_buffer_len, output_returned_auth_token_len);
-          return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
+          return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r1_status, g1] = r1;
         if (!r1_status.has_value()) {
@@ -233,7 +234,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto r2 = [&]() {
-          auto gas_before = ctx.runtime().get_available_gas();
+          auto gas_before = ctx.gas_remaining();
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -243,7 +244,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                       .value(),
               std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
               output_return_buffer_len, output_returned_auth_token_len);
-          return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
+          return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r2_status, g2] = r2;
         if (!r2_status.has_value()) {
@@ -254,7 +255,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto r3 = [&]() {
-          auto gas_before = ctx.runtime().get_available_gas();
+          auto gas_before = ctx.gas_remaining();
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
@@ -264,7 +265,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                       .value(),
               std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
               output_return_buffer_len, output_returned_auth_token_len);
-          return std::pair{r, gas_before - ctx.runtime().get_available_gas()};
+          return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r3_status, g3] = r3;
         if (!r3_status.has_value()) {
@@ -281,15 +282,14 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         auto r = [&]() {
-          auto gas_before = ctx.runtime().get_available_gas();
+          auto gas_before = ctx.gas_remaining();
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
               kAddressMiddle, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
               output_return_buffer_len, output_returned_auth_token_len);
-          return std::pair{invoke_status,
-                           gas_before - ctx.runtime().get_available_gas()};
+          return std::pair{invoke_status, gas_before - ctx.gas_remaining()};
         }();
         auto const &[invoke_status, g] = r;
         if (!invoke_status.has_value()) {
@@ -341,6 +341,91 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
   ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
+}
+
+TEST_F(NativeContractTest, GasCostsAtBoundary)
+{
+  // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
+  // a child that consumes 255 gas, while gas_limit 255 is converted to
+  // OutOfGas/DeterministicWasm and still charges the full child limit.
+
+  constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
+  constexpr static ContractAddress kAddressEntry = test_contract_address(1);
+
+  NativeContractBuilder builder_consumer;
+  builder_consumer.add<SerializationFormat::kTxs>(
+      0,
+      [](NativeSyscallContext &runtime,
+         uint32_t test_amount) -> InvokeStatus<int32_t> {
+        if (!runtime.consume_gas(test_amount)) {
+          return InvokeError{InvokeErrorCode::OutOfGas};
+        }
+        return 0;
+      });
+
+  NativeContractBuilder builder_entry;
+  builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        auto invoke_status = ctx.syscall<SyscallNo::kInvoke>(
+            kAddressConsumer, 0, 256, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+            output_return_buffer_len, output_returned_auth_token_len);
+        if (!invoke_status.has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        invoke_status = ctx.syscall<SyscallNo::kInvoke>(
+            kAddressConsumer, 0, 255, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
+            output_return_buffer_len, output_returned_auth_token_len);
+        if (!invoke_status.has_value() ||
+            invoke_status.value() !=
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder_consumer.build());
+  contract_map.emplace(1, builder_entry.build());
+
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
+  for (int32_t i = 0; i < 2; ++i) {
+    Contract contract(ContractType::kNative);
+    contract.native_contract_id() =
+        static_cast<HogexecPrecompiledNativeContracts>(i);
+    snapshot_server_->impl()->setup_create_contract(contract);
+    snapshot_server_->impl()->setup_create_deployment(
+        deployment_addrs[i],
+        DeployedContractHash{.hash = sha256(contract),
+                             .contract_size = 0,
+                             .contract_type = contract.contract_type()});
+  }
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = kAddressEntry,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+  ASSERT_EQ(res.gas_consumed_, 510);
 }
 
 namespace {
@@ -649,6 +734,105 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
+}
+
+TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
+{
+  constexpr ContractAddress kAddrParent = test_contract_address(30);
+  constexpr ContractAddress kAddrChild = test_contract_address(31);
+  constexpr StorageKeyContractData kBannedDataKey{};
+
+  StorageKey banned_full_key(StorageKeyType::ContractData);
+  banned_full_key.contract_data_key() = kBannedDataKey;
+  AddressAndKey banned_addrkey{.address = kAddrChild, .key = banned_full_key};
+
+  // Ban the child's key in the subtransaction path — any lock probe touching
+  // this key will return kRPCUnrecoverable.
+  snapshot_server_->impl()->setup_ban_subtransaction_key(banned_addrkey);
+
+  // Parent: TryInvoke the child, assert FrameReverted.
+  auto contract_parent = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_returned_auth_token_len = 0;
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 kAddrChild, 0, ctx.gas_remaining(), Calldata{},
+                 std::to_underlying(InvokeFlag::TryInvoke),
+                 std::span<uint32_t>{}, output_return_buffer_len,
+                 output_returned_auth_token_len);
+             if (!r.has_value()) {
+               ADD_FAILURE()
+                   << "TryInvoke returned system error (lock probe reached "
+                      "banned key?)";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (r.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+               ADD_FAILURE() << "Expected FrameReverted, got "
+                             << static_cast<int32_t>(r.value());
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  // Child: write to the banned key, then manually revert.
+  auto contract_child = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto data = make_bytestring("child_write");
+             constexpr StorageKeyContractData kKey{};
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), kKey, std::as_bytes(std::span(data)),
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_parent));
+  contract_map.emplace(1, std::move(contract_child));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract parent_contract(ContractType::kNative);
+  parent_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  Contract child_contract(ContractType::kNative);
+  child_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(1);
+
+  snapshot_server_->impl()->setup_create_contract(parent_contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddrParent,
+      DeployedContractHash{.hash = sha256(parent_contract),
+                           .contract_size = 0,
+                           .contract_type = parent_contract.contract_type()});
+
+  snapshot_server_->impl()->setup_create_contract(child_contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddrChild,
+      DeployedContractHash{.hash = sha256(child_contract),
+                           .contract_size = 0,
+                           .contract_type = child_contract.contract_type()});
+
+  SystemCallHandler handler =
+      make_handler(Transaction{.invocation =
+                                   Invocation{.invoked_address = kAddrParent,
+                                              .entrypoint =
+                                                  entrypoint_from_method_id(0),
+                                              .gas_limit = UINT64_MAX,
+                                              .calldata = {}}},
+                   snapshot, 0, 0, *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
 }
 
 } // namespace hogd

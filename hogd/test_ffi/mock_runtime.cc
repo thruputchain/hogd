@@ -25,16 +25,17 @@ MockRuntimeContext::set_trampoline(int32_t contract,
                             MockContract(entry_point, foreign_context));
 }
 
-InvokeStatus<void>
-MockRuntime::invoke_internal(std::string_view method_name)
+std::pair<InvokeStatus<void>, GasAmount>
+MockRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
 {
+  reset_gas(gas_limit);
   auto *context = SyscallHandlerContext::get_context();
   assert(context != nullptr);
   context->push_mock_runtime(this);
   auto res = backing_contract_.invoke(method_name);
   auto *runtime = context->pop_mock_runtime();
   assert(runtime == this);
-  return res;
+  return {res, gas_consumed()};
 }
 
 SystemStatus<std::unique_ptr<Runtime>>

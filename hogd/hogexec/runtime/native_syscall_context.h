@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 #include <tuple>
@@ -26,8 +27,8 @@ namespace hogd {
 // contracts.
 class NativeSyscallContext {
 public:
-  NativeSyscallContext(SystemCallHandler &h, NativeRuntime &r)
-    : handler_(h), runtime_(r)
+  NativeSyscallContext(SystemCallHandler &h, GasAmount gas_limit)
+    : handler_(h), initial_gas_amount_(gas_limit)
   {}
 
   template<SyscallNo Syscall, typename... Args>
@@ -45,16 +46,48 @@ public:
           std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    return wrap_after_parse<Meta>(guard, handler_, runtime_, Meta::kSyscallNo,
-                                  parsed);
+    // std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+    auto [res, gas_consumed] =
+        wrap_after_parse<Meta>(guard, handler_, gas_remaining(),
+                               Meta::kSyscallNo, parsed);
+
+    consume_gas(gas_consumed);
+    return res;
   }
 
   SystemCallHandler &handler() { return handler_; }
-  NativeRuntime &runtime() { return runtime_; }
+
+  GasAmount gas_remaining() const
+  {
+    if (gas_consumed_ > initial_gas_amount_) {
+      return 0;
+    }
+    return initial_gas_amount_ - gas_consumed_;
+  }
+
+  GasAmount total_gas_consumed() const
+  {
+    return initial_gas_amount_ - gas_remaining();
+  }
+
+  bool consume_gas(GasAmount amount)
+  {
+    auto [sum, of] = overflowing_add(amount, gas_consumed_);
+
+    if (of) {
+      gas_consumed_ = std::numeric_limits<GasAmount>::max();
+    }
+    else {
+      gas_consumed_ = sum;
+    }
+
+    return initial_gas_amount_ > gas_consumed_;
+  }
 
 private:
   SystemCallHandler &handler_;
-  NativeRuntime &runtime_;
+  const GasAmount initial_gas_amount_;
+  GasAmount gas_consumed_ = 0;
 
   // Convert a native arg to the parsed form that wrap_after_parse expects.
   //

@@ -47,8 +47,8 @@ public:
   static RPCError abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
-  static RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch const &batch);
+  RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
+                                       StorageDeltaBatch const &batch);
 
   // Revert one or more subtransactions.
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,
@@ -85,6 +85,16 @@ public:
     return out;
   }
 
+  static ExpectedViewingSnapshot open_viewing_snapshot()
+  {
+    return ExpectedViewingSnapshot(RPCError::kRPCUnimplemented);
+  }
+
+  static RPCError close_viewing_snapshot(BlockID /*unused*/)
+  {
+    return RPCError::kRPCUnimplemented;
+  }
+
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr,
@@ -94,6 +104,7 @@ public:
                                      QueueEntry entry);
 
   void setup_ban_item(AddressAndKey const &addrkey);
+  void setup_ban_subtransaction_key(AddressAndKey const &addrkey);
   void setup_stall_item(AddressAndKey const &addrkey);
   void wait_for_stalled_item(AddressAndKey const &addrkey);
   void release_stalled_item(AddressAndKey const &addrkey);
@@ -123,6 +134,9 @@ private:
   // For testing lazy loading:
   // Creates a set of items that throw an error if they are accessed at all
   x23::MVar<std::set<AddressAndKey>> blocked_items_;
+
+  // For testing subtransaction key banning:
+  x23::MVar<std::set<AddressAndKey>> blocked_subtransaction_keys_;
 
   // For testing in-flight snapshot access:
   // Reads to these items suspend (via CoroFutex) until released by the test

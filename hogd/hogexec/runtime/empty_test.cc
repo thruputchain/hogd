@@ -20,6 +20,7 @@ TEST(EmptyTest, RepeatedInstantiate)
   }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct EmptyTestStruct : public NativeContractTestFramework,
                          public ::testing::TestWithParam<TestDB> {
   EmptyTestStruct()

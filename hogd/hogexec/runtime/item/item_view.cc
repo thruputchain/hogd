@@ -101,8 +101,11 @@ NNIntItem::validate() const
 {
   int128_t add_value = from_xdr(add_value_);
   if (add_value >= 0) {
-    // When add_value_ is nonnegative, the storage delta produced
-    // by this item is always valid.
+    // A nonnegative add_value is always valid, even with a negative
+    // set_value (base).  The protocol invariant is
+    // value >= min(set_value, 0), NOT value >= 0.  Negative set_values
+    // intentionally commit negative NNInt values; the lock system
+    // enforces the lower bound accordingly.  See #2155.
     return {};
   }
   if (!base_value_.has_value()) {

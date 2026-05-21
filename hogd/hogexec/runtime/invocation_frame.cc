@@ -260,12 +260,18 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
 
   [[maybe_unused]] bool try_invoke_failed = false;
 
-  // handle the try_invoke data
   assert(!frame_stack_.empty());
+  bool manually_reverted = frame_stack_.back().should_revert();
+
+  // handle the try_invoke data
   if (frame_stack_.back().is_try_invoke()) {
     // Only relevant in the case where the deterministic part of the frame
-    // succeeds.
-    if (frame_result.is_frame_success()) {
+    // succeeds AND the frame is not manually reverting. A manually-reverted
+    // frame discards its writes, so probing locks for those writes is
+    // incorrect: it would consume a nondeterministic bit that should not
+    // exist, and a lock conflict or DB error would wrongly rewrite the
+    // result.
+    if (frame_result.is_frame_success() && !manually_reverted) {
       bool acq_success = false;
 
       if (frame_stack_.back().depth_cap_reached()) {
@@ -317,16 +323,13 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     // otherwise nothing to do here with try_invoke
   }
 
-  if (frame_result.should_frame_revert() ||
-      frame_stack_.back().should_revert()) {
+  if (frame_result.should_frame_revert() || manually_reverted) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
       frame_stack_.pop_back();
       return st.error();
     }
   }
-
-  bool manually_reverted = frame_stack_.back().should_revert();
 
   if (frame_result.should_frame_revert()) {
     assert(try_invoke_failed ||

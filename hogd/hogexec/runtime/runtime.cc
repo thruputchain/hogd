@@ -72,16 +72,12 @@ make_hogexec_wasm_context(RuntimeEngine engine)
 InvokeResult
 Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
-  // Push the previous gas limit onto the stack.
-  const uint64_t prev_gas_limit = get_available_gas();
-  set_available_gas(gas_limit);
 
   trace("Invoking method {} with gas limit {}", method_name, gas_limit);
-  auto res = invoke_internal(method_name);
-  uint64_t gas_remaining = get_available_gas();
+  auto [res, gas_consumed] = invoke_internal(method_name, gas_limit);
   trace("Invoke result: {}, gas consumed: {}",
         res.has_value() ? "success" : x23::show(res.error().code()),
-        gas_limit - gas_remaining);
+        gas_consumed);
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.
@@ -92,33 +88,13 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
   // This makes the behavior of the wasm runtime consistent with the behavior of
   // consume_gas (defined in this file), which is what we use to consume gas
   // within syscalls.
-
   if (!res.has_value() && res.error().code() == InvokeErrorCode::OutOfGas) {
-    gas_remaining = 0;
+    gas_consumed = gas_limit;
   }
 
-  CHECK(gas_remaining <= gas_limit);
-  uint64_t gas_consumed = gas_limit - gas_remaining;
-
-  // Restore previous gas limit.
-  set_available_gas(prev_gas_limit);
+  CHECK(gas_consumed <= gas_limit);
 
   return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
-}
-
-bool
-Runtime::consume_gas(uint64_t gas) noexcept
-{
-  uint64_t current_gas = get_available_gas();
-
-  if (current_gas >= gas) {
-    set_available_gas(current_gas - gas);
-    return true;
-  }
-  // If there is insufficient gas to consume the target amount,
-  // we consume all remaining gas.
-  set_available_gas(0);
-  return false;
 }
 
 Runtime::Runtime(std::unique_ptr<HostCallContext> host_call_context)

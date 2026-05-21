@@ -181,4 +181,22 @@ TEST_F(DirectStalenessTest,
   EXPECT_EQ(second_abandon, DbSchedResult::DbSchedResultError);
 }
 
+TEST_F(DirectStalenessTest, CommitInvalidatedBlockReturnsError)
+{
+  advance_block();
+
+  auto [block_a, block_b] = create_sibling();
+
+  close_and_commit_block(block_a);
+
+  auto close_b = get_coord_client().dbsched_close_snapshot(block_b);
+  EXPECT_EQ(close_b.result(), DbSchedResult::DbSchedResultOK);
+
+  auto commit_b = get_coord_client().dbsched_commit_snapshot(
+      block_b,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*block_hash=*/BlockHash{}, /*events_hash=*/SHA256Hash{});
+  EXPECT_NE(commit_b.result(), DbSchedResult::DbSchedResultOK);
+}
+
 } // namespace hogd

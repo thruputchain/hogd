@@ -145,7 +145,9 @@ public:
       ItemKeyType key_type = ItemKeyType::kItemKeyTypeContractData)
     : item_key_{.addr = addr, .key = key}, key_type_(key_type),
       memoized_hash_(hogd::SipHash24::get_default()(as_bytes()))
-  {}
+  {
+    static_assert(sizeof(item_key_) == kAddressSize + kItemKeySize);
+  }
   [[nodiscard]] constexpr std::span<const std::byte> as_bytes() const
   {
     switch (key_type_) {

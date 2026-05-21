@@ -135,6 +135,11 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
 
   assert(btx != nullptr);
 
+  if (btx->get().is_invalidated()) {
+    error("tried to commit already-invalidated block '{}'", id);
+    return HogDBError(HogDBCode::kInternal);
+  }
+
   if (!btx->initiate_shutdown()) {
     error("Started to commit block '{}' while there were still outstanding "
           "references",
@@ -142,33 +147,34 @@ HogDBSchedRpc::commit_block(BlockID id, BlockHash block_hash,
     return HogDBError(HogDBCode::kInternal);
   }
 
-  // Invalidate siblings BEFORE updating the dbtip below. Executor RPCs such as
-  // get_db_tip read the tip and then check is_snapshot_read_stale; that pair
-  // only excludes the "stale block reads new committed sibling's tip" race if
-  // siblings have been marked invalidated by the time the tip is updated.
-  ctx_.invalidate_siblings(id);
+  // Invalidate siblings BEFORE updating the dbtip below. The publication guard
+  // also blocks new snapshots from opening after this invalidation until the
+  // tip has been updated to match the newly committed data.
+  {
+    RPCContext::CommitPublicationGuard publication_guard(ctx_, id);
 
-  HogDBStatus<void> ret = btx->get().commit();
-  if (!ret) {
-    // Cleanup the block tx if commit failed.
-    return ret.error();
+    HogDBStatus<void> ret = btx->get().commit();
+    if (!ret) {
+      // Cleanup the block tx if commit failed.
+      return ret.error();
+    }
+
+    if (!ctx_.get_db().check_invariants()) {
+      error("invariants check failed!!!");
+      // TODO(geoff): Figure out if there's a way to rollback the block tx,
+      // in ramdb; otherwise, the state is in some kind of corrupted version
+      // where some core invariant is violated.
+      return HogDBError(HogDBCode::kInternal);
+    }
+
+    // Releases the reference to the blocktx acquried above
+    // destroy the block TX.
+    ctx_.remove_shutdown_block_tx(id);
+
+    ret = ctx_.update_dbtip(id, block_hash, events_hash, db_hash);
+    if (!ret)
+      return ret.error();
   }
-
-  if (!ctx_.get_db().check_invariants()) {
-    error("invariants check failed!!!");
-    // TODO(geoff): Figure out if there's a way to rollback the block tx,
-    // in ramdb; otherwise, the state is in some kind of corrupted version
-    // where some core invariant is violated.
-    return HogDBError(HogDBCode::kInternal);
-  }
-
-  // Releases the reference to the blocktx acquried above
-  // destroy the block TX.
-  ctx_.remove_shutdown_block_tx(id);
-
-  ret = ctx_.update_dbtip(id, block_hash, events_hash, db_hash);
-  if (!ret)
-    return ret.error();
 
   // persist everything to the ramdb.
   HogDBStatus<uint64_t> lsn = ctx_.get_db().commit();
@@ -193,14 +199,14 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_open(parent_id, new_id);
   }
-  auto tip_id = ctx_.get_tip().id;
-  if (parent_id != tip_id) {
-    error("parent_id {} is not the last committed block {}", parent_id, tip_id);
-    co_return DbSchedResult::DbSchedResultInvalidParentId;
-  }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
-  co_return to_db_result(ctx_.open_block_tx(new_id, mode));
+  auto res = ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
+  if (!res && res.error() == HogDBCode::kStaleBlock) {
+    error("parent_id {} is not the last committed block", parent_id);
+    co_return DbSchedResult::DbSchedResultInvalidParentId;
+  }
+  co_return to_db_result(res);
 }
 
 x23::Async<DbBlockResult>
