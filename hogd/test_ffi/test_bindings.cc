@@ -824,18 +824,15 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     return VerifyContractResult{.success = result == InvokeErrorCode::None
                                                ? static_cast<uint8_t>(1)
                                                : static_cast<uint8_t>(0),
-                                .invoke_error_code = std::to_underlying(result),
                                 .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException const &e) {
     log_error("error deserializing contract in do_verify_contract: {}", e);
     return VerifyContractResult{.success = 0,
-                                .invoke_error_code = 0,
                                 .ffi_error_code =
                                     kTestFFIErrorCodeDeserializeError};
   } catch (std::exception const &e) {
     log_error("error in do_verify_contract: {}", e);
     return VerifyContractResult{.success = 0,
-                                .invoke_error_code = 0,
                                 .ffi_error_code =
                                     kTestFFIErrorCodeUnrecoverableError};
   }

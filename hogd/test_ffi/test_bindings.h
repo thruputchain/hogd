@@ -271,8 +271,6 @@ struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
 struct VerifyContractResult {
   // 1 if contract is valid, 0 if invalid
   uint8_t success;
-  // InvokeErrorCode from the verifier (0 = None/success)
-  int32_t invoke_error_code;
   // FFI-level error code
   enum TestFFIErrorCode ffi_error_code;
 };
