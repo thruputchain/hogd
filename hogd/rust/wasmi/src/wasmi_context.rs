@@ -15,7 +15,9 @@ use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinearMemorySlice, LinkEntry, SystemErrorCode, WasmContext};
+use common::{
+    InvokeErrorCode, LinearMemorySlice, LinkEntry, SystemErrorCode, WasmContext,
+};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes owned by one RuntimeContext.
@@ -388,14 +390,14 @@ impl WasmiContext {
         linker
     }
 
-    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> InvokeErrorCode {
         let engine = Self::new_engine();
         let module = match Module::new(&engine, contract_data) {
             Ok(m) => m,
             Err(e) => {
                 #[cfg(debug_assertions)]
                 eprintln!("Contract verification failed: {}", e);
-                return false;
+                return InvokeErrorCode::Deterministic;
             }
         };
         if !check_memory_limit(&module) {
@@ -403,12 +405,12 @@ impl WasmiContext {
             eprintln!(
                 "Contract verification failed: memory limit check failed"
             );
-            return false;
+            return InvokeErrorCode::Deterministic;
         }
         if !validate_imports(&module, self.global_context.entries()) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: import validation failed");
-            return false;
+            return InvokeErrorCode::Deterministic;
         }
         let config = groundhog_wasm_meter::Config {
             max_imported_functions: 1,
@@ -418,9 +420,14 @@ impl WasmiContext {
         if let Err(e) = groundhog_wasm_meter::verify(contract_data, &config) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: wasm-meter: {e}");
-            return false;
+            return match e {
+                groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
+                    InvokeErrorCode::Unrecoverable
+                }
+                _ => InvokeErrorCode::Deterministic,
+            };
         }
-        true
+        InvokeErrorCode::None
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);
@@ -722,17 +729,17 @@ pub unsafe extern "C" fn wasmi_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
-) -> bool {
+) -> i32 {
     debug_assert!(!p.is_null());
     if contract_data_p.is_null() {
         #[cfg(debug_assertions)]
         eprintln!("Contract verification failed: null contract data pointer");
-        return false;
+        return InvokeErrorCode::Deterministic.0;
     }
     let context: *const WasmiContext = p.cast::<WasmiContext>();
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
-    unsafe { (*context).verify_contract(wasm) }
+    unsafe { (*context).verify_contract(wasm) }.0
 }
 
 // ===========================================================================

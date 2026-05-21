@@ -166,21 +166,22 @@ WasmiContext::make_new_runtime(
                                         wasmi_runtime_ptr);
 }
 
-bool
+InvokeErrorCode
 WasmiContext::verify_contract(Contract const &contract) const
 {
   assert(wasmi_context_ptr_);
   if (contract.contract_type() != ContractType::kWasmi) {
-    return false;
+    return InvokeErrorCode::Deterministic;
   }
   try {
-    return wasmi_verify_contract(wasmi_context_ptr_,
-                                 reinterpret_cast<const uint8_t *>(
-                                     contract.wasmi_contract().wasm.data()),
-                                 contract.wasmi_contract().wasm.size());
+    return static_cast<InvokeErrorCode>(
+        wasmi_verify_contract(wasmi_context_ptr_,
+                              reinterpret_cast<const uint8_t *>(
+                                  contract.wasmi_contract().wasm.data()),
+                              contract.wasmi_contract().wasm.size()));
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
-    return false;
+    return InvokeErrorCode::Unrecoverable;
   }
 }
 

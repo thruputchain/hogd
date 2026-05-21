@@ -95,11 +95,14 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  bool verify_contract(Contract const &contract) const override
+  InvokeErrorCode verify_contract(Contract const &contract) const override
   {
     CHECK(contract.contract_type() == ContractType::kNative);
-    return contracts_.contains(
-        std::to_underlying(contract.native_contract_id()));
+    if (contracts_.contains(
+            std::to_underlying(contract.native_contract_id()))) {
+      return InvokeErrorCode::None;
+    }
+    return InvokeErrorCode::Deterministic;
   }
 
 private:
