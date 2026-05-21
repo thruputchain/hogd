@@ -30,7 +30,6 @@
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 

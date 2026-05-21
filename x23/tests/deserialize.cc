@@ -486,16 +486,18 @@ TEST(Deserialize, BufViewRejectsTruncatedInput)
 {
   // Forge a 4-byte length header claiming 100 bytes, but only provide 8 bytes
   uint8_t bad_input[] = {0x00, 0x00, 0x00, 0x64,  // length = 100
-                         0x01, 0x02, 0x03, 0x04};  // only 4 bytes of data
+                         0x01, 0x02, 0x03, 0x04}; // only 4 bytes of data
   x23::BufView view;
-  EXPECT_THROW(x23::deserialize(&view, x23::BufView(bad_input, sizeof(bad_input))),
+  EXPECT_THROW(x23::deserialize(&view,
+                                x23::BufView(bad_input, sizeof(bad_input))),
                x23::XdrBadInput);
 }
 
 TEST(Deserialize, BufViewSerializesLikeCalldata)
 {
   // Calldata = Vec<uint8_t, 0xffffffff>
-  static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 0xffffffff>>);
+  static_assert(
+      x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 0xffffffff>>);
   static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 100>>);
 }
 

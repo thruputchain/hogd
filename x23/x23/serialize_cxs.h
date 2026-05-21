@@ -523,8 +523,6 @@ template<> struct CxsSerializer<x23::BufView> {
   {
     uint32_t size;
     CxsSerializer<uint32_t>::load(data, size);
-    if (size > x23::BufView::kMaxSize) [[unlikely]]
-      throw CxsBadInput("length {} exceeds maximum deserializing BufView", size);
     check_size(data, size);
     value = x23::BufView(data.data(), size);
     data = data.subspan(size);

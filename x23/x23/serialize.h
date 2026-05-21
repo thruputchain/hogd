@@ -782,8 +782,8 @@ struct Deserializer
         }
       }
       else {
-        static_assert(!requires { x.resize_uninitialized(size); }
-                      && is_xdr_cat<X, XdrCategory::kOpaqueVec>);
+        static_assert(!requires { x.resize_uninitialized(size); } &&
+                      is_xdr_cat<X, XdrCategory::kOpaqueVec>);
         x = X(p, size);
         if (size)
           p += size;
@@ -798,8 +798,8 @@ struct Deserializer
         memcpy(x.data(), p, size);
       }
       else {
-        static_assert(!requires { x.resize_uninitialized(size); }
-                      && is_xdr_cat<X, XdrCategory::kOpaqueVec>);
+        static_assert(!requires { x.resize_uninitialized(size); } &&
+                      is_xdr_cat<X, XdrCategory::kOpaqueVec>);
         x = X(p, size);
       }
       p += binlen;

@@ -865,8 +865,8 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
   // Serialize the fixed-size args as valid CXS prefix.
   // For fixed-size opaque arrays, CXS serialization is raw bytes.
   auto prefix =
-      Serializer<itc_meta::kSerializationFormat>::serialize(
-          hash, nonce, entrypoint);
+      Serializer<itc_meta::kSerializationFormat>::serialize(hash, nonce,
+                                                            entrypoint);
   ASSERT_TRUE(prefix.has_value());
 
   // Append a CXS-encoded length claiming 32 MiB.
@@ -888,8 +888,7 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
               {
                   .invoked_address =
                       GenesisConfigurationLoader::kDeployContractAddress,
-                  .entrypoint =
-                      itc_meta::entrypoint<"claim_initial_tokens">(),
+                  .entrypoint = itc_meta::entrypoint<"claim_initial_tokens">(),
                   .gas_limit = UINT64_MAX,
                   .calldata = std::move(forged),
               },
