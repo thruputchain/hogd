@@ -12,6 +12,7 @@
 #include "event.hh"
 #include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/event_cursor.h"
 #include "hogd/indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
@@ -735,6 +736,76 @@ TEST_F(IndexDBTest, LatestBlockRecoversAfterRestartWithoutMetaKey)
   auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
   EXPECT_EQ(db->latest_block(), 0);
+}
+
+TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx1, tx2;
+  std::ranges::fill(tx1, 0x01);
+  std::ranges::fill(tx2, 0x02);
+
+  TxEventLog log1;
+  log1.proposed_tx_hash = tx1;
+  log1.events.push_back(make_event(addr, 0, 0));
+
+  TxEventLog log2;
+  log2.proposed_tx_hash = tx2;
+  log2.events.push_back(make_event(addr, 0, 0));
+
+  ASSERT_TRUE(db->consume_events(5, std::vector{log1}));
+  ASSERT_TRUE(db->consume_events(10, std::vector{log2}));
+
+  EventCursorPayload payload;
+  payload.schema_version = cursor::kCursorVersion;
+  payload.order = static_cast<IterationOrder>(2);
+  payload.block_height = 10;
+  payload.tx_hash = tx2;
+  payload.sequence_number = 0;
+  std::string encoded = cursor::encode(payload);
+
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+  EventQuery query =
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 BlockAnchor(BlockAnchorKind::AnchorAtBeginning));
+  query.cursor.append_range(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+
+  auto page = db->get_events(query);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_TRUE(page->events.empty());
+  EXPECT_TRUE(page->cursor.empty());
+}
+
+TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  SHA256Hash tx1;
+  std::ranges::fill(tx1, 0x01);
+
+  TxEventLog log1;
+  log1.proposed_tx_hash = tx1;
+  log1.events.push_back(make_event(addr, 0, 0));
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{log1}));
+
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr}));
+  auto page = db->get_events(
+      make_query(std::move(filters), static_cast<IterationOrder>(2),
+                 anchor_at_height(10)));
+  ASSERT_TRUE(page.has_value());
+  EXPECT_TRUE(page->events.empty());
+  EXPECT_TRUE(page->cursor.empty());
 }
 
 // NOLINTEND(misc-include-cleaner)
