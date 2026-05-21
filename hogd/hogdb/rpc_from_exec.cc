@@ -472,8 +472,8 @@ HogDBExecutorRpc::open_viewing_snapshot()
   }
 
   BlockID block_id = generate_block_id();
-  auto res =
-      ctx_.open_block_tx(block_id, BlockExecutionMode::kBlockExecutionModeViewing);
+  auto res = ctx_.open_block_tx(block_id,
+                                BlockExecutionMode::kBlockExecutionModeViewing);
   if (!res) {
     return ExpectedViewingSnapshot(to_rpc_error(res.error()));
   }

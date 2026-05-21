@@ -538,15 +538,11 @@ public:
 
   uint16_t get_db_exec_port()
   {
-    return std::visit(
-        [](auto &db_wrapper) { return db_wrapper.exec_port(); },
-        db_wrapper_);
+    return std::visit([](auto &db_wrapper) { return db_wrapper.exec_port(); },
+                      db_wrapper_);
   }
 
-  uint16_t get_event_exec_port()
-  {
-    return event_server_wrapper_.exec_port();
-  }
+  uint16_t get_event_exec_port() { return event_server_wrapper_.exec_port(); }
 
   static DeployedContractHash
   make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)

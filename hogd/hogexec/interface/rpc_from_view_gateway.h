@@ -55,8 +55,7 @@ private:
 
   ViewGatewayResult run_view_with_retries(TransactionViewQuery const &query);
   ViewGatewayResult run_view_attempt(TransactionViewQuery const &query,
-                                     DbTip const &tip,
-                                     ViewState &view_state);
+                                     DbTip const &tip, ViewState &view_state);
 
   // Returns a pointer to the current view state with a reference acquired,
   // or nullptr if shutdown is in progress. Lazy-initializes the first

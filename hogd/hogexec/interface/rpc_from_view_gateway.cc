@@ -110,7 +110,8 @@ ViewGatewayRpc::shut_down()
              it->first);
       }
       it = view_states_.erase(it);
-    } else {
+    }
+    else {
       ++it;
     }
   }
@@ -142,8 +143,8 @@ ViewGatewayRpc::get_current_view_state()
       return nullptr;
     }
     auto &snapshot = res.value();
-    view_states_.try_emplace(
-        snapshot.block_id, snapshot.block_id, snapshot.tip, db_proxy_);
+    view_states_.try_emplace(snapshot.block_id, snapshot.block_id, snapshot.tip,
+                             db_proxy_);
     current_view_block_id_ = snapshot.block_id;
   }
   auto *state = &view_states_.at(current_view_block_id_);
@@ -169,8 +170,8 @@ ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
     return false;
   }
   auto &snapshot = res.value();
-  view_states_.try_emplace(
-      snapshot.block_id, snapshot.block_id, snapshot.tip, db_proxy_);
+  view_states_.try_emplace(snapshot.block_id, snapshot.block_id, snapshot.tip,
+                           db_proxy_);
   current_view_block_id_ = snapshot.block_id;
   return true;
 }
@@ -226,8 +227,7 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 
 ViewGatewayResult
 ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
-                                 DbTip const &tip,
-                                 ViewState &view_state)
+                                 DbTip const &tip, ViewState &view_state)
 {
   static thread_local auto context = make_hogexec_context();
 

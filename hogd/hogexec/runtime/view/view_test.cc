@@ -1434,9 +1434,8 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
 
   auto result = View::run_view_transaction(
       snapshot_cache,
-      PerTransactionDatabaseProxy(
-          framework_.get_db_proxy(), snapshot.block_id,
-          std::numeric_limits<TransactionID>::max()),
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(), snapshot.block_id,
+                                  std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {});
@@ -1486,9 +1485,8 @@ TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
 
   auto result = View::run_view_transaction(
       snapshot_cache,
-      PerTransactionDatabaseProxy(
-          framework_.get_db_proxy(), tip.id,
-          std::numeric_limits<TransactionID>::max()),
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(), tip.id,
+                                  std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {});
@@ -1551,9 +1549,8 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
 
   auto result = View::run_view_transaction(
       snapshot_cache,
-      PerTransactionDatabaseProxy(
-          framework_.get_db_proxy(), snapshot.block_id,
-          std::numeric_limits<TransactionID>::max()),
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(), snapshot.block_id,
+                                  std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {});

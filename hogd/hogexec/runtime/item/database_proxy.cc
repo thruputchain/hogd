@@ -288,9 +288,8 @@ DatabaseProxy::open_viewing_snapshot()
 {
   auto res = client_.open_viewing_snapshot();
   return to_system_error_code<NotFoundIsUnrecoverableError{}>(
-      res, [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> {
-        return x;
-      });
+      res,
+      [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
 }
 
 SystemStatus<void>
