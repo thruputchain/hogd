@@ -3278,6 +3278,75 @@ TEST_F(HogDBTest, ViewingBlockTXCommitRejectsWrite)
   EXPECT_EQ(result.error().code(), HogDBCode::kInvalidExecutorBehavior);
 }
 
+// Regression test for issue #1750: a stale sibling block could read the live
+// DAO's storage cost after another sibling committed, inflating refunds.
+// The staleness guard (PR #1895) must reject the stale block's lock attempt.
+TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
+{
+  Address addr = make_address(kAddress + 301);
+  ItemKey j_key = make_item_key(addr, 1);
+  ItemKey k_key = make_item_key(addr, 2);
+
+  const int128_t initial_balance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, initial_balance));
+  ASSERT_TRUE(db_.write_address_metadata(
+      addr,
+      DeployedContractHash{.hash = sha256(std::as_bytes(std::span("stale"))),
+                           .contract_size = 10}));
+
+  PerThreadARC<BlockTX> block_a(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  PerThreadARC<BlockTX> block_b(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_a.try_acquire_reference());
+  {
+    InvokeTX itx_a(block_a);
+    ASSERT_TRUE(itx_a.request_nnint128(
+        j_key, 1, std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx_a.sync_balance_locks());
+    itx_a.commit();
+    itx_a.release_blocktx_reference();
+  }
+
+  std::vector<std::byte> large_value(1024, std::byte{0x42});
+  ASSERT_TRUE(block_b.try_acquire_reference());
+  {
+    InvokeTX itx_b(block_b);
+    ASSERT_TRUE(itx_b.request_bytes(
+        k_key, std::span(large_value),
+        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx_b.sync_balance_locks());
+    itx_b.commit();
+    itx_b.release_blocktx_reference();
+  }
+  ASSERT_TRUE(block_b.get().close_skip_hash_for_testing());
+  ASSERT_TRUE(block_b.get().commit());
+
+  // Simulate what RPCContext::invalidate_siblings does when B commits.
+  block_a.get().invalidate();
+
+  // Block A is now stale — sibling B committed, advancing the tip.
+  // The staleness guard must reject A's attempt to lock key K.
+  // Without the guard, lock() would read B's 1024-byte cost from the live DAO
+  // as A's snapshot cost, producing a spurious storage refund.
+  ASSERT_TRUE(block_a.try_acquire_reference());
+  {
+    InvokeTX itx_a(block_a);
+    constexpr std::array<std::byte, 1> kSmallValue = {std::byte{0x7F}};
+    auto result = itx_a.request_bytes(
+        k_key, std::span(kSmallValue),
+        std::to_underlying(StorageDeltaFlags::None));
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
+
+    itx_a.abort();
+    itx_a.release_blocktx_reference();
+  }
+}
+
 } // namespace hogd
 
 int
