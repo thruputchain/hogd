@@ -82,58 +82,28 @@ public:
 
   ~MockRuntime() override = default;
 
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override
-  {
-    return gas_remaining_;
-  }
-
-  void set_available_gas(uint64_t gas) noexcept override
-  {
-    gas_remaining_ = gas;
-  }
-
 private:
-  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   MockContract backing_contract_;
-  uint64_t gas_remaining_ = 0;
 };
 
 class EmptyRuntime : public Runtime {
 public:
-  EmptyRuntime(Invocation const &invocation)
+  EmptyRuntime(Invocation const & /*invocation*/)
     : Runtime(std::make_unique<HostCallContext>())
-  {
-    gas_remaining_ = invocation.gas_limit;
-    initial_gas_ = invocation.gas_limit;
-  }
+  {}
 
   ~EmptyRuntime() override = default;
 
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override
-  {
-    return gas_remaining_;
-  }
-
-  void set_available_gas(uint64_t gas) noexcept override
-  {
-    gas_remaining_ = gas;
-  }
-
-  uint64_t get_consumed_gas() const noexcept
-  {
-    assert(gas_remaining_ <= initial_gas_);
-    return initial_gas_ - gas_remaining_;
-  }
-
 private:
-  InvokeStatus<void> invoke_internal(std::string_view /*unused*/) override
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view /*unused*/,
+                  uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");
   }
-
-  uint64_t gas_remaining_ = 0;
-  uint64_t initial_gas_ = 0;
 };
 
 } // namespace hogd

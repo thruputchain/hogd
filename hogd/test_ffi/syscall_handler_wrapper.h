@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <tuple>
@@ -223,9 +224,9 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
                    typename syscall_t::template arg_i<Is>>(guard,
                                                            input_args)...};
 
-    auto inner_res = wrap_after_parse<SyscallMeta>(guard, handler->to_handler(),
-                                                   *mock_runtime, syscall_no,
-                                                   std::move(parsed_args));
+    auto [inner_res, _gas] = wrap_after_parse<SyscallMeta>(
+        guard, handler->to_handler(), std::numeric_limits<GasAmount>::max(),
+        syscall_no, std::move(parsed_args));
 
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
