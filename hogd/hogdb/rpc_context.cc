@@ -1,5 +1,6 @@
 #include "hogd/hogdb/rpc_context.h"
 
+#include <atomic>
 #include <cassert>
 #include <mutex>
 #include <tuple>
