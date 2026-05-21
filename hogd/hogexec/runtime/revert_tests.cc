@@ -463,6 +463,222 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
   advance_block();
 }
 
+// Regression test for issue 1745: a manually-reverted TryInvoke child that
+// wrote storage should return FrameReverted + abort payload regardless of
+// whether another transaction holds a conflicting reservation on the
+// discarded key.
+TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
+{
+  constexpr ContractAddress kAddrParent = make_contract_address(10);
+  constexpr ContractAddress kAddrChild = make_contract_address(11);
+  constexpr auto kConflictKey = make_storage_key("conflict_key");
+
+  auto abort_payload = make_bytestring("manual_revert_payload");
+
+  // Parent: TryInvoke the child, then assert FrameReverted + abort payload.
+  auto contract_parent = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [abort_payload,
+            kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_returned_auth_token_len = 0;
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 kAddrChild, 0, ctx.runtime().get_available_gas(), Calldata{},
+                 std::to_underlying(InvokeFlag::TryInvoke),
+                 std::span<uint32_t>{}, output_return_buffer_len,
+                 output_returned_auth_token_len);
+             if (!r.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (r.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+               ADD_FAILURE() << "Expected FrameReverted, got "
+                             << static_cast<int32_t>(r.value());
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (output_return_buffer_len != abort_payload.size()) {
+               ADD_FAILURE() << "Abort payload length mismatch: expected "
+                             << abort_payload.size() << ", got "
+                             << output_return_buffer_len;
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+
+             auto status = ctx.handler().get_return_buffer();
+             if (!status.has_value()) {
+               return status.error().to_invoke_error();
+             }
+             if (!status.value().has_value()) {
+               ADD_FAILURE() << "Abort payload should be available";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (*status.value().value() != abort_payload) {
+               ADD_FAILURE() << "Abort payload content mismatch";
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  // Child: write to kConflictKey, then manually revert with abort payload.
+  auto contract_child = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [abort_payload,
+            kConflictKey](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto child_data = make_bytestring("child_state");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), kConflictKey,
+                 std::as_bytes(std::span(child_data)),
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             ReturnBuffer buffer(abort_payload.begin(), abort_payload.end());
+             ctx.handler().set_return_buffer(std::move(buffer), true);
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_parent));
+  contract_map.emplace(1, std::move(contract_child));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto parent_xdr = make_native_contract(0);
+  auto child_xdr = make_native_contract(1);
+  write_contract(parent_xdr);
+  write_contract(child_xdr);
+  write_deployment(kAddrParent, parent_xdr);
+  write_deployment(kAddrChild, child_xdr);
+  setup_grant_storage_token(kAddrParent, 1'000'000'000);
+  setup_grant_storage_token(kAddrChild, 1'000'000'000);
+
+  // Create a conflicting reservation on kConflictKey from another transaction.
+  auto conflict_addrkey =
+      make_contract_data_addrkey(kAddrChild, "conflict_key");
+  auto locker_tx = make_new_per_tx_db_proxy(UINT64_MAX);
+  locker_tx.add_delta(conflict_addrkey, make_bytestring_delta("locker"),
+                      std::to_underlying(StorageDeltaFlags::None));
+  auto lock_res = locker_tx.try_push_current_subtransaction();
+  ASSERT_TRUE(lock_res.has_value());
+  ASSERT_TRUE(lock_res.value());
+
+  // Run the parent transaction — should succeed with FrameReverted.
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kAddrParent,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  // Clean up the locker transaction.
+  ASSERT_TRUE(locker_tx.abort_transaction().has_value());
+
+  advance_block();
+
+  // The child's discarded write should not be committed.
+  auto child_item = lookup_storage_item_from_db(conflict_addrkey);
+  ASSERT_FALSE(child_item.has_value());
+}
+
+// Regression test for issue 1745: proposal mode should not log a
+// nondeterministic bit for a manually-reverted TryInvoke child's discarded
+// writes, and validation mode should agree.
+TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
+{
+  constexpr ContractAddress kAddrParent = make_contract_address(20);
+  constexpr ContractAddress kAddrChild = make_contract_address(21);
+  constexpr auto kWriteKey = make_storage_key("write_key");
+
+  // Parent: TryInvoke the child.
+  auto contract_parent = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [kAddrChild](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len = 0;
+             RuntimeMemoryLength output_returned_auth_token_len = 0;
+             auto r = ctx.syscall<SyscallNo::kInvoke>(
+                 kAddrChild, 0, ctx.runtime().get_available_gas(), Calldata{},
+                 std::to_underlying(InvokeFlag::TryInvoke),
+                 std::span<uint32_t>{}, output_return_buffer_len,
+                 output_returned_auth_token_len);
+             if (!r.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (r.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+               ADD_FAILURE() << "Expected FrameReverted, got "
+                             << static_cast<int32_t>(r.value());
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }}});
+
+  // Child: write to storage, then manually revert.
+  auto contract_child = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0, [kWriteKey](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto data = make_bytestring("written");
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 ctx.handler(), kWriteKey, std::as_bytes(std::span(data)),
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_parent));
+  contract_map.emplace(1, std::move(contract_child));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto parent_xdr = make_native_contract(0);
+  auto child_xdr = make_native_contract(1);
+  write_contract(parent_xdr);
+  write_contract(child_xdr);
+  write_deployment(kAddrParent, parent_xdr);
+  write_deployment(kAddrChild, child_xdr);
+  setup_grant_storage_token(kAddrParent, 1'000'000'000);
+  setup_grant_storage_token(kAddrChild, 1'000'000'000);
+
+  Transaction tx{.invocation =
+                     Invocation{.invoked_address = kAddrParent,
+                                .entrypoint = entrypoint_from_method_id(0),
+                                .gas_limit = UINT64_MAX,
+                                .calldata = {}}};
+
+  // Proposal mode: run and extract proposal data.
+  auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);
+  auto proposal_res = proposal_handler.root_invoke();
+  ASSERT_TRUE(proposal_res.is_root_success());
+  auto proposal_data = proposal_handler.get_proposal_data();
+  ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+
+  // No nondeterministic bit should have been logged.
+  EXPECT_EQ(proposal_data.nondeterministic_bit_count, 0U);
+
+  // Validation mode: replay with the proposal data.
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto validation_handler =
+      make_new_system_call_handler_validation(tx, *runtime_context,
+                                              proposal_data);
+  auto validation_res = validation_handler.root_invoke();
+  ASSERT_TRUE(validation_res.is_root_success());
+  ASSERT_EQ(validation_handler.try_commit_transaction(),
+            ExecResult::ExecResultOK);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RevertTest,
