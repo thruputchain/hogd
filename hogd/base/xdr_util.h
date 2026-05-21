@@ -360,10 +360,12 @@ show_byte_array(const std::array<uint8_t, N> &array)
 } // namespace hogd
 
 template<> struct std::hash<hogd::AddressAndKey> {
-  std::size_t operator()(const hogd::AddressAndKey &addrkey) const
+  std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
   {
     auto key_disc = addrkey.key.key_type();
 
+    static_assert(sizeof(addrkey.address) == 32,
+                  "ContractAddress size changed; update buf allocation");
     std::array<uint8_t, 32 + sizeof(key_disc) + 32> buf{};
     size_t pos = 0;
 
@@ -375,9 +377,18 @@ template<> struct std::hash<hogd::AddressAndKey> {
     pos += sizeof(key_disc);
 
     if (key_disc == hogd::StorageKeyType::ContractData) {
+      static_assert(
+          sizeof(addrkey.key.contract_data_key()) == 32,
+          "StorageKeyContractData size changed; update buf allocation");
       std::memcpy(buf.data() + pos, addrkey.key.contract_data_key().data(),
                   addrkey.key.contract_data_key().size());
       pos += addrkey.key.contract_data_key().size();
+    }
+    else {
+      assert(key_disc == hogd::StorageKeyType::FreeNativeTokenBalance ||
+             key_disc == hogd::StorageKeyType::AuthData ||
+             key_disc == hogd::StorageKeyType::Metadata ||
+             key_disc == hogd::StorageKeyType::ReplayCache);
     }
 
     return hogd::SipHash24::get_default()(
