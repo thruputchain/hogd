@@ -412,8 +412,8 @@ public:
     : intro_height_(intro_height)
   {}
 
-  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight height,
-                                                ContractAddress /*address*/) const
+  x23::Async<DBAuthResult>
+  authdb_get_auth_data(BlockHeight height, ContractAddress /*address*/) const
   {
     if (height != intro_height_) {
       co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
