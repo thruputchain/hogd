@@ -3304,8 +3304,9 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
   ASSERT_TRUE(block_a.try_acquire_reference());
   {
     InvokeTX itx_a(block_a);
-    ASSERT_TRUE(itx_a.request_nnint128(
-        j_key, 1, std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(
+        itx_a.request_nnint128(j_key, 1,
+                               std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_a.sync_balance_locks());
     itx_a.commit();
     itx_a.release_blocktx_reference();
@@ -3315,9 +3316,9 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
   ASSERT_TRUE(block_b.try_acquire_reference());
   {
     InvokeTX itx_b(block_b);
-    ASSERT_TRUE(itx_b.request_bytes(
-        k_key, std::span(large_value),
-        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(
+        itx_b.request_bytes(k_key, std::span(large_value),
+                            std::to_underlying(StorageDeltaFlags::None)));
     ASSERT_TRUE(itx_b.sync_balance_locks());
     itx_b.commit();
     itx_b.release_blocktx_reference();
@@ -3336,9 +3337,9 @@ TEST_F(HogDBTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
   {
     InvokeTX itx_a(block_a);
     constexpr std::array<std::byte, 1> kSmallValue = {std::byte{0x7F}};
-    auto result = itx_a.request_bytes(
-        k_key, std::span(kSmallValue),
-        std::to_underlying(StorageDeltaFlags::None));
+    auto result =
+        itx_a.request_bytes(k_key, std::span(kSmallValue),
+                            std::to_underlying(StorageDeltaFlags::None));
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code(), HogDBCode::kStaleBlock);
 
