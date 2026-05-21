@@ -99,8 +99,7 @@ public:
 
 private:
   std::pair<InvokeStatus<void>, GasAmount>
-  invoke_internal(std::string_view /*unused*/,
-                  uint64_t /*gas_limit*/) override
+  invoke_internal(std::string_view /*unused*/, uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");
   }

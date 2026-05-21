@@ -692,6 +692,7 @@ TEST_P(RCQTest, ConcurrentOverflow)
                       Invocation{
                           .invoked_address = contract_address_,
                           .entrypoint = entrypoint_from_method_id(0), // Insert
+                          .gas_limit = UINT64_MAX,
                           .calldata = Calldata(values.begin(), values.end())}}},
       *context_);
 
@@ -703,6 +704,7 @@ TEST_P(RCQTest, ConcurrentOverflow)
                       Invocation{
                           .invoked_address = contract_address_,
                           .entrypoint = entrypoint_from_method_id(0), // Insert
+                          .gas_limit = UINT64_MAX,
                           .calldata = Calldata(values.begin(), values.end())}}},
       *context_);
 
