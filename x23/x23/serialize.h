@@ -762,25 +762,39 @@ struct Deserializer
   void go(X &x)
   {
     uint32_t size = get32<Safe>();
-    if (size > x.max_size()) [[unlikely]]
-      raise("length {} exceeds maximum deserializing {}", size,
-            xdr_type_name<X>());
+    if constexpr (requires { x.max_size(); }) {
+      if (size > x.max_size()) [[unlikely]]
+        raise("length {} exceeds maximum deserializing {}", size,
+              xdr_type_name<X>());
+    }
     size_t rem = size % 4;
     if (rem == 0) {
       if constexpr (Safe)
         need(size);
-      x.resize_uninitialized(size);
-      if (size) {
-        memcpy(x.data(), p, size);
-        p += size;
+      if constexpr (requires { x.resize_uninitialized(size); }) {
+        x.resize_uninitialized(size);
+        if (size) {
+          memcpy(x.data(), p, size);
+          p += size;
+        }
+      }
+      else {
+        x = X(p, size);
+        if (size)
+          p += size;
       }
     }
     else {
       std::size_t binlen = (size + 3UZ) & ~3UZ;
       if (Safe)
         need(binlen);
-      x.resize_uninitialized(size);
-      memcpy(x.data(), p, size);
+      if constexpr (requires { x.resize_uninitialized(size); }) {
+        x.resize_uninitialized(size);
+        memcpy(x.data(), p, size);
+      }
+      else {
+        x = X(p, size);
+      }
       p += binlen;
       check_trailing_zeros(rem);
     }

@@ -446,6 +446,52 @@ TEST(Deserialize, BufViewOpaqueRoundTrip)
   EXPECT_EQ(view[4], 0x05);
 }
 
+TEST(Deserialize, BufViewEmptyOpaque)
+{
+  x23::Vec<uint8_t, 100> src{};
+  auto buf = x23::serialize(src);
+
+  x23::BufView view;
+  x23::deserialize(&view, x23::BufView(buf));
+  EXPECT_EQ(view.size(), 0U);
+}
+
+TEST(Deserialize, BufViewInTuple)
+{
+  uint32_t src_u32 = 42;
+  x23::Vec<uint8_t, 100> src_opaque{0xAA, 0xBB, 0xCC};
+  auto buf = x23::serialize(std::make_tuple(src_u32, src_opaque));
+
+  std::tuple<uint32_t, x23::BufView> out;
+  x23::deserialize(&out, x23::BufView(buf));
+  EXPECT_EQ(std::get<0>(out), 42U);
+  EXPECT_EQ(std::get<1>(out).size(), 3U);
+  EXPECT_EQ(std::get<1>(out)[0], 0xAA);
+}
+
+TEST(Deserialize, BufViewPointsIntoInputBuffer)
+{
+  x23::Vec<uint8_t, 100> src{0x01, 0x02};
+  auto buf = x23::serialize(src);
+
+  x23::BufView view;
+  x23::deserialize(&view, x23::BufView(buf));
+
+  // BufView data pointer should be inside the buf memory region
+  EXPECT_GE(view.data(), buf.data());
+  EXPECT_LE(view.data() + view.size(), buf.data() + buf.size());
+}
+
+TEST(Deserialize, BufViewRejectsTruncatedInput)
+{
+  // Forge a 4-byte length header claiming 100 bytes, but only provide 8 bytes
+  uint8_t bad_input[] = {0x00, 0x00, 0x00, 0x64,  // length = 100
+                         0x01, 0x02, 0x03, 0x04};  // only 4 bytes of data
+  x23::BufView view;
+  EXPECT_THROW(x23::deserialize(&view, x23::BufView(bad_input, sizeof(bad_input))),
+               x23::XdrBadInput);
+}
+
 // NOLINTEND(modernize-type-traits)
 
 } // namespace x23
