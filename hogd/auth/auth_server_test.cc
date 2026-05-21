@@ -402,6 +402,91 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
   ASSERT_TRUE(result.value()->second.has_value());
 }
 
+namespace {
+
+class SimpleDBAuthRpc {
+public:
+  using rpc_service = DBAuth1;
+
+  explicit SimpleDBAuthRpc(BlockHeight intro_height)
+    : intro_height_(intro_height)
+  {}
+
+  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight height,
+                                                ContractAddress /*address*/) const
+  {
+    if (height != intro_height_) {
+      co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
+    }
+    co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
+  }
+
+  x23::Async<DBAuthResultBatch>
+  authdb_get_auth_data_batch(BlockHeight height,
+                             ContractAddressBatch const &addresses) const
+  {
+    DBAuthResultBatch result;
+    result.reserve(addresses.size());
+    for (size_t i = 0; i < addresses.size(); i++) {
+      result.emplace_back(height == intro_height_
+                              ? DBAuthError::kDBAuthNotFound
+                              : DBAuthError::kDBAuthStaleBlockHeight);
+    }
+    co_return result;
+  }
+
+  x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard /*card*/) const
+  {
+    DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
+    ret.current_height() = intro_height_;
+    co_return ret;
+  }
+
+private:
+  BlockHeight intro_height_;
+};
+
+static_assert(is_DBAuth1<SimpleDBAuthRpc *, x23::Async>);
+
+} // namespace
+
+// Regression test for #1448: lookup_auth_data waiters stranded when
+// subscribe_to_auth_data_changes stores the initial height without broadcast.
+TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
+{
+  constexpr BlockHeight kIntroHeight = 5;
+  ContractAddress address = make_test_address(10);
+
+  RpcServer<SimpleDBAuthRpc> db_server(kIntroHeight);
+  uint16_t port = db_server.start_server(0);
+  std::string db_address = std::format("localhost:{}", port);
+  dbauth_client_t dbauth_client = make_dbauth_client(db_address)();
+  AuthServer auth_server(std::move(dbauth_client), 16);
+
+  std::atomic<bool> lookup_started = false;
+  std::atomic<bool> lookup_finished = false;
+
+  std::jthread lookup_thread([&] {
+    lookup_started = true;
+    lookup_started.notify_all();
+    (void)auth_server.lookup_auth_data(kIntroHeight, address)();
+    lookup_finished = true;
+    lookup_finished.notify_all();
+  });
+
+  lookup_started.wait(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_FALSE(lookup_finished.load());
+
+  AuthCard card{};
+  auth_server.subscribe_to_auth_data_changes(card)();
+
+  lookup_finished.wait(false);
+  EXPECT_TRUE(lookup_finished.load());
+
+  lookup_thread.join();
+}
+
 TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)
 {
   const ContractAddress address = make_test_address(101);
