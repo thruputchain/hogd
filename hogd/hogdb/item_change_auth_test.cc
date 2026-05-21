@@ -4,7 +4,6 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
