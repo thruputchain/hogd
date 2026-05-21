@@ -195,26 +195,6 @@ ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
     }
 
     BlockID state_block_id = state->get().block_id;
-
-    // Freshness check: verify the viewing block is still live before
-    // running the view. Without this, a hot cache could serve stale data
-    // indefinitely after a commit invalidates the block, because cached
-    // reads never reach HogDB to observe kRPCBadBlockID.
-    auto tip_check = db_proxy_.get_db_tip(state_block_id);
-    if (!tip_check.has_value()) {
-      if (!rotate_view_state(state_block_id)) {
-        if (state->release_reference()) {
-          gc_view_state(state_block_id);
-        }
-        return make_view_gateway_result(
-            ViewGatewayOutcome::ViewGatewayInternalError);
-      }
-      if (state->release_reference()) {
-        gc_view_state(state_block_id);
-      }
-      continue;
-    }
-
     ViewGatewayResult result =
         run_view_attempt(query, state->get().tip, state->get());
 
