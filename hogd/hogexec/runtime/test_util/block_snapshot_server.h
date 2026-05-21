@@ -85,6 +85,16 @@ public:
     return out;
   }
 
+  static ExpectedViewingSnapshot open_viewing_snapshot()
+  {
+    return ExpectedViewingSnapshot(RPCError::kRPCUnimplemented);
+  }
+
+  static RPCError close_viewing_snapshot(BlockID /*unused*/)
+  {
+    return RPCError::kRPCUnimplemented;
+  }
+
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr,

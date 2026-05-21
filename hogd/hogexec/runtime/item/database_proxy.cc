@@ -283,4 +283,20 @@ DatabaseProxy::get_db_tip(BlockID block_id)
       });
 }
 
+SystemStatus<ViewingSnapshot>
+DatabaseProxy::open_viewing_snapshot()
+{
+  auto res = client_.open_viewing_snapshot();
+  return to_system_error_code<NotFoundIsUnrecoverableError{}>(
+      res,
+      [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
+}
+
+SystemStatus<void>
+DatabaseProxy::close_viewing_snapshot(BlockID block_id)
+{
+  auto res = client_.close_viewing_snapshot(block_id);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
 } // namespace hogd

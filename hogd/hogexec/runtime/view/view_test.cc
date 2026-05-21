@@ -19,6 +19,7 @@
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -1395,6 +1396,171 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          BlockHeight height = -1;
+          auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+  framework_.advance_block();
+
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snapshot_res.has_value());
+  auto &snapshot = snapshot_res.value();
+
+  StorageSnapshotCache snapshot_cache(snapshot.block_id,
+                                      framework_.get_db_proxy());
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = View::run_view_transaction(
+      snapshot_cache,
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(), snapshot.block_id,
+                                  std::numeric_limits<TransactionID>::max()),
+      framework_.make_new_per_tx_event_server_proxy(
+          std::numeric_limits<TransactionID>::max()),
+      make_query(invocation), *setup.context, {});
+
+  EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+
+  auto close_res =
+      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  EXPECT_TRUE(close_res.has_value());
+}
+
+TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
+{
+  if constexpr (is_debug_build()) {
+    GTEST_SKIP() << "Debug build hits assert in HogDB before DatabaseProxy "
+                    "can observe the error";
+  }
+
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(11);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          BlockHeight height = -1;
+          auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+  framework_.advance_block();
+
+  DbTip tip = framework_.get_db_tip();
+  StorageSnapshotCache snapshot_cache(tip.id, framework_.get_db_proxy());
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = View::run_view_transaction(
+      snapshot_cache,
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(), tip.id,
+                                  std::numeric_limits<TransactionID>::max()),
+      framework_.make_new_per_tx_event_server_proxy(
+          std::numeric_limits<TransactionID>::max()),
+      make_query(invocation), *setup.context, {});
+
+  EXPECT_EQ(result.status(), TransactionViewStatus::InternalError);
+}
+
+TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
+{
+  framework_.advance_block();
+
+  auto res = framework_.get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(res.has_value());
+
+  auto &snapshot = res.value();
+  EXPECT_NE(snapshot.block_id, 0U);
+  EXPECT_GE(snapshot.tip.height, 0);
+
+  auto close_res =
+      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  EXPECT_TRUE(close_res.has_value());
+}
+
+TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(12);
+
+  NativeViewSetup setup(
+      {{0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          BlockHeight height = -1;
+          auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+          if (!r.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        }}});
+
+  deploy_native(kNativeAddr);
+  framework_.advance_block();
+
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  ASSERT_TRUE(snapshot_res.has_value());
+  auto &snapshot = snapshot_res.value();
+
+  framework_.advance_block();
+
+  StorageSnapshotCache snapshot_cache(snapshot.block_id,
+                                      framework_.get_db_proxy());
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = View::run_view_transaction(
+      snapshot_cache,
+      PerTransactionDatabaseProxy(framework_.get_db_proxy(), snapshot.block_id,
+                                  std::numeric_limits<TransactionID>::max()),
+      framework_.make_new_per_tx_event_server_proxy(
+          std::numeric_limits<TransactionID>::max()),
+      make_query(invocation), *setup.context, {});
+
+  EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
+
+  auto close_res =
+      framework_.get_db_proxy().close_viewing_snapshot(snapshot.block_id);
+  EXPECT_TRUE(close_res.has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
