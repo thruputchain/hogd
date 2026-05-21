@@ -634,7 +634,11 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
   // Verify wasm contracts before storing — reject contracts that would
   // fail during instantiation (e.g., memory exceeding limits).
   if (contract.contract_type() == ContractType::kWasmi) {
-    if ((*context_cast)->verify_contract(contract) != InvokeErrorCode::None) {
+    auto verify_result = (*context_cast)->verify_contract(contract);
+    if (verify_result == InvokeErrorCode::Unrecoverable) {
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+    if (verify_result != InvokeErrorCode::None) {
       return kTestFFIErrorCodeContractVerificationFailed;
     }
   }
