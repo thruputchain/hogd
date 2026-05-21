@@ -171,8 +171,7 @@ WasmtimeContext::verify_contract(Contract const &contract) const
     auto const &wasm = contract.wasmi_contract().wasm;
     return static_cast<InvokeErrorCode>(
         wasmtime_verify_contract(wasmtime_context_ptr_,
-                                 reinterpret_cast<uint8_t const *>(
-                                     wasm.data()),
+                                 reinterpret_cast<uint8_t const *>(wasm.data()),
                                  wasm.size()));
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
