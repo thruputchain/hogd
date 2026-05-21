@@ -29,6 +29,8 @@
 #include "types.hh"
 
 namespace hogd {
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class RevertTest : public ::testing::TestWithParam<TestDB>,
                    public NativeContractTestFramework {
 public:
@@ -155,7 +157,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_1, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   addr_1, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -173,7 +175,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_2, 1, ctx.runtime().get_available_gas(), Calldata{},
+                   addr_2, 1, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -189,7 +191,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_3, 1, ctx.runtime().get_available_gas(), Calldata{},
+                   addr_3, 1, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();
@@ -212,7 +214,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_2, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   addr_2, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -250,7 +252,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_3, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   addr_3, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::TryInvoke),
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
@@ -383,7 +385,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   addr_fault, 0, ctx.runtime().get_available_gas(), Calldata{},
+                   addr_fault, 0, UINT64_MAX, Calldata{},
                    std::to_underlying(InvokeFlag::None), std::span<uint32_t>{},
                    output_return_buffer_len, output_returned_auth_token_len);
              }();

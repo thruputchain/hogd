@@ -1,16 +1,13 @@
 #pragma once
 
-#include <concepts>
 #include <cstddef>
 #include <memory>
-#include <span>
 #include <string_view>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/trampoline_result.h"
 
 namespace hogd {
 
@@ -119,11 +116,9 @@ public:
 
   ~WasmiRuntime() override;
 
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override;
-  void set_available_gas(uint64_t gas) noexcept override;
-
 private:
-  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;

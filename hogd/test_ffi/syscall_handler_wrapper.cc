@@ -148,9 +148,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
-  if (auto const *runtime = get_mock_runtime()) {
-    current_gas = runtime->get_available_gas();
-  }
 
   if (handler_.is_running()) {
     handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
@@ -200,12 +197,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
                                        ? InvokeStatus<void>{}
                                        : InvokeError{invoke_error_code};
 
-  // get the runtime and gas consumed by the invocation
   auto *runtime = pop_mock_runtime();
   CHECK(runtime != nullptr);
-  auto *empty_runtime = dynamic_cast<EmptyRuntime *>(runtime);
-  CHECK(empty_runtime != nullptr);
-  uint64_t consumed_gas = empty_runtime->get_consumed_gas();
+  uint64_t consumed_gas = 0;
   x23::Defer _([runtime]() { delete runtime; });
 
   auto result =
@@ -233,10 +227,6 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   result += frame_result;
 
   GasAmount gas_remaining = std::numeric_limits<GasAmount>::max();
-  if (auto *runtime = get_mock_runtime()) {
-    auto _ = runtime->consume_gas(consumed_gas);
-    gas_remaining = runtime->get_available_gas();
-  }
 
   if (handler_.is_running()) {
     auto status = [&]() -> HostFnStatus<SyscallErrorCode> {

@@ -7,6 +7,7 @@ use crate::debug_log;
 use common::string_from_parts;
 use common::LinearMemorySlice;
 use common::LinkEntry;
+use common::WasmContext;
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker,
@@ -49,18 +50,33 @@ macro_rules! link_function_nargs {
         ) -> Result<(), wasmtime::Error> {
             let ptr = fn_pointer;
             linker
-                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
+                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| -> Result<i32, wasmtime::Error> {
 
-                    let contract_memory : LinearMemorySlice = get_linear_memory_slice(&mut caller);
+                    let gas_remaining = match caller.get_fuel() {
+                        Ok(fuel) => fuel,
+                        Err(_e) => {
+                            debug_log!(eprintln!("Unrecoverable: failed to get fuel: {_e:?}"));
+                            return Err(wasmtime::Error::new(TrampolineError { error: common::HostFnErrorCode::Unrecoverable }));
+                        }
+                    };
 
-                    let res : Result<i32, common::HostFnErrorCode> = {
+                    let wasm_context : WasmContext = WasmContext {
+                        memory: get_linear_memory_slice(&mut caller),
+                        gas_remaining,
+                    };
+
+                    let (res, gas_consumed) : (Result<i32, common::HostFnErrorCode>, u64) = {
                         common::$cfunc(
                             ptr,
                             *caller.data(),
-                            contract_memory,
+                            wasm_context,
                             $($arg),*
                         )
                     }.into();
+
+                    assert!(gas_consumed <= gas_remaining);
+                    caller.set_fuel(gas_remaining - gas_consumed).unwrap();
+
                     res.map_err(|error| wasmtime::Error::new(TrampolineError { error }))
                 })
                 .map_err(Into::into)

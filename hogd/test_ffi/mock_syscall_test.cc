@@ -150,7 +150,6 @@ TEST(MockSyscallTest, IntTypeTest)
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
-  mock_runtime.set_available_gas(1000);
 
   uint32_t inp_1 = 100;
   int128_t inp_128 = int128_t{1} << 70;
@@ -189,7 +188,6 @@ TEST(MockSyscallTest, SpanTest)
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
-  mock_runtime.set_available_gas(1000);
 
   uint64_t inp = 0x090A;
   uint32_t out = 0;
@@ -223,7 +221,6 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
-  mock_runtime.set_available_gas(1000);
 
   auto res_canonical =
       mock_syscall_parser<SignedI32TypeTestSyscallMeta>(SyscallNo::kExit,
@@ -260,7 +257,6 @@ TEST(MockSyscallTest, NoReturnTest)
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
-  mock_runtime.set_available_gas(1000);
 
   auto res =
       mock_syscall_parser<NoReturnSyscallMeta>(SyscallNo::kGetReturnedBuffer, 0,
@@ -283,7 +279,6 @@ TEST(MockSyscallTest, NoSyscallTest)
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
   context.push_mock_runtime(&mock_runtime);
-  mock_runtime.set_available_gas(1000);
 
   auto res = mock_syscall_entrypoint(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 

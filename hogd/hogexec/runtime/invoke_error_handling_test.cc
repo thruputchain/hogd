@@ -25,6 +25,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class InvokeErrorHandlingTest : public ::testing::TestWithParam<TestDB>,
                                 public NativeContractTestFramework {
 public:
@@ -135,7 +136,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                RuntimeMemoryLength output_return_buffer_len = 0,
                                    output_returned_auth_token_len = 0;
                return ctx.syscall<SyscallNo::kInvoke>(
-                   kCalleeAddress, 2, UINT64_MAX, Calldata{}, 0,
+                   kCalleeAddress, 2, 12345, Calldata{}, 0,
                    std::span<uint32_t>{}, output_return_buffer_len,
                    output_returned_auth_token_len);
              }();

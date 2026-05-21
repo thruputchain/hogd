@@ -9,11 +9,17 @@ extern "C" {
 struct TrampolineResult {
   int32_t result_code;
   int32_t panic; // HostFnErrorCode
+  uint64_t gas_consumed;
 };
 
 struct LinearMemorySlice {
   uint8_t *mem;
   uint64_t sz;
+};
+
+struct WasmContext {
+  struct LinearMemorySlice memory;
+  uint64_t gas_remaining;
 };
 
 // The first parameter is the host call context.  This is a c++ only type, and
@@ -24,53 +30,53 @@ struct LinearMemorySlice {
 typedef void *ExternHostCallContext;
 
 typedef struct TrampolineResult (*HostFn0)(ExternHostCallContext,
-                                           struct LinearMemorySlice);
+                                           struct WasmContext);
 typedef struct TrampolineResult (*HostFn1)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t);
+                                           struct WasmContext, uint64_t);
 typedef struct TrampolineResult (*HostFn2)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t);
 typedef struct TrampolineResult (*HostFn3)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t);
 typedef struct TrampolineResult (*HostFn4)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t, uint64_t);
 typedef struct TrampolineResult (*HostFn5)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t);
 typedef struct TrampolineResult (*HostFn6)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t, uint64_t);
 typedef struct TrampolineResult (*HostFn7)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t, uint64_t, uint64_t);
 typedef struct TrampolineResult (*HostFn8)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t);
 typedef struct TrampolineResult (*HostFn9)(ExternHostCallContext,
-                                           struct LinearMemorySlice, uint64_t,
+                                           struct WasmContext, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t, uint64_t);
 typedef struct TrampolineResult (*HostFn10)(ExternHostCallContext,
-                                            struct LinearMemorySlice, uint64_t,
+                                            struct WasmContext, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t, uint64_t, uint64_t);
 typedef struct TrampolineResult (*HostFn11)(ExternHostCallContext,
-                                            struct LinearMemorySlice, uint64_t,
+                                            struct WasmContext, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t);
 typedef struct TrampolineResult (*HostFn12)(ExternHostCallContext,
-                                            struct LinearMemorySlice, uint64_t,
+                                            struct WasmContext, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t, uint64_t, uint64_t,
                                             uint64_t, uint64_t, uint64_t,

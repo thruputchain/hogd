@@ -10,10 +10,12 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/common/status.h"
 #include "hogd/hogexec/runtime/native_syscall_context.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -28,16 +30,38 @@ NativeContract::find_function(Runtime::MethodID method) const
   return &it->second;
 }
 
-InvokeStatus<void>
+std::pair<InvokeStatus<void>, GasAmount>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
-                       NativeRuntime &runtime) const
+                       uint64_t gas_limit) const
 {
   const auto *fn = find_function(method);
   if (fn == nullptr)
-    return InvokeError{InvokeErrorCode::Deterministic};
-  NativeSyscallContext ctx(syscall_handler, runtime);
-  return (*fn)(ctx);
+    return {InvokeError{InvokeErrorCode::Deterministic}, 0};
+  NativeSyscallContext ctx(syscall_handler, gas_limit);
+  auto status = (*fn)(ctx);
+
+  GasAmount gas_consumed = ctx.total_gas_consumed();
+  CHECK(gas_consumed <= gas_limit);
+
+  if (!status.has_value()) {
+    switch (status.error().code()) {
+    case InvokeErrorCode::Unrecoverable:
+    case InvokeErrorCode::ValidationFailure:
+    case InvokeErrorCode::Abandon:
+    case InvokeErrorCode::OutOfGas:
+      return {status, gas_consumed};
+    case InvokeErrorCode::None:
+    case InvokeErrorCode::Deterministic:
+      break;
+    }
+  }
+
+  // These are the only error codes that can get upgraded to OutOfGas
+  if (gas_limit == gas_consumed) {
+    return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
+  }
+  return {status, gas_consumed};
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
@@ -91,19 +115,19 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
   : Runtime(std::move(host_call_context)), contract_(contract)
 {}
 
-InvokeStatus<void>
-NativeRuntime::invoke_internal(std::string_view method_name)
+std::pair<InvokeStatus<void>, GasAmount>
+NativeRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
 {
   auto method_id = Runtime::method_id_from_name(method_name);
   if (!method_id) {
     error("Unrecoverable: NativeRuntime::invoke_internal failed to parse "
           "method name '{}'",
           method_name);
-    return InvokeError{InvokeErrorCode::Unrecoverable};
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
   }
 
   return contract_.invoke(*method_id, *host_call_context_->syscall_handler,
-                          *this);
+                          gas_limit);
 }
 
 } // namespace hogd

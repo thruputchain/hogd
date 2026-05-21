@@ -44,6 +44,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class ViewTest : public ::testing::Test {
 public:
   using fibonacci_meta = ContractTraitMeta<fibonacci::Fibonacci>;

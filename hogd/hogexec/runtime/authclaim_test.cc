@@ -18,6 +18,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class AuthClaimTestFixture : public ::testing::Test,
                              public NativeContractTestFramework {
 public:
