@@ -469,7 +469,7 @@ TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
   std::jthread lookup_thread([&] {
     lookup_started = true;
     lookup_started.notify_all();
-    (void)auth_server.lookup_auth_data(kIntroHeight, address)();
+    auto res = auth_server.lookup_auth_data(kIntroHeight, address)();
     lookup_finished = true;
     lookup_finished.notify_all();
   });
