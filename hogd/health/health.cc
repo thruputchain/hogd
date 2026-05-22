@@ -1,11 +1,15 @@
 #include "hogd/health/health.h"
 
+#include <cstdint>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 #include "hogd/base/json.h"
-#include "hogd/base/types.h"
+#include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 

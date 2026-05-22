@@ -43,6 +43,7 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
 
   const json::Value *timestamp = parsed->find("last_updated_timestamp");
   ASSERT_NE(timestamp, nullptr);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   ASSERT_TRUE(timestamp->as_string().has_value());
   EXPECT_FALSE(timestamp->as_string()->empty());
 
