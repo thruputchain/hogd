@@ -243,7 +243,8 @@ verify_auth_claims_internal(const SignedTransaction &stx,
       auth_data = source_auth_data;
       break;
     case AuthClaimType::kPubkeySignature:
-      panic("Pubkey signature auth claim not supported");
+      trace("Pubkey signature auth claim not supported");
+      return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     default:
       panic("Unsupported auth claim type: {}", auth_claim.claim_type());
     }
