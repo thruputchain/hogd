@@ -64,25 +64,21 @@ public:
     : target_workers_(n), active_workers_(n)
   {
     CHECK_GT(n, 0);
-    workers_.reserve(n);
-    for (int i = 0; i < n; ++i) {
-      workers_.emplace_back(
-          [this](const std::stop_token &stoken) { worker_loop(stoken); });
+    try {
+      workers_.reserve(n);
+      for (int i = 0; i < n; ++i) {
+        workers_.emplace_back(
+            [this](const std::stop_token &stoken) { worker_loop(stoken); });
+      }
+    } catch (...) {
+      request_workers_stop();
+      throw;
     }
   }
   ~WorkerPool()
   {
     assert(jobs_.empty());
-    // Make teardown slightly faster for large numbers of threads.
-    // Without this the destructor signals workers to stop one by one.
-    {
-      std::scoped_lock g(lock_);
-      stopping_ = true;
-    }
-    cv_.notify_all();
-    for (auto &worker : workers_) {
-      worker.request_stop();
-    }
+    request_workers_stop();
   }
 
   // disable move and copy.
@@ -245,6 +241,21 @@ private:
   bool stopping_{false};
   std::vector<WorkerThread> workers_;
   std::atomic<size_t> pending_jobs_{0};
+
+  void request_workers_stop()
+  {
+    // Wake all workers before requesting jthread stop. The worker loop does not
+    // wait on the stop token, so this also prevents constructor failure from
+    // leaving already-started workers blocked during member unwinding.
+    {
+      std::scoped_lock g(lock_);
+      stopping_ = true;
+    }
+    cv_.notify_all();
+    for (auto &worker : workers_) {
+      worker.request_stop();
+    }
+  }
 
   // worker_loop is the main loop run by each worker thread.
   void worker_loop(const std::stop_token & /*stoken*/)
