@@ -409,7 +409,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 
     // Track each inserted entry against pending consumes.
     for (auto const &entry : delta.insert.added_entries) {
-      ++consumed_set_balance_[entry];
+      apply_consumed_set_balance_delta(entry, 1);
     }
   }
 
@@ -420,7 +420,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
 
     // Track each consumed current-block entry against pending inserts.
     for (auto const &entry : delta.consume->current_block_consumed) {
-      --consumed_set_balance_[entry];
+      apply_consumed_set_balance_delta(entry, -1);
     }
   }
 
@@ -434,6 +434,17 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   const int128_t cost_after = calculate_cost();
 
   return cost_after - cost_before;
+}
+
+void
+RetrocausalQueueLock::apply_consumed_set_balance_delta(const QueueEntry &entry,
+                                                       int64_t delta)
+{
+  auto [it, inserted] =
+      consumed_set_balance_.try_emplace(QueueEntryKey(entry), delta);
+  if (!inserted) {
+    it->second += delta;
+  }
 }
 
 bool

@@ -4,6 +4,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -17,14 +18,82 @@
 
 namespace hogd {
 
-// Uses SipHash24 with a random key (generated at construction) to defend
-// against adversarial hash collision attacks on consumed_set_balance_.
-struct QueueEntryHasher {
-  mutable SipHash24 hasher;
+[[nodiscard]] inline size_t
+hash_queue_entry(const QueueEntry &entry)
+{
+  return SipHash24::get_default()(
+      std::as_bytes(std::span(entry.data(), entry.size())));
+}
 
-  size_t operator()(const QueueEntry &entry) const
+class QueueEntryKey {
+public:
+  explicit QueueEntryKey(const QueueEntry &entry)
+    : borrowed_entry_(&entry), hash_(hash_queue_entry(entry))
+  {}
+
+  QueueEntryKey(const QueueEntryKey &other)
+    : owned_entry_(other.entry()), hash_(other.hash_)
+  {}
+
+  QueueEntryKey(QueueEntryKey &&other)
+    : hash_(other.hash_)
   {
-    return hasher(std::as_bytes(std::span(entry.data(), entry.size())));
+    if (other.borrowed_entry_) {
+      owned_entry_ = *other.borrowed_entry_;
+    }
+    else {
+      owned_entry_ = std::move(other.owned_entry_);
+    }
+  }
+
+  QueueEntryKey &operator=(const QueueEntryKey &other)
+  {
+    if (this == &other) {
+      return *this;
+    }
+    owned_entry_ = other.entry();
+    borrowed_entry_ = nullptr;
+    hash_ = other.hash_;
+    return *this;
+  }
+
+  QueueEntryKey &operator=(QueueEntryKey &&other)
+  {
+    if (this == &other) {
+      return *this;
+    }
+    if (other.borrowed_entry_) {
+      owned_entry_ = *other.borrowed_entry_;
+    }
+    else {
+      owned_entry_ = std::move(other.owned_entry_);
+    }
+    borrowed_entry_ = nullptr;
+    hash_ = other.hash_;
+    return *this;
+  }
+
+  [[nodiscard]] const QueueEntry &entry() const noexcept
+  {
+    return borrowed_entry_ ? *borrowed_entry_ : owned_entry_;
+  }
+  [[nodiscard]] size_t hash() const noexcept { return hash_; }
+
+  friend bool operator==(const QueueEntryKey &lhs, const QueueEntryKey &rhs)
+  {
+    return lhs.hash_ == rhs.hash_ && lhs.entry() == rhs.entry();
+  }
+
+private:
+  QueueEntry owned_entry_;
+  const QueueEntry *borrowed_entry_{nullptr};
+  size_t hash_;
+};
+
+struct QueueEntryKeyHasher {
+  size_t operator()(const QueueEntryKey &entry) const noexcept
+  {
+    return entry.hash();
   }
 };
 
@@ -100,8 +169,11 @@ private:
   // for each consumed entry in current_block_consumed. At block close, any
   // entry with a negative count was consumed but never inserted — indicating
   // a malicious proposer.
-  std::unordered_map<QueueEntry, int64_t, QueueEntryHasher>
+  std::unordered_map<QueueEntryKey, int64_t, QueueEntryKeyHasher>
       consumed_set_balance_;
+
+  void apply_consumed_set_balance_delta(const QueueEntry &entry,
+                                        int64_t delta);
 
   // Returns true if any consumed current-block entry was not matched by an
   // insert across all committed TXs. Called by stage_committed_changes()
