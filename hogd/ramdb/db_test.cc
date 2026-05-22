@@ -756,6 +756,63 @@ TEST_F(DatabaseTest, IncrementalSnapshotAfterReopenRejectsGap)
   check_integrity();
 }
 
+// Regression for #1605: the recovery skip path used the unpadded
+// key_len + value_len, but the writer pads kNormal/kTombstone records to
+// alignof(ItemHeader). After a snapshot covers a misaligned record, recovery
+// reads the next header from inside that padding and reports kCorruption.
+TEST_F(DatabaseTest, RecoverySkipAlignsPaddedRecord)
+{
+  constexpr uint64_t kInfTargetLSN = std::numeric_limits<uint64_t>::max();
+  constexpr size_t kRolloverAfterFirstRecordBytes = 31;
+
+  db_.reset();
+  ASSERT_TRUE(dir_.unlink_all());
+  DBStatus<void> ret = open_db(kInfTargetLSN, kRolloverAfterFirstRecordBytes);
+  ASSERT_TRUE(ret);
+
+  std::string odd_key = "abcde";
+  std::string empty_value;
+  // key_len + value_len must be unaligned for the bug to bite.
+  ASSERT_NE((odd_key.size() + empty_value.size()) % alignof(ItemHeader), 0U);
+
+  DBStatus<void> put_ret = db_->put(std::as_bytes(std::span(odd_key)), 0,
+                                    std::as_bytes(std::span(empty_value)));
+  ASSERT_TRUE(put_ret);
+
+  auto snap = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap);
+  ASSERT_EQ(snap->first, 1);
+  ASSERT_TRUE(snap->second.get());
+  check_file_exists("0-1.snap");
+  check_file_exists("0.log");
+
+  std::string next_key = "next-key";
+  std::string next_value = "still reachable";
+  put_ret = db_->put(std::as_bytes(std::span(next_key)), 0,
+                     std::as_bytes(std::span(next_value)));
+  ASSERT_TRUE(put_ret);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  ASSERT_EQ(*lsn, 2);
+  check_file_exists("1.log");
+
+  db_.reset();
+
+  // Pre-fix: 0.log's misaligned record desynced the reader and recovery
+  // failed with kCorruption. Post-fix: recovery succeeds and both records
+  // are observable.
+  ret = open_db(kInfTargetLSN, kRolloverAfterFirstRecordBytes);
+  ASSERT_TRUE(static_cast<bool>(ret));
+
+  DBStatus<DBItem> got_odd = db_->get(std::as_bytes(std::span(odd_key)));
+  ASSERT_TRUE(got_odd);
+  EXPECT_EQ(got_odd->value.size(), 0U);
+
+  DBStatus<DBItem> got_next = db_->get(std::as_bytes(std::span(next_key)));
+  ASSERT_TRUE(got_next);
+  EXPECT_EQ(to_string(got_next->value), next_value);
+}
+
 } // namespace hogd
 
 int
