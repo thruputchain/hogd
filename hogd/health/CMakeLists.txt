@@ -7,3 +7,14 @@ target_link_libraries(
   base
   hogd
 )
+
+add_executable(
+  health_test
+  health_test.cc
+)
+target_link_libraries(
+  health_test
+  health
+  GTest::gtest_main
+)
+gtest_discover_tests(health_test)
