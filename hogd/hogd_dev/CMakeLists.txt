@@ -79,3 +79,26 @@ gtest_discover_tests(
   PROPERTIES
     RESOURCE_LOCK hogd_dev
 )
+
+add_executable(
+  hogd_dev_fresh_launch_test
+  hogd_dev_fresh_launch_test.cc
+)
+target_compile_definitions(
+  hogd_dev_fresh_launch_test
+  PRIVATE
+  HOGD_DEV_BINARY="$<TARGET_FILE:hogd_dev_exec>"
+)
+add_dependencies(
+  hogd_dev_fresh_launch_test
+  hogd_dev_exec
+)
+add_test(
+  NAME HogdDev.FreshNonInteractiveLaunchEmitsReadiness
+  COMMAND hogd_dev_fresh_launch_test
+)
+set_tests_properties(
+  HogdDev.FreshNonInteractiveLaunchEmitsReadiness
+  PROPERTIES
+    RESOURCE_LOCK hogd_dev
+)

@@ -963,6 +963,32 @@ TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
   EXPECT_TRUE(saw_hogd_dev_target);
 }
 
+TEST(HogdDev, ConstructorFailureAfterExecutorStartExitsBeforeReadiness)
+{
+  HogdDevProcess process =
+      HogdDevProcess::start({}, {{"HOGD_LOG_FORMAT", "json"},
+                                 {"HOGD_DEV_TEST_THROW_AFTER_EXECUTOR_START",
+                                  "1"}});
+
+  std::optional<int> status =
+      process.wait_for_exit_for_test(std::chrono::seconds(10));
+  if (!status.has_value()) {
+    FAIL() << "hogd-dev did not exit after injected constructor failure";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  std::string stderr_output = process.read_remaining_stderr();
+  EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+  EXPECT_TRUE(stderr_output.contains("hogd-dev failed before readiness"))
+      << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("injected hogd-dev constructor failure"))
+      << stderr_output;
+}
+
 TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
 {
   EXPECT_EQ(format_advertised_address("127.0.0.1", 12345), "127.0.0.1:12345");
