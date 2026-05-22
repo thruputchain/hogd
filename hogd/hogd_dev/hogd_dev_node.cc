@@ -21,7 +21,8 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogd_dev/dev_account_bootstrap.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_auth.h"
@@ -55,8 +56,8 @@ namespace {
 constexpr char kIndexerDbSubdir[] = "indexer-db";
 
 void
-validate_dev_account_auth_data(DevAccountMetadata const &account,
-                               AddressAuthData const &auth_data)
+validate_bootstrap_account_auth_data(BootstrapAccountMetadata const &account,
+                                     AddressAuthData const &auth_data)
 {
   CHECK_EQ(auth_data.required_weight, Weight{1});
   CHECK(auth_data.public_keys[0] != nullptr);
@@ -69,19 +70,17 @@ validate_dev_account_auth_data(DevAccountMetadata const &account,
 
 HogdDevNode::HogdDevNode(std::string bind_host,
                          std::uint16_t requested_scheduler_port,
-                         DevAccountBootstrapConfig const &bootstrap_config)
-  : bind_host_(std::move(bind_host)), event_ctx_(event_dir_.directory()),
-    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
-    event_indexer_server_(event_ctx_)
+                         BootstrapAccountConfig const &bootstrap_config)
+  : bind_host_(std::move(bind_host)), bootstrap_config_(bootstrap_config),
+    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   mempool_auth_server_->impl()->register_callback(
       [this](BlockHeight height, KeyChangeBatch key_changes) {
         return mempool_coord_server_->impl()->auth_data_changed(
             height, std::move(key_changes));
       });
-  // The supervisor loads genesis over the scheduler endpoint after readiness,
-  // and future dev-account genesis payloads should not trip the transport
-  // default before the scheduler sees them.
+  // Genesis bootstrap payloads can be larger than the transport default.
   mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
   mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
 
@@ -163,7 +162,7 @@ HogdDevNode::HogdDevNode(std::string bind_host,
   // have registered!
   register_executor_with_mempool();
   register_coordinator_with_mempool()();
-  bootstrap_dev_accounts(bootstrap_config);
+  materialize_bootstrap_accounts(bootstrap_config);
 }
 
 HogdDevNode::~HogdDevNode()
@@ -241,16 +240,23 @@ HogdDevNode::register_indexer_with_event_service()
 }
 
 void
-HogdDevNode::bootstrap_dev_accounts(DevAccountBootstrapConfig const &config)
+HogdDevNode::materialize_bootstrap_accounts(
+    BootstrapAccountConfig const &config)
 {
+  auto client = create_client<SchedulerCoord1>(bind_host_,
+                                               mempool_coord_server_.port())();
   if (config.count == 0) {
+    GenesisConfigurationBuilder builder;
+    genesis_configuration_ =
+        builder.build(StorageCostModel::default_cost_model());
+    CHECK_EQ(client.schedcoord_load_genesis_configuration(
+                 GenesisConfiguration(genesis_configuration_))(),
+             DbSchedResult::DbSchedResultOK);
     return;
   }
 
-  DevAccountBootstrapArtifact artifact =
-      build_dev_account_bootstrap_artifact(config);
-  auto client = create_client<SchedulerCoord1>(bind_host_,
-                                               mempool_coord_server_.port())();
+  BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
+  genesis_configuration_ = artifact.genesis_configuration;
   CHECK_EQ(client.schedcoord_load_genesis_configuration(
                std::move(artifact.genesis_configuration))(),
            DbSchedResult::DbSchedResultOK);
@@ -259,8 +265,8 @@ HogdDevNode::bootstrap_dev_accounts(DevAccountBootstrapConfig const &config)
   batch.append_range(artifact.initialization_txs);
   commit_initialization_batch(batch);
 
-  dev_accounts_ = std::move(artifact.accounts);
-  refresh_dev_account_balances();
+  bootstrap_accounts_ = std::move(artifact.accounts);
+  refresh_bootstrap_account_balances();
 }
 
 void
@@ -287,13 +293,13 @@ HogdDevNode::commit_initialization_batch(SignedTransactionBatch const &txs)
 }
 
 void
-HogdDevNode::refresh_dev_account_balances()
+HogdDevNode::refresh_bootstrap_account_balances()
 {
-  for (DevAccountMetadata &account : dev_accounts_) {
+  for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
     HogDBStatus<AddressAuthData> auth_data =
         ctx_->get_db().read_address_auth_data(account.address);
     CHECK(auth_data.has_value());
-    validate_dev_account_auth_data(account, *auth_data);
+    validate_bootstrap_account_auth_data(account, *auth_data);
 
     HogDBStatus<int128_t> balance =
         ctx_->get_db().read_address_balance(account.address);

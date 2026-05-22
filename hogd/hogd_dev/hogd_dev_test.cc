@@ -1,4 +1,5 @@
 #include <sys/poll.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
@@ -6,7 +7,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -15,8 +15,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <expected>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <initializer_list>
+#include <ios>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -30,19 +35,19 @@
 #include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/dev_wallet.h"
-#include "built_contracts/fibonacci.h"
 #include "db_gateway.hh"
-#include "db_sched.hh"
 #include "event.hh"
 #include "exec_result.hh"
+#include "genesis.hh"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/network.h"
 #include "hogd/base/string.h"
-#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogd_dev/dev_account_bootstrap.h"
+#include "hogd/hogd_dev/bootstrap_accounts.h"
+#include "hogd/hogd_dev/runtime_manifest.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
@@ -96,17 +101,20 @@ struct Readiness {
   };
 
   Endpoint scheduler;
-  Endpoint read;
-  Endpoint gateway;
+  Endpoint indexer;
+  Endpoint db_gateway;
   Endpoint view_gateway;
+  std::filesystem::path manifest_path;
+  std::string manifest_hash;
+  json::Value manifest;
 
-  struct DevAccount {
+  struct BootstrapAccount {
     std::uint32_t index;
     std::string address;
     std::string public_key;
-    std::uint64_t initial_storage_tokens;
+    std::string initial_storage_tokens;
   };
-  std::vector<DevAccount> dev_accounts;
+  std::vector<BootstrapAccount> bootstrap_accounts;
 };
 
 std::string
@@ -143,6 +151,35 @@ read_to_end(int fd)
     }
     throw std::runtime_error(errno_message("read", errno));
   }
+}
+
+std::string
+read_file(std::filesystem::path const &path)
+{
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error(std::format("failed to open {}", path.string()));
+  }
+  return std::string(std::istreambuf_iterator<char>(input),
+                     std::istreambuf_iterator<char>());
+}
+
+SHA256Hash
+hash_string(std::string_view bytes)
+{
+  SHA256Hasher hasher;
+  hasher.update(std::as_bytes(std::span(bytes.data(), bytes.size())));
+  return hasher.finalize();
+}
+
+int
+path_mode(std::filesystem::path const &path)
+{
+  struct stat stat_buffer{};
+  if (::stat(path.c_str(), &stat_buffer) != 0) {
+    throw std::runtime_error(errno_message("stat", errno));
+  }
+  return static_cast<int>(stat_buffer.st_mode & 0777);
 }
 
 Readiness::Endpoint
@@ -216,42 +253,70 @@ require_integer_field(const json::Value &parent, std::string_view key,
   return *value;
 }
 
-std::vector<Readiness::DevAccount>
-parse_dev_accounts(const json::Value &readiness, std::string_view line)
+void
+require_exact_object_keys(const json::Value &parent,
+                          std::initializer_list<std::string_view> keys,
+                          std::string_view name, std::string_view line)
 {
-  const json::Value *dev_accounts = readiness.find("dev_accounts");
-  if (dev_accounts == nullptr) {
+  if (parent.type() != json::Value::Type::kObject) {
+    throw std::runtime_error(
+        std::format("{} is not an object: {}", name, line));
+  }
+  const auto fields = parent.as_object();
+  if (fields.size() != keys.size()) {
+    throw std::runtime_error(std::format("{} has {} fields; expected {}: {}",
+                                         name, fields.size(), keys.size(),
+                                         line));
+  }
+  for (const auto &[field, _] : fields) {
+    bool expected = false;
+    for (std::string_view key : keys) {
+      if (field == key) {
+        expected = true;
+        break;
+      }
+    }
+    if (!expected) {
+      throw std::runtime_error(
+          std::format("{} has unexpected field '{}': {}", name, field, line));
+    }
+  }
+}
+
+std::vector<Readiness::BootstrapAccount>
+parse_bootstrap_accounts(const json::Value &manifest, std::string_view line)
+{
+  const json::Value *bootstrap_accounts = manifest.find("bootstrapAccounts");
+  if (bootstrap_accounts == nullptr) {
     return {};
   }
-  if (dev_accounts->type() != json::Value::Type::kArray) {
+  if (bootstrap_accounts->type() != json::Value::Type::kArray) {
     throw std::runtime_error(
-        std::format("readiness dev_accounts is not an array: {}", line));
+        std::format("manifest bootstrapAccounts is not an array: {}", line));
   }
 
-  std::vector<Readiness::DevAccount> out;
-  for (const json::Value &account : dev_accounts->as_array()) {
+  std::vector<Readiness::BootstrapAccount> out;
+  for (const json::Value &account : bootstrap_accounts->as_array()) {
     if (account.type() != json::Value::Type::kObject) {
       throw std::runtime_error(
-          std::format("readiness dev_accounts entry is not an object: {}",
+          std::format("manifest bootstrapAccounts entry is not an object: {}",
                       line));
     }
     const std::int64_t index = require_integer_field(account, "index", line);
-    const std::int64_t initial_storage_tokens =
-        require_integer_field(account, "initial_storage_tokens", line);
     if (index < 0 ||
-        std::cmp_greater(index, std::numeric_limits<std::uint32_t>::max()) ||
-        initial_storage_tokens < 0) {
+        std::cmp_greater(index, std::numeric_limits<std::uint32_t>::max())) {
       throw std::runtime_error(
-          std::format("unexpected dev_accounts integer in readiness: {}",
+          std::format("unexpected bootstrapAccounts index in manifest: {}",
                       line));
     }
-    out.push_back(Readiness::DevAccount{
+    out.push_back(Readiness::BootstrapAccount{
         .index = static_cast<std::uint32_t>(index),
-        .address = std::string(require_string_field(account, "address", line)),
+        .address =
+            std::string(require_string_field(account, "walletAddress", line)),
         .public_key =
-            std::string(require_string_field(account, "public_key", line)),
-        .initial_storage_tokens =
-            static_cast<std::uint64_t>(initial_storage_tokens),
+            std::string(require_string_field(account, "publicKey", line)),
+        .initial_storage_tokens = std::string(
+            require_string_field(account, "initialStorageTokens", line)),
     });
   }
   return out;
@@ -271,6 +336,18 @@ parse_readiness(std::string line)
                                          parsed.error().offset,
                                          parsed.error().message, line));
   }
+  require_exact_object_keys(*parsed,
+                            {"schemaVersion", "status", "manifestPath",
+                             "manifestHash"},
+                            "readiness pointer", line);
+
+  const std::int64_t schema_version =
+      require_integer_field(*parsed, "schemaVersion", line);
+  if (schema_version != 1) {
+    throw std::runtime_error(
+        std::format("unexpected readiness schemaVersion {}: {}", schema_version,
+                    line));
+  }
 
   std::string_view status = require_string_field(*parsed, "status", line);
   if (status != "ready") {
@@ -278,33 +355,73 @@ parse_readiness(std::string line)
         std::format("unexpected readiness status '{}': {}", status, line));
   }
 
-  std::string_view network_id =
-      require_string_field(*parsed, "network_id", line);
-  if (network_id != "groundhog-local") {
-    throw std::runtime_error(std::format("unexpected readiness network_id "
-                                         "'{}': {}",
-                                         network_id, line));
+  std::string manifest_hash =
+      std::string(require_string_field(*parsed, "manifestHash", line));
+  std::filesystem::path manifest_path(
+      std::string(require_string_field(*parsed, "manifestPath", line)));
+  std::string manifest_bytes = read_file(manifest_path);
+  std::string actual_hash = format_hex_hash(hash_string(manifest_bytes));
+  if (actual_hash != manifest_hash) {
+    throw std::runtime_error(
+        std::format("manifest hash mismatch: expected {}, got {}",
+                    manifest_hash, actual_hash));
   }
 
-  const json::Value *endpoints = parsed->find("endpoints");
+  std::expected<json::Value, json::ParseError> manifest =
+      json::parse(manifest_bytes);
+  if (!manifest.has_value()) {
+    throw std::runtime_error(std::format("manifest JSON parse failed at {}: "
+                                         "{}: {}",
+                                         manifest.error().offset,
+                                         manifest.error().message,
+                                         manifest_bytes));
+  }
+
+  const std::int64_t manifest_schema_version =
+      require_integer_field(*manifest, "schemaVersion", manifest_bytes);
+  if (manifest_schema_version != 1) {
+    throw std::runtime_error(std::format("unexpected manifest schemaVersion {}",
+                                         manifest_schema_version));
+  }
+  std::string_view kind =
+      require_string_field(*manifest, "kind", manifest_bytes);
+  if (kind != "hogd-dev-runtime") {
+    throw std::runtime_error(
+        std::format("unexpected manifest kind '{}'", kind));
+  }
+  std::string_view network_id =
+      require_string_field(*manifest, "networkId", manifest_bytes);
+  if (network_id != "groundhog-local") {
+    throw std::runtime_error(
+        std::format("unexpected manifest networkId '{}'", network_id));
+  }
+
+  const json::Value *endpoints = manifest->find("endpoints");
   if (endpoints == nullptr || endpoints->type() != json::Value::Type::kObject) {
     throw std::runtime_error(
-        std::format("readiness missing endpoints object: {}", line));
+        std::format("manifest missing endpoints object: {}", manifest_bytes));
   }
+  std::vector<Readiness::BootstrapAccount> bootstrap_accounts =
+      parse_bootstrap_accounts(*manifest, manifest_bytes);
 
   return {
-      .scheduler =
-          parse_endpoint(require_string_field(*endpoints, "scheduler", line),
-                         "scheduler", line),
-      .read = parse_endpoint(require_string_field(*endpoints, "read", line),
-                             "read", line),
-      .gateway =
-          parse_endpoint(require_string_field(*endpoints, "gateway", line),
-                         "gateway", line),
+      .scheduler = parse_endpoint(require_string_field(*endpoints, "scheduler",
+                                                       manifest_bytes),
+                                  "scheduler", manifest_bytes),
+      .indexer = parse_endpoint(require_string_field(*endpoints, "indexer",
+                                                     manifest_bytes),
+                                "indexer", manifest_bytes),
+      .db_gateway = parse_endpoint(require_string_field(*endpoints, "dbGateway",
+                                                        manifest_bytes),
+                                   "dbGateway", manifest_bytes),
       .view_gateway =
-          parse_endpoint(require_string_field(*endpoints, "view_gateway", line),
-                         "view_gateway", line),
-      .dev_accounts = parse_dev_accounts(*parsed, line),
+          parse_endpoint(require_string_field(*endpoints, "viewGateway",
+                                              manifest_bytes),
+                         "viewGateway", manifest_bytes),
+      .manifest_path = std::move(manifest_path),
+      .manifest_hash = std::move(manifest_hash),
+      .manifest = std::move(*manifest),
+      .bootstrap_accounts = std::move(bootstrap_accounts),
   };
 }
 
@@ -360,21 +477,6 @@ submit_and_commit(sched_coord_client_t &scheduler,
     return {};
   }
   return tx_hashes;
-}
-
-GenesisConfigurationBuilder
-make_fibonacci_genesis_builder()
-{
-  auto fibonacci_contract = load_contract("fibonacci.wasm");
-  using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
-
-  GenesisConfigurationBuilder builder;
-  builder.add_initial_config(fibonacci_contract, make_nonce(0),
-                             fibonacci_meta_t::entrypoint<"fibonacci">(),
-                             fibonacci_meta_t::make_calldata<"fibonacci">(
-                                 std::uint32_t{0}),
-                             int128_t{1'000'000'000});
-  return builder;
 }
 
 class HogdDevProcess {
@@ -626,13 +728,75 @@ TEST(HogdDev, EmitsOneReadinessLineAndStopsOnSigterm)
 
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
-  EXPECT_EQ(readiness.read.host, "127.0.0.1");
-  EXPECT_GT(readiness.read.port, 0);
-  EXPECT_EQ(readiness.gateway.host, "127.0.0.1");
-  EXPECT_GT(readiness.gateway.port, 0);
+  EXPECT_EQ(readiness.indexer.host, "127.0.0.1");
+  EXPECT_GT(readiness.indexer.port, 0);
+  EXPECT_EQ(readiness.db_gateway.host, "127.0.0.1");
+  EXPECT_GT(readiness.db_gateway.port, 0);
   EXPECT_EQ(readiness.view_gateway.host, "127.0.0.1");
   EXPECT_GT(readiness.view_gateway.port, 0);
-  EXPECT_TRUE(readiness.dev_accounts.empty());
+  EXPECT_TRUE(readiness.bootstrap_accounts.empty());
+  EXPECT_TRUE(readiness.manifest_path.is_absolute());
+  EXPECT_TRUE(std::filesystem::exists(readiness.manifest_path));
+  EXPECT_EQ(path_mode(readiness.manifest_path), 0600);
+  EXPECT_EQ(path_mode(readiness.manifest_path.parent_path()), 0700);
+  EXPECT_FALSE(std::filesystem::exists(
+      readiness.manifest_path.parent_path() /
+      std::format("{}{}", readiness.manifest_path.filename().string(),
+                  ".tmp")));
+  EXPECT_EQ(readiness.manifest_hash,
+            hex_string(hash_string(read_file(readiness.manifest_path))));
+  EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
+            version::kHogdProtocol());
+  const json::Value *producer = readiness.manifest.find("producer");
+  ASSERT_NE(producer, nullptr);
+  EXPECT_EQ(require_string_field(*producer, "binary", ""), "hogd-dev");
+  EXPECT_EQ(require_string_field(*producer, "version", ""),
+            version::kHogdVersion);
+  std::string_view git_hash = version::kHogdGitHash;
+  if (!git_hash.empty() && git_hash != "unknown") {
+    EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
+  }
+
+  GenesisConfigurationBuilder builder;
+  GenesisConfiguration genesis =
+      builder.build(StorageCostModel::default_cost_model());
+  EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
+            hex_string(sha256(genesis)));
+
+  const json::Value *bootstrap = readiness.manifest.find("bootstrap");
+  ASSERT_NE(bootstrap, nullptr);
+  const json::Value *dev_wallet = bootstrap->find("devWallet");
+  ASSERT_NE(dev_wallet, nullptr);
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  auto wallet_contract = wallet_meta::load_wasm();
+  ASSERT_TRUE(wallet_contract);
+  std::string wallet_hash = hex_string(sha256(*wallet_contract));
+  EXPECT_EQ(require_string_field(*dev_wallet, "contentHash", ""), wallet_hash);
+  EXPECT_EQ(require_string_field(*dev_wallet, "deployedCodeHash", ""),
+            wallet_hash);
+  EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
+            "built_contracts/dev_wallet.wasm");
+  EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
+            hex_string(wallet_meta::entrypoint<"initialize">()));
+  EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
+            hex_string(wallet_meta::entrypoint<"do_action">()));
+
+  const json::Value *cost_model = bootstrap->find("storageCostModel");
+  ASSERT_NE(cost_model, nullptr);
+  EXPECT_EQ(require_string_field(*cost_model, "baseDataItemCost", ""), "12000");
+  EXPECT_EQ(require_string_field(*cost_model, "bytestringCostPerByte", ""),
+            "10");
+  EXPECT_EQ(require_string_field(*cost_model, "baseContractDeploymentCost", ""),
+            "12000");
+  EXPECT_EQ(require_string_field(*cost_model, "contractDeploymentCostPerByte",
+                                 ""),
+            "10");
+  EXPECT_EQ(require_string_field(*cost_model, "authPerKeyCost", ""), "1111");
+  EXPECT_EQ(require_string_field(*cost_model, "rcqCostPerEntry", ""), "8");
+  EXPECT_EQ(require_string_field(*cost_model, "replayCacheCostPerEntry", ""),
+            "7");
+  EXPECT_EQ(require_string_field(*cost_model, "balanceCost", ""), "1234");
+  EXPECT_TRUE(require_string_field(*cost_model, "hash", "").starts_with("0x"));
 
   expect_clean_exit(process);
 }
@@ -704,6 +868,34 @@ TEST(HogdDev, InvalidReadinessArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("Invalid readiness sink: stderr"))
       << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogdDev, RejectsWildcardListenHostBeforeInitialization)
+{
+  for (std::string_view host : {"0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0",
+                                "[0:0:0:0:0:0:0:0]", "::0"}) {
+    SCOPED_TRACE(host);
+    HogdDevProcess process =
+        HogdDevProcess::start({"--listen-host", std::string(host)});
+
+    std::optional<int> status =
+        process.wait_for_exit_for_test(std::chrono::seconds(10));
+    if (!status.has_value()) {
+      FAIL() << "hogd-dev did not exit";
+      return;
+    }
+    const int exit_status = status.value();
+    ASSERT_TRUE(WIFEXITED(exit_status));
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+
+    std::string stdout_output = process.read_remaining_stdout();
+    std::string stderr_output = process.read_remaining_stderr();
+    EXPECT_TRUE(stdout_output.empty()) << stdout_output;
+    EXPECT_TRUE(
+        stderr_output.contains("wildcard addresses cannot be advertised"))
+        << stderr_output;
+    EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+  }
 }
 
 TEST(HogdDev, JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr)
@@ -779,24 +971,48 @@ TEST(HogdDev, FormatsSchedulerEndpointAsCanonicalHostPort)
 
 TEST(HogdDev, ReadinessParserAcceptsBracketedIpv6Endpoints)
 {
-  Readiness readiness =
-      parse_readiness(R"({"status":"ready","network_id":"groundhog-local",)"
-                      R"("endpoints":{"scheduler":"[::1]:12345",)"
-                      R"("read":"[::1]:23456",)"
-                      R"("gateway":"[::1]:34567",)"
-                      R"("view_gateway":"[::1]:45678"}})");
+  std::filesystem::path manifest_path =
+      std::filesystem::temp_directory_path() /
+      std::format("hogd-dev-test-manifest-{}.json", getpid());
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+  std::string manifest =
+      R"({"schemaVersion":1,"kind":"hogd-dev-runtime",)"
+      R"("networkId":"groundhog-local","protocol":"hogp/test",)"
+      R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
+      R"("producer":{"binary":"hogd-dev","version":"test"},)"
+      R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
+      R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
+      R"("bootstrapAccountDerivation":{"scheme":"groundhog-bootstrap-account-v1","seed":"test"},)"
+      R"("bootstrapAccounts":[],"bootstrap":{"devWallet":{)"
+      R"("contentHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
+      R"("deployedCodeHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
+      R"("artifactHint":"built_contracts/dev_wallet.wasm",)"
+      R"("deployEntrypoint":"0x0000000000000000","doActionEntrypoint":"0x0000000000000000"},)"
+      R"("storageCostModel":{"hash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
+      R"("baseDataItemCost":"12000","bytestringCostPerByte":"10",)"
+      R"("baseContractDeploymentCost":"12000","contractDeploymentCostPerByte":"10",)"
+      R"("authPerKeyCost":"1111","rcqCostPerEntry":"8",)"
+      R"("replayCacheCostPerEntry":"7","balanceCost":"1234"}}})";
+  {
+    std::ofstream output(manifest_path, std::ios::binary);
+    output << manifest;
+  }
+  Readiness readiness = parse_readiness(
+      std::format(R"({{"schemaVersion":1,"status":"ready",)"
+                  R"("manifestPath":"{}","manifestHash":"{}"}})",
+                  manifest_path.string(), hex_string(hash_string(manifest))));
 
   EXPECT_EQ(readiness.scheduler.host, "::1");
   EXPECT_EQ(readiness.scheduler.port, 12345);
-  EXPECT_EQ(readiness.read.host, "::1");
-  EXPECT_EQ(readiness.read.port, 23456);
-  EXPECT_EQ(readiness.gateway.host, "::1");
-  EXPECT_EQ(readiness.gateway.port, 34567);
+  EXPECT_EQ(readiness.indexer.host, "::1");
+  EXPECT_EQ(readiness.indexer.port, 23456);
+  EXPECT_EQ(readiness.db_gateway.host, "::1");
+  EXPECT_EQ(readiness.db_gateway.port, 34567);
   EXPECT_EQ(readiness.view_gateway.host, "::1");
   EXPECT_EQ(readiness.view_gateway.port, 45678);
 }
 
-TEST(HogdDev, DevAccountDerivationMatchesRustGoldens)
+TEST(HogdDev, BootstrapAccountDerivationMatchesRustGoldens)
 {
   constexpr std::string_view kDefaultSeed = "groundhog-dev-accounts";
   const std::vector<std::string> expected = {
@@ -813,19 +1029,17 @@ TEST(HogdDev, DevAccountDerivationMatchesRustGoldens)
   };
 
   for (std::uint32_t i = 0; i < expected.size(); ++i) {
-    auto keypair = derive_dev_account_keypair(kDefaultSeed, i);
+    auto keypair = derive_bootstrap_account_keypair(kDefaultSeed, i);
     EXPECT_EQ(hex_string(keypair.first), expected[i]);
   }
 }
 
-TEST(HogdDev, BootstrapArtifactBuildsStableDevAccounts)
+TEST(HogdDev, BootstrapArtifactBuildsStableAccounts)
 {
-  DevAccountBootstrapConfig config{.count = 3};
+  BootstrapAccountConfig config{.count = 3};
 
-  DevAccountBootstrapArtifact first =
-      build_dev_account_bootstrap_artifact(config);
-  DevAccountBootstrapArtifact second =
-      build_dev_account_bootstrap_artifact(config);
+  BootstrapAccountArtifact first = build_bootstrap_account_artifact(config);
+  BootstrapAccountArtifact second = build_bootstrap_account_artifact(config);
 
   ASSERT_EQ(first.accounts.size(), 3UL);
   ASSERT_EQ(first.initialization_txs.size(), 3UL);
@@ -834,13 +1048,14 @@ TEST(HogdDev, BootstrapArtifactBuildsStableDevAccounts)
 
   for (std::uint32_t i = 0; i < first.accounts.size(); ++i) {
     EXPECT_EQ(first.accounts[i].index, i);
+    EXPECT_EQ(first.accounts[i].initial_storage_tokens, config.storage_tokens);
     EXPECT_EQ(first.accounts[i].storage_tokens, config.storage_tokens);
     EXPECT_EQ(first.accounts[i].address, second.accounts[i].address);
     EXPECT_EQ(first.accounts[i].public_key, second.accounts[i].public_key);
   }
 }
 
-TEST(HogdDev, DevAccountReadinessAdvertisesPublicMetadata)
+TEST(HogdDev, BootstrapManifestAdvertisesAccountMetadata)
 {
   HogdDevProcess process = HogdDevProcess::start({
       "--dev-accounts",
@@ -852,16 +1067,24 @@ TEST(HogdDev, DevAccountReadinessAdvertisesPublicMetadata)
   });
   Readiness readiness = process.wait_for_readiness();
 
-  ASSERT_EQ(readiness.dev_accounts.size(), 3UL);
-  for (std::uint32_t i = 0; i < readiness.dev_accounts.size(); ++i) {
-    auto keypair = derive_dev_account_keypair("groundhog-dev-accounts", i);
-    EXPECT_EQ(readiness.dev_accounts[i].index, i);
-    EXPECT_EQ(readiness.dev_accounts[i].public_key, hex_string(keypair.first));
-    EXPECT_TRUE(readiness.dev_accounts[i].address.starts_with("0x"));
-    EXPECT_EQ(readiness.dev_accounts[i].address.size(), 66UL);
-    EXPECT_GT(readiness.dev_accounts[i].initial_storage_tokens, 0UL);
-    EXPECT_LE(readiness.dev_accounts[i].initial_storage_tokens,
-              1'000'000'000UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 3UL);
+  const json::Value *derivation =
+      readiness.manifest.find("bootstrapAccountDerivation");
+  ASSERT_NE(derivation, nullptr);
+  EXPECT_EQ(require_string_field(*derivation, "scheme", ""),
+            "groundhog-bootstrap-account-v1");
+  EXPECT_EQ(require_string_field(*derivation, "seed", ""),
+            "groundhog-dev-accounts");
+  for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
+    auto keypair =
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", i);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
+              hex_string(keypair.first));
+    EXPECT_TRUE(readiness.bootstrap_accounts[i].address.starts_with("0x"));
+    EXPECT_EQ(readiness.bootstrap_accounts[i].address.size(), 66UL);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
+              "1000000000");
   }
 
   expect_clean_exit(process);
@@ -884,7 +1107,7 @@ TEST(HogdDev, RejectsDevAccountCountAboveLimit)
             std::string::npos);
 }
 
-TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
+TEST(HogdDev, SchedulerTipReportsGenesisTipAfterReadiness)
 {
   HogdDevProcess process = HogdDevProcess::start();
   Readiness readiness = process.wait_for_readiness();
@@ -895,19 +1118,10 @@ TEST(HogdDev, SchedulerTipReportsNoGenesisThenGenesisTip)
                                        readiness.scheduler.port,
                                        /*retry=*/true)();
 
-    SchedulerGetTipResult before = client.schedcoord_get_tip()();
-    ASSERT_EQ(before.outcome(),
-              SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
-
-    GenesisConfigurationBuilder builder;
-    ASSERT_EQ(client.schedcoord_load_genesis_configuration(
-                  builder.build(StorageCostModel::default_cost_model()))(),
-              DbSchedResult::DbSchedResultOK);
-
-    SchedulerGetTipResult after = client.schedcoord_get_tip()();
-    ASSERT_EQ(after.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(after.db_tip().height, 0);
-    EXPECT_EQ(after.db_tip().id, 0UL);
+    SchedulerGetTipResult tip = client.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().height, 0);
+    EXPECT_EQ(tip.db_tip().id, 0UL);
   }
 
   expect_clean_exit(process);
@@ -919,8 +1133,8 @@ TEST(HogdDev, GatewayEndpointAnswersIntroAndGetItems)
   Readiness readiness = process.wait_for_readiness();
 
   {
-    auto client = create_client<DbGateway1>(readiness.gateway.host,
-                                            readiness.gateway.port,
+    auto client = create_client<DbGateway1>(readiness.db_gateway.host,
+                                            readiness.db_gateway.port,
                                             /*retry=*/true)();
 
     EXPECT_EQ(client.dbgateway_intro(version::kHogdProtocol())(),
@@ -960,7 +1174,7 @@ TEST(HogdDev, ViewGatewayEndpointAnswersIntro)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, ViewGatewayViewsCommittedDevWallet)
+TEST(HogdDev, ViewGatewayViewsCommittedBootstrapWallet)
 {
   HogdDevProcess process = HogdDevProcess::start({
       "--dev-accounts",
@@ -971,7 +1185,7 @@ TEST(HogdDev, ViewGatewayViewsCommittedDevWallet)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.dev_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
 
   {
     auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
@@ -983,8 +1197,9 @@ TEST(HogdDev, ViewGatewayViewsCommittedDevWallet)
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     const ContractAddress wallet_address =
-        build_dev_account_bootstrap_artifact({.count = 1}).accounts[0].address;
-    EXPECT_EQ(hex_string(wallet_address), readiness.dev_accounts[0].address);
+        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+    EXPECT_EQ(hex_string(wallet_address),
+              readiness.bootstrap_accounts[0].address);
 
     TransactionViewQuery query{
         .invocation =
@@ -1010,14 +1225,14 @@ TEST(HogdDev, ViewGatewayViewsCommittedDevWallet)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, ReadEndpointServesIndexerBlockExplorer)
+TEST(HogdDev, IndexerEndpointServesBlockExplorer)
 {
   HogdDevProcess process = HogdDevProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
   {
-    auto client = create_client<IndexerBlockExplorer1>(readiness.read.host,
-                                                       readiness.read.port,
+    auto client = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
                                                        /*retry=*/true)();
 
     EXPECT_EQ(client.indexer_block_explorer_intro(version::kHogdProtocol())(),
@@ -1031,45 +1246,69 @@ TEST(HogdDev, ReadEndpointServesIndexerBlockExplorer)
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, CommittedTransactionsPopulateReadEndpoint)
+TEST(HogdDev, CommittedTransactionsPopulateIndexerEndpoint)
 {
-  HogdDevProcess process = HogdDevProcess::start();
+  HogdDevProcess process = HogdDevProcess::start({
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
   Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
 
   {
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
                                        /*retry=*/true)();
-    auto reader = create_client<IndexerBlockExplorer1>(readiness.read.host,
-                                                       readiness.read.port,
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
                                                        /*retry=*/true)();
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    GenesisConfigurationBuilder builder = make_fibonacci_genesis_builder();
-    ASSERT_EQ(scheduler.schedcoord_load_genesis_configuration(
-                  builder.build(StorageCostModel::default_cost_model()))(),
-              DbSchedResult::DbSchedResultOK);
+    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    ASSERT_TRUE(fibonacci_contract);
+    auto keypair =
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    const ContractAddress wallet_address =
+        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
 
-    std::vector<SignedTransaction> unfurl_txs =
-        builder.make_unfurl_genesis_transactions();
-    ASSERT_EQ(unfurl_txs.size(), 1UL);
-    const SignedTransactionHash tx_hash = sha256(unfurl_txs[0].tx);
-
-    scheduler.schedulercoord_submit_unvetted(
-        t_to_parallel_batch(SignedTransactionBatch{unfurl_txs[0]})())();
-
-    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
-    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    SchedulerNominationResult nomination =
-        scheduler.schedulercoord_nominate(tip.db_tip())();
-    ASSERT_EQ(nomination.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
-    ASSERT_EQ(scheduler.schedulercoord_commit_block(
-                  nomination.nominated_block().block_id)(),
-              SchedulerCommitOutcome::SchedulerCommitOK);
+    Transaction tx{
+        .invocation =
+            Invocation{
+                .invoked_address = wallet_address,
+                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<"deploy">(
+                    make_nonce(11), sha256(*fibonacci_contract)),
+            },
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 11},
+        .contracts_to_deploy = {*fibonacci_contract},
+        .auth_claim = source_address_auth_claim(),
+    };
+    Signature signature(CryptographicScheme::Ed25519);
+    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    ASSERT_TRUE(signed_bytes.has_value());
+    signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
+    SignedTransaction signed_tx{
+        .tx = std::move(tx),
+        .signatures = {DecoratedSignature{
+            .public_key_id = 0,
+            .signature = signature,
+        }},
+    };
+    const SignedTransactionHash tx_hash = sha256(signed_tx.tx);
+    ASSERT_EQ(
+        submit_and_commit(scheduler, SignedTransactionBatch{signed_tx}).size(),
+        1UL);
 
     const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
     TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
@@ -1082,21 +1321,15 @@ TEST(HogdDev, CommittedTransactionsPopulateReadEndpoint)
     }
 
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(result.info().height, 1);
+    EXPECT_EQ(result.info().height, 2);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
     EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
-    ASSERT_FALSE(result.info().events.events.empty());
-    EXPECT_TRUE(std::ranges::any_of(
-        result.info().events.events, [](TxEmittedEvent const &event) {
-          return event.contract_address ==
-                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
-        }));
   }
 
   expect_clean_exit(process);
 }
 
-TEST(HogdDev, DevAccountCanDeployCliShapedTransaction)
+TEST(HogdDev, BootstrapAccountCanDeployCliShapedTransaction)
 {
   HogdDevProcess process = HogdDevProcess::start({
       "--dev-accounts",
@@ -1107,15 +1340,15 @@ TEST(HogdDev, DevAccountCanDeployCliShapedTransaction)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.dev_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
 
   {
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
                                        readiness.scheduler.port,
                                        /*retry=*/true)();
-    auto reader = create_client<IndexerBlockExplorer1>(readiness.read.host,
-                                                       readiness.read.port,
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
                                                        /*retry=*/true)();
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
@@ -1125,11 +1358,12 @@ TEST(HogdDev, DevAccountCanDeployCliShapedTransaction)
     ASSERT_TRUE(fibonacci_contract);
 
     auto keypair =
-        derive_dev_account_keypair("groundhog-dev-accounts", /*index=*/0);
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     const ContractAddress wallet_address =
-        build_dev_account_bootstrap_artifact({.count = 1}).accounts[0].address;
-    EXPECT_EQ(hex_string(wallet_address), readiness.dev_accounts[0].address);
+        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+    EXPECT_EQ(hex_string(wallet_address),
+              readiness.bootstrap_accounts[0].address);
     const SHA256Hash deploy_nonce = make_nonce(7);
     const SHA256Hash contract_hash = sha256(*fibonacci_contract);
 
