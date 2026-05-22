@@ -765,11 +765,9 @@ struct Deserializer
   void go(X &x)
   {
     uint32_t size = get32<Safe>();
-    if constexpr (requires { x.max_size(); }) {
-      if (size > x.max_size()) [[unlikely]]
-        raise("length {} exceeds maximum deserializing {}", size,
-              xdr_type_name<X>());
-    }
+    if (size > x.max_size()) [[unlikely]]
+      raise("length {} exceeds maximum deserializing {}", size,
+            xdr_type_name<X>());
     size_t rem = size % 4;
     if (rem == 0) {
       if constexpr (Safe)

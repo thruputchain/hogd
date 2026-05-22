@@ -835,6 +835,7 @@ static_assert(
 // variety of containers of std::uint8_t or char.
 struct BufView : span<const uint8_t> {
   static constexpr size_t kMaxSize = 0xffffffff;
+  static constexpr size_t max_size() noexcept { return kMaxSize; }
   using super = span<const uint8_t>;
   BufView() noexcept : super() {}
   template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
