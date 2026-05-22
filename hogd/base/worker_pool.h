@@ -75,6 +75,11 @@ public:
     assert(jobs_.empty());
     // Make teardown slightly faster for large numbers of threads.
     // Without this the destructor signals workers to stop one by one.
+    {
+      std::scoped_lock g(lock_);
+      stopping_ = true;
+    }
+    cv_.notify_all();
     for (auto &worker : workers_) {
       worker.request_stop();
     }
@@ -233,25 +238,27 @@ public:
 
 private:
   std::mutex lock_;
-  std::condition_variable_any cv_;
+  std::condition_variable cv_;
   std::queue<UniqueFunction<void()>> jobs_;
   int target_workers_;
   int active_workers_;
+  bool stopping_{false};
   std::vector<WorkerThread> workers_;
   std::atomic<size_t> pending_jobs_{0};
 
   // worker_loop is the main loop run by each worker thread.
-  void worker_loop(const std::stop_token &stoken)
+  void worker_loop(const std::stop_token & /*stoken*/)
   {
     while (true) {
       UniqueFunction<void()> fn;
       {
         std::unique_lock lk(lock_);
         active_workers_--;
-        cv_.wait(lk, stoken, [this] {
-          return !jobs_.empty() && active_workers_ < target_workers_;
+        cv_.wait(lk, [this] {
+          return stopping_ ||
+                 (!jobs_.empty() && active_workers_ < target_workers_);
         });
-        if (unlikely(stoken.stop_requested()))
+        if (unlikely(stopping_))
           return;
         assert(!jobs_.empty());
         fn = std::move(jobs_.front());
