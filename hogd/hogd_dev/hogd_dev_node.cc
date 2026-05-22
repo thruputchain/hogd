@@ -1,11 +1,14 @@
 #include "hogd/hogd_dev/hogd_dev_node.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <utility>
 
@@ -56,6 +59,15 @@ namespace {
 constexpr char kIndexerDbSubdir[] = "indexer-db";
 
 void
+maybe_inject_post_executor_failure()
+{
+  const char *value = std::getenv("HOGD_DEV_TEST_THROW_AFTER_EXECUTOR_START");
+  if (value != nullptr && std::string_view(value) == "1") {
+    throw std::runtime_error("injected hogd-dev constructor failure");
+  }
+}
+
+void
 validate_bootstrap_account_auth_data(BootstrapAccountMetadata const &account,
                                      AddressAuthData const &auth_data)
 {
@@ -75,94 +87,103 @@ HogdDevNode::HogdDevNode(std::string bind_host,
     event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
-  mempool_auth_server_->impl()->register_callback(
-      [this](BlockHeight height, KeyChangeBatch key_changes) {
-        return mempool_coord_server_->impl()->auth_data_changed(
-            height, std::move(key_changes));
-      });
-  // Genesis bootstrap payloads can be larger than the transport default.
-  mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
-  mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
+  try {
+    mempool_auth_server_->impl()->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return mempool_coord_server_->impl()->auth_data_changed(
+              height, std::move(key_changes));
+        });
+    // Genesis bootstrap payloads can be larger than the transport default.
+    mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
 
-  // Start the mempool RPC servers. All of the subsystems register with the
-  // mempool, so the mempool RPC servers need to start first.
-  sched_db_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
-  sched_event_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
-  sched_exec_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
-  mempool_coord_server_.start_server(
-      make_bind_host_port(bind_host_, requested_scheduler_port));
-  mempool_auth_server_.start_server(
-      make_bind_host_port(bind_host_, /*port=*/0));
+    // Start the mempool RPC servers. All of the subsystems register with the
+    // mempool, so the mempool RPC servers need to start first.
+    sched_db_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
+    sched_event_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    sched_exec_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    mempool_coord_server_.start_server(
+        make_bind_host_port(bind_host_, requested_scheduler_port));
+    mempool_auth_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
 
-  auto sched_db_client = std::make_unique<sched_db_client_t>(
-      create_client<SchedDb1>(bind_host_, sched_db_server_.port())());
-  init_db_backend(std::move(sched_db_client));
+    auto sched_db_client = std::make_unique<sched_db_client_t>(
+        create_client<SchedDb1>(bind_host_, sched_db_server_.port())());
+    init_db_backend(std::move(sched_db_client));
 
-  // [db_executor_server_] handles RPCs from the executor.
-  db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
-  db_executor_server_->start_server(
-      make_bind_host_port(bind_host_, /*port=*/0));
-  // [db_scheduler_server_] handles RPCs from the mempool.
-  db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-  (*db_scheduler_server_)->max_message_size_ = kDevRpcMaxMessageSize;
-  db_scheduler_server_->start_server(make_bind_host_port(bind_host_,
+    // [db_executor_server_] handles RPCs from the executor.
+    db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
+    db_executor_server_->start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    // [db_scheduler_server_] handles RPCs from the mempool.
+    db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
+    (*db_scheduler_server_)->max_message_size_ = kDevRpcMaxMessageSize;
+    db_scheduler_server_->start_server(make_bind_host_port(bind_host_,
+                                                           /*port=*/0));
+    db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
+    db_auth_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
+    // Read-only state reads served to the public RPC gateway over x23.
+    db_gateway_server_ = std::make_unique<HogDBGatewayServer>(*ctx_);
+    db_gateway_server_->start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+
+    std::string dbauth_address =
+        format_advertised_address(bind_host_, db_auth_server_->port());
+    dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
+    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+
+    auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    auth_db_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
+    auth_mempool_server_.start_server(make_bind_host_port(bind_host_,
+                                                          /*port=*/0));
+    auth_db_server_->impl()->set_auth_server(*auth_server_);
+    auth_mempool_server_->impl()->set_auth_server(*auth_server_);
+
+    event_sched_server_.max_message_size_ = kDevRpcMaxMessageSize;
+    event_exec_server_.max_message_size_ = kDevRpcMaxMessageSize;
+    event_indexer_server_.max_message_size_ = kDevRpcMaxMessageSize;
+    event_sched_server_.start_server(make_bind_host_port(bind_host_,
                                                          /*port=*/0));
-  db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
-  db_auth_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
-  // Read-only state reads served to the public RPC gateway over x23.
-  db_gateway_server_ = std::make_unique<HogDBGatewayServer>(*ctx_);
-  db_gateway_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
-
-  std::string dbauth_address =
-      format_advertised_address(bind_host_, db_auth_server_->port());
-  dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)();
-  auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
-
-  auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
-  auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;
-  auth_db_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
-  auth_mempool_server_.start_server(make_bind_host_port(bind_host_,
+    event_exec_server_.start_server(make_bind_host_port(bind_host_,
                                                         /*port=*/0));
-  auth_db_server_->impl()->set_auth_server(*auth_server_);
-  auth_mempool_server_->impl()->set_auth_server(*auth_server_);
+    event_indexer_server_.start_server(make_bind_host_port(bind_host_,
+                                                           /*port=*/0));
 
-  event_sched_server_.max_message_size_ = kDevRpcMaxMessageSize;
-  event_exec_server_.max_message_size_ = kDevRpcMaxMessageSize;
-  event_indexer_server_.max_message_size_ = kDevRpcMaxMessageSize;
-  event_sched_server_.start_server(make_bind_host_port(bind_host_,
-                                                       /*port=*/0));
-  event_exec_server_.start_server(make_bind_host_port(bind_host_,
-                                                      /*port=*/0));
-  event_indexer_server_.start_server(make_bind_host_port(bind_host_,
-                                                         /*port=*/0));
+    view_gateway_server_ = std::make_unique<ViewGatewayServer>(
+        format_advertised_address(bind_host_, db_executor_server_->port()),
+        bind_host_, event_exec_server_.port());
+    view_gateway_server_->start_server(make_bind_host_port(bind_host_,
+                                                           /*port=*/0));
 
-  view_gateway_server_ = std::make_unique<ViewGatewayServer>(
-      format_advertised_address(bind_host_, db_executor_server_->port()),
-      bind_host_, event_exec_server_.port());
-  view_gateway_server_->start_server(make_bind_host_port(bind_host_,
-                                                         /*port=*/0));
+    init_indexer_backend();
 
-  init_indexer_backend();
+    // We start the executor server in [register_executor_with_mempool()].
 
-  // We start the executor server in [register_executor_with_mempool()].
+    // Start the fake coordinator. The real coordinator lives in chuckd, but
+    // hogd-dev only needs the scheduler back-channel that the mempool requires
+    // during startup.
+    coordinator_sched_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    coordinator_sched_server_.start_server(make_bind_host_port(bind_host_,
+                                                               /*port=*/0));
 
-  // Start the fake coordinator. The real coordinator lives in chuckd, but
-  // hogd-dev only needs the scheduler back-channel that the mempool requires
-  // during startup.
-  coordinator_sched_server_->max_message_size_ = kDevRpcMaxMessageSize;
-  coordinator_sched_server_.start_server(make_bind_host_port(bind_host_,
-                                                             /*port=*/0));
-
-  // Now have all of the subsystems register themselves with the mempool.
-  register_indexer_with_event_service();
-  register_db_with_mempool();
-  register_event_with_mempool();
-  register_auth_with_mempool();
-  // The executor must register itself *after* the database and event servers
-  // have registered!
-  register_executor_with_mempool();
-  register_coordinator_with_mempool()();
-  materialize_bootstrap_accounts(bootstrap_config);
+    // Now have all of the subsystems register themselves with the mempool.
+    register_indexer_with_event_service();
+    register_db_with_mempool();
+    register_event_with_mempool();
+    register_auth_with_mempool();
+    // The executor must register itself *after* the database and event servers
+    // have registered!
+    register_executor_with_mempool();
+    maybe_inject_post_executor_failure();
+    register_coordinator_with_mempool()();
+    materialize_bootstrap_accounts(bootstrap_config);
+  } catch (...) {
+    prepare_for_failed_construction();
+    throw;
+  }
 }
 
 HogdDevNode::~HogdDevNode()
@@ -199,6 +220,21 @@ HogdDevNode::~HogdDevNode()
   } catch (...) {
     error("~HogdDevNode received exception");
     CHECK(false);
+  }
+}
+
+void
+HogdDevNode::prepare_for_failed_construction() noexcept
+{
+  try {
+    executor_.shut_down();
+    if (view_gateway_server_ != nullptr) {
+      view_gateway_server_->impl()->shut_down();
+    }
+  } catch (const std::exception &e) {
+    error("HogdDevNode failed-start cleanup received exception: {}", e.what());
+  } catch (...) {
+    error("HogdDevNode failed-start cleanup received exception");
   }
 }
 

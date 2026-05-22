@@ -95,6 +95,7 @@ private:
   void materialize_bootstrap_accounts(BootstrapAccountConfig const &config);
   void commit_initialization_batch(SignedTransactionBatch const &txs);
   void refresh_bootstrap_account_balances();
+  void prepare_for_failed_construction() noexcept;
 
   std::string bind_host_;
   BootstrapAccountConfig bootstrap_config_;
