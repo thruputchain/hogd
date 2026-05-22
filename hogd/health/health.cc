@@ -15,13 +15,16 @@
 
 #include <unistd.h>
 
+#include "hogd/base/log.h"
+#include "x23/debug.h"
+
 namespace hogd {
 namespace {
 
 std::filesystem::path
 make_temp_path(const std::filesystem::path &path)
 {
-  static std::atomic<uint64_t> next_temp_file_id{0};
+  static std::atomic<std::uint64_t> next_temp_file_id{0};
   std::filesystem::path temp_path = path;
   temp_path += std::format(".tmp.{}.{}", getpid(), next_temp_file_id++);
   return temp_path;

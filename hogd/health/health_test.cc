@@ -44,10 +44,11 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
 
   const json::Value *timestamp = parsed->find("last_updated_timestamp");
   ASSERT_NE(timestamp, nullptr);
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(timestamp->as_string().has_value());
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_FALSE(timestamp->as_string()->empty());
   const std::string_view timestamp_value = *timestamp->as_string();
+  // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_NE(timestamp_value.find('T'), std::string_view::npos);
   ASSERT_FALSE(timestamp_value.empty());
   EXPECT_EQ(timestamp_value.back(), 'Z');
