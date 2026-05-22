@@ -27,7 +27,6 @@ public:
   x23::Async<void> dump_to_file(const std::string &path) const;
 
   x23::Async<void> set_status(Status status);
-
   x23::Async<void> set_current_block_height(BlockHeight current_block_height);
 
   // Disable copy and move.
