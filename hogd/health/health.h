@@ -43,7 +43,7 @@ private:
 
     std::string format() const
     {
-      return std::format("{:%Y-%m-%d %H:%M:%S}", timestamp);
+      return std::format("{:%Y-%m-%dT%H:%M:%SZ}", timestamp);
     }
   };
 

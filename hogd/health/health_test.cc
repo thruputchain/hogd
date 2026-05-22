@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 
 #include "hogd/base/json.h"
 #include "hogd/base/test.h"
@@ -46,6 +47,10 @@ TEST(HealthTest, DumpToFileWritesJsonHealthState)
   ASSERT_TRUE(timestamp->as_string().has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_FALSE(timestamp->as_string()->empty());
+  const std::string_view timestamp_value = *timestamp->as_string();
+  EXPECT_NE(timestamp_value.find('T'), std::string_view::npos);
+  ASSERT_FALSE(timestamp_value.empty());
+  EXPECT_EQ(timestamp_value.back(), 'Z');
 
   const json::Value *status = parsed->find("status");
   ASSERT_NE(status, nullptr);
