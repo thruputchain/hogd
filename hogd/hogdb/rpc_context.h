@@ -107,6 +107,19 @@ public:
   // Does not acquire a reference to the blocktx.
   HogDBStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid,
                                                      BlockExecutionMode mode);
+
+  // Opens a new block transaction only if parent_id is still the committed
+  // tip. If a commit is currently being published, waits until the tip and
+  // committed data are consistent before checking parent_id.
+  HogDBStatus<PerThreadARC<BlockTX> *>
+  open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
+                          BlockExecutionMode mode);
+
+  // Opens a viewing block transaction and returns the tip it views. If a commit
+  // is currently being published, waits until the tip and committed data are
+  // consistent before opening.
+  HogDBStatus<ViewingSnapshot> open_viewing_snapshot(BlockTXID bid);
+
   // retrieves an open block transaction.
   // If the returned value is not null, then
   // the caller has acquired a reference to the blocktx.
@@ -158,6 +171,19 @@ public:
 
   bool is_snapshot_read_stale(BlockTXID bid);
 
+  class CommitPublicationGuard {
+  public:
+    CommitPublicationGuard(RPCContext &ctx, BlockTXID committer);
+    CommitPublicationGuard(CommitPublicationGuard const &) = delete;
+    CommitPublicationGuard &operator=(CommitPublicationGuard const &) = delete;
+    CommitPublicationGuard(CommitPublicationGuard &&) = delete;
+    CommitPublicationGuard &operator=(CommitPublicationGuard &&) = delete;
+    ~CommitPublicationGuard();
+
+  private:
+    RPCContext *ctx_;
+  };
+
 private:
   struct BlockCache {
     std::mutex lock;
@@ -176,6 +202,7 @@ private:
   std::optional<StorageCostModel> cost_model_;
   // protects block_txes_.
   std::mutex lock_;
+  std::atomic<bool> commit_publishing_{false};
   // pending block transactions.
   // The block txs are refcounted.
   // Each InvokeTX acquires a reference;  when the InvokeTX is closed, it
@@ -201,6 +228,13 @@ private:
                                            bool acquire_reference);
   // slow path for is_snapshot_read_stale().
   bool is_snapshot_read_stale_slow(BlockTXID bid);
+
+  HogDBStatus<PerThreadARC<BlockTX> *>
+  open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode);
+
+  void invalidate_siblings_locked(BlockTXID committer);
+  void begin_commit_publication(BlockTXID committer);
+  void finish_commit_publication() noexcept;
 
   void release_block_tx_reference(BlockTXID bid);
 };

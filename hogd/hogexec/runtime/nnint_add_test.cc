@@ -401,6 +401,180 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   nnint_item = read_res.value().nnint();
   ASSERT_EQ(from_xdr(nnint_item), 200);
 }
+
+// Regression test for #2155: negative set_value is intentionally allowed.
+// The protocol invariant is value >= min(set_value, 0), not value >= 0.
+TEST_P(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("neg_base");
+             int128_t set_value = -1;
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 0,
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+
+  auto contract_addr = make_contract_address(0);
+  write_deployment(contract_addr, contract_0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  advance_block();
+
+  auto read_res = lookup_storage_item_from_db(
+      make_contract_data_addrkey(contract_addr, "neg_base"));
+  ASSERT_TRUE(read_res.has_value());
+  ASSERT_EQ(read_res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
+  auto nnint_item = read_res.value().nnint();
+  ASSERT_EQ(from_xdr(nnint_item), -1);
+}
+
+// Regression test for #2155: negative set_value with positive add_value.
+// Final value is set_value + add_value.  The lock lower bound is
+// min(set_value, 0), so the result is valid as long as it stays above that.
+TEST_P(NNIntAddTest, NegativeSetValueWithPositiveAdd)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("neg_base_pos_add");
+             int128_t set_value = -5;
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, 10,
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value() ||
+                 *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+
+  auto contract_addr = make_contract_address(0);
+  write_deployment(contract_addr, contract_0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+
+  advance_block();
+
+  auto read_res = lookup_storage_item_from_db(
+      make_contract_data_addrkey(contract_addr, "neg_base_pos_add"));
+  ASSERT_TRUE(read_res.has_value());
+  ASSERT_EQ(read_res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
+  auto nnint_item = read_res.value().nnint();
+  ASSERT_EQ(from_xdr(nnint_item), 5);
+}
+
+// Regression test for #2155: negative set_value with negative add_value
+// is rejected, since subtracting from an already-negative base would violate
+// the lower bound.
+TEST_P(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
+{
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+          {0,
+           [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+             auto key = make_storage_key("neg_base_neg_add");
+             int128_t set_value = -1;
+             auto res = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                 key, &set_value, -1,
+                 std::to_underlying(StorageDeltaFlags::None));
+             if (!res.has_value()) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             if (*res !=
+                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+               return InvokeError{InvokeErrorCode::Deterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+
+  auto contract_addr = make_contract_address(0);
+  write_deployment(contract_addr, contract_0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(NNIntAddTest, NNIntAddTest,

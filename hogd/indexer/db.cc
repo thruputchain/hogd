@@ -1089,6 +1089,9 @@ IndexDB::get_events(EventQuery const &query) const
       // silently continuing with a misinterpreted position.
       return page;
     }
+    if (!is_valid_iteration_order(decoded->order)) {
+      return page;
+    }
     order = decoded->order;
     cursor_block = decoded->block_height;
     cursor_tx = decoded->tx_hash;
@@ -1098,6 +1101,9 @@ IndexDB::get_events(EventQuery const &query) const
   }
   else {
     order = query.order;
+    if (!is_valid_iteration_order(order)) {
+      return page;
+    }
     switch (query.anchor.kind()) {
     case BlockAnchorKind::AnchorAtBeginning:
       if (order == IterationOrder::IterationOrderDescending) {

@@ -20,13 +20,13 @@ namespace {
 SystemCallHandler *ctx_check = nullptr;
 
 extern "C" TrampolineResult
-foo(ExternHostCallContext external_context, LinearMemorySlice /*unused*/,
+foo(ExternHostCallContext external_context, WasmContext /*unused*/,
     uint64_t value)
 {
   auto *ctx = reinterpret_cast<HostCallContext *>(external_context);
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
-  return to_trampoline_result({SyscallErrorCode(15)});
+  return to_trampoline_result({SyscallErrorCode(15)}, 0);
 }
 
 } // namespace

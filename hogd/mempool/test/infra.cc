@@ -9,12 +9,15 @@
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
+#include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
@@ -22,7 +25,11 @@
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
+MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
+                                   size_t mempool_tx_size_limit)
+  : mempool_coord_server_(
+        RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(), kNetworkId,
+                                         mempool_tx_size_limit))
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration at the beginning of each test.

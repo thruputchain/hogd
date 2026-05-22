@@ -73,7 +73,9 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra(bool skip_genesis_block = false);
+  MempoolTestInfra(bool skip_genesis_block = false,
+                   size_t mempool_tx_size_limit =
+                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
 
   ~MempoolTestInfra()
   {
@@ -214,10 +216,10 @@ private:
         std::make_unique<RPCContext>(std::move(db), std::move(sched_db_client));
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
-        .base_data_item_cost = to_xdr(int128_t{12000}),
+        .base_data_item_cost = 12000,
         .bytestring_cost_per_byte = 10,
-        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+        .base_contract_deployment_cost = 12000,
+        .contract_deployment_cost_per_byte = 10,
     }));
   }
 
@@ -364,8 +366,7 @@ private:
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
-  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(), kNetworkId);
+  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_;
   RpcServer<MempoolAuthRpc> mempool_auth_server_;
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;

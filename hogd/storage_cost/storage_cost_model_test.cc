@@ -2,7 +2,6 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
 #include "types.hh"
@@ -28,14 +27,14 @@ TEST(StorageCostModelTest, RoundtripCustomValues)
 {
   StorageCostModelXdr original{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = ::hogd::to_xdr(int128_t{42}),
+      .base_data_item_cost = 42,
       .bytestring_cost_per_byte = 7,
-      .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{100}),
-      .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{3}),
-      .auth_per_key_cost = ::hogd::to_xdr(int128_t{55}),
-      .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{11}),
-      .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{17}),
-      .balance_cost = ::hogd::to_xdr(int128_t{9999}),
+      .base_contract_deployment_cost = 100,
+      .contract_deployment_cost_per_byte = 3,
+      .auth_per_key_cost = 55,
+      .rcq_cost_per_entry = 11,
+      .replay_cache_cost_per_entry = 17,
+      .balance_cost = 9999,
   };
 
   StorageCostModel model(original);
@@ -66,14 +65,14 @@ TEST(StorageCostModelTest, ContractDeploymentCostIncludesBase)
 {
   StorageCostModelXdr xdr{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = ::hogd::to_xdr(int128_t{5000}),
+      .base_data_item_cost = 5000,
       .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = ::hogd::to_xdr(int128_t{12000}),
-      .contract_deployment_cost_per_byte = ::hogd::to_xdr(int128_t{10}),
-      .auth_per_key_cost = ::hogd::to_xdr(int128_t{1111}),
-      .rcq_cost_per_entry = ::hogd::to_xdr(int128_t{8}),
-      .replay_cache_cost_per_entry = ::hogd::to_xdr(int128_t{7}),
-      .balance_cost = ::hogd::to_xdr(int128_t{1234}),
+      .base_contract_deployment_cost = 12000,
+      .contract_deployment_cost_per_byte = 10,
+      .auth_per_key_cost = 1111,
+      .rcq_cost_per_entry = 8,
+      .replay_cache_cost_per_entry = 7,
+      .balance_cost = 1234,
   };
   StorageCostModel model(xdr);
 

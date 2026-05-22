@@ -1,4 +1,6 @@
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <format>
 #include <iostream>
@@ -18,6 +20,7 @@
 #endif // HAVE_CXX_STACKTRACE
 
 #include "hogd/base/ansi_color.h"
+#include "hogd/base/json.h"
 #include "hogd/base/log.h"
 
 namespace hogd {
@@ -54,6 +57,57 @@ do_panic(std::string_view fmt, const std::source_location &loc,
 
 } // namespace detail
 
+namespace {
+
+constexpr std::string_view
+log_level_to_string(LogLevel level)
+{
+  using enum LogLevel;
+  switch (level) {
+  case kCritical:
+    return "critical";
+  case kError:
+    return "error";
+  case kWarn:
+    return "warn";
+  case kInfo:
+    return "info";
+  case kDebug:
+    return "debug";
+  case kTrace:
+    return "trace";
+  default:
+    return "unknown";
+  }
+}
+
+std::string_view
+source_target(std::string_view path)
+{
+  constexpr std::string_view kHogdPrefix = "hogd/";
+
+  std::size_t start = path.rfind(kHogdPrefix);
+  if (start != std::string_view::npos) {
+    start += kHogdPrefix.size();
+  }
+  else {
+    start = 0;
+  }
+
+  // Build-tree and installed paths differ, so derive the subsystem from the
+  // source path suffix under `hogd/` instead of requiring an absolute prefix.
+  std::size_t end = path.find('/', start);
+  std::string_view target = end == std::string_view::npos
+                                ? path.substr(start)
+                                : path.substr(start, end - start);
+  if (target.ends_with(".cc") || target.ends_with(".h")) {
+    return "hogd";
+  }
+  return target.empty() ? std::string_view("hogd") : target;
+}
+
+} // namespace
+
 void
 ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
                     const std::source_location &loc, std::format_args args)
@@ -87,6 +141,47 @@ ConsoleLogger::flush()
 {
   // Note: cerr doesn't buffer by default, but flush just in case it was
   // configured differently.
+  std::cerr.flush();
+}
+
+void
+JsonConsoleLogger::vlog(LogLevel level, std::string_view fmt,
+                        const std::source_location &loc, std::format_args args)
+{
+  if (level > max_level_)
+    return;
+
+  const auto now = std::chrono::system_clock::now();
+  const auto timestamp_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          now.time_since_epoch())
+          .count();
+
+  // TODO(mm): this is a JSON envelope around the existing printf-style log
+  // message. Should be a structured-field logging API once real user workflows
+  // identify which fields need first-class filtering.
+  std::string message;
+  std::vformat_to(std::back_inserter(message), fmt, args);
+
+  std::string buf;
+  json::Writer(buf).object([&](json::Writer &w) {
+    w.field("timestamp_ms", static_cast<std::int64_t>(timestamp_ms));
+    w.field("level", log_level_to_string(level));
+    w.field("target", source_target(loc.file_name()));
+    w.field("message", message);
+    w.object_field("fields", [&](json::Writer &w) {
+      w.field("file", detail::source_basename(loc.file_name()));
+      w.field("line", static_cast<std::int64_t>(loc.line()));
+    });
+  });
+  std::format_to(std::back_inserter(buf), "\n");
+
+  std::osyncstream(std::cerr) << buf;
+}
+
+void
+JsonConsoleLogger::flush()
+{
   std::cerr.flush();
 }
 

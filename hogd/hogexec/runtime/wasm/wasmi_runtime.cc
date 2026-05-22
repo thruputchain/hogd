@@ -166,55 +166,42 @@ WasmiContext::make_new_runtime(
                                         wasmi_runtime_ptr);
 }
 
-bool
+InvokeErrorCode
 WasmiContext::verify_contract(Contract const &contract) const
 {
   assert(wasmi_context_ptr_);
   if (contract.contract_type() != ContractType::kWasmi) {
-    return false;
+    return InvokeErrorCode::Deterministic;
   }
   try {
-    return wasmi_verify_contract(wasmi_context_ptr_,
-                                 reinterpret_cast<const uint8_t *>(
-                                     contract.wasmi_contract().wasm.data()),
-                                 contract.wasmi_contract().wasm.size());
+    return static_cast<InvokeErrorCode>(
+        wasmi_verify_contract(wasmi_context_ptr_,
+                              reinterpret_cast<const uint8_t *>(
+                                  contract.wasmi_contract().wasm.data()),
+                              contract.wasmi_contract().wasm.size()));
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
-    return false;
+    return InvokeErrorCode::Unrecoverable;
   }
 }
 
-InvokeStatus<void>
-WasmiRuntime::invoke_internal(std::string_view method_name)
+std::pair<InvokeStatus<void>, GasAmount>
+WasmiRuntime::invoke_internal(std::string_view method_name, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
   WasmiInvokeResult res =
       wasmi_invoke(wasmi_runtime_ptr_,
                    reinterpret_cast<const uint8_t *>(method_name.data()),
-                   method_name.size());
+                   method_name.size(), gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
   trace("Wasmi Invoke Result: {}",
         x23::show(static_cast<InvokeErrorCode>(res.error)));
   if (wasmi_error != InvokeErrorCode::None) {
-    return InvokeError{wasmi_error};
+    return {InvokeError{wasmi_error}, res.gas_consumed};
   }
-  return {};
-}
-
-uint64_t
-WasmiRuntime::get_available_gas() const noexcept
-{
-  assert(wasmi_runtime_ptr_ != nullptr);
-  return wasmi_get_available_gas(wasmi_runtime_ptr_);
-}
-
-void
-WasmiRuntime::set_available_gas(uint64_t gas) noexcept
-{
-  assert(wasmi_runtime_ptr_ != nullptr);
-  wasmi_set_available_gas(wasmi_runtime_ptr_, gas);
+  return {{}, res.gas_consumed};
 }
 
 WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,

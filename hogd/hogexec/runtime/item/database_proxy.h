@@ -88,6 +88,9 @@ public:
 
   SystemStatus<DbTip> get_db_tip(BlockID block_id);
 
+  SystemStatus<ViewingSnapshot> open_viewing_snapshot();
+  SystemStatus<void> close_viewing_snapshot(BlockID block_id);
+
 private:
   using base_client_t = x23::SRpcMulticlient<x23::RpcLogger>::ClientRef;
   using client_t = DatabaseToExecutorInterfaceV1::client<base_client_t>;

@@ -116,6 +116,25 @@ private:
   LogLevel max_level_;
 };
 
+// JsonConsoleLogger prints newline-delimited JSON log records to stderr.
+class JsonConsoleLogger : public Logger {
+public:
+  JsonConsoleLogger(LogLevel level = is_debug_build() ? LogLevel::kDebug
+                                                      : LogLevel::kInfo)
+    : max_level_(level)
+  {}
+
+  void vlog(LogLevel level, std::string_view fmt,
+            const std::source_location &loc, std::format_args args) override;
+  void flush() override;
+
+  void set_log_level(LogLevel level) { max_level_ = level; }
+  LogLevel get_max_log_level() const override { return max_level_; }
+
+private:
+  LogLevel max_level_;
+};
+
 namespace detail {
 
 extern std::unique_ptr<Logger> logger;
@@ -320,6 +339,8 @@ format_arg(T &&t)
   }
 }
 
+} // namespace hogd
+
 #ifdef __APPLE__
 inline auto
 gettid()
@@ -327,6 +348,8 @@ gettid()
   return std::this_thread::get_id();
 }
 #endif
+
+namespace hogd {
 
 #define LOG_INTERNAL_CHECK(op, invop, expr1, expr2)                            \
   do {                                                                         \

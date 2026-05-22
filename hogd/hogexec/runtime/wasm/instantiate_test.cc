@@ -130,14 +130,13 @@ TEST_P(InstantiateTest, InstantiateOobElementSegment)
 namespace {
 
 extern "C" TrampolineResult
-dummy_syscall_8args(ExternHostCallContext /*unused*/,
-                    LinearMemorySlice /*unused*/, uint64_t /*unused*/,
+dummy_syscall_8args(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
                     uint64_t /*unused*/, uint64_t /*unused*/,
-                    uint64_t /*unused*/)
+                    uint64_t /*unused*/, uint64_t /*unused*/)
 {
-  return {.result_code = 0, .panic = 0};
+  return {.result_code = 0, .panic = 0, .gas_consumed = 0};
 }
 
 } // namespace
@@ -152,7 +151,7 @@ TEST_P(InstantiateTest, WrongImportTypeRejectedAtVerification)
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_wrong_import_type.wasm");
-  EXPECT_FALSE(get_context()->verify_contract(contract));
+  EXPECT_NE(get_context()->verify_contract(contract), InvokeErrorCode::None);
 }
 
 // Regression guard for #1533 / #2021: a contract that imports a name the
@@ -166,7 +165,7 @@ TEST_P(InstantiateTest, UnknownImportRejectedAtVerification)
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_unknown_import.wasm");
 
-  EXPECT_FALSE(get_context()->verify_contract(contract));
+  EXPECT_NE(get_context()->verify_contract(contract), InvokeErrorCode::None);
 }
 
 // Regression test for issue #1472: both engines currently allow a method-name
@@ -178,7 +177,7 @@ TEST_P(InstantiateTest, ParamEntryPointSignatureMismatchIsDeterministic)
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
       test::load_wasm_from_file("test_param_entrypoint.wasm");
-  EXPECT_TRUE(get_context()->verify_contract(contract));
+  EXPECT_EQ(get_context()->verify_contract(contract), InvokeErrorCode::None);
 
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),

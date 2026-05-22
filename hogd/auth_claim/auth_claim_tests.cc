@@ -381,6 +381,32 @@ TEST_F(AuthClaimTests, ZeroSignaturesRejectedByWeight)
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
+TEST_F(AuthClaimTests, PubkeySignatureClaimRejectedWithoutPanic)
+{
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  auto tx = make_transaction(claim);
+  SignedTransaction stx{.tx = tx, .signatures = {}};
+
+  auto [pk, _] = make_key_pair();
+  AddressAuthData auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = 1})},
+      .required_weight = 1,
+  };
+
+  auto well_formed = auth_claim_is_well_formed(stx);
+  EXPECT_FALSE(well_formed.has_value());
+  EXPECT_EQ(well_formed.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+
+  auto lightweight = lightweight_validate_auth_claims(stx, auth_data);
+  EXPECT_FALSE(lightweight.has_value());
+  EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+
+  auto verified = verify_auth(stx, auth_data);
+  EXPECT_FALSE(verified.has_value());
+  EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthMalformed);
+}
+
 TEST_F(AuthClaimTests, WeightAccumulatorDoesNotOverflow32Bits)
 {
   constexpr Weight kMaxWeight = std::numeric_limits<Weight>::max();

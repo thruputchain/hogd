@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
+#include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/xdr_util.h"
@@ -273,6 +275,51 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
   auto r = oversized_proxy.try_push_current_subtransaction();
   ASSERT_FALSE(r.has_value());
   ASSERT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
+}
+
+TEST(DirectStorageOversizedFinalCommitBatchTest,
+     OversizedNewContractBatchYieldsUnrecoverable)
+{
+  const std::size_t saved_max = x23::default_max_message_size;
+  x23::default_max_message_size = 1024;
+  x23::Defer restore{
+      [saved_max] { x23::default_max_message_size = saved_max; }};
+
+  NativeContractTestFramework fw(
+      /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
+      TestDB::kHogDB);
+
+  const auto contract_addr =
+      NativeContractTestFramework::make_contract_address(1);
+  fw.setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract().wasm.append_range(std::string(2048, 'x'));
+  auto contract_ptr = std::make_shared<const Contract>(contract);
+  const auto deployed_contract_hash =
+      NativeContractTestFramework::make_deployed_contract_hash(contract_ptr);
+
+  auto tx = fw.make_new_per_tx_db_proxy(202);
+  AddressAndKey addrkey{.address = contract_addr,
+                        .key = StorageKey(StorageKeyType::Metadata)};
+  StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
+  delta.deployed_contract_hash() = deployed_contract_hash;
+  tx.add_delta(addrkey, std::move(delta),
+               std::to_underlying(StorageDeltaFlags::None));
+
+  auto push = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(push.has_value());
+  ASSERT_TRUE(push.value());
+
+  BorrowedContractBatch::hash_set_t hashes{deployed_contract_hash.hash};
+  BorrowedContractBatch::contract_map_t contracts;
+  contracts.emplace(deployed_contract_hash.hash,
+                    std::make_unique<const Contract>(contract));
+  BorrowedContractBatch new_contracts(hashes, contracts);
+
+  auto res = tx.commit_transaction(new_contracts);
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error().code(), SystemErrorCode::Unrecoverable);
 }
 
 } // namespace hogd

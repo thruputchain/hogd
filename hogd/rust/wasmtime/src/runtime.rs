@@ -1,4 +1,4 @@
-use core::ffi::c_void;
+use std::os::raw::c_void;
 use std::slice;
 use wasmtime::{Instance, Store};
 
@@ -118,13 +118,14 @@ impl WasmtimeRuntime {
         Ok(Some(Self { store, instance }))
     }
 
-    fn invoke(&mut self, method: &str) -> WasmtimeInvokeResult {
+    fn invoke(&mut self, method: &str, gas_limit: u64) -> WasmtimeInvokeResult {
         let func = match self.instance.get_func(&mut self.store, method) {
             Some(v) => v,
             _ => {
                 debug_log!(eprintln!("Function {method} not found"));
                 return WasmtimeInvokeResult::error(
                     InvokeErrorCode::Deterministic,
+                    0,
                 );
             }
         };
@@ -134,11 +135,45 @@ impl WasmtimeRuntime {
             debug_log!(eprintln!(
                 "Function {method} has unsupported ABI: expected () -> (), got {func_type:?}"
             ));
-            return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic);
+            return WasmtimeInvokeResult::error(
+                InvokeErrorCode::Deterministic,
+                0,
+            );
         }
 
-        match func.call(&mut self.store, &[], &mut []) {
-            Ok(_) => WasmtimeInvokeResult::success(),
+        // set_fuel returns an error if allocation fails or if fuel is not configured.
+        // either of these is unrecoverable.
+        match self.store.set_fuel(gas_limit) {
+            Ok(()) => (),
+            Err(e) => {
+                eprintln!("Unrecoverable: failed to set fuel: {e:?}");
+                return WasmtimeInvokeResult::error(
+                    InvokeErrorCode::Unrecoverable,
+                    0,
+                );
+            }
+        };
+
+        let fn_result = func.call(&mut self.store, &[], &mut []);
+
+        // get_fuel returns an error if fuel is not configured or
+        // if memory allocation fails.
+        // Either of these is unrecoverable.
+        let gas_remaining = match self.store.get_fuel() {
+            Ok(fuel) => fuel,
+            Err(e) => {
+                eprintln!("Unrecoverable: failed to get fuel: {e:?}");
+                return WasmtimeInvokeResult::error(
+                    InvokeErrorCode::Unrecoverable,
+                    0,
+                );
+            }
+        };
+        assert!(gas_remaining <= gas_limit);
+        let gas_consumed = gas_limit - gas_remaining;
+
+        match fn_result {
+            Ok(_) => WasmtimeInvokeResult::success(gas_consumed),
             Err(err) => {
                 if let Some(trap_code) = err.downcast_ref::<wasmtime::Trap>() {
                     #[cfg(feature = "wasm_debug")]
@@ -147,6 +182,7 @@ impl WasmtimeRuntime {
                     }
                     return WasmtimeInvokeResult::from_wasmtime_trap_code(
                         trap_code,
+                        gas_consumed,
                     );
                 }
                 err.downcast_ref::<TrampolineError>().map_or_else(
@@ -156,6 +192,7 @@ impl WasmtimeRuntime {
                         );
                         WasmtimeInvokeResult::error(
                             InvokeErrorCode::Unrecoverable,
+                            gas_consumed,
                         )
                     },
                     |trampoline_error| {
@@ -167,7 +204,7 @@ impl WasmtimeRuntime {
                                 eprintln!("WASM backtrace:\n{:#}", err);
                             }
                         }
-                        trampoline_error.to_wasmtime_invoke_result()
+                        trampoline_error.to_wasmtime_invoke_result(gas_consumed)
                     },
                 )
             }
@@ -191,12 +228,13 @@ pub unsafe extern "C" fn wasmtime_invoke(
     runtime_void: *mut c_void,
     method_name: *const u8,
     method_name_len: u32,
+    gas_limit: u64,
 ) -> WasmtimeInvokeResult {
     let runtime: *mut WasmtimeRuntime = runtime_void.cast::<WasmtimeRuntime>();
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
-        return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic);
+        return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic, 0);
     }
 
     let method_name_slice =
@@ -205,13 +243,16 @@ pub unsafe extern "C" fn wasmtime_invoke(
     let string = match std::str::from_utf8(method_name_slice) {
         Ok(v) => v,
         _ => {
-            return WasmtimeInvokeResult::error(InvokeErrorCode::Deterministic)
+            return WasmtimeInvokeResult::error(
+                InvokeErrorCode::Deterministic,
+                0,
+            )
         }
     };
 
     let r = unsafe { &mut *runtime };
 
-    r.invoke(string)
+    r.invoke(string, gas_limit)
 }
 
 #[repr(C)]

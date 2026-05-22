@@ -66,6 +66,16 @@ public:
 
   ExpectedDBTip get_db_tip(BlockID block_id);
 
+  static ExpectedViewingSnapshot open_viewing_snapshot()
+  {
+    return ExpectedViewingSnapshot(RPCError::kRPCUnimplemented);
+  }
+
+  static RPCError close_viewing_snapshot(BlockID /*unused*/)
+  {
+    return RPCError::kRPCUnimplemented;
+  }
+
 private:
   static bool try_reserve_delta(BlockState *block_state, TransactionID tx,
                                 AddressAndKey const &addrkey,

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -204,10 +205,10 @@ SystemCallHandler::perform_initial_validation()
   for (auto const &[_, contract] : newly_created_contracts_) {
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
-    if (!res) {
+    if (res != InvokeErrorCode::None) {
       error("Contract verification failed");
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::Deterministic};
+      cumulative_invoke_result_.result_ = InvokeError{res};
+      return;
     }
   }
 }
@@ -218,8 +219,15 @@ SystemCallHandler::check_final_validation_data()
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.check_all_consumed()) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
+      // Allowlist: also excludes overwriting an existing ValidationFailure.
+      if (cumulative_invoke_result_.is_root_success() ||
+          cumulative_invoke_result_.result_.error().code() ==
+              InvokeErrorCode::Deterministic ||
+          cumulative_invoke_result_.result_.error().code() ==
+              InvokeErrorCode::OutOfGas) {
+        cumulative_invoke_result_.result_ =
+            InvokeError{InvokeErrorCode::ValidationFailure};
+      }
     }
   }
 }
@@ -238,17 +246,19 @@ SystemCallHandler::root_invoke()
   // root_invocation_ is nullopt only in the test harness
   CHECK(root_invocation_.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  auto const &root_invocation = root_invocation_.value();
+  Invocation root_invocation = std::move(root_invocation_.value());
+  root_invocation_.reset();
 
   GasAmount available_gas =
       cumulative_invoke_result_.gas_consumed_ < root_invocation.gas_limit
           ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
           : 0;
 
-  auto [res, gas_consumed] = invoke(root_invocation.invoked_address,
-                                    sdk_method_id(root_invocation.entrypoint),
-                                    available_gas, root_invocation.calldata,
-                                    std::to_underlying(InvokeFlag::None), {});
+  auto [res, gas_consumed] =
+      invoke(root_invocation.invoked_address,
+             sdk_method_id(root_invocation.entrypoint), available_gas,
+             std::move(root_invocation.calldata),
+             std::to_underlying(InvokeFlag::None), {});
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -297,6 +307,10 @@ SystemCallHandler::get_most_recent_frame_events() const
   if (last_frame_finished_) {
     assert(invocation_frame_stack_.empty());
     if (!last_frame_.has_value()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (last_frame_.value().should_revert()) {
       return x23::Vec<TxEmittedEvent>();
     }
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -419,6 +433,7 @@ SystemCallHandler::try_commit_transaction()
   auto res = db_proxy_.commit_transaction(
       BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
   if (!res.has_value()) {
+    two_phase_commit_failed_ = true;
     return to_exec_result(res.error().code());
   }
 
@@ -618,7 +633,7 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
     invocation_frame_trace_->system_calls.push_back(SyscallTrace{
         .gas_remaining_at_start = current_gas_remaining,
         // This field is filled in when the syscall finishes.
-        .gas_remaining_at_end = current_gas_remaining,
+        .gas_remaining_at_end = std::numeric_limits<GasAmount>::max(),
         // This field is filled in by the individual syscall
         .body = SyscallTraceBody(syscall_number),
         // This field is filled in when the syscall finishes.
@@ -637,16 +652,16 @@ SystemCallHandler::finish_syscall_trace(HostFnStatus<SyscallErrorCode> status,
   }
 
   if (invocation_frame_trace_) {
-    assert(!invocation_frame_trace_->system_calls.empty());
+    CHECK(!invocation_frame_trace_->system_calls.empty());
     // field is uninitialized
-    assert(invocation_frame_trace_->system_calls.back().gas_remaining_at_end ==
-           invocation_frame_trace_->system_calls.back().gas_remaining_at_start);
+    CHECK_EQ(invocation_frame_trace_->system_calls.back().gas_remaining_at_end,
+             std::numeric_limits<GasAmount>::max());
     invocation_frame_trace_->system_calls.back().gas_remaining_at_end =
         gas_remaining_at_end;
 
     // field is uninitialized
-    assert(invocation_frame_trace_->system_calls.back().status.error() ==
-           HostFnErrorCode::Unrecoverable);
+    CHECK_EQ(invocation_frame_trace_->system_calls.back().status.error(),
+             HostFnErrorCode::Unrecoverable);
     auto &status_field = invocation_frame_trace_->system_calls.back().status;
     if (status.has_value()) {
       status_field.error(HostFnErrorCode::NoneOrRecoverable);

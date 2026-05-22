@@ -83,7 +83,7 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  bool verify_contract(Contract const &contract) const override;
+  InvokeErrorCode verify_contract(Contract const &contract) const override;
 
 private:
   void *wasmtime_context_ptr_ = nullptr;
@@ -100,14 +100,12 @@ public:
 
   ~WasmtimeRuntime() override;
 
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override;
-  void set_available_gas(uint64_t gas) noexcept override;
-
   // Get module statistics (e.g., serialized module size)
   bool get_module_stats(WasmtimeModuleStats *stats_out) const noexcept;
 
 private:
-  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
 
   // manipulated in rust
   void *wasmtime_runtime_ptr_;

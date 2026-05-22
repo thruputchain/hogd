@@ -2,15 +2,11 @@
 
 #include <gtest/gtest.h>
 
-#include <atomic>
-#include <cstdint>
 #include <utility>
-#include <vector>
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "invoke_flag.hh"
-#include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -39,17 +35,6 @@ make_query()
       .forwarded_tokens = {},
       .invoke_flags = {},
   };
-}
-
-ViewGatewayResult
-make_gateway_ok(BlockHeight height)
-{
-  ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayOk);
-  result.payload().height = height;
-  result.payload().output =
-      InvocationFrameOutput(InvocationFrameStatusCode::Return);
-  result.payload().events = {};
-  return result;
 }
 
 TEST(ViewGatewayRpc, MapsRawOkOutputs)
@@ -155,104 +140,6 @@ TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesForwardedTokens)
   EXPECT_EQ(normalized.forwarded_tokens.size(), 2U)
       << "forwarded_tokens must survive normalization (WAI: read-only "
          "simulation context)";
-}
-
-TEST(ViewGatewayRpc, RetriesAbandonedThenReturnsSuccessfulAttemptHeight)
-{
-  std::atomic<bool> shutdown_flag = false;
-  std::vector<DbTip> tips{
-      DbTip{.height = 10, .id = 100},
-      DbTip{.height = 11, .id = 101},
-  };
-  std::uint32_t tip_reads = 0;
-  std::uint32_t attempts = 0;
-  TransactionViewQuery query = make_query();
-
-  ViewGatewayResult result = run_view_with_retries_for_gateway(
-      query, shutdown_flag, [&] { return tips.at(tip_reads++); },
-      [&](TransactionViewQuery const &attempt_query, DbTip const &tip) {
-        EXPECT_EQ(&attempt_query, &query);
-        ++attempts;
-        if (attempts == 1) {
-          return ViewGatewayResult(ViewGatewayOutcome::ViewGatewayAbandoned);
-        }
-        return make_gateway_ok(tip.height);
-      },
-      3);
-
-  ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
-  EXPECT_EQ(result.payload().height, 11);
-  EXPECT_EQ(tip_reads, 2);
-  EXPECT_EQ(attempts, 2);
-}
-
-TEST(ViewGatewayRpc, ReturnsAbandonedAfterRetryExhaustion)
-{
-  std::atomic<bool> shutdown_flag = false;
-  std::uint32_t attempts = 0;
-  TransactionViewQuery query = make_query();
-
-  ViewGatewayResult result = run_view_with_retries_for_gateway(
-      query, shutdown_flag, [] { return DbTip{.height = 1, .id = 1}; },
-      [&](TransactionViewQuery const &, DbTip const &) {
-        ++attempts;
-        return ViewGatewayResult(ViewGatewayOutcome::ViewGatewayAbandoned);
-      },
-      3);
-
-  EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayAbandoned);
-  EXPECT_EQ(attempts, 3);
-}
-
-TEST(ViewGatewayRpc, ShutdownShortCircuitsBeforeAttempt)
-{
-  std::atomic<bool> shutdown_flag = true;
-  TransactionViewQuery query = make_query();
-
-  ViewGatewayResult result = run_view_with_retries_for_gateway(
-      query, shutdown_flag, [] { return DbTip{.height = 1, .id = 1}; },
-      [](TransactionViewQuery const &, DbTip const &) {
-        ADD_FAILURE() << "attempt should not run after shutdown";
-        return make_gateway_ok(1);
-      },
-      3);
-
-  EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayInternalError);
-}
-
-TEST(ViewGatewayRpc, ShutdownShortCircuitsBetweenAttempts)
-{
-  std::atomic<bool> shutdown_flag = false;
-  std::uint32_t attempts = 0;
-  TransactionViewQuery query = make_query();
-
-  ViewGatewayResult result = run_view_with_retries_for_gateway(
-      query, shutdown_flag, [] { return DbTip{.height = 1, .id = 1}; },
-      [&](TransactionViewQuery const &, DbTip const &) {
-        ++attempts;
-        shutdown_flag = true;
-        return ViewGatewayResult(ViewGatewayOutcome::ViewGatewayAbandoned);
-      },
-      3);
-
-  EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayInternalError);
-  EXPECT_EQ(attempts, 1);
-}
-
-TEST(ViewGatewayRpc, NotReadyTipDoesNotRunAttempt)
-{
-  std::atomic<bool> shutdown_flag = false;
-  TransactionViewQuery query = make_query();
-
-  ViewGatewayResult result = run_view_with_retries_for_gateway(
-      query, shutdown_flag, [] { return DbTip{.height = -1, .id = 0}; },
-      [](TransactionViewQuery const &, DbTip const &) {
-        ADD_FAILURE() << "attempt should not run without a committed tip";
-        return make_gateway_ok(1);
-      },
-      3);
-
-  EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
 } // namespace

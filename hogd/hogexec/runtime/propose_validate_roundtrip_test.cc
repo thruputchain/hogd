@@ -40,6 +40,7 @@ namespace hogd {
 // NondeterministicProposalData, then replay in validation mode and verify
 // the results match.  Also test that tampered proposal data causes
 // validation failure.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class ProposeValidateRoundtripTest : public ::testing::TestWithParam<TestDB>,
                                      public NativeContractTestFramework {
 public:
@@ -162,7 +163,7 @@ protected:
     RuntimeMemoryLength output_return_buffer_len = 0,
                         output_returned_auth_token_len = 0;
     return ctx.syscall<SyscallNo::kInvoke>(
-        kAddrB, method, ctx.runtime().get_available_gas(), Calldata{},
+        kAddrB, method, UINT64_MAX, Calldata{},
         std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
         output_return_buffer_len, output_returned_auth_token_len);
   }
@@ -916,10 +917,9 @@ TEST_P(ProposeValidateRoundtripTest,
           RuntimeMemoryLength output_return_buffer_len = 0,
                               output_returned_auth_token_len = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(),
-              make_index_calldata(i), std::to_underlying(InvokeFlag::TryInvoke),
-              std::span<uint32_t>{}, output_return_buffer_len,
-              output_returned_auth_token_len);
+              kAddrB, 0, UINT64_MAX, make_index_calldata(i),
+              std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
+              output_return_buffer_len, output_returned_auth_token_len);
           if (!r.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1009,7 +1009,7 @@ TEST_P(ProposeValidateRoundtripTest,
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrB, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           // Tolerant: propagate system errors but ignore user-level failures
@@ -1059,7 +1059,7 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
         for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrB, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           if (!r.has_value() ||
@@ -1108,7 +1108,7 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
         for (uint32_t i = 0; i < kAttempts; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrB, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           // Tolerant: propagate system errors, ignore deterministic child
@@ -1177,7 +1177,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
       make_contract({[](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         RuntimeMemoryLength out_ret = 0, out_auth = 0;
         auto r = ctx.syscall<SyscallNo::kInvoke>(
-            kAddrB, 0, ctx.runtime().get_available_gas(), Calldata{},
+            kAddrB, 0, UINT64_MAX, Calldata{},
             std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
             out_ret, out_auth);
         if (!r.has_value()) {
@@ -1193,7 +1193,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         for (uint32_t i = 0; i < kChildCap; i++) {
           RuntimeMemoryLength out_ret = 0, out_auth = 0;
           auto r = ctx.syscall<SyscallNo::kInvoke>(
-              kAddrC, 0, ctx.runtime().get_available_gas(), Calldata{},
+              kAddrC, 0, UINT64_MAX, Calldata{},
               std::to_underlying(InvokeFlag::TryInvoke), std::span<uint32_t>{},
               out_ret, out_auth);
           if (!r.has_value()) {
@@ -1388,6 +1388,59 @@ TEST_P(ProposeValidateRoundtripTest,
   EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
   EXPECT_EQ(handler.try_commit_transaction(),
             ExecResult::ExecResultTxValidationFailure);
+}
+
+TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
+{
+  auto tx = make_invoke_a_tx(0);
+
+  auto run_case = [this, &tx](InvokeErrorCode root_error,
+                              ExecResult expected_result) {
+    auto make_error_context = [root_error] {
+      auto contract_a = make_contract(
+          {[root_error](NativeSyscallContext & /*unused*/)
+               -> InvokeStatus<void> { return InvokeError{root_error}; }});
+      return make_ab_context(std::move(contract_a), make_contract({}));
+    };
+
+    {
+      auto ctx = make_error_context();
+      NondeterministicProposalData empty_proposal;
+      empty_proposal.nondeterministic_bit_count = 0;
+      empty_proposal.nondeterministic_bits.clear();
+      empty_proposal.observed_queue_entry_sequence.clear();
+
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+      auto handler =
+          make_new_system_call_handler_validation(tx, *ctx,
+                                                  std::move(empty_proposal));
+      auto res = handler.root_invoke();
+      ASSERT_FALSE(res.is_root_success());
+      ASSERT_EQ(res.result_.error().code(), root_error);
+      EXPECT_EQ(handler.try_commit_transaction(), expected_result);
+    }
+
+    {
+      auto ctx = make_error_context();
+      NondeterministicProposalData unused_bit;
+      unused_bit.nondeterministic_bit_count = 1;
+      unused_bit.nondeterministic_bits = {0};
+
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+      auto handler =
+          make_new_system_call_handler_validation(tx, *ctx,
+                                                  std::move(unused_bit));
+      auto res = handler.root_invoke();
+      ASSERT_FALSE(res.is_root_success());
+      ASSERT_EQ(res.result_.error().code(), root_error);
+      EXPECT_EQ(handler.try_commit_transaction(), expected_result);
+    }
+  };
+
+  run_case(InvokeErrorCode::Abandon, ExecResult::ExecResultSystemError);
+  run_case(InvokeErrorCode::Unrecoverable, ExecResult::ExecResultUnrecoverable);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,

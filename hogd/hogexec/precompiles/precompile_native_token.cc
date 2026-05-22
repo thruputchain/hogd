@@ -149,7 +149,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
 {
   trace("native token transfer: receiver {} amount {}", x23::show(receiver),
         x23::show(amount));
-  if (!ctx.runtime().consume_gas(1)) {
+  if (!ctx.consume_gas(1)) {
     return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
@@ -209,7 +209,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
 {
   trace("native token transfer_from: owner {} receiver {} amount {}",
         x23::show(owner), x23::show(receiver), x23::show(amount));
-  if (!ctx.runtime().consume_gas(1)) {
+  if (!ctx.consume_gas(1)) {
     return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
@@ -277,7 +277,7 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
 {
   trace("native token adjust_allowance: spender {} amount {}",
         x23::show(spender), x23::show(amount));
-  if (!ctx.runtime().consume_gas(1)) {
+  if (!ctx.consume_gas(1)) {
     return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
@@ -318,7 +318,7 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
 {
   trace("native token get_allowance: owner {} spender {}", x23::show(owner),
         x23::show(spender));
-  if (!ctx.runtime().consume_gas(1)) {
+  if (!ctx.consume_gas(1)) {
     return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
@@ -380,7 +380,7 @@ make_native_token_contract()
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
-        if (!ctx.runtime().consume_gas(1)) {
+        if (!ctx.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
         auto balance = ctx.handler().get_native_token_balance(contract_address);
@@ -401,7 +401,7 @@ make_native_token_contract()
       [](NativeSyscallContext &ctx)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance");
-        if (!ctx.runtime().consume_gas(1)) {
+        if (!ctx.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
@@ -433,7 +433,7 @@ make_native_token_contract()
 
   // total_supply
   builder.add<itc_erc20::ERC20, "total_supply">(
-      [](NativeRuntime &runtime)
+      [](NativeSyscallContext &runtime)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token total_supply");
         // TODO(geoff): gas costs

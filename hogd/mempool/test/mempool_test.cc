@@ -1,10 +1,12 @@
 #include <atomic>
+#include <future>
 #include <gtest/gtest.h>
 #include <latch>
 #include <memory>
 #include <set>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
@@ -12,8 +14,11 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "genesis.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -31,7 +36,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
-#include "x23/x23/x23.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -149,6 +154,57 @@ TEST(Mempool, SubmitUnvetted)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
+TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+
+  size_t mempool_tx_size_limit = 1'000;
+  SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client, mempool_tx_size_limit + 1);
+
+  MempoolTestInfra server(/*skip_genesis_block=*/false, mempool_tx_size_limit);
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 0;
+  auth_data.required_weight = 1;
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  KeyChangeBatch key_changes = {
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+
+  WorkerPool &worker_pool = WorkerPool::get_default_pool();
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), available_parallelism());
+  std::vector<std::future<void>> futures;
+  futures.reserve(chunks.size());
+
+  for (const ChunkRange &chunk : chunks) {
+    futures.push_back(worker_pool.submit([chunk, &txs, &sk] {
+      for (size_t i = chunk.start; i < chunk.end; i++) {
+        SignedTransaction &tx = txs[i];
+        tx.tx.auth_claim = make_sign_claim(0);
+        tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
+
+  ParallelSignedTransactionBatch batch =
+      t_to_parallel_batch(SignedTransactionBatch{txs})();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(std::move(batch))();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
+            mempool_tx_size_limit);
+}
+
 TEST(Mempool, SubmitVetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -159,6 +215,7 @@ TEST(Mempool, SubmitVetted)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
@@ -468,7 +525,9 @@ TEST(Mempool, ValidateMalformedNominationDecodeReturnsInvalid)
   nomination.transactions_hash.segment_tokens[0]++;
   nomination.transactions_nondeterministic_data.segment_tokens[0]++;
 
-  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  MempoolCoordinatorRpc coord(
+      /*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);
@@ -489,7 +548,9 @@ TEST(Mempool, ValidateMismatchedNominationCountsReturnsInvalid)
           t_to_parallel_batch(tx_nondeterministic_data)(),
   };
 
-  MempoolCoordinatorRpc coord(/*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId);
+  MempoolCoordinatorRpc coord(
+      /*db_rpc=*/nullptr, MempoolTestInfra::kNetworkId,
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   auto res_validate = coord.schedulercoord_validate(DbTip{}, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationMalformed);

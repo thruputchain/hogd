@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <string_view>
@@ -38,7 +39,7 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler) override;
 
-  bool verify_contract(Contract const &contract) const override
+  InvokeErrorCode verify_contract(Contract const &contract) const override
   {
     return base_context_->verify_contract(contract);
   };
@@ -73,67 +74,73 @@ private:
 // does NOT keep track of a SystemCallHandler* pointer.
 // The mock testing system uses a separate method for tracking
 // SystemCallHandler* context.
-class MockRuntime : public Runtime {
+class MockGasRuntime : public Runtime {
 public:
-  MockRuntime(MockContract contract)
-    : Runtime(std::make_unique<HostCallContext>()),
-      backing_contract_(std::move(contract))
-  {}
+  GasAmount gas_remaining() const { return gas_remaining_; }
 
-  ~MockRuntime() override = default;
-
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override
-  {
-    return gas_remaining_;
-  }
-
-  void set_available_gas(uint64_t gas) noexcept override
-  {
-    gas_remaining_ = gas;
-  }
-
-private:
-  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
-
-  MockContract backing_contract_;
-  uint64_t gas_remaining_ = 0;
-};
-
-class EmptyRuntime : public Runtime {
-public:
-  EmptyRuntime(Invocation const &invocation)
-    : Runtime(std::make_unique<HostCallContext>())
-  {
-    gas_remaining_ = invocation.gas_limit;
-    initial_gas_ = invocation.gas_limit;
-  }
-
-  ~EmptyRuntime() override = default;
-
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override
-  {
-    return gas_remaining_;
-  }
-
-  void set_available_gas(uint64_t gas) noexcept override
-  {
-    gas_remaining_ = gas;
-  }
-
-  uint64_t get_consumed_gas() const noexcept
+  GasAmount gas_consumed() const
   {
     assert(gas_remaining_ <= initial_gas_);
     return initial_gas_ - gas_remaining_;
   }
 
+  bool consume_gas(GasAmount gas)
+  {
+    if (gas < gas_remaining_) {
+      gas_remaining_ -= gas;
+      return true;
+    }
+    gas_remaining_ = 0;
+    return false;
+  }
+
+protected:
+  explicit MockGasRuntime(
+      GasAmount initial_gas = std::numeric_limits<GasAmount>::max())
+    : Runtime(std::make_unique<HostCallContext>()), initial_gas_(initial_gas),
+      gas_remaining_(initial_gas)
+  {}
+
+  void reset_gas(GasAmount initial_gas)
+  {
+    initial_gas_ = initial_gas;
+    gas_remaining_ = initial_gas;
+  }
+
 private:
-  InvokeStatus<void> invoke_internal(std::string_view /*unused*/) override
+  GasAmount initial_gas_;
+  GasAmount gas_remaining_;
+};
+
+class MockRuntime : public MockGasRuntime {
+public:
+  MockRuntime(MockContract contract)
+    : MockGasRuntime(), backing_contract_(std::move(contract))
+  {}
+
+  ~MockRuntime() override = default;
+
+private:
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view method_name, uint64_t gas_limit) override;
+
+  MockContract backing_contract_;
+};
+
+class EmptyRuntime : public MockGasRuntime {
+public:
+  EmptyRuntime(Invocation const &invocation)
+    : MockGasRuntime(invocation.gas_limit)
+  {}
+
+  ~EmptyRuntime() override = default;
+
+private:
+  std::pair<InvokeStatus<void>, GasAmount>
+  invoke_internal(std::string_view /*unused*/, uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");
   }
-
-  uint64_t gas_remaining_ = 0;
-  uint64_t initial_gas_ = 0;
 };
 
 } // namespace hogd

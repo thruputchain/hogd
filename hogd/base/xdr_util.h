@@ -17,6 +17,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "parallel.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -361,37 +362,36 @@ show_byte_array(const std::array<uint8_t, N> &array)
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
   {
-    auto addr_view =
-        std::string_view(reinterpret_cast<const char *>(addrkey.address.data()),
-                         addrkey.address.size());
     auto key_disc = addrkey.key.key_type();
-    std::string_view key_view = [&] {
-      switch (key_disc) {
-      case hogd::StorageKeyType::ContractData:
-        return std::string_view(reinterpret_cast<const char *>(
-                                    addrkey.key.contract_data_key().data()),
-                                addrkey.key.contract_data_key().size());
-      case hogd::StorageKeyType::FreeNativeTokenBalance:
-      case hogd::StorageKeyType::AuthData:
-      case hogd::StorageKeyType::Metadata:
-      case hogd::StorageKeyType::ReplayCache:
-        return std::string_view();
-      }
-      hogd::panic("unhandled StorageKeyType: {}", key_disc);
-    }();
 
-    // This is the hash combine used in boost
-    // https://www.boost.org/doc/libs/1_55_0/doc/html/hash/reference.html#boost.hash_combine
-    auto hash_combine = []<typename T>(std::size_t &seed, T view) {
-      std::hash<T> hasher;
-      seed ^= hasher(view) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    };
+    static_assert(sizeof(addrkey.address) == 32,
+                  "ContractAddress size changed; update buf allocation");
+    std::array<uint8_t, 32 + sizeof(key_disc) + 32> buf{};
+    size_t pos = 0;
 
-    std::size_t seed = 0;
-    hash_combine(seed, addr_view);
-    hash_combine(seed, key_disc);
-    hash_combine(seed, key_view);
+    std::memcpy(buf.data() + pos, addrkey.address.data(),
+                addrkey.address.size());
+    pos += addrkey.address.size();
 
-    return seed;
+    std::memcpy(buf.data() + pos, &key_disc, sizeof(key_disc));
+    pos += sizeof(key_disc);
+
+    if (key_disc == hogd::StorageKeyType::ContractData) {
+      static_assert(
+          sizeof(addrkey.key.contract_data_key()) == 32,
+          "StorageKeyContractData size changed; update buf allocation");
+      std::memcpy(buf.data() + pos, addrkey.key.contract_data_key().data(),
+                  addrkey.key.contract_data_key().size());
+      pos += addrkey.key.contract_data_key().size();
+    }
+    else {
+      CHECK(key_disc == hogd::StorageKeyType::FreeNativeTokenBalance ||
+            key_disc == hogd::StorageKeyType::AuthData ||
+            key_disc == hogd::StorageKeyType::Metadata ||
+            key_disc == hogd::StorageKeyType::ReplayCache);
+    }
+
+    return hogd::SipHash24::get_default()(
+        std::as_bytes(std::span(buf.data(), pos)));
   }
 };

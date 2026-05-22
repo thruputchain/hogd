@@ -169,6 +169,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   double stage_filter_invalid = 0.0;
   double stage_add_txs = 0.0;
 
+  if (scheduler_->size() >= mempool_tx_size_limit_) {
+    info(
+        "submit_unvetted rejected txs as the mempool has too many pending txs");
+    co_return;
+  }
+
   auto txs = std::make_shared<SignedTransactionBatch>();
   if (!(co_await parallel_batch_to_t(batch, *txs))) {
     info("submit_unvetted rejected malformed transaction batch");
@@ -180,6 +186,28 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
+
+  {
+    // [scheduler_->size()] may have changed since we last checked it above, so
+    // we read it again here. Importantly, we do this while holding
+    // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond the
+    // mempool tx capacity limit.
+    size_t scheduler_size = scheduler_->size();
+    if (scheduler_size >= mempool_tx_size_limit_) {
+      info("submit_unvetted rejected txs as the mempool has too many pending "
+           "txs");
+      co_return;
+    }
+    size_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
+    if (num_slots_left < txs->size()) {
+      // The submitted txs will bring the mempool beyond its pending tx capacity
+      // limit, so we discard the extra txs.
+      info("submit_unvetted received {} txs, but only {} will fit in the "
+           "mempool. discarding {} txs.",
+           num_submitted_txs, num_slots_left, txs->size() - num_slots_left);
+      txs->resize(num_slots_left);
+    }
+  }
 
   const BlockHeight verify_height = scheduler_->current_block();
   info("submit_unvetted will check if {} txs are valid for height {}",
@@ -244,16 +272,35 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
+  // We deliberately do not discard *vetted* txs even if the mempool is at
+  // capacity because we want to avoid this deadlock:
+  // 1. The mempool receives a block to validate.
+  // 2. The mempool is missing txs from that block, so it requests them from the
+  //    coordinator.
+  // 3. The coordinator sends the requested txs to the mempool via this current
+  //    RPC call ([schedulercoord_submit_vetted()]).
+  // 4. If the mempool is at capacity and we were to check for that here, the
+  //    mempool would drop the txs.
+  // 5. Now the block can never be validated by this mempool because the
+  //    requested txs are never enqueued in the mempool. Note that if the
+  //    validated block becomes committed on other nodes, this mempool will
+  //    never be able to advance to future blocks in the chain. And furthermore,
+  //    this mempool will never be asked to nominate a block, so it will be
+  //    unable to process and erase the currently enqueued txs, so it will never
+  //    free up capacity.
   SignedTransactionBatch txs;
   if (!(co_await parallel_batch_to_t(batch, txs))) {
     info("submit_vetted rejected malformed transaction batch");
     co_return;
   }
-  record_submitted_vetted(txs.size());
+  size_t num_submitted_txs = txs.size();
+  record_submitted_vetted(num_submitted_txs);
   info("submit_vetted, {} txs", txs.size());
+
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
   info("submit_vetted, got lock. will now add txs");
+
   co_await scheduler_->add_txs(txs);
   info("submit_vetted, finished adding txs. will now return");
   co_return;

@@ -7,8 +7,7 @@ use common::SystemErrorCode;
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
     new_wasmtime_context, new_wasmtime_global_context, new_wasmtime_runtime,
-    wasmtime_get_available_gas, wasmtime_invoke, wasmtime_set_available_gas,
-    wasmtime_verify_contract, ContractGetResult,
+    wasmtime_invoke, wasmtime_verify_contract, ContractGetResult,
 };
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
@@ -18,10 +17,12 @@ use wasmtime_lib::{
 extern "C" fn c_call_0args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -29,11 +30,13 @@ extern "C" fn c_call_0args(
 extern "C" fn c_call_1args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -41,12 +44,14 @@ extern "C" fn c_call_1args(
 extern "C" fn c_call_2args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
 ) -> common::TrampolineResult {
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -54,6 +59,7 @@ extern "C" fn c_call_2args(
 extern "C" fn c_call_3args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
     _arg3: u64,
@@ -61,6 +67,7 @@ extern "C" fn c_call_3args(
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -68,6 +75,7 @@ extern "C" fn c_call_3args(
 extern "C" fn c_call_4args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
     _arg3: u64,
@@ -76,6 +84,7 @@ extern "C" fn c_call_4args(
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -83,6 +92,7 @@ extern "C" fn c_call_4args(
 extern "C" fn c_call_5args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
     _arg3: u64,
@@ -92,6 +102,7 @@ extern "C" fn c_call_5args(
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -99,6 +110,7 @@ extern "C" fn c_call_5args(
 extern "C" fn c_call_6args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
     _arg3: u64,
@@ -109,6 +121,7 @@ extern "C" fn c_call_6args(
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -116,6 +129,7 @@ extern "C" fn c_call_6args(
 extern "C" fn c_call_7args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
     _arg3: u64,
@@ -127,6 +141,7 @@ extern "C" fn c_call_7args(
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -134,6 +149,7 @@ extern "C" fn c_call_7args(
 extern "C" fn c_call_8args(
     _fn_ptr: *mut c_void,
     _userctx: *mut c_void,
+    _wasm_context: common::WasmContext,
     _arg1: u64,
     _arg2: u64,
     _arg3: u64,
@@ -146,6 +162,7 @@ extern "C" fn c_call_8args(
     common::TrampolineResult {
         result_code: 0,
         panic: common::HostFnErrorCode::NoneOrRecoverable.0,
+        gas_consumed: 0,
     }
 }
 
@@ -211,7 +228,7 @@ fn test_verify_valid_wasm() {
             wasm_bytes.len(),
         );
 
-        assert!(result, "Valid WASM should verify successfully");
+        assert_eq!(result, 0, "Valid WASM should verify successfully");
 
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -302,8 +319,12 @@ fn test_invoke_function() {
 
         // Try to invoke a function
         let fn_name = b"add";
-        let result =
-            wasmtime_invoke(runtime, fn_name.as_ptr(), fn_name.len() as u32);
+        let result = wasmtime_invoke(
+            runtime,
+            fn_name.as_ptr(),
+            fn_name.len() as u32,
+            1_000_000,
+        );
 
         // Check the result (0 means success)
         // The function might not exist, which is fine for this test
@@ -337,13 +358,22 @@ fn test_gas_metering() {
 
         assert!(!runtime.is_null());
 
-        // Set initial gas
-        let initial_gas = 1_000_000u64;
-        wasmtime_set_available_gas(runtime, initial_gas);
+        // Invoke with a gas limit and verify gas was consumed
+        let fn_name = b"fib10";
+        let gas_limit = 1_000_000u64;
+        let result = wasmtime_invoke(
+            runtime,
+            fn_name.as_ptr(),
+            fn_name.len() as u32,
+            gas_limit,
+        );
 
-        // Verify we can read it back
-        let current_gas = wasmtime_get_available_gas(runtime);
-        assert_eq!(current_gas, initial_gas, "Gas should be set correctly");
+        assert_eq!(result.error, 0, "Fibonacci invoke should succeed");
+        assert!(result.gas_consumed > 0, "Some gas should be consumed");
+        assert!(
+            result.gas_consumed <= gas_limit,
+            "Gas consumed should not exceed limit"
+        );
 
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
@@ -377,7 +407,7 @@ fn test_verify_invalid_wasm() {
             invalid_wasm.len(),
         );
 
-        assert!(!result, "Invalid WASM should fail verification");
+        assert_ne!(result, 0, "Invalid WASM should fail verification");
 
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -422,8 +452,6 @@ fn test_multiple_runtimes() {
 
 #[test]
 fn test_fibonacci_computation() {
-    // Test that we can invoke the fibonacci function and verify results
-    // This tests the WAT->WASM conversion from test_fibonacci.wat
     unsafe {
         let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
@@ -442,21 +470,18 @@ fn test_fibonacci_computation() {
 
         assert!(!runtime.is_null());
 
-        wasmtime_set_available_gas(runtime, 1_000_000);
-
         // Try to invoke the fib function
         let fn_name = b"fib10";
-        let result =
-            wasmtime_invoke(runtime, fn_name.as_ptr(), fn_name.len() as u32);
+        let result = wasmtime_invoke(
+            runtime,
+            fn_name.as_ptr(),
+            fn_name.len() as u32,
+            1_000_000,
+        );
 
-        // Just verify we can call it - the actual behavior depends on
-        // how arguments are passed, which would require more setup
         assert_eq!(result.error, 0, "Fibonacci invoke should succeed");
 
-        assert!(
-            wasmtime_get_available_gas(runtime) < 1_000_000,
-            "Gas should be consumed"
-        );
+        assert!(result.gas_consumed > 0, "Gas should be consumed");
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -485,12 +510,14 @@ fn test_fibonacci_computation_overflow() {
 
         assert!(!runtime.is_null());
 
-        wasmtime_set_available_gas(runtime, 1_000_000_000_000);
-
         // Try to invoke the fib function
         let fn_name = b"fib30";
-        let result =
-            wasmtime_invoke(runtime, fn_name.as_ptr(), fn_name.len() as u32);
+        let result = wasmtime_invoke(
+            runtime,
+            fn_name.as_ptr(),
+            fn_name.len() as u32,
+            1_000_000_000_000,
+        );
 
         // Verify we get the expected error code
         assert_ne!(
@@ -611,16 +638,6 @@ fn test_module_cache() {
     }
 }
 
-// Regression test for audit issue #1: WasmtimeRuntime::new used to panic
-// (UB across extern "C" boundary) when instantiation fails with a
-// non-OutOfFuel error.
-//
-// This module has a data segment at offset 70000, beyond the 1-page
-// (65536 byte) memory. During instantiation, wasmtime tries to copy the
-// data segment and fails with a trap that is NOT OutOfFuel.
-//
-// Before the fix: this call panics inside extern "C" -> abort/UB.
-// After the fix: new_wasmtime_runtime returns a null runtime pointer.
 #[test]
 fn test_audit_1_oob_data_segment_instantiation() {
     unsafe {
@@ -637,8 +654,6 @@ fn test_audit_1_oob_data_segment_instantiation() {
         let result =
             new_wasmtime_runtime(contract_hash.as_ptr(), context_ptr, context);
 
-        // After fix: err_code == 0 but runtime pointer is null
-        // (same convention as other module-level failures like check_memory_limit)
         let runtime_ptr = result.get().unwrap();
         assert!(
             runtime_ptr.is_null(),
@@ -652,11 +667,6 @@ fn test_audit_1_oob_data_segment_instantiation() {
     }
 }
 
-// Regression test for audit issue #1 variant: active element segment init can
-// trap at instantiation time when the table offset is out-of-bounds.
-//
-// Before the fix: this could panic inside extern "C".
-// After the fix: new_wasmtime_runtime returns a null runtime pointer.
 #[test]
 fn test_audit_1_oob_element_segment_instantiation() {
     unsafe {
@@ -686,8 +696,6 @@ fn test_audit_1_oob_element_segment_instantiation() {
     }
 }
 
-// Regression test: if pooling allocator slots are exhausted, runtime creation
-// must return a system error (err_code != 0), not panic.
 #[test]
 fn test_pool_exhaustion_returns_system_error() {
     unsafe {
@@ -734,9 +742,6 @@ fn test_pool_exhaustion_returns_system_error() {
     }
 }
 
-// Regression test for issue #1472: a valid method-name export with the wrong
-// ABI currently passes verification and runtime creation, so invoke-time
-// defense in depth must classify the signature mismatch as deterministic.
 #[test]
 fn test_param_entrypoint_signature_mismatch_is_deterministic() {
     unsafe {
@@ -755,8 +760,8 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
             wasm_bytes.as_ptr(),
             wasm_bytes.len(),
         );
-        assert!(
-            verified,
+        assert_eq!(
+            verified, 0,
             "verify_contract currently accepts a method export with the wrong ABI"
         );
 
@@ -769,11 +774,13 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
             "runtime creation should not reject the bad entrypoint ABI yet"
         );
 
-        wasmtime_set_available_gas(runtime, 1_000_000);
-
         let fn_name = b"0000000000000001";
-        let result =
-            wasmtime_invoke(runtime, fn_name.as_ptr(), fn_name.len() as u32);
+        let result = wasmtime_invoke(
+            runtime,
+            fn_name.as_ptr(),
+            fn_name.len() as u32,
+            1_000_000,
+        );
 
         assert_eq!(
             result.error,
@@ -788,19 +795,6 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
         let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
-
-// ===========================================================================
-// Regression test for issue #1869:
-// Wasmtime StackOverflow trap is nondeterministic, so it correctly maps to
-// Unrecoverable. The defense is at the verification layer: wasm-meter must
-// reject modules whose operand stack or per-function charge can produce
-// Cranelift frames large enough to trigger Wasmtime's native stack check
-// before the instrumented prologue runs.
-//
-// This module accumulates 1280 i64 values on the operand stack (via 128
-// calls to a function returning 10 i64s), exceeding the default
-// max_operand_stack_values (1024) and max_function_charge (4096 bytes).
-// ===========================================================================
 
 fn big_stack_frame_contract_bytes() -> &'static [u8] {
     let n = 128;
@@ -842,8 +836,8 @@ fn test_issue_1869_big_stack_frame_rejected_by_verify() {
             wasm_bytes.len(),
         );
 
-        assert!(
-            !result,
+        assert_ne!(
+            result, 0,
             "contracts with operand stack exceeding wasm-meter limits \
              must be rejected by wasmtime_verify_contract"
         );
@@ -852,23 +846,6 @@ fn test_issue_1869_big_stack_frame_rejected_by_verify() {
         free_wasmtime_global_context(global_context);
     }
 }
-
-// ===========================================================================
-// Regression tests for audit issue #1469 (H002):
-// Winch SIMD contract validity depends on host AVX support.
-//
-// Root cause: the production Wasmtime config in global_context.rs selects
-// Strategy::Winch but leaves wasm_simd() at the default (enabled). Winch's
-// x86_64 SIMD lowering is gated by runtime-detected AVX features, and its
-// aarch64 backend has SIMD unimplemented entirely. An attacker-crafted
-// module containing any v128 operator therefore:
-//   - verifies and executes on x86_64 + AVX validators, but
-//   - fails Module::new on x86_64 no-AVX or aarch64 validators, which
-//     maps to SystemErrorCode::Unrecoverable in get_instance_pre.
-// Fix: disable the SIMD feature in the production Config. Wasmtime then
-// rejects v128 operators deterministically at the wasmparser validation
-// layer, regardless of host CPU.
-// ===========================================================================
 
 unsafe extern "C" fn test_get_simd_contract_get_fn(
     _userctx: *mut c_void,
@@ -883,19 +860,6 @@ unsafe extern "C" fn test_get_simd_contract_get_fn(
     ContractGetResult::new(0, wasm_bytes)
 }
 
-// Directly asserts that the production Wasmtime Config disables the SIMD
-// feature at the wasmparser validation layer. This is the property that
-// makes SIMD rejection deterministic across hosts, independent of Winch's
-// AVX-gated x86_64 SIMD lowering and its unimplemented aarch64 backend.
-//
-// Before the fix, wasm_simd defaults to true: Module::new either compiles
-// the module (x86_64 + AVX host) or fails at codegen with "AVX support"
-// or "unimplemented masm instruction" errors (no-AVX / aarch64 hosts) —
-// neither path produces wasmparser's "SIMD support is not enabled"
-// validation error, so the assertion fails uniformly pre-fix.
-//
-// After the fix, Module::new fails at validation with exactly that
-// message on every host. That is the deterministic rejection we want.
 #[test]
 fn test_h002_production_config_rejects_simd_at_validation() {
     let config =
@@ -909,11 +873,6 @@ fn test_h002_production_config_rejects_simd_at_validation() {
          at validation on every host",
     );
 
-    // anyhow's plain Display (`{err}` / `err.to_string()`) prints only the
-    // top-level message ("failed to compile: ..."), dropping the nested
-    // "SIMD support is not enabled" cause we need to assert on. Alternate
-    // Display (`{err:#}`) prints the full chain on one line without the
-    // Debug backtrace noise, which is what we want here.
     let msg = format!("{err:#}");
     assert!(
         msg.contains("SIMD support is not enabled"),
@@ -922,13 +881,6 @@ fn test_h002_production_config_rejects_simd_at_validation() {
     );
 }
 
-// Regression test using the real production FFI path. With wasm_simd
-// disabled in global_context.rs the wasmparser validator rejects any
-// module with v128 operators before Winch is consulted, so verification
-// returns false on every host. Prior to the fix this test passed
-// coincidentally on aarch64 hosts (Winch aarch64 can't compile SIMD so
-// Module::new failed at codegen) and failed on x86_64 + AVX hosts (Winch
-// successfully compiled SIMD, so verify returned true).
 #[test]
 fn test_h002_verify_contract_rejects_simd_module() {
     unsafe {
@@ -943,8 +895,8 @@ fn test_h002_verify_contract_rejects_simd_module() {
             wasm_bytes.len(),
         );
 
-        assert!(
-            !result,
+        assert_ne!(
+            result, 0,
             "SIMD-bearing contracts must be rejected by \
              wasmtime_verify_contract on every host"
         );
@@ -954,13 +906,6 @@ fn test_h002_verify_contract_rejects_simd_module() {
     }
 }
 
-// Documents the downstream kSystemUnrecoverable that the audit issue is
-// actually about. If any path (verify bypass, cache prime, legacy stored
-// contract) ever delivers SIMD bytes to get_instance_pre, Module::new
-// fails and the runtime path maps the failure to kSystemUnrecoverable.
-// With wasm_simd(false) this now happens deterministically at validation,
-// uniformly across hosts, rather than depending on runtime-detected CPU
-// features.
 #[test]
 fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
     unsafe {
@@ -992,31 +937,6 @@ fn test_h002_runtime_creation_on_simd_returns_system_unrecoverable() {
     }
 }
 
-// ===========================================================================
-// Regression tests for audit issue #1522 (H001):
-// Winch accepts float-bearing contracts without NaN canonicalization.
-//
-// Root cause: the production config selected Strategy::Winch and relied on
-// cranelift_nan_canonicalization(true) for deterministic NaN handling, but
-// that knob is a no-op under Winch. Winch's x86_64 lowering of f32.div,
-// f32.sqrt, etc. emits raw host-produced NaN bit patterns (0xffc00000),
-// not the canonical 0x7fc00000 — so scalar float results are host- and
-// backend-dependent, risking consensus divergence.
-//
-// Fix: clear the FLOATS bit in wasmparser's WasmFeatures via the
-// wasm_features(...) Config escape hatch. wasmparser then rejects every
-// f32/f64 operator and type at validation, uniformly across hosts and
-// backends, before Winch is consulted.
-// ===========================================================================
-
-// Minimal float-bearing module: an f32 constant returned from an exported
-// function. Both the return type (f32) and the operator (f32.const) are
-// gated by wasmparser's FLOATS feature, so either validation branch will
-// reject this before Winch codegen runs. Bytes are leaked to 'static so
-// the FFI can treat them the same way as build.rs-produced fixtures. We
-// can't route this through build.rs because groundhog_wasm_meter's
-// default config rejects floats during instrument, so inline wat::parse
-// bypasses the instrument step the normal fixtures go through.
 fn float_contract_bytes() -> &'static [u8] {
     let wat = r#"
         (module
@@ -1040,21 +960,6 @@ unsafe extern "C" fn test_get_float_contract_get_fn(
     ContractGetResult::new(0, float_contract_bytes())
 }
 
-// Directly asserts that the production Wasmtime Config clears the FLOATS
-// bit at the wasmparser validation layer. This is the property that makes
-// float rejection deterministic across hosts and independent of Winch's
-// (non-canonical) NaN handling.
-//
-// Before the fix, wasm_features left FLOATS set: Module::new compiled
-// float-bearing modules successfully, and wasm-meter was the only layer
-// rejecting floats — so a wasm-meter regression would silently re-expose
-// Winch's non-canonical NaN output to consensus.
-//
-// After the fix, Module::new fails at validation with an error chain
-// containing "floating-point" (wasmparser emits "floating-point support
-// is disabled" for f32/f64 types and "floating-point instruction
-// disallowed" for ops). That's the deterministic wasmparser-layer
-// rejection we want.
 #[test]
 fn test_h001_production_config_rejects_floats_at_validation() {
     let config =
@@ -1068,9 +973,6 @@ fn test_h001_production_config_rejects_floats_at_validation() {
          modules are rejected at validation on every host",
     );
 
-    // Alternate Display (`{err:#}`) prints the full anyhow chain on one
-    // line; the top-level "failed to compile" message drops the nested
-    // "floating-point ..." cause we need to assert on.
     let msg = format!("{err:#}");
     assert!(
         msg.contains("floating-point"),
@@ -1079,12 +981,6 @@ fn test_h001_production_config_rejects_floats_at_validation() {
     );
 }
 
-// Regression test using the real production FFI path. With FLOATS cleared
-// in the WasmFeatures, wasmparser rejects any module with f32/f64
-// operators or types before Winch is consulted, so verification returns
-// false on every host. Prior to the fix, the wasmtime verify path relied
-// solely on wasm-meter's reject_floats check — this test pins the
-// wasmparser-layer gate as a second line of defense.
 #[test]
 fn test_h001_verify_contract_rejects_float_module() {
     unsafe {
@@ -1099,8 +995,8 @@ fn test_h001_verify_contract_rejects_float_module() {
             wasm_bytes.len(),
         );
 
-        assert!(
-            !result,
+        assert_ne!(
+            result, 0,
             "float-bearing contracts must be rejected by \
              wasmtime_verify_contract on every host"
         );
@@ -1110,13 +1006,6 @@ fn test_h001_verify_contract_rejects_float_module() {
     }
 }
 
-// Documents the downstream kSystemUnrecoverable that the audit issue is
-// about. If any path (verify bypass, cache prime, legacy stored contract)
-// ever delivers float-bearing bytes to get_instance_pre, Module::new
-// fails and the runtime path maps the failure to kSystemUnrecoverable.
-// With FLOATS cleared this now happens deterministically at validation,
-// uniformly across hosts, rather than executing under Winch with
-// non-canonical NaN bits.
 #[test]
 fn test_h001_runtime_creation_on_float_returns_system_unrecoverable() {
     unsafe {

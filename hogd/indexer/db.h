@@ -14,6 +14,7 @@
 #include "event.hh"
 #include "hogd/indexer/status.h"
 #include "indexer.hh"
+#include "pagination.hh"
 #include "types.hh"
 
 // Forward declare RocksDB types to avoid including headers here
@@ -113,6 +114,13 @@ public:
   // kEventsMaxLimit is capped to that.
   static constexpr std::uint32_t kEventsDefaultLimit = 50;
   static constexpr std::uint32_t kEventsMaxLimit = 200;
+
+  [[nodiscard]] static constexpr bool
+  is_valid_iteration_order(IterationOrder order)
+  {
+    return order == IterationOrder::IterationOrderAscending ||
+           order == IterationOrder::IterationOrderDescending;
+  }
 
   [[nodiscard]] static constexpr std::uint32_t
   clamp_events_limit(std::uint32_t requested)

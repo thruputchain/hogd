@@ -8,13 +8,16 @@ use core::ffi::c_void;
 use core::slice;
 
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::wasmi_debug_log as debug_log;
 use crate::wasmi_error::TrampolineError;
 use crate::wasmi_runtime::check_memory_limit;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
-use common::{LinearMemorySlice, LinkEntry, SystemErrorCode};
+use common::{
+    InvokeErrorCode, LinearMemorySlice, LinkEntry, SystemErrorCode, WasmContext,
+};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes owned by one RuntimeContext.
@@ -182,15 +185,33 @@ macro_rules! link_function_nargs {
         ) -> Result<(), Error> {
             let ptr = fn_pointer;
             linker
-                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
-                    let res : Result<i32, common::HostFnErrorCode> = {
+                .func_wrap(import_name, fn_name, move |mut caller: Caller<'_, *mut c_void>, $($arg: u64),*| -> Result<i32, wasmi::Error> {
+
+                    let gas_remaining = match caller.get_fuel() {
+                        Ok(fuel) => fuel,
+                        Err(_e) => {
+                            debug_log!(eprintln!("Unrecoverable: failed to get fuel: {_e:?}"));
+                            return Err(Error::host(TrampolineError { error: common::HostFnErrorCode::Unrecoverable }));
+                        }
+                    };
+
+                    let wasm_context : WasmContext = WasmContext {
+                        memory: get_linear_memory_slice(&mut caller),
+                        gas_remaining,
+                    };
+
+                    let (res, gas_consumed) : (Result<i32, common::HostFnErrorCode>, u64) = {
                         common::$cfunc(
                             ptr,
                             *caller.data(),
-                            get_linear_memory_slice(&mut caller),
+                            wasm_context,
                             $($arg),*
                         )
                     }.into();
+
+                    assert!(gas_consumed <= gas_remaining);
+                    caller.set_fuel(gas_remaining - gas_consumed).unwrap();
+
                     res.map_err(|error| Error::host(TrampolineError { error }))
                 })
                 .map_err(Into::into)
@@ -369,14 +390,14 @@ impl WasmiContext {
         linker
     }
 
-    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> InvokeErrorCode {
         let engine = Self::new_engine();
         let module = match Module::new(&engine, contract_data) {
             Ok(m) => m,
             Err(e) => {
                 #[cfg(debug_assertions)]
                 eprintln!("Contract verification failed: {}", e);
-                return false;
+                return InvokeErrorCode::Deterministic;
             }
         };
         if !check_memory_limit(&module) {
@@ -384,12 +405,12 @@ impl WasmiContext {
             eprintln!(
                 "Contract verification failed: memory limit check failed"
             );
-            return false;
+            return InvokeErrorCode::Deterministic;
         }
         if !validate_imports(&module, self.global_context.entries()) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: import validation failed");
-            return false;
+            return InvokeErrorCode::Deterministic;
         }
         let config = groundhog_wasm_meter::Config {
             max_imported_functions: 1,
@@ -399,9 +420,14 @@ impl WasmiContext {
         if let Err(e) = groundhog_wasm_meter::verify(contract_data, &config) {
             #[cfg(debug_assertions)]
             eprintln!("Contract verification failed: wasm-meter: {e}");
-            return false;
+            return match e {
+                groundhog_wasm_meter::Error::InternalResourceExhausted(_) => {
+                    InvokeErrorCode::Unrecoverable
+                }
+                _ => InvokeErrorCode::Deterministic,
+            };
         }
-        true
+        InvokeErrorCode::None
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);
@@ -703,17 +729,17 @@ pub unsafe extern "C" fn wasmi_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
-) -> bool {
+) -> i32 {
     debug_assert!(!p.is_null());
     if contract_data_p.is_null() {
         #[cfg(debug_assertions)]
         eprintln!("Contract verification failed: null contract data pointer");
-        return false;
+        return InvokeErrorCode::Deterministic.0;
     }
     let context: *const WasmiContext = p.cast::<WasmiContext>();
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
-    unsafe { (*context).verify_contract(wasm) }
+    unsafe { (*context).verify_contract(wasm) }.0
 }
 
 // ===========================================================================
@@ -770,8 +796,8 @@ mod h001_float_rejection_tests {
     // End-to-end via the public verify_contract entry point. Either the
     // wasmi-level .floats(false) gate (Module::new) or the
     // groundhog_wasm_meter::verify reject_floats gate will reject —
-    // verify_contract returning false is the only behavior callers
-    // observe, and that's what consensus depends on.
+    // verify_contract returning a non-None error is the only behavior
+    // callers observe, and that's what consensus depends on.
     #[test]
     fn verify_contract_rejects_float_module() {
         // Stub contract_get_fn — verify_contract doesn't touch it, but
@@ -786,8 +812,9 @@ mod h001_float_rejection_tests {
         let global_context = std::sync::Arc::new(WasmiGlobalContext::default());
         let ctx = WasmiContext::new(global_context, stub_get_fn);
         let bytes = float_module_bytes();
-        assert!(
-            !ctx.verify_contract(&bytes),
+        assert_ne!(
+            ctx.verify_contract(&bytes),
+            InvokeErrorCode::None,
             "wasmi verify_contract must reject float-bearing modules"
         );
     }

@@ -3,15 +3,15 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <utility>
 
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/hogdb/rpc_context.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/item/database_proxy.h"
@@ -67,12 +67,11 @@ make_view_database_identifier(std::string const &db_executor_address)
 
 } // namespace
 
-ViewGatewayRpc::ViewGatewayRpc(RPCContext &ctx,
-                               std::string const &db_executor_address,
+ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::string const &event_host,
                                std::uint16_t event_exec_port,
                                std::size_t nthreads)
-  : ctx_(ctx), db_proxy_(make_view_database_identifier(db_executor_address)),
+  : db_proxy_(make_view_database_identifier(db_executor_address)),
     event_server_proxy_(make_bind_host_port(event_host, event_exec_port)),
     worker_pool_(static_cast<int>(nthreads))
 {}
@@ -98,32 +97,150 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   co_return co_await awaitable;
 }
 
+void
+ViewGatewayRpc::shut_down()
+{
+  shutdown_flag_ = true;
+  shutdown_flag_.notify_all();
+
+  std::scoped_lock g(view_state_mutex_);
+  for (auto it = view_states_.begin(); it != view_states_.end();) {
+    if (it->second.initiate_shutdown()) {
+      auto close_res = db_proxy_.close_viewing_snapshot(it->first);
+      if (!close_res.has_value()) {
+        warn("viewgateway: failed to close viewing snapshot {} on shutdown",
+             it->first);
+      }
+      it = view_states_.erase(it);
+    }
+    else {
+      ++it;
+    }
+  }
+  current_view_block_id_ = 0;
+}
+
+void
+ViewGatewayRpc::gc_view_state(BlockID block_id)
+{
+  auto close_res = db_proxy_.close_viewing_snapshot(block_id);
+  if (!close_res.has_value()) {
+    warn("viewgateway: failed to close viewing snapshot {}", block_id);
+  }
+  std::scoped_lock g(view_state_mutex_);
+  view_states_.erase(block_id);
+}
+
+PerThreadARC<ViewGatewayRpc::ViewState> *
+ViewGatewayRpc::get_current_view_state()
+{
+  std::scoped_lock g(view_state_mutex_);
+  if (current_view_block_id_ == 0) {
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      return nullptr;
+    }
+    auto res = db_proxy_.open_viewing_snapshot();
+    if (!res.has_value()) {
+      warn("viewgateway: failed to open viewing snapshot");
+      return nullptr;
+    }
+    auto &snapshot = res.value();
+    view_states_.try_emplace(snapshot.block_id, snapshot.block_id, snapshot.tip,
+                             db_proxy_);
+    current_view_block_id_ = snapshot.block_id;
+  }
+  auto *state = &view_states_.at(current_view_block_id_);
+  if (!state->try_acquire_reference()) {
+    return nullptr;
+  }
+  return state;
+}
+
+bool
+ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
+{
+  std::scoped_lock g(view_state_mutex_);
+  if (current_view_block_id_ != stale_block_id) {
+    return true;
+  }
+  view_states_.at(stale_block_id).initiate_shutdown();
+
+  auto res = db_proxy_.open_viewing_snapshot();
+  if (!res.has_value()) {
+    warn("viewgateway: failed to open replacement viewing snapshot");
+    current_view_block_id_ = 0;
+    return false;
+  }
+  auto &snapshot = res.value();
+  view_states_.try_emplace(snapshot.block_id, snapshot.block_id, snapshot.tip,
+                           db_proxy_);
+  current_view_block_id_ = snapshot.block_id;
+  return true;
+}
+
 ViewGatewayResult
 ViewGatewayRpc::run_view_with_retries(TransactionViewQuery const &query)
 {
-  return run_view_with_retries_for_gateway(
-      query, shutdown_flag_, [this] { return ctx_.get_tip(); },
-      [this](TransactionViewQuery const &attempt_query, DbTip const &tip) {
-        return run_view_attempt(attempt_query, tip);
-      },
-      kMaxViewAttempts);
+  for (std::uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      warn("viewgateway: shutdown requested before view attempt");
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+
+    auto *state = get_current_view_state();
+    if (!state) {
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+
+    BlockID state_block_id = state->get().block_id;
+    ViewGatewayResult result =
+        run_view_attempt(query, state->get().tip, state->get());
+
+    if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
+      if (state->release_reference()) {
+        gc_view_state(state_block_id);
+      }
+      return result;
+    }
+
+    if (!rotate_view_state(state_block_id)) {
+      if (state->release_reference()) {
+        gc_view_state(state_block_id);
+      }
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+
+    if (state->release_reference()) {
+      gc_view_state(state_block_id);
+    }
+
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      warn("viewgateway: shutdown requested after abandoned view attempt");
+      return make_view_gateway_result(
+          ViewGatewayOutcome::ViewGatewayInternalError);
+    }
+  }
+
+  return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayAbandoned);
 }
 
 ViewGatewayResult
 ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
-                                 DbTip const &tip)
+                                 DbTip const &tip, ViewState &view_state)
 {
   static thread_local auto context = make_hogexec_context();
-  StorageSnapshotCache snapshot_cache(tip.id, db_proxy_);
 
   // WAI: empty nondeterministic data causes ViewingModeData to default
   // TryInvoke outcomes to success. This is deliberate — see the comment on
   // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = View::run_view_transaction(
-      snapshot_cache,
-      PerTransactionDatabaseProxy(db_proxy_, tip.id,
+      view_state.snapshot_cache,
+      PerTransactionDatabaseProxy(db_proxy_, view_state.block_id,
                                   std::numeric_limits<TransactionID>::max()),
-      PerTransactionEventServerProxy(event_server_proxy_, tip.id,
+      PerTransactionEventServerProxy(event_server_proxy_, view_state.block_id,
                                      std::numeric_limits<TransactionID>::max()),
       query, *context, {});
   return view_gateway_result_from_raw_view_result(tip.height, std::move(raw));
@@ -180,43 +297,6 @@ normalize_public_view_query(TransactionViewQuery query)
   query.auth_claim = make_public_view_auth_claim();
   query.invoke_flags = std::to_underlying(InvokeFlag::None);
   return query;
-}
-
-ViewGatewayResult
-run_view_with_retries_for_gateway(
-    TransactionViewQuery const &query, std::atomic<bool> const &shutdown_flag,
-    std::function<DbTip()> const &read_tip,
-    std::function<ViewGatewayResult(TransactionViewQuery const &,
-                                    DbTip const &)> const &run_attempt,
-    std::uint32_t max_attempts)
-{
-  for (std::uint32_t attempt = 0; attempt < max_attempts; ++attempt) {
-    if (shutdown_flag.load(std::memory_order_relaxed)) {
-      warn("viewgateway: shutdown requested before view attempt");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-
-    DbTip tip = read_tip();
-    if (!RPCContext::has_committed_tip(tip)) {
-      warn("viewgateway: no committed DbTip is available");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-
-    ViewGatewayResult result = run_attempt(query, tip);
-    if (result.outcome() != ViewGatewayOutcome::ViewGatewayAbandoned) {
-      return result;
-    }
-
-    if (shutdown_flag.load(std::memory_order_relaxed)) {
-      warn("viewgateway: shutdown requested after abandoned view attempt");
-      return make_view_gateway_result(
-          ViewGatewayOutcome::ViewGatewayInternalError);
-    }
-  }
-
-  return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayAbandoned);
 }
 
 } // namespace hogd

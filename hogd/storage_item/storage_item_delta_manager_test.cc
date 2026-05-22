@@ -897,7 +897,7 @@ TEST_P(DeltaManagerTest, NNIntInterleavings)
               return false;
             }
 
-            if (net_storage_cost != cost_model.kBaseItemCost) {
+            if (net_storage_cost != int128_t{cost_model.kBaseItemCost}) {
               return false;
             }
 
@@ -998,7 +998,7 @@ TEST_P(DeltaManagerTest, NNIntConflictingInterleavings)
               return false;
             }
 
-            if (net_storage_cost != cost_model.kBaseItemCost) {
+            if (net_storage_cost != int128_t{cost_model.kBaseItemCost}) {
               return false;
             }
 
