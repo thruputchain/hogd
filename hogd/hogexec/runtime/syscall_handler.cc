@@ -205,10 +205,10 @@ SystemCallHandler::perform_initial_validation()
   for (auto const &[_, contract] : newly_created_contracts_) {
     auto res = runtime_context_.verify_contract(*contract);
     // TODO(geoff): gas costs for verifying contracts
-    if (!res) {
+    if (res != InvokeErrorCode::None) {
       error("Contract verification failed");
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::Deterministic};
+      cumulative_invoke_result_.result_ = InvokeError{res};
+      return;
     }
   }
 }

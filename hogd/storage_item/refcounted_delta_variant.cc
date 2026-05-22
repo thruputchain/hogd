@@ -525,7 +525,7 @@ AuthDataArgs::get_current_committed_cost( // NOLINT
         base_cost -= current_model->kAuthPerKeyCost;
       }
     }
-    assert(base_cost >= current_model->kBaseItemCost);
+    assert(base_cost >= int128_t{current_model->kBaseItemCost});
     return base_cost;
   }
 

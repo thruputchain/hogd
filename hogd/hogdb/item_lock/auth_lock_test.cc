@@ -436,7 +436,7 @@ TEST(AuthLockTest, StorageCostWithDeletedKey)
 
   // After commit, we should have 2 keys (0, 2)
   EXPECT_EQ(commit_cost, kTestCostModel.get_auth_data_cost(2) - snapshot_cost);
-  EXPECT_EQ(commit_cost, -kTestCostModel.kAuthPerKeyCost);
+  EXPECT_EQ(commit_cost, -int128_t{kTestCostModel.kAuthPerKeyCost});
 }
 
 TEST(AuthLockTest, DISABLED_PartialCommit)

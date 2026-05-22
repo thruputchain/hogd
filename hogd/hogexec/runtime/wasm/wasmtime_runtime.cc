@@ -155,7 +155,7 @@ WasmtimeContext::make_new_runtime(
                                            new_runtime_result.runtime_pointer);
 }
 
-bool
+InvokeErrorCode
 WasmtimeContext::verify_contract(Contract const &contract) const
 {
   assert(wasmtime_context_ptr_);
@@ -164,18 +164,18 @@ WasmtimeContext::verify_contract(Contract const &contract) const
   // kWasmi For now, wasmtime contracts use the same WASM bytecode format as
   // wasmi
   if (contract.contract_type() != ContractType::kWasmi) {
-    return false;
+    return InvokeErrorCode::Deterministic;
   }
 
   try {
     auto const &wasm = contract.wasmi_contract().wasm;
-    return wasmtime_verify_contract(wasmtime_context_ptr_,
-                                    reinterpret_cast<uint8_t const *>(
-                                        wasm.data()),
-                                    wasm.size());
+    return static_cast<InvokeErrorCode>(
+        wasmtime_verify_contract(wasmtime_context_ptr_,
+                                 reinterpret_cast<uint8_t const *>(wasm.data()),
+                                 wasm.size()));
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
-    return false;
+    return InvokeErrorCode::Unrecoverable;
   }
 }
 

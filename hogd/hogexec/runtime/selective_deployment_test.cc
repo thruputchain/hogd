@@ -49,9 +49,9 @@ namespace {
 // so make_new_runtime does not need to produce a working Runtime.
 class NoopWasmiContext : public RuntimeContext {
 public:
-  bool verify_contract(Contract const & /*unused*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*unused*/) const override
   {
-    return true;
+    return InvokeErrorCode::None;
   }
 
   SystemStatus<std::unique_ptr<Runtime>>

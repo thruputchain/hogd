@@ -228,7 +228,7 @@ fn test_verify_valid_wasm() {
             wasm_bytes.len(),
         );
 
-        assert!(result, "Valid WASM should verify successfully");
+        assert_eq!(result, 0, "Valid WASM should verify successfully");
 
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -407,7 +407,7 @@ fn test_verify_invalid_wasm() {
             invalid_wasm.len(),
         );
 
-        assert!(!result, "Invalid WASM should fail verification");
+        assert_ne!(result, 0, "Invalid WASM should fail verification");
 
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -760,8 +760,8 @@ fn test_param_entrypoint_signature_mismatch_is_deterministic() {
             wasm_bytes.as_ptr(),
             wasm_bytes.len(),
         );
-        assert!(
-            verified,
+        assert_eq!(
+            verified, 0,
             "verify_contract currently accepts a method export with the wrong ABI"
         );
 
@@ -836,8 +836,8 @@ fn test_issue_1869_big_stack_frame_rejected_by_verify() {
             wasm_bytes.len(),
         );
 
-        assert!(
-            !result,
+        assert_ne!(
+            result, 0,
             "contracts with operand stack exceeding wasm-meter limits \
              must be rejected by wasmtime_verify_contract"
         );
@@ -895,8 +895,8 @@ fn test_h002_verify_contract_rejects_simd_module() {
             wasm_bytes.len(),
         );
 
-        assert!(
-            !result,
+        assert_ne!(
+            result, 0,
             "SIMD-bearing contracts must be rejected by \
              wasmtime_verify_contract on every host"
         );
@@ -995,8 +995,8 @@ fn test_h001_verify_contract_rejects_float_module() {
             wasm_bytes.len(),
         );
 
-        assert!(
-            !result,
+        assert_ne!(
+            result, 0,
             "float-bearing contracts must be rejected by \
              wasmtime_verify_contract on every host"
         );

@@ -61,10 +61,10 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     RPCContext ctx(std::move(dao), nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
-        .base_data_item_cost = to_xdr(int128_t{12000}),
+        .base_data_item_cost = 12000,
         .bytestring_cost_per_byte = 10,
-        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+        .base_contract_deployment_cost = 12000,
+        .contract_deployment_cost_per_byte = 10,
     }));
     ASSERT_TRUE(
         ctx.get_db().write_cost_model(ctx.get_cost_model()).has_value());
