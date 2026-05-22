@@ -1271,6 +1271,32 @@ TEST(Mempool, OutOfOrderAuthDataChangedWaitsInsteadOfCrashing)
   EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), 2);
 }
 
+// Regression test: three concurrent auth_data_changed calls with a gap > 1.
+// wait_for_auth_data must tolerate auth_data_height_ being more than one step
+// behind the expected height.
+TEST(Mempool, AuthDataChangedGapOfTwoDoesNotCrash)
+{
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_auth_data(/*expected_height=*/0)();
+
+  // Fire heights 3 and 2 first so both park on wait_for_auth_data while
+  // auth_data_height_ is still 0. Height 3 waits for auth_data_height_ == 2,
+  // but sees 0 — a gap of 2.
+  std::thread t3(
+      [&] { server.mempool_coord_rpc().auth_data_changed(3, {})(); });
+  std::thread t2(
+      [&] { server.mempool_coord_rpc().auth_data_changed(2, {})(); });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  server.mempool_coord_rpc().auth_data_changed(1, {})();
+
+  t2.join();
+  t3.join();
+
+  EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), 3);
+}
+
 } // namespace hogd
 
 int
