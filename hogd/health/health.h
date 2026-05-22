@@ -2,10 +2,13 @@
 
 #include <chrono>
 #include <format>
+#include <string>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -13,6 +16,7 @@ class Health {
 public:
   enum class Status {
     kOk,
+    kError,
   };
 
   ~Health() = default;
@@ -20,7 +24,11 @@ public:
   // Returns the [Health] singleton instance.
   static Health &instance();
 
-  void dump_to_file(const std::string &path) const;
+  x23::Async<void> dump_to_file(const std::string &path) const;
+
+  x23::Async<void> set_status(Status status);
+
+  x23::Async<void> set_current_block_height(BlockHeight current_block_height);
 
   // Disable copy and move.
   Health(const Health &) = delete;
@@ -29,9 +37,6 @@ public:
   Health &operator=(Health &&) = delete;
 
 private:
-  // [Health] should only be used via a singleton instance.
-  Health() = default;
-
   struct Timestamp {
     std::chrono::system_clock::time_point timestamp =
         std::chrono::system_clock::now();
@@ -39,6 +44,16 @@ private:
     friend struct std::formatter<Timestamp>;
   };
 
+  // [Health] should only be used via a singleton instance.
+  Health() = default;
+
+  void update_timestamp()
+  {
+    CHECK(lock_.busy());
+    last_updated_timestamp_.timestamp = std::chrono::system_clock::now();
+  }
+
+  mutable x23::CoroLock lock_;
   Status status_ = Status::kOk;
   Timestamp last_updated_timestamp_;
   BlockHeight current_block_height_ = 0;
@@ -54,6 +69,8 @@ struct std::formatter<hogd::Health::Status> : std::formatter<const char *> {
     switch (status) {
     case hogd::Health::Status::kOk:
       return std::formatter<const char *>::format("ok", ctx);
+    case hogd::Health::Status::kError:
+      return std::formatter<const char *>::format("error", ctx);
     }
     __builtin_unreachable();
   }

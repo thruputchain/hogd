@@ -15,9 +15,12 @@ Health::instance()
   return health;
 }
 
-void
+x23::Async<void>
 Health::dump_to_file(const std::string &path) const
 {
+  x23::CoroGuard g;
+  co_await g(lock_);
+
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("last_updated_timestamp",
@@ -27,8 +30,35 @@ Health::dump_to_file(const std::string &path) const
             static_cast<std::int64_t>(current_block_height_));
   });
 
+  g.reset();
+
   std::ofstream out(path);
   out << buffer << '\n';
+  co_return;
+}
+
+x23::Async<void>
+Health::set_status(Status status)
+{
+  x23::CoroGuard g;
+  co_await g(lock_);
+
+  update_timestamp();
+  status_ = status;
+
+  co_await g.reset_and_return();
+}
+
+x23::Async<void>
+Health::set_current_block_height(BlockHeight current_block_height)
+{
+  x23::CoroGuard g;
+  co_await g(lock_);
+
+  update_timestamp();
+  current_block_height_ = current_block_height;
+
+  co_await g.reset_and_return();
 }
 
 } // namespace hogd
