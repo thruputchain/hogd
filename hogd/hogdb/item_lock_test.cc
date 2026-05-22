@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <barrier>
 #include <optional>
 #include <span>
 #include <thread>
@@ -838,6 +839,87 @@ TEST(ItemLockTest, RCQNarrowMaxInsertCountTracksAcrossMultipleNarrows)
 
   auto r2 = c3.narrow(c2);
   ASSERT_TRUE(r2.has_value());
+}
+
+TEST(ItemLockTest, ConcurrentNonexclusiveCommitSingleFinalizer)
+{
+  constexpr size_t kThreads = 64;
+  constexpr size_t kAttempts = 500;
+  constexpr int128_t kSnapshotCost = 50'000;
+
+  auto ctx = make_dummy_context();
+
+  for (size_t attempt = 0; attempt < kAttempts; ++attempt) {
+    ItemLock lock(kSnapshotCost);
+
+    auto deletion = make_deletion_change();
+    for (size_t i = 0; i < kThreads; ++i) {
+      auto res = lock.try_atomic_change_lock(nullptr, &deletion, ctx);
+      ASSERT_TRUE(res.has_value());
+      ASSERT_EQ(*res, 0);
+    }
+
+    std::barrier sync(static_cast<std::ptrdiff_t>(kThreads));
+    std::vector<int128_t> costs(kThreads);
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (size_t i = 0; i < kThreads; ++i) {
+      threads.emplace_back([&, i]() {
+        sync.arrive_and_wait();
+        costs[i] = lock.commit_change(deletion, ctx);
+      });
+    }
+
+    for (auto &t : threads) {
+      t.join();
+    }
+
+    int finalizer_count = 0;
+    for (size_t i = 0; i < kThreads; ++i) {
+      if (costs[i] == -kSnapshotCost) {
+        ++finalizer_count;
+      }
+      else {
+        EXPECT_EQ(costs[i], 0) << "attempt=" << attempt << " thread=" << i;
+      }
+    }
+    EXPECT_EQ(finalizer_count, 1) << "attempt=" << attempt;
+  }
+}
+
+TEST(ItemLockTest, ExclusiveCommitUnderContention)
+{
+  auto ctx = make_dummy_context();
+
+  auto first = make_nnint_change(100, 10);
+  auto second = make_nnint_change(200, 20);
+  EXPECT_TRUE(second.narrow(first).has_value());
+  ASSERT_TRUE(second.is_exclusive());
+
+  ItemLock lock(0);
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, ctx);
+  ASSERT_TRUE(r1.has_value());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, ctx);
+  ASSERT_TRUE(r2.has_value());
+
+  EXPECT_EQ(lock.commit_change(second, ctx), kTestCostModel.kBaseItemCost);
+}
+
+TEST(ItemLockTest, PermanentExclusiveCommitUnderContention)
+{
+  auto ctx = make_dummy_context();
+
+  auto change = make_nnint_change(100, 10);
+  change.set_permanent_exclusive();
+  ASSERT_TRUE(change.is_permanent_exclusive());
+
+  ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+  auto r = lock.try_atomic_change_lock(nullptr, &change, ctx);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(*r, -1000);
+
+  EXPECT_EQ(lock.commit_change(change, ctx), -1000);
 }
 
 } // namespace hogd
