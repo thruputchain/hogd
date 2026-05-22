@@ -13,7 +13,7 @@ HogdDevTmpDir::HogdDevTmpDir()
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   CHECK(dir.has_value());
-  path_ = (*dir).get_path();
+  path_ = std::filesystem::absolute((*dir).get_path()).string();
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)

@@ -6,13 +6,14 @@
 #include <string>
 #include <vector>
 
+#include "genesis.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
-#include "hogd/hogd_dev/dev_account_bootstrap.h"
+#include "hogd/hogd_dev/bootstrap_accounts.h"
 #include "hogd/hogd_dev/fake_coordinator.h"
 #include "hogd/hogd_dev/hogd_dev_tmp_dir.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -37,7 +38,7 @@ namespace hogd {
 class HogdDevNode {
 public:
   HogdDevNode(std::string bind_host, std::uint16_t requested_scheduler_port,
-              DevAccountBootstrapConfig const &bootstrap_config = {});
+              BootstrapAccountConfig const &bootstrap_config = {});
   ~HogdDevNode();
 
   HogdDevNode(HogdDevNode const &) = delete;
@@ -49,23 +50,31 @@ public:
   // The supervisor calls this the scheduler endpoint; hogd exposes it through
   // the coordinator-facing SchedulerCoord1 RPC server.
   std::uint16_t scheduler_port() const { return mempool_coord_server_.port(); }
-  // The supervisor calls this the read endpoint; hogd exposes it through
-  // the indexer-facing IndexerBlockExplorer1 RPC server.
+  // Advertised in the runtime manifest as the `indexer` endpoint.
   std::uint16_t read_port() const
   {
     return indexer_block_explorer_server_->port();
   }
-  // Advertised in the readiness JSON as the `gateway` endpoint.
+  // Advertised in the runtime manifest as the `dbGateway` endpoint.
   std::uint16_t gateway_port() const { return db_gateway_server_->port(); }
-  // Advertised in the readiness JSON as the `view_gateway` endpoint.
+  // Advertised in the runtime manifest as the `viewGateway` endpoint.
   std::uint16_t view_gateway_port() const
   {
     return view_gateway_server_->port();
   }
-  std::vector<DevAccountMetadata> const &dev_accounts() const
+  std::vector<BootstrapAccountMetadata> const &bootstrap_accounts() const
   {
-    return dev_accounts_;
+    return bootstrap_accounts_;
   }
+  BootstrapAccountConfig const &bootstrap_config() const
+  {
+    return bootstrap_config_;
+  }
+  GenesisConfiguration const &genesis_configuration() const
+  {
+    return genesis_configuration_;
+  }
+  std::string const &runtime_dir() const { return runtime_dir_.directory(); }
 
 private:
   // Numeric chain network id. The readiness network_id is a human protocol
@@ -83,13 +92,16 @@ private:
   void register_auth_with_mempool();
   void register_executor_with_mempool();
   x23::Async<void> register_coordinator_with_mempool();
-  void bootstrap_dev_accounts(DevAccountBootstrapConfig const &config);
+  void materialize_bootstrap_accounts(BootstrapAccountConfig const &config);
   void commit_initialization_batch(SignedTransactionBatch const &txs);
-  void refresh_dev_account_balances();
+  void refresh_bootstrap_account_balances();
 
   std::string bind_host_;
-  std::vector<DevAccountMetadata> dev_accounts_;
+  BootstrapAccountConfig bootstrap_config_;
+  GenesisConfiguration genesis_configuration_;
+  std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
 
+  HogdDevTmpDir runtime_dir_;
   HogdDevTmpDir db_dir_;
   // Declaration order matters: event_ctx_ borrows event_dir_.directory(),
   // and the event RPC servers below borrow event_ctx_.
