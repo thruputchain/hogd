@@ -41,7 +41,10 @@ private:
     std::chrono::system_clock::time_point timestamp =
         std::chrono::system_clock::now();
 
-    friend struct std::formatter<Timestamp>;
+    std::string format() const
+    {
+      return std::format("{:%Y-%m-%d %H:%M:%S}", timestamp);
+    }
   };
 
   // [Health] should only be used via a singleton instance.
@@ -73,17 +76,5 @@ struct std::formatter<hogd::Health::Status> : std::formatter<const char *> {
       return std::formatter<const char *>::format("error", ctx);
     }
     __builtin_unreachable();
-  }
-};
-
-template<>
-struct std::formatter<hogd::Health::Timestamp>
-  : std::formatter<std::chrono::system_clock::time_point> {
-  template<typename FormatContext>
-  auto format(const hogd::Health::Timestamp &timestamp,
-              FormatContext &ctx) const
-  {
-    return std::formatter<std::chrono::system_clock::time_point>::format(
-        timestamp.timestamp, ctx);
   }
 };

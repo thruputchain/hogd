@@ -1,10 +1,11 @@
 #include "hogd/health/health.h"
 
-#include "hogd/base/json.h"
-
 #include <format>
 #include <fstream>
 #include <string>
+
+#include "hogd/base/json.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
@@ -23,8 +24,7 @@ Health::dump_to_file(const std::string &path) const
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("last_updated_timestamp",
-            std::format("{:%Y-%m-%d %H:%M:%S}", last_updated_timestamp_));
+    w.field("last_updated_timestamp", last_updated_timestamp_.format());
     w.field("status", std::format("{}", status_));
     w.field("current_block_height",
             static_cast<std::int64_t>(current_block_height_));
